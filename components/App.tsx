@@ -3,10 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { NAV, Avatar, PageHead, LCard, LightScreen } from '@/components/ui/kit';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle, TweakButton } from '@/components/ui/TweaksPanel';
-import { SELLERS, NAV_ROLES } from '@/lib/data';
+import { NAV_ROLES } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { subscribeStore } from '@/lib/store';
-import { AuthService } from '@/lib/services';
+import { AuthService, SellerService } from '@/lib/services';
 import { AuthFlow } from '@/components/auth/AuthFlow';
 import { Home } from '@/components/screens/Home';
 import { ScreenClientes, ScreenAndamento, ScreenPendencias } from '@/components/screens/ScreensOps';
@@ -34,7 +34,7 @@ function PlaceholderScreen({ title }: { title: string }) {
 
 function Rail({ current, go, currentUser }: { current: string; go: (id: string) => void; currentUser: User }) {
   const allowedIds = NAV_ROLES[currentUser.role] || [];
-  const seller = currentUser.sellerId ? (SELLERS as any[]).find((s: any) => s.id === currentUser.sellerId) : null;
+  const seller = currentUser.sellerId ? SellerService.getById(currentUser.sellerId) : null;
   const displayTeam = seller?.team
     ? `Vendedor · ${seller.team}`
     : currentUser.role === 'admin' ? 'Administrador' : 'Gerente';
@@ -180,7 +180,7 @@ export function App() {
         <TweakButton label="Ver Cadastro" onClick={() => (window as any).__reviewAuth('signup')} />
         <TweakButton label="Ver Recuperação de senha" onClick={() => (window as any).__reviewAuth('recover')} />
         <TweakButton label="Ver Onboarding" onClick={() => (window as any).__reviewAuth('onboarding')} />
-        <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: (SELLERS as any[])[0] })} />
+        <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
         <TweakButton label="Ver Central de notificações" onClick={() => openFlow('notificacoes')} />
         <TweakButton label="Ver Busca global" onClick={() => openFlow('busca')} />
         <TweakButton label="Ver Galeria de estados" onClick={() => openFlow('estados')} />

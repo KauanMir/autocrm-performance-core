@@ -2,9 +2,9 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge } from '@/components/ui/kit';
-import { SELLERS, STAGES } from '@/lib/data';
+import { STAGES } from '@/lib/data';
 import type { User } from '@/lib/data';
-import { AuthService } from '@/lib/services';
+import { AuthService, SellerService } from '@/lib/services';
 import { FField, Segmented, StepRail } from '@/components/flows/FlowsShared';
 
 function AuthStage({ children }: { children: React.ReactNode }) {
@@ -279,7 +279,7 @@ function OnboardingView({ onDone }: { onDone: () => void }) {
               </>}
               {step === 1 && <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
-                  {(SELLERS as any[]).slice(0, 4).map((s: any) => (
+                  {(SellerService.getAll() as any[]).slice(0, 4).map((s: any) => (
                     <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(255,255,255,.03)' }}>
                       <Avatar name={s.name} size={36} ring="#3B82F6" />
                       <div style={{ flex: 1 }}><div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-900)' }}>{s.name}</div><div style={{ fontSize: 12, color: 'var(--t-500)' }}>Equipe {s.team}</div></div>

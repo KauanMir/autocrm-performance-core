@@ -4,7 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Avatar, CountUp, FitBox } from '@/components/ui/kit';
 import { PLACE, Podium } from '@/components/podiums/Podiums';
 import { useStore } from '@/lib/store';
-import { AuthService, SellerService } from '@/lib/services';
+import { AuthService } from '@/lib/services';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
 
