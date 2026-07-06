@@ -3,7 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { NAV, Avatar, PageHead, LCard, LightScreen } from '@/components/ui/kit';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle, TweakButton } from '@/components/ui/TweaksPanel';
-import { SELLERS, ME_ID } from '@/lib/data';
+import { SELLERS, NAV_ROLES } from '@/lib/data';
+import type { User } from '@/lib/data';
+import { subscribeStore } from '@/lib/store';
+import { AuthService } from '@/lib/services';
 import { AuthFlow } from '@/components/auth/AuthFlow';
 import { Home } from '@/components/screens/Home';
 import { ScreenClientes, ScreenAndamento, ScreenPendencias } from '@/components/screens/ScreensOps';
@@ -29,8 +32,13 @@ function PlaceholderScreen({ title }: { title: string }) {
   return <LightScreen><Placeholder title={title} /></LightScreen>;
 }
 
-function Rail({ current, go }: { current: string; go: (id: string) => void }) {
-  const me = (SELLERS as any[]).find((s: any) => s.id === ME_ID);
+function Rail({ current, go, currentUser }: { current: string; go: (id: string) => void; currentUser: User }) {
+  const allowedIds = NAV_ROLES[currentUser.role] || [];
+  const seller = currentUser.sellerId ? (SELLERS as any[]).find((s: any) => s.id === currentUser.sellerId) : null;
+  const displayTeam = seller?.team
+    ? `Vendedor · ${seller.team}`
+    : currentUser.role === 'admin' ? 'Administrador' : 'Gerente';
+
   return (
     <aside style={{ width: 236, flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', background: 'linear-gradient(180deg,#0b0b0c,#070708)', borderRight: '1px solid rgba(255,255,255,.06)' }}>
       <div className="carbon" style={{ position: 'absolute', inset: 0, opacity: .35, pointerEvents: 'none' }} />
@@ -48,7 +56,7 @@ function Rail({ current, go }: { current: string; go: (id: string) => void }) {
       </div>
 
       <nav style={{ position: 'relative', flex: 1, overflowY: 'auto', padding: '6px 14px' }}>
-        {(NAV as any[]).map((item: any) => {
+        {(NAV as any[]).filter((item: any) => allowedIds.includes(item.id)).map((item: any) => {
           const on = current === item.id;
           return (
             <button key={item.id} onClick={() => go(item.id)} style={{
@@ -72,13 +80,13 @@ function Rail({ current, go }: { current: string; go: (id: string) => void }) {
 
       <div style={{ position: 'relative', padding: '12px 14px 16px' }}>
         <div style={{ height: 1, background: 'linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent)', marginBottom: 10 }} />
-        <div className="lift" onClick={() => (window as any).__openFlow && (window as any).__openFlow('perfil-vendedor', { seller: me })} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 10px', borderRadius: 12, cursor: 'pointer', border: '1px solid transparent' }}>
-          <Avatar name={me.name} size={36} ring="#3B82F6" />
+        <div className="lift" onClick={() => seller && (window as any).__openFlow && (window as any).__openFlow('perfil-vendedor', { seller })} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 10px', borderRadius: 12, cursor: 'pointer', border: '1px solid transparent' }}>
+          <Avatar name={currentUser.name} size={36} ring="#3B82F6" />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{me.name}</div>
-            <div style={{ fontSize: 11, color: 'var(--txt-lo)' }}>Vendedor · {me.team}</div>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentUser.name}</div>
+            <div style={{ fontSize: 11, color: 'var(--txt-lo)' }}>{displayTeam}</div>
           </div>
-          <button onClick={(e: any) => { e.stopPropagation(); (window as any).__openFlow && (window as any).__openFlow('confirmar', { title: 'Sair do sistema?', message: 'Você precisará entrar novamente para acessar seu painel de performance.', confirmLabel: 'Sair', tone: 'danger', icon: 'logout', onConfirm: () => (window as any).__logout && (window as any).__logout() }); }} className="focus-ring" style={{ width: 30, height: 30, borderRadius: 8, border: 'none', background: 'transparent', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--txt-lo)' }} title="Sair">
+          <button onClick={(e: any) => { e.stopPropagation(); (window as any).__openFlow && (window as any).__openFlow('confirmar', { title: 'Sair do sistema?', message: 'Você precisará entrar novamente para acessar seu painel de performance.', confirmLabel: 'Sair', tone: 'danger', icon: 'logout', onConfirm: () => AuthService.logout() }); }} className="focus-ring" style={{ width: 30, height: 30, borderRadius: 8, border: 'none', background: 'transparent', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--txt-lo)' }} title="Sair">
             <Icon name="logout" size={17} stroke={2} />
           </button>
         </div>
@@ -92,26 +100,42 @@ export function App() {
   const [current, setCurrent] = useState('home');
   const [animKey, setAnimKey] = useState(0);
   const [flow, setFlow] = useState<{ id: string; payload: any } | null>(null);
-  const [authed, setAuthed] = useState(() => { try { return localStorage.getItem('acrm_session') === '1'; } catch { return false; } });
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try { return AuthService.getCurrentUser(); } catch { return null; }
+  });
   const [authView, setAuthView] = useState('login');
+  const [, _setTick] = useState(0);
 
   const go = (id: string) => {
+    if (!currentUser) return;
+    const allowed = NAV_ROLES[currentUser.role] || [];
+    if (!allowed.includes(id)) return;
     setCurrent(id);
     document.querySelector('#scroll-host')?.scrollTo(0, 0);
   };
   const openFlow = (id: string, payload: any = {}) => setFlow({ id, payload });
   const closeFlow = () => setFlow(null);
-  const enter = () => { try { localStorage.setItem('acrm_session', '1'); } catch {} setAuthed(true); setFlow(null); };
+  const enter = (user: User) => { setCurrentUser(user); setFlow(null); };
+
+  useEffect(() => subscribeStore(() => _setTick(n => n + 1)), []);
 
   useEffect(() => {
     (window as any).__openFlow = openFlow;
     (window as any).__logout = () => {
-      try { localStorage.removeItem('acrm_session'); } catch {}
-      setFlow(null); setAuthView('login'); setAuthed(false);
+      setFlow(null); setAuthView('login'); setCurrentUser(null);
     };
-    (window as any).__reviewAuth = (v: string) => { setFlow(null); setAuthView(v); setAuthed(false); };
+    (window as any).__reviewAuth = (v: string) => { setFlow(null); setAuthView(v); setCurrentUser(null); };
     return () => { if ((window as any).__openFlow === openFlow) delete (window as any).__openFlow; };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { (window as any).__currentUser = currentUser; }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const allowed = NAV_ROLES[currentUser.role] || [];
+    if (!allowed.includes(current)) setCurrent('home');
+  }, [currentUser, current]);
 
   useEffect(() => { if (current === 'home') setAnimKey(k => k + 1); }, [current, t.podium]);
 
@@ -130,13 +154,13 @@ export function App() {
   const Cur = Screens[current];
   const navItem = (NAV as any[]).find((n: any) => n.id === current);
 
-  if (!authed) {
+  if (!currentUser) {
     return <AuthFlow view={authView} setView={setAuthView} onAuthed={enter} onSignedUp={() => setAuthView('onboarding')} />;
   }
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Rail current={current} go={go} />
+      <Rail current={current} go={go} currentUser={currentUser} />
       <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
         {current === 'home'
           ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} />

@@ -2,9 +2,10 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard, Stat } from '@/components/ui/kit';
-import { LEADS, STAGES, DEALS, SALES, VISITS, SELLERS } from '@/lib/data';
+import { STAGES } from '@/lib/data';
+import { useStore } from '@/lib/store';
+import { LeadService, VisitService, DealService, SaleService, SellerService } from '@/lib/services';
 import { PLACE } from '@/components/podiums/Podiums';
-import { findLead } from '@/components/flows/FlowsShared';
 
 const VST: Record<string, { tone: string; label: string; solid?: boolean }> = {
   confirmada: { tone: 'green', label: 'Confirmada' },
@@ -34,7 +35,14 @@ function VisitRow({ v, go }: any) {
       </div>
       <LBadge tone={s.tone} solid={s.solid}>{pend && <Icon name="alert" size={12} stroke={2.4} />}{s.label}</LBadge>
       <LBtn size="sm" kind={pend ? 'danger' : noRes ? 'primary' : 'ghost'} icon={pend ? 'phone' : noRes ? 'edit' : 'arrowRight'}
-        onClick={() => pend ? (window as any).__openFlow('confirmar-visita', { visit: v }) : noRes ? (window as any).__openFlow('registrar-resultado', { visit: v }) : (window as any).__openFlow('ver-cliente', { lead: findLead(v.client) || (LEADS as any[])[0] })}>
+        onClick={() => {
+          if (pend) { (window as any).__openFlow('confirmar-visita', { visit: v }); return; }
+          if (noRes) { (window as any).__openFlow('registrar-resultado', { visit: v }); return; }
+          const lead = v.leadId
+            ? LeadService.getAll().find((l: any) => l.id === v.leadId)
+            : LeadService.getAll().find((l: any) => l.name === v.client);
+          (window as any).__openFlow('ver-cliente', { lead: lead ?? LeadService.getAll()[0] });
+        }}>
         {pend ? 'Confirmar' : noRes ? 'Registrar' : 'Ver'}
       </LBtn>
     </div>
@@ -42,16 +50,18 @@ function VisitRow({ v, go }: any) {
 }
 
 export function ScreenVisitas({ go }: any) {
+  useStore();
+  const visits = VisitService.getAll();
   const groups = [
-    { name: 'Hoje — 14 de junho', items: (VISITS as any[]).filter((v: any) => v.day === 'hoje') },
-    { name: 'Amanhã — 15 de junho', items: (VISITS as any[]).filter((v: any) => v.day === 'amanha') },
-    { name: 'Pendentes de resultado', items: (VISITS as any[]).filter((v: any) => v.day === 'passado'), warn: true },
+    { name: 'Hoje — 14 de junho', items: visits.filter((v: any) => v.day === 'hoje') },
+    { name: 'Amanhã — 15 de junho', items: visits.filter((v: any) => v.day === 'amanha') },
+    { name: 'Pendentes de resultado', items: visits.filter((v: any) => v.day === 'passado'), warn: true },
   ];
-  const unconfirmed = (VISITS as any[]).filter((v: any) => v.status === 'pendente').length;
+  const unconfirmed = visits.filter((v: any) => v.status === 'pendente').length;
   return (
     <LightScreen>
       <PageHead title="Visitas" sub="A agenda do dia e o que precisa ser confirmado." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
-      <Guide tone="red" icon="calendar" text={<span>Você tem <b>{unconfirmed} visitas não confirmadas</b> para hoje. Ligue para confirmar antes do horário — visita confirmada vende mais.</span>} action="Confirmar agora" onAction={() => { const v = (VISITS as any[]).find((x: any) => x.status === 'pendente'); (window as any).__openFlow('confirmar-visita', { visit: v }); }} />
+      <Guide tone="red" icon="calendar" text={<span>Você tem <b>{unconfirmed} visitas não confirmadas</b> para hoje. Ligue para confirmar antes do horário — visita confirmada vende mais.</span>} action="Confirmar agora" onAction={() => { const v = visits.find((x: any) => x.status === 'pendente'); (window as any).__openFlow('confirmar-visita', { visit: v }); }} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         {groups.map((g: any) => (
           <div key={g.name}>
@@ -97,14 +107,21 @@ function DealRow({ d, go, approval }: any) {
       </div>
       {approval
         ? <LBtn size="sm" kind="primary" icon="check" onClick={() => (window as any).__openFlow('aprovar-proposta', { deal: d })}>Aprovar</LBtn>
-        : <LBtn size="sm" kind="ghost" icon="arrowRight" onClick={() => (window as any).__openFlow('ver-cliente', { lead: findLead(d.client) || (LEADS as any[])[0] })}>Ver</LBtn>}
+        : <LBtn size="sm" kind="ghost" icon="arrowRight" onClick={() => {
+            const lead = d.leadId
+              ? LeadService.getAll().find((l: any) => l.id === d.leadId)
+              : LeadService.getAll().find((l: any) => l.name === d.client);
+            (window as any).__openFlow('ver-cliente', { lead: lead ?? LeadService.getAll()[0] });
+          }}>Ver</LBtn>}
     </div>
   );
 }
 
 export function ScreenPropostas({ go }: any) {
-  const open = (DEALS as any[]).filter((d: any) => d.status === 'aberta');
-  const appr = (DEALS as any[]).filter((d: any) => d.status === 'aprovacao');
+  useStore();
+  const deals = DealService.getAll();
+  const open = deals.filter((d: any) => d.status === 'aberta');
+  const appr = deals.filter((d: any) => d.status === 'aprovacao');
   return (
     <LightScreen>
       <PageHead title="Propostas" sub="As negociações em aberto e o que precisa de aprovação." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-proposta')}>Nova proposta</LBtn>} />
@@ -129,13 +146,15 @@ export function ScreenPropostas({ go }: any) {
 }
 
 export function ScreenVendas({ go }: any) {
-  const delivered = (SALES as any[]).filter((s: any) => s.status === 'entregue').length;
-  const pending = (SALES as any[]).filter((s: any) => s.status === 'aguardando').length;
+  useStore();
+  const sales = SaleService.getAll();
+  const delivered = sales.filter((s: any) => s.status === 'entregue').length;
+  const pending = sales.filter((s: any) => s.status === 'aguardando').length;
   return (
     <LightScreen>
       <PageHead title="Vendas" sub="O que importa primeiro: quantas vendas você fechou." actions={<LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('registrar-venda')}>Registrar venda</LBtn>} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 22 }}>
-        <Stat label="Vendas no mês" value={23} icon="trophy" tone="gold" active sub="meta: 30" />
+        <Stat label="Vendas no mês" value={sales.length} icon="trophy" tone="gold" active sub="meta: 30" />
         <Stat label="Entregas pendentes" value={pending} icon="car" tone="amber" active sub="agendar entrega" />
         <Stat label="Entregues" value={delivered} icon="check" tone="green" active />
         <Stat label="Receita do mês" value="R$ 1,38M" icon="bars" tone="ink" sub="indicador secundário" />
@@ -145,7 +164,7 @@ export function ScreenVendas({ go }: any) {
           <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--t-900)' }}>Vendas recentes</span>
           <span style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--t-400)' }}>Junho 2026</span>
         </div>
-        {(SALES as any[]).map((s: any, i: number) => (
+        {sales.map((s: any, i: number) => (
           <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 18px', borderTop: i ? '1px solid var(--border-2)' : 'none' }}>
             <Avatar name={s.client} size={38} ring="#15924B" />
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -178,7 +197,8 @@ function Bar({ label, pct, value, tone }: { label: string; pct: number; value: s
 }
 
 export function ScreenResultados({ go }: any) {
-  const top = [...(SELLERS as any[])];
+  useStore();
+  const top = SellerService.getAll();
   return (
     <LightScreen>
       <PageHead title="Resultados" sub="Como a equipe está performando — em números simples." actions={<LBtn kind="ghost" icon="file">Exportar</LBtn>} />
@@ -228,6 +248,9 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 export function ScreenAjustes({ go }: any) {
+  useStore();
+  const sellers = SellerService.getAll();
+  const leads = LeadService.getAll();
   const [tab, setTab] = useState('Empresa');
   return (
     <LightScreen>
@@ -253,7 +276,7 @@ export function ScreenAjustes({ go }: any) {
             <span style={{ fontWeight: 700, fontSize: 14 }}>Equipe</span>
             <LBtn size="sm" kind="primary" icon="plus" style={{ marginLeft: 'auto' }}>Convidar</LBtn>
           </div>
-          {(SELLERS as any[]).slice(0, 6).map((s: any, i: number) => (
+          {sellers.slice(0, 6).map((s: any, i: number) => (
             <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderTop: i ? '1px solid var(--border-2)' : 'none' }}>
               <Avatar name={s.name} size={34} />
               <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</div><div style={{ fontSize: 12, color: 'var(--t-500)' }}>{s.first.toLowerCase()}@revenda.com.br</div></div>
@@ -271,7 +294,7 @@ export function ScreenAjustes({ go }: any) {
             <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 10, marginBottom: 8 }}>
               <Icon name="list" size={16} stroke={2} style={{ color: 'var(--t-400)' }} />
               <span style={{ fontWeight: 600, fontSize: 14 }}>{s}</span>
-              <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--t-400)' }}>{(LEADS as any[]).filter((l: any) => l.stage === s).length} clientes</span>
+              <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--t-400)' }}>{leads.filter((l: any) => l.stage === s).length} clientes</span>
             </div>
           ))}
         </LCard>

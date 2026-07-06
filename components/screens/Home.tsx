@@ -2,20 +2,22 @@
 import React, { useState, useEffect } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, CountUp, FitBox } from '@/components/ui/kit';
-import { SELLERS, ME_ID } from '@/lib/data';
 import { PLACE, Podium } from '@/components/podiums/Podiums';
+import { useStore } from '@/lib/store';
+import { AuthService, SellerService } from '@/lib/services';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
 
-function getCompetition() {
-  const meIdx = SELLERS.findIndex((s: any) => s.id === ME_ID);
-  const me = (SELLERS as any[])[meIdx];
-  const rivalAhead = (SELLERS as any[])[meIdx - 1] || null;
-  const chaser = (SELLERS as any[])[meIdx + 1] || null;
-  const third = (SELLERS as any[])[2];
-  const top3Gap = Math.max(0, third.sales - me.sales);
-  const aheadGap = rivalAhead ? Math.max(0, rivalAhead.sales - me.sales) : 0;
-  return { meIdx, me, pos: meIdx + 1, rivalAhead, chaser, third, top3Gap, aheadGap, weeklyDone: 2, weeklyGoal: 3 };
+function getCompetition(sellers: any[]) {
+  const currentSellerId = AuthService.getCurrentUser()?.sellerId ?? null;
+  const meIdx = currentSellerId ? sellers.findIndex((s: any) => s.id === currentSellerId) : -1;
+  const me = meIdx >= 0 ? sellers[meIdx] : sellers[0];
+  const rivalAhead = meIdx > 0 ? sellers[meIdx - 1] : null;
+  const chaser = meIdx >= 0 && meIdx < sellers.length - 1 ? sellers[meIdx + 1] : null;
+  const third = sellers[2] ?? sellers[sellers.length - 1] ?? null;
+  const top3Gap = (third && me) ? Math.max(0, (third.sales ?? 0) - (me.sales ?? 0)) : 0;
+  const aheadGap = (rivalAhead && me) ? Math.max(0, (rivalAhead.sales ?? 0) - (me.sales ?? 0)) : 0;
+  return { meIdx, me, pos: meIdx >= 0 ? meIdx + 1 : 1, rivalAhead, chaser, third, top3Gap, aheadGap, weeklyDone: 2, weeklyGoal: 3, leader: sellers[0] ?? null };
 }
 
 function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam }: any) {
@@ -52,9 +54,9 @@ function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam }: a
 function CompTicker({ comp }: any) {
   const msgs = [
     { icon: 'flag', c: '#E8CE72', t: <span>Faltam <b>{comp.top3Gap} vendas</b> para você entrar no <b>TOP 3</b></span> },
-    { icon: 'flame', c: '#FF6B3B', t: <span><b>{comp.chaser.first}</b> subiu 3 posições e empatou com você</span> },
-    { icon: 'target', c: '#E23744', t: <span>Seu rival direto: <b>{comp.rivalAhead.first}</b> — {comp.aheadGap} vendas à frente</span> },
-    { icon: 'trophy', c: '#E8CE72', t: <span><b>{(SELLERS as any[])[0].first}</b> lidera com {(SELLERS as any[])[0].sales} vendas</span> },
+    { icon: 'flame', c: '#FF6B3B', t: <span><b>{comp.chaser?.first ?? '—'}</b> subiu 3 posições e empatou com você</span> },
+    { icon: 'target', c: '#E23744', t: <span>Seu rival direto: <b>{comp.rivalAhead?.first ?? '—'}</b> — {comp.aheadGap} vendas à frente</span> },
+    { icon: 'trophy', c: '#E8CE72', t: <span><b>{comp.leader?.first}</b> lidera com {comp.leader?.sales} vendas</span> },
     { icon: 'zap', c: '#27C75F', t: <span>Meta da semana: <b>+{comp.weeklyGoal} vendas</b></span> },
   ];
   const row = (key: string) => (
@@ -133,7 +135,7 @@ function RankingList({ sellers, active, comp }: any) {
         <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--txt-lo)' }}>{sellers.length} vendedores</span>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
-        {(sellers as any[]).map((s: any, i: number) => <RankingRow key={s.id} s={s} pos={i + 1} active={active} leader={i === 0} me={s.id === ME_ID} target={comp && s.id === (comp.rivalAhead && comp.rivalAhead.id)} />)}
+        {(sellers as any[]).map((s: any, i: number) => <RankingRow key={s.id} s={s} pos={i + 1} active={active} leader={i === 0} me={s.id === (AuthService.getCurrentUser()?.sellerId ?? null)} target={comp && s.id === (comp.rivalAhead && comp.rivalAhead.id)} />)}
       </div>
     </div>
   );
@@ -203,8 +205,8 @@ function MinhaDisputa({ active, comp }: any) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <RaceMsg icon="flag" c="#D4AF37" title="Sua meta agora">Faltam <b style={{ color: '#E8CE72' }}>{comp.top3Gap} vendas</b> para entrar no TOP 3</RaceMsg>
-          <RaceMsg icon="target" c="#E23744" title="Rival direto">Ultrapasse <b>{comp.rivalAhead.first}</b> — está só {comp.aheadGap} vendas à frente</RaceMsg>
-          <RaceMsg icon="flame" c="#FF8A00" title="Atenção">{comp.chaser.first} empatou com você e vem subindo rápido</RaceMsg>
+          <RaceMsg icon="target" c="#E23744" title="Rival direto">Ultrapasse <b>{comp.rivalAhead?.first ?? '—'}</b> — está só {comp.aheadGap} vendas à frente</RaceMsg>
+          <RaceMsg icon="flame" c="#FF8A00" title="Atenção">{comp.chaser?.first ?? '—'} empatou com você e vem subindo rápido</RaceMsg>
         </div>
       </div>
     </div>
@@ -339,10 +341,12 @@ export function Home({ t, setTweak, go, active }: any) {
     return () => window.removeEventListener('resize', onR);
   }, []);
 
+  const store = useStore();
   const variant = t.podium;
-  const sellers = team === 'Todos' ? SELLERS : (SELLERS as any[]).filter((s: any) => s.team === team);
-  const top3 = (sellers as any[]).slice(0, 3);
-  const comp = getCompetition();
+  const allSellers = store.sellers;
+  const sellers = team === 'Todos' ? allSellers : allSellers.filter((s: any) => s.team === team);
+  const top3 = sellers.slice(0, 3);
+  const comp = getCompetition(allSellers);
 
   const podiumStage = (
     <div style={{ position: 'relative', background: 'radial-gradient(120% 80% at 50% 6%, #1d1d21 0%, #131315 48%, #0b0b0c 100%)', border: '1px solid var(--line-dark)', borderRadius: 22, padding: '0 16px 14px', height: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>

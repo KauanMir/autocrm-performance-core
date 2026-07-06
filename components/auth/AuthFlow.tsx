@@ -2,7 +2,9 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge } from '@/components/ui/kit';
-import { SELLERS, STAGES, ME_ID } from '@/lib/data';
+import { SELLERS, STAGES } from '@/lib/data';
+import type { User } from '@/lib/data';
+import { AuthService } from '@/lib/services';
 import { FField, Segmented, StepRail } from '@/components/flows/FlowsShared';
 
 function AuthStage({ children }: { children: React.ReactNode }) {
@@ -109,10 +111,19 @@ function Divider({ children }: { children: React.ReactNode }) {
   );
 }
 
-function LoginView({ go, onDone }: { go: (v: string) => void; onDone: () => void }) {
-  const [email, setEmail] = useState('vendedor@revenda.com.br');
+function LoginView({ go, onDone }: { go: (v: string) => void; onDone: (user: User) => void }) {
+  const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [remember, setRemember] = useState(true);
+  const [err, setErr] = useState('');
+
+  const handleLogin = () => {
+    const user = AuthService.login(email, pw);
+    if (!user) { setErr('E-mail ou senha incorretos.'); return; }
+    setErr('');
+    onDone(user);
+  };
+
   return (
     <AuthStage>
       <AuthHero />
@@ -122,6 +133,7 @@ function LoginView({ go, onDone }: { go: (v: string) => void; onDone: () => void
         <p style={{ margin: '0 0 24px', color: 'var(--t-500)', fontSize: 14 }}>Acesse seu painel de performance.</p>
         <FField label="E-mail" icon="user" type="email" placeholder="voce@empresa.com.br" value={email} onChange={(e: any) => setEmail(e.target.value)} />
         <PwField label="Senha" value={pw} onChange={(e: any) => setPw(e.target.value)} />
+        {err && <div style={{ fontSize: 13, color: '#FF4242', marginBottom: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(255,66,66,.1)', border: '1px solid rgba(255,66,66,.25)' }}>{err}</div>}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '4px 0 22px' }}>
           <button onClick={() => setRemember(r => !r)} style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
             <span style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${remember ? 'var(--gold)' : 'var(--border)'}`, background: remember ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : 'transparent', display: 'grid', placeItems: 'center', color: '#241c04' }}>{remember && <Icon name="check" size={12} stroke={3} />}</span>
@@ -129,9 +141,9 @@ function LoginView({ go, onDone }: { go: (v: string) => void; onDone: () => void
           </button>
           <button onClick={() => go('recover')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600, color: '#E8CE72' }}>Esqueci minha senha</button>
         </div>
-        <LBtn kind="gold" size="lg" icon="arrowRight" onClick={onDone} style={{ width: '100%', justifyContent: 'center' }}>Entrar</LBtn>
+        <LBtn kind="gold" size="lg" icon="arrowRight" onClick={handleLogin} style={{ width: '100%', justifyContent: 'center' }}>Entrar</LBtn>
         <Divider>ou</Divider>
-        <GoogleBtn onClick={onDone} label="Entrar com Google" />
+        <GoogleBtn onClick={handleLogin} label="Entrar com Google" />
         <p style={{ textAlign: 'center', margin: '24px 0 0', fontSize: 13.5, color: 'var(--t-500)' }}>
           Não tem conta? <button onClick={() => go('signup')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 700, color: '#E8CE72' }}>Criar conta</button>
         </p>
@@ -329,11 +341,11 @@ function OnboardingView({ onDone }: { onDone: () => void }) {
 export function AuthFlow({ view, setView, onAuthed, onSignedUp }: {
   view: string;
   setView: (v: string) => void;
-  onAuthed: () => void;
+  onAuthed: (user: User) => void;
   onSignedUp: () => void;
 }) {
   if (view === 'signup') return <SignupView go={setView} onDone={onSignedUp} />;
   if (view === 'recover') return <RecoverView go={setView} />;
-  if (view === 'onboarding') return <OnboardingView onDone={onAuthed} />;
+  if (view === 'onboarding') return <OnboardingView onDone={() => setView('login')} />;
   return <LoginView go={setView} onDone={onAuthed} />;
 }

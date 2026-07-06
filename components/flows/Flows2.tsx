@@ -2,9 +2,10 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge } from '@/components/ui/kit';
-import { LEADS, STAGES, DEALS, SELLERS, VISITS, ME_ID } from '@/lib/data';
+import { STAGES } from '@/lib/data';
+import { AuthService, LeadService, VisitService, DealService, SaleService, TaskService, SellerService } from '@/lib/services';
 import {
-  CARS, ORIGINS, PAYS, findLead,
+  CARS, ORIGINS, PAYS,
   FField, FArea, Segmented, ChoiceTile, ClientChip,
   FPanel, StepRail, SummaryRow, FlowShell, FlowSuccess,
 } from './FlowsShared';
@@ -15,6 +16,36 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
   const set = (k: string, v: any) => setF(s => ({ ...s, [k]: v }));
   const steps = ['Quem é', 'O que procura', 'Revisão'];
   const canNext = step === 0 ? f.nome && f.tel : step === 1 ? f.car : true;
+
+  const handleCreate = () => {
+    const user = AuthService.getCurrentUser();
+    const urgMap: Record<string, 'red' | 'amber' | 'green'> = { Quente: 'red', Morno: 'amber', Frio: 'green' };
+    LeadService.create({
+      name: f.nome || 'Novo cliente',
+      phone: f.tel,
+      car: f.car || CARS[0],
+      stage: 'Novo',
+      urgency: urgMap[f.urg] || 'green',
+      pay: f.pay,
+      value: '—',
+      last: 'Agora',
+      alert: 'Fazer primeiro contato',
+      seller: user?.name || '—',
+      sellerId: user?.sellerId ?? null,
+      origem: f.origem,
+      timeline: [{ icon: 'plus', c: '#27C75F', t: `Cadastrado via ${f.origem}`, when: 'Agora' }],
+    });
+    TaskService.create({
+      title: `Ligar para ${f.nome}`,
+      lead: f.nome,
+      state: 'hoje',
+      prio: 'alta',
+      when: 'Hoje',
+      assignedTo: user?.sellerId ?? null,
+      note: 'Primeiro contato',
+    });
+    setStep(3);
+  };
 
   if (step === 3) {
     const lead = { name: f.nome || 'Novo cliente', phone: f.tel, car: f.car || CARS[0], stage: 'Novo', urgency: 'green', pay: f.pay, value: '—', last: 'Cadastrado agora', alert: 'Fazer primeiro contato' };
@@ -37,7 +68,9 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
         {step > 0 ? <LBtn kind="ghost" size="lg" onClick={() => setStep(step - 1)}>Voltar</LBtn> : <span />}
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 13, color: 'var(--t-500)' }}>Passo {step + 1} de 3</span>
-        <LBtn kind="gold" size="lg" icon={step === 2 ? 'check' : 'arrowRight'} onClick={() => canNext && setStep(step + 1)} style={{ opacity: canNext ? 1 : .5 }}>
+        <LBtn kind="gold" size="lg" icon={step === 2 ? 'check' : 'arrowRight'}
+          onClick={() => { if (!canNext) return; if (step === 2) handleCreate(); else setStep(step + 1); }}
+          style={{ opacity: canNext ? 1 : .5 }}>
           {step === 2 ? 'Criar atendimento' : 'Continuar'}
         </LBtn>
       </>}>
@@ -76,18 +109,23 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
 }
 
 export function FlowEditarCliente({ payload, close }: any) {
-  const lead = payload.lead || LEADS[0];
+  const lead = payload.lead || {};
   const [done, setDone] = useState(false);
-  const [f, setF] = useState({ nome: lead.name, tel: lead.phone, car: lead.car, stage: lead.stage, pay: lead.pay });
+  const [f, setF] = useState({ nome: lead.name || '', tel: lead.phone || '', car: lead.car || CARS[0], stage: lead.stage || 'Novo', pay: lead.pay || 'Financiamento' });
   const set = (k: string, v: any) => setF(s => ({ ...s, [k]: v }));
+
   if (done) return (
     <FlowShell eyebrow="EDITAR CLIENTE" title="Dados atualizados" icon="edit" accent="#27C75F" onClose={close}>
       <FlowSuccess title="Dados salvos com sucesso" sub={`As informações de ${f.nome} foram atualizadas.`} actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
     </FlowShell>
   );
   return (
-    <FlowShell eyebrow="EDITAR CLIENTE" title={`Atualizar ${lead.name.split(' ')[0]}`} icon="edit" accent="#E8CE72" onClose={close}
-      footer={<><div style={{ flex: 1 }} /><LBtn kind="ghost" size="lg" onClick={close}>Cancelar</LBtn><LBtn kind="gold" size="lg" icon="check" onClick={() => setDone(true)}>Salvar alterações</LBtn></>}>
+    <FlowShell eyebrow="EDITAR CLIENTE" title={`Atualizar ${(lead.name || '').split(' ')[0]}`} icon="edit" accent="#E8CE72" onClose={close}
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="ghost" size="lg" onClick={close}>Cancelar</LBtn>
+        <LBtn kind="gold" size="lg" icon="check" onClick={() => {
+          if (lead.id) LeadService.update(lead.id, { name: f.nome, phone: f.tel, car: f.car, stage: f.stage, pay: f.pay });
+          setDone(true);
+        }}>Salvar alterações</LBtn></>}>
       <div style={{ maxWidth: 720 }}>
         <FPanel>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
@@ -96,7 +134,7 @@ export function FlowEditarCliente({ payload, close }: any) {
           </div>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '4px 0 9px' }}>Veículo de interesse</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10, marginBottom: 18 }}>
-            {[lead.car, ...CARS.filter((c: string) => c !== lead.car)].slice(0, 4).map(c => <ChoiceTile key={c} icon="car" title={c} active={f.car === c} onClick={() => set('car', c)} />)}
+            {(lead.car ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 4).map(c => <ChoiceTile key={c} icon="car" title={c} active={f.car === c} onClick={() => set('car', c)} />)}
           </div>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Etapa atual</div>
           <div style={{ marginBottom: 18 }}><Segmented options={STAGES} value={f.stage} onChange={v => set('stage', v)} /></div>
@@ -118,6 +156,27 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
   const days = ['Hoje', 'Amanhã', 'Qui 18', 'Sex 19', 'Sáb 20'];
   const slots = ['09:00', '10:30', '14:00', '15:30', '17:00', '18:30'];
   const ok = client && day && time;
+
+  const handleSchedule = () => {
+    if (!ok) return;
+    const user = AuthService.getCurrentUser();
+    const leadId = lead?.id ?? (LeadService.getAll().find(l => l.name === client)?.id ?? null);
+    VisitService.create({
+      client,
+      car: car || CARS[0],
+      day: day.toLowerCase(),
+      time,
+      status: 'agendada',
+      seller: user?.name || '—',
+      sellerId: user?.sellerId ?? null,
+      leadId,
+    });
+    if (leadId) {
+      LeadService.addToTimeline(leadId, { icon: 'calendar', c: '#E8CE72', t: 'Visita agendada', d: `${day} às ${time}` });
+    }
+    setDone(true);
+  };
+
   if (done) return (
     <FlowShell eyebrow="AGENDAR VISITA" title="Visita agendada" icon="calendar" accent="#27C75F" onClose={close}>
       <FlowSuccess title="Visita agendada!" sub={`${client} · ${day} às ${time}. Enviamos um lembrete e criamos uma pendência para confirmar a presença.`}
@@ -127,7 +186,7 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
   return (
     <FlowShell eyebrow="AGENDAR VISITA" title="Agendar uma visita" icon="calendar" accent="#E8CE72" onClose={close}
       sub="Escolha o dia e o horário. Visita confirmada é o passo que mais aproxima da venda."
-      footer={<><div style={{ flex: 1 }} /><span style={{ fontSize: 13, color: 'var(--t-500)' }}>{ok ? `${day} às ${time}` : 'Selecione dia e horário'}</span><LBtn kind="gold" size="lg" icon="check" onClick={() => ok && setDone(true)} style={{ opacity: ok ? 1 : .5 }}>Agendar visita</LBtn></>}>
+      footer={<><div style={{ flex: 1 }} /><span style={{ fontSize: 13, color: 'var(--t-500)' }}>{ok ? `${day} às ${time}` : 'Selecione dia e horário'}</span><LBtn kind="gold" size="lg" icon="check" onClick={handleSchedule} style={{ opacity: ok ? 1 : .5 }}>Agendar visita</LBtn></>}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start', maxWidth: 900 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {lead ? <ClientChip lead={lead} size="lg" /> : <FPanel><FField label="Cliente" icon="user" placeholder="Buscar ou digitar nome" value={client} onChange={(e: any) => setClient(e.target.value)} /></FPanel>}
@@ -152,10 +211,14 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
 }
 
 export function FlowConfirmarVisita({ payload, close, openFlow }: any) {
-  const v = payload.visit || VISITS[0];
-  const lead = findLead(v.client);
+  const v = payload.visit;
   const [done, setDone] = useState<string | null>(null);
   const [remind, setRemind] = useState(true);
+
+  if (!v) return null;
+
+  const lead = v.leadId ? LeadService.getAll().find((l: any) => l.id === v.leadId) ?? null : null;
+
   if (done) {
     const map: Record<string, any> = {
       confirmada: { icon: 'checkCircle', accent: '#27C75F', title: 'Visita confirmada!', sub: `${v.client} confirmou presença ${remind ? '— lembrete enviado por WhatsApp.' : '.'}` },
@@ -194,9 +257,20 @@ export function FlowConfirmarVisita({ payload, close, openFlow }: any) {
           <span style={{ fontSize: 14, color: 'var(--t-900)', fontWeight: 600 }}>Enviar lembrete por WhatsApp ao confirmar</span>
         </button>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-          <ChoiceTile icon="checkCircle" title="Confirmou" desc="Vai comparecer" accent="#27C75F" onClick={() => setDone('confirmada')} />
-          <ChoiceTile icon="calendar" title="Remarcar" desc="Outro dia/horário" accent="#FFA31F" onClick={() => setDone('remarcar')} />
-          <ChoiceTile icon="xCircle" title="Cancelou" desc="Não vem mais" accent="#FF3B3B" onClick={() => setDone('cancelou')} />
+          <ChoiceTile icon="checkCircle" title="Confirmou" desc="Vai comparecer" accent="#27C75F" onClick={() => {
+            VisitService.update(v.id, { status: 'confirmada' });
+            if (v.leadId) LeadService.addToTimeline(v.leadId, { icon: 'checkCircle', c: '#27C75F', t: 'Visita confirmada', d: remind ? 'Lembrete enviado' : undefined });
+            setDone('confirmada');
+          }} />
+          <ChoiceTile icon="calendar" title="Remarcar" desc="Outro dia/horário" accent="#FFA31F" onClick={() => {
+            VisitService.update(v.id, { status: 'remarcando' });
+            setDone('remarcar');
+          }} />
+          <ChoiceTile icon="xCircle" title="Cancelou" desc="Não vem mais" accent="#FF3B3B" onClick={() => {
+            VisitService.update(v.id, { status: 'cancelada' });
+            if (v.leadId) LeadService.addToTimeline(v.leadId, { icon: 'xCircle', c: '#FF3B3B', t: 'Visita cancelada' });
+            setDone('cancelou');
+          }} />
         </div>
       </div>
     </FlowShell>
@@ -204,8 +278,7 @@ export function FlowConfirmarVisita({ payload, close, openFlow }: any) {
 }
 
 export function FlowRegistrarResultado({ payload, close, openFlow }: any) {
-  const v = payload.visit || VISITS[0];
-  const lead = findLead(v.client);
+  const v = payload.visit;
   const [outcome, setOutcome] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [done, setDone] = useState(false);
@@ -215,8 +288,25 @@ export function FlowRegistrarResultado({ payload, close, openFlow }: any) {
     { id: 'pensar', icon: 'clock', title: 'Vai pensar', desc: 'Agendar follow-up', accent: '#FFA31F', next: 'criar-acompanhamento' },
     { id: 'sem', icon: 'xCircle', title: 'Sem interesse', desc: 'Encerrar por agora', accent: '#8B8B93', next: null },
   ];
+
+  if (!v) return null;
+
+  const handleSave = () => {
+    if (!outcome) return;
+    const statusMap: Record<string, string> = { vendeu: 'Realizada', negociando: 'Realizada', pensar: 'Realizada', sem: 'Sem interesse' };
+    VisitService.update(v.id, { status: statusMap[outcome] || 'Realizada' });
+    if (v.leadId) {
+      const o = opts.find(x => x.id === outcome)!;
+      LeadService.addToTimeline(v.leadId, {
+        icon: o.icon, c: o.accent === '#8B8B93' ? '#888' : o.accent, t: `Visita: ${o.title}`, d: note || undefined,
+      });
+    }
+    setDone(true);
+  };
+
   if (done) {
     const o = opts.find(x => x.id === outcome)!;
+    const lead = v.leadId ? LeadService.getAll().find((l: any) => l.id === v.leadId) ?? null : null;
     return (
       <FlowShell eyebrow="RESULTADO DA VISITA" title="Resultado registrado" icon="clipboard" accent={o.accent} onClose={close}>
         <FlowSuccess icon="checkCircle" accent={o.accent === '#8B8B93' ? '#27C75F' : o.accent} title="Resultado salvo!" sub={`Visita de ${v.client} registrada como "${o.title}".`}
@@ -230,7 +320,7 @@ export function FlowRegistrarResultado({ payload, close, openFlow }: any) {
   return (
     <FlowShell eyebrow="RESULTADO DA VISITA" title="Como foi a visita?" icon="clipboard" accent="#E8CE72" onClose={close}
       sub={`Registre o que aconteceu na visita de ${v.client}. Isso mantém o ranking e o acompanhamento sempre certos.`}
-      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={() => outcome && setDone(true)} style={{ opacity: outcome ? 1 : .5 }}>Salvar resultado</LBtn></>}>
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={handleSave} style={{ opacity: outcome ? 1 : .5 }}>Salvar resultado</LBtn></>}>
       <div style={{ maxWidth: 760 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
           {opts.map(o => <ChoiceTile key={o.id} big icon={o.icon} title={o.title} desc={o.desc} accent={o.accent} active={outcome === o.id} onClick={() => setOutcome(o.id)} />)}
@@ -254,6 +344,25 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
   const finalV = Math.round(base * (1 - disc / 100));
   const fmt = (n: number) => 'R$ ' + n.toLocaleString('pt-BR');
 
+  const handleCreateDeal = () => {
+    const user = AuthService.getCurrentUser();
+    DealService.create({
+      client: lead ? lead.name : (client || '—'),
+      car,
+      value: fmt(finalV),
+      disc: `${disc}%`,
+      status: needsApproval ? 'aprovacao' : 'aberta',
+      last: 'Agora',
+      seller: user?.name || '—',
+      sellerId: user?.sellerId ?? null,
+      leadId: lead?.id ?? null,
+    });
+    if (lead?.id) {
+      LeadService.addToTimeline(lead.id, { icon: 'handshake', c: '#E8CE72', t: 'Proposta criada', d: `${car} · ${fmt(finalV)}` });
+    }
+    setStep(3);
+  };
+
   if (step === 3) {
     return (
       <FlowShell eyebrow="MONTAR PROPOSTA" title="Proposta criada" icon="handshake" accent="#27C75F" onClose={close}>
@@ -268,7 +377,10 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
         {step > 0 ? <LBtn kind="ghost" size="lg" onClick={() => setStep(step - 1)}>Voltar</LBtn> : <span />}
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 13, color: 'var(--t-500)' }}>Passo {step + 1} de 3</span>
-        <LBtn kind="gold" size="lg" icon={step === 2 ? 'check' : 'arrowRight'} onClick={() => setStep(step + 1)}>{step === 2 ? 'Criar proposta' : 'Continuar'}</LBtn>
+        <LBtn kind="gold" size="lg" icon={step === 2 ? 'check' : 'arrowRight'}
+          onClick={() => { if (step === 2) handleCreateDeal(); else setStep(step + 1); }}>
+          {step === 2 ? 'Criar proposta' : 'Continuar'}
+        </LBtn>
       </>}>
       <StepRail steps={steps} current={step} />
       <div style={{ maxWidth: 760 }}>
@@ -314,8 +426,11 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
 }
 
 export function FlowAprovarProposta({ payload, close }: any) {
-  const d = payload.deal || DEALS.find((x: any) => x.status === 'aprovacao') || DEALS[0];
+  const d = payload.deal;
   const [done, setDone] = useState<string | null>(null);
+
+  if (!d) return null;
+
   if (done) return (
     <FlowShell eyebrow="APROVAÇÃO" title={done === 'aprovada' ? 'Proposta aprovada' : 'Proposta recusada'} icon="shield" accent={done === 'aprovada' ? '#27C75F' : '#FF3B3B'} onClose={close}>
       <FlowSuccess icon={done === 'aprovada' ? 'checkCircle' : 'xCircle'} accent={done === 'aprovada' ? '#27C75F' : '#FF3B3B'} title={done === 'aprovada' ? 'Proposta aprovada!' : 'Proposta recusada'} sub={done === 'aprovada' ? `O vendedor ${d.seller.split(' ')[0]} foi avisado e já pode fechar com ${d.client}.` : `O vendedor ${d.seller.split(' ')[0]} foi avisado para renegociar com ${d.client}.`}
@@ -345,8 +460,16 @@ export function FlowAprovarProposta({ payload, close }: any) {
           </div>
         </FPanel>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <LBtn kind="gold" size="lg" icon="checkCircle" onClick={() => setDone('aprovada')} style={{ justifyContent: 'center', background: 'linear-gradient(180deg,#2EDC72,#15924B)', color: '#fff', border: '1px solid #2EDC72', padding: '16px' }}>Aprovar proposta</LBtn>
-          <LBtn kind="danger" size="lg" icon="xCircle" onClick={() => setDone('recusada')} style={{ justifyContent: 'center', padding: '16px' }}>Recusar</LBtn>
+          <LBtn kind="gold" size="lg" icon="checkCircle" onClick={() => {
+            DealService.approve(d.id);
+            if (d.leadId) LeadService.addToTimeline(d.leadId, { icon: 'checkCircle', c: '#27C75F', t: 'Proposta aprovada' });
+            setDone('aprovada');
+          }} style={{ justifyContent: 'center', background: 'linear-gradient(180deg,#2EDC72,#15924B)', color: '#fff', border: '1px solid #2EDC72', padding: '16px' }}>Aprovar proposta</LBtn>
+          <LBtn kind="danger" size="lg" icon="xCircle" onClick={() => {
+            DealService.reject(d.id);
+            if (d.leadId) LeadService.addToTimeline(d.leadId, { icon: 'xCircle', c: '#FF3B3B', t: 'Proposta recusada' });
+            setDone('recusada');
+          }} style={{ justifyContent: 'center', padding: '16px' }}>Recusar</LBtn>
         </div>
       </div>
     </FlowShell>
@@ -369,10 +492,33 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   const [step, setStep] = useState(lead ? 'confirm' : 'pick');
   const [car, setCar] = useState(lead ? lead.car : CARS[0]);
   const [client, setClient] = useState(lead ? lead.name : '');
-  const me = SELLERS.find(s => s.id === ME_ID)!;
-  const meIdx = SELLERS.findIndex(s => s.id === ME_ID);
-  const third = SELLERS[2];
-  const gapTop3 = Math.max(0, third.sales - (me.sales + 1));
+
+  const user = AuthService.getCurrentUser();
+  const storeSellers = SellerService.getAll();
+  const seller = SellerService.getCurrentSeller();
+  const sellerIdx = user?.sellerId ? storeSellers.findIndex((s: any) => s.id === user.sellerId) : -1;
+  const third = storeSellers[2] ?? null;
+  const gapTop3 = seller && third ? Math.max(0, (third.sales ?? 0) - (seller.sales ?? 0)) : 0;
+
+  const handleConfirmSale = () => {
+    if (!client && !lead) return;
+    SaleService.create({
+      client: lead ? lead.name : client,
+      car,
+      seller: user?.name || '—',
+      sellerId: user?.sellerId ?? null,
+      leadId: lead?.id ?? null,
+      dealId: null,
+      value: '—',
+      pay: lead?.pay || 'Financiamento',
+      date: 'Hoje',
+      status: 'Fechada',
+    });
+    if (lead?.id) {
+      LeadService.addToTimeline(lead.id, { icon: 'trophy', c: '#E8CE72', t: 'Venda fechada!', d: car });
+    }
+    setStep('done');
+  };
 
   if (step === 'done') {
     return (
@@ -390,15 +536,15 @@ export function FlowRegistrarVenda({ payload, close }: any) {
               </div>
             </div>
             <div className="display" style={{ fontSize: 13, fontWeight: 800, color: '#E8CE72', letterSpacing: '.28em', marginBottom: 10 }}>VENDA CONFIRMADA</div>
-            <h1 className="display" style={{ margin: '0 0 14px', fontSize: 46, fontWeight: 900, color: '#fff', letterSpacing: '-.02em', lineHeight: 1 }}>Parabéns, {me.first}! 🏁</h1>
-            <p style={{ margin: '0 auto 24px', color: 'var(--txt-mid)', fontSize: 16, maxWidth: 500 }}>Você fechou a venda do <b style={{ color: '#fff' }}>{car}</b>{client ? <> para <b style={{ color: '#fff' }}>{client}</b></> : ''}. Mais um passo rumo ao topo do ranking.</p>
+            <h1 className="display" style={{ margin: '0 0 14px', fontSize: 46, fontWeight: 900, color: '#fff', letterSpacing: '-.02em', lineHeight: 1 }}>Parabéns, {seller?.first || user?.name?.split(' ')[0] || '...'}! 🏁</h1>
+            <p style={{ margin: '0 auto 24px', color: 'var(--txt-mid)', fontSize: 16, maxWidth: 500 }}>Você fechou a venda do <b style={{ color: '#fff' }}>{car}</b>{(lead?.name || client) ? <> para <b style={{ color: '#fff' }}>{lead?.name || client}</b></> : ''}. Mais um passo rumo ao topo do ranking.</p>
             <div style={{ display: 'inline-flex', gap: 14, marginBottom: 28, flexWrap: 'wrap', justifyContent: 'center' }}>
               <div style={{ padding: '16px 26px', borderRadius: 16, background: 'linear-gradient(180deg,#1f1a08,#141103)', border: '1px solid rgba(212,175,55,.4)' }}>
-                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#E8CE72', lineHeight: 1 }}>{me.sales + 1}</div>
+                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#E8CE72', lineHeight: 1 }}>{seller?.sales ?? '—'}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginTop: 4 }}>vendas no mês</div>
               </div>
               <div style={{ padding: '16px 26px', borderRadius: 16, background: 'rgba(255,255,255,.04)', border: '1px solid var(--line-dark)' }}>
-                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{meIdx + 1}º</div>
+                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{sellerIdx >= 0 ? `${sellerIdx + 1}º` : '—'}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginTop: 4 }}>posição</div>
               </div>
               <div style={{ padding: '16px 26px', borderRadius: 16, background: 'rgba(39,199,95,.1)', border: '1px solid var(--green-line)' }}>
@@ -419,7 +565,7 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   return (
     <FlowShell eyebrow="REGISTRAR VENDA" title="Confirmar venda" icon="trophy" accent="#E8CE72" onClose={close}
       sub="Confirme os dados da venda. Esse é o número que mais importa — e que te leva ao topo do ranking."
-      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="trophy" onClick={() => (client || lead) && setStep('done')} style={{ opacity: (client || lead) ? 1 : .5, background: 'linear-gradient(180deg,#E8CE72,#C9A227)' }}>Confirmar venda 🏁</LBtn></>}>
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="trophy" onClick={handleConfirmSale} style={{ opacity: (client || lead) ? 1 : .5, background: 'linear-gradient(180deg,#E8CE72,#C9A227)' }}>Confirmar venda 🏁</LBtn></>}>
       <div style={{ maxWidth: 720 }}>
         {!lead && <FPanel style={{ marginBottom: 16 }}><FField label="Cliente" icon="user" placeholder="Quem comprou?" value={client} onChange={(e: any) => setClient(e.target.value)} /></FPanel>}
         {lead && <div style={{ marginBottom: 16 }}><ClientChip lead={lead} size="lg" /></div>}
@@ -440,6 +586,7 @@ export function FlowNovaPendencia({ payload, close }: any) {
   const [when, setWhen] = useState('Hoje');
   const [prio, setPrio] = useState('Alta');
   const types: [string, string][] = [['Ligar', 'phone'], ['Visita', 'calendar'], ['Follow-up', 'refresh'], ['Proposta', 'handshake'], ['Documento', 'doc']];
+
   if (done) return (
     <FlowShell eyebrow="NOVA PENDÊNCIA" title="Pendência criada" icon="check" accent="#27C75F" onClose={close}>
       <FlowSuccess title="Pendência criada!" sub={`"${type}${client ? ' — ' + client : ''}" foi adicionada para ${when.toLowerCase()}.`} actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
@@ -447,7 +594,20 @@ export function FlowNovaPendencia({ payload, close }: any) {
   );
   return (
     <FlowShell eyebrow="NOVA PENDÊNCIA" title="Criar uma pendência" icon="check" accent="#E8CE72" onClose={close}
-      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={() => setDone(true)}>Criar pendência</LBtn></>}>
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={() => {
+        const user = AuthService.getCurrentUser();
+        const prioMap: Record<string, string> = { Alta: 'alta', Média: 'media', Baixa: 'baixa' };
+        TaskService.create({
+          title: `${type}${client ? ' — ' + client : ''}`,
+          lead: client,
+          state: 'hoje',
+          prio: prioMap[prio] || 'media',
+          when,
+          assignedTo: user?.sellerId ?? null,
+          note: '',
+        });
+        setDone(true);
+      }}>Criar pendência</LBtn></>}>
       <div style={{ maxWidth: 720 }}>
         <FPanel style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Tipo de tarefa</div>
@@ -485,6 +645,7 @@ export function FlowCriarAcompanhamento({ payload, close }: any) {
   const [when, setWhen] = useState('Amanhã');
   const [note, setNote] = useState('');
   const canais: [string, string][] = [['WhatsApp', 'message'], ['Ligação', 'phone'], ['E-mail', 'send'], ['Presencial', 'mapPin']];
+
   if (done) return (
     <FlowShell eyebrow="ACOMPANHAMENTO" title="Follow-up agendado" icon="refresh" accent="#27C75F" onClose={close}>
       <FlowSuccess title="Acompanhamento criado!" sub={`Vamos te lembrar de retomar ${lead ? lead.name : 'o cliente'} via ${canal}, ${when.toLowerCase()}.`} actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
@@ -493,7 +654,22 @@ export function FlowCriarAcompanhamento({ payload, close }: any) {
   return (
     <FlowShell eyebrow="ACOMPANHAMENTO" title="Criar acompanhamento" icon="refresh" accent="#3B82F6" onClose={close}
       sub="Não deixe o cliente esfriar. Agende o próximo toque e o sistema te lembra na hora certa."
-      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={() => setDone(true)}>Agendar follow-up</LBtn></>}>
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={() => {
+        const user = AuthService.getCurrentUser();
+        if (lead?.id) {
+          LeadService.addToTimeline(lead.id, { icon: 'refresh', c: '#3B82F6', t: `Follow-up via ${canal}`, d: note || when });
+        }
+        TaskService.create({
+          title: `${canal}${lead ? ' — ' + lead.name : ''}`,
+          lead: lead ? lead.name : '',
+          state: 'proxima',
+          prio: 'media',
+          when,
+          assignedTo: user?.sellerId ?? null,
+          note: note || '',
+        });
+        setDone(true);
+      }}>Agendar follow-up</LBtn></>}>
       <div style={{ maxWidth: 720 }}>
         {lead && <div style={{ marginBottom: 16 }}><ClientChip lead={lead} size="lg" /></div>}
         <FPanel>

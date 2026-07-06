@@ -2,8 +2,9 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard } from '@/components/ui/kit';
-import { LEADS, STAGES, TASKS } from '@/lib/data';
-import { findLead } from '@/components/flows/FlowsShared';
+import { STAGES } from '@/lib/data';
+import { useStore } from '@/lib/store';
+import { LeadService, TaskService, PipelineService } from '@/lib/services';
 
 const STAGE_TONE: Record<string, string> = {
   'Novo': 'green', 'Qualificado': 'green', 'Visita agendada': 'amber',
@@ -69,10 +70,12 @@ function LeadCard({ lead, go }: any) {
 }
 
 export function ScreenClientes({ go }: any) {
+  useStore();
+  const leads = LeadService.getAll();
   const [filter, setFilter] = useState('Todos');
-  const delayed = (LEADS as any[]).filter((l: any) => l.urgency === 'red').length;
+  const delayed = leads.filter((l: any) => l.urgency === 'red').length;
   const filters = ['Todos', 'Atrasados', 'Novo', 'Qualificado', 'Visita agendada', 'Em negociação'];
-  const list = (LEADS as any[]).filter((l: any) => {
+  const list = leads.filter((l: any) => {
     if (filter === 'Todos') return true;
     if (filter === 'Atrasados') return l.urgency === 'red';
     return l.stage === filter;
@@ -118,6 +121,10 @@ function PipeCard({ lead, go }: any) {
 }
 
 export function ScreenAndamento({ go }: any) {
+  useStore();
+  const leads = LeadService.getAll();
+  const overrides = PipelineService.getOverrides();
+  const stages = PipelineService.getStages();
   const colTone: Record<string, string> = {
     'Novo': '#8B8B93', 'Qualificado': '#27C75F', 'Visita agendada': '#FFA31F',
     'Em negociação': '#3B82F6', 'Fechamento': '#E8CE72',
@@ -125,9 +132,9 @@ export function ScreenAndamento({ go }: any) {
   return (
     <LightScreen>
       <PageHead title="Em progresso" sub="Onde cada cliente está no caminho até a venda. Arraste de etapa quando avançar." actions={<LBtn kind="ghost" icon="filter">Só os meus</LBtn>} />
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${(STAGES as string[]).length}, minmax(210px, 1fr))`, gap: 14, overflowX: 'auto', paddingBottom: 8 }}>
-        {(STAGES as string[]).map((stage: string) => {
-          const items = (LEADS as any[]).filter((l: any) => l.stage === stage);
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${stages.length}, minmax(210px, 1fr))`, gap: 14, overflowX: 'auto', paddingBottom: 8 }}>
+        {stages.map((stage: string) => {
+          const items = leads.filter((l: any) => (overrides[l.id] ?? l.stage) === stage);
           return (
             <div key={stage} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 12, display: 'flex', flexDirection: 'column', minHeight: 360 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
@@ -175,7 +182,10 @@ function TaskRow({ task, go }: any) {
         <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}>{task.note}</div>
       </div>
       <span style={{ fontSize: 12, fontWeight: 700, color: late ? 'var(--red)' : 'var(--t-500)', whiteSpace: 'nowrap' }}>{task.when}</span>
-      <button onClick={() => (window as any).__openFlow('ver-cliente', { lead: findLead(task.lead) || (LEADS as any[])[0] })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+      <button onClick={() => {
+        const lead = LeadService.getAll().find((l: any) => l.name === task.lead);
+        (window as any).__openFlow('ver-cliente', { lead: lead ?? LeadService.getAll()[0] });
+      }} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
         <Icon name="user" size={14} stroke={2} /> {task.lead.split(' ')[0]}
       </button>
     </div>
@@ -183,11 +193,13 @@ function TaskRow({ task, go }: any) {
 }
 
 export function ScreenPendencias({ go }: any) {
+  useStore();
+  const tasks = TaskService.getAll();
   const [tab, setTab] = useState('Atrasadas');
   const groups: Record<string, any[]> = {
-    'Atrasadas': (TASKS as any[]).filter((t: any) => t.state === 'atrasada'),
-    'Hoje': (TASKS as any[]).filter((t: any) => t.state === 'hoje'),
-    'Próximas': (TASKS as any[]).filter((t: any) => t.state === 'proxima'),
+    'Atrasadas': tasks.filter((t: any) => t.state === 'atrasada'),
+    'Hoje': tasks.filter((t: any) => t.state === 'hoje'),
+    'Próximas': tasks.filter((t: any) => t.state === 'proxima'),
   };
   const late = groups['Atrasadas'].length;
   const view = tab === 'Todas' ? Object.entries(groups) : [[tab, groups[tab]]];
