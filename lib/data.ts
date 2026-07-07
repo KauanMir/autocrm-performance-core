@@ -178,6 +178,38 @@ export const LEADS: Lead[] = [
 
 export const STAGES = ['Novo', 'Qualificado', 'Visita agendada', 'Em negociação', 'Fechamento'];
 
+// ── Status contracts ──────────────────────────────────────────────────
+// Single source of truth for every status string a flow is allowed to write.
+// A screen that renders a status must recognize every value here — writing
+// a status outside its own contract is what caused Visitas to crash and
+// Propostas to silently disappear (see M0-J audit).
+
+export const VISIT_STATUS = {
+  PENDING:         'pendente',       // agendada, aguardando confirmação do cliente
+  SCHEDULED:       'agendada',       // agendada, confirmação ainda não necessária
+  CONFIRMED:       'confirmada',     // cliente confirmou presença
+  RESCHEDULED:     'remarcada',      // remarcada para outro dia/horário
+  CANCELED:        'cancelada',      // cliente cancelou
+  AWAITING_RESULT: 'sem_resultado',  // aconteceu, resultado ainda não registrado
+  DONE:            'realizada',      // resultado registrado (venda/negociação/follow-up)
+  NO_INTEREST:     'sem_interesse',  // resultado registrado, cliente sem interesse
+} as const;
+export type VisitStatus = typeof VISIT_STATUS[keyof typeof VISIT_STATUS];
+
+export const DEAL_STATUS = {
+  OPEN:     'aberta',     // em negociação, sem pendência de aprovação
+  APPROVAL: 'aprovacao',  // desconto acima do limite, aguardando gestor
+  APPROVED: 'aprovada',   // gestor aprovou
+  REJECTED: 'recusada',   // gestor recusou
+} as const;
+export type DealStatus = typeof DEAL_STATUS[keyof typeof DEAL_STATUS];
+
+export const SALE_STATUS = {
+  PENDING:   'aguardando', // registrada, entrega ainda não realizada
+  DELIVERED: 'entregue',
+} as const;
+export type SaleStatus = typeof SALE_STATUS[keyof typeof SALE_STATUS];
+
 // ── TASKS — assignedTo → SELLERS.id FK ───────────────────────────────
 
 export const TASKS: Task[] = [

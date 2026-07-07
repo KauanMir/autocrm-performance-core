@@ -101,6 +101,41 @@ export function ClientChip({ lead, size = 'md' }: { lead: any; size?: 'md' | 'lg
   );
 }
 
+// Client search-and-select used by any flow that must link its record to a
+// real Lead instead of free text (see M0-K1.5 — a plain uncontrolled text
+// field is what let "Nova proposta" save with client:'—' regardless of what
+// was typed). Always resolves to a real lead via LeadService.getAll(), never
+// a static seed list, so leads created earlier in the session show up too.
+export function LeadPicker({ value, onChange, onPick, placeholder }: {
+  value: string; onChange: (v: string) => void; onPick: (lead: any) => void; placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  const q = value.trim().toLowerCase();
+  const matches = q ? LeadService.getAll().filter((l: any) => l.name.toLowerCase().includes(q)).slice(0, 6) : [];
+  return (
+    <div style={{ position: 'relative' }}>
+      <FField label="Cliente" icon="user" placeholder={placeholder || 'Buscar cliente pelo nome...'} value={value}
+        onChange={(e: any) => { onChange(e.target.value); setShow(true); }}
+        onFocus={() => setShow(true)} />
+      {show && matches.length > 0 && (
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 74, zIndex: 5, background: '#1a1a1d', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
+          {matches.map((l: any) => (
+            <button key={l.id} onClick={() => { onPick(l); setShow(false); }} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
+              onMouseEnter={(e: any) => { e.currentTarget.style.background = 'rgba(255,255,255,.05)'; }}
+              onMouseLeave={(e: any) => { e.currentTarget.style.background = 'transparent'; }}>
+              <Avatar name={l.name} size={28} ring="#3B82F6" />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff' }}>{l.name}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--t-500)' }}>{l.car}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function FPanel({ title, icon, children, accent = 'var(--t-500)', style }: {
   title?: string; icon?: string; children?: React.ReactNode; accent?: string; style?: React.CSSProperties;
 }) {

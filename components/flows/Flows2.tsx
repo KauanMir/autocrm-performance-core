@@ -2,11 +2,11 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge } from '@/components/ui/kit';
-import { STAGES } from '@/lib/data';
+import { STAGES, VISIT_STATUS, DEAL_STATUS, SALE_STATUS } from '@/lib/data';
 import { AuthService, LeadService, VisitService, DealService, SaleService, TaskService, SellerService } from '@/lib/services';
 import {
   CARS, ORIGINS, PAYS,
-  FField, FArea, Segmented, ChoiceTile, ClientChip,
+  FField, FArea, Segmented, ChoiceTile, ClientChip, LeadPicker,
   FPanel, StepRail, SummaryRow, FlowShell, FlowSuccess,
 } from './FlowsShared';
 
@@ -161,7 +161,7 @@ export function FlowEditarCliente({ payload, close }: any) {
 }
 
 export function FlowCriarVisita({ payload, close, openFlow }: any) {
-  const lead = payload.lead || null;
+  const [lead, setLead] = useState<any>(payload.lead || null);
   const [done, setDone] = useState(false);
   const [client, setClient] = useState(lead ? lead.name : '');
   const [day, setDay] = useState('Amanhã');
@@ -173,6 +173,9 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
   const [note, setNote] = useState('');
   const days = ['Hoje', 'Amanhã', 'Qui 18', 'Sex 19', 'Sáb 20'];
   const slots = ['09:00', '10:30', '14:00', '15:30', '17:00', '18:30'];
+
+  const pickLead = (l: any) => { setLead(l); setClient(l.name); setVehicles([l.car]); setCustomCar(''); };
+  const clearLead = () => { setLead(null); setClient(''); setVehicles([]); };
 
   const toggleVehicle = (c: string) => {
     setVehicles(vs => vs.includes(c) ? vs.filter(v => v !== c) : [...vs, c]);
@@ -192,22 +195,21 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
   const handleSchedule = () => {
     if (!ok) return;
     const user = AuthService.getCurrentUser();
-    const leadId = lead?.id ?? (LeadService.getAll().find(l => l.name === client)?.id ?? null);
     VisitService.create({
-      client,
+      client: lead ? lead.name : client,
       car: finalVehicles[0],
       vehicles: finalVehicles.length > 1 ? finalVehicles : undefined,
       day: normalizeDay(finalDay),
       time: finalTime,
-      status: 'agendada',
-      seller: user?.name || '—',
-      sellerId: user?.sellerId ?? null,
-      leadId,
+      status: VISIT_STATUS.SCHEDULED,
+      seller: lead?.seller || user?.name || '—',
+      sellerId: lead?.sellerId ?? user?.sellerId ?? null,
+      leadId: lead?.id ?? null,
       note: note.trim() || undefined,
     });
-    if (leadId) {
-      LeadService.addToTimeline(leadId, { icon: 'calendar', c: '#E8CE72', t: 'Visita agendada', d: `${finalDay} às ${finalTime}` });
-      LeadService.updateHealth(leadId, { type: 'visit_scheduled', hasDate: !!finalDay, hasTime: !!finalTime });
+    if (lead?.id) {
+      LeadService.addToTimeline(lead.id, { icon: 'calendar', c: '#E8CE72', t: 'Visita agendada', d: `${finalDay} às ${finalTime}` });
+      LeadService.updateHealth(lead.id, { type: 'visit_scheduled', hasDate: !!finalDay, hasTime: !!finalTime });
     }
     setDone(true);
   };
@@ -224,7 +226,10 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
       footer={<><div style={{ flex: 1 }} /><span style={{ fontSize: 13, color: 'var(--t-500)' }}>{ok ? `${finalDay} às ${finalTime}` : 'Selecione veículo, dia e horário'}</span><LBtn kind="gold" size="lg" icon="check" onClick={handleSchedule} style={{ opacity: ok ? 1 : .5 }}>Agendar visita</LBtn></>}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start', maxWidth: 900 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {lead ? <ClientChip lead={lead} size="lg" /> : <FPanel><FField label="Cliente" icon="user" placeholder="Buscar ou digitar nome" value={client} onChange={(e: any) => setClient(e.target.value)} /></FPanel>}
+          {lead ? <div>
+            <ClientChip lead={lead} size="lg" />
+            <button onClick={clearLead} style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: 'var(--t-500)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Trocar cliente</button>
+          </div> : <FPanel><LeadPicker value={client} onChange={setClient} onPick={pickLead} placeholder="Buscar cliente pelo nome..." /></FPanel>}
           <FPanel title="Veículo(s) de interesse" icon="car" accent="#E8CE72">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 4).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={vehicles.includes(c)} onClick={() => toggleVehicle(c)} />)}
@@ -304,17 +309,27 @@ export function FlowConfirmarVisita({ payload, close, openFlow }: any) {
         </button>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           <ChoiceTile icon="checkCircle" title="Confirmou" desc="Vai comparecer" accent="#27C75F" onClick={() => {
-            VisitService.update(v.id, { status: 'confirmada' });
-            if (v.leadId) LeadService.addToTimeline(v.leadId, { icon: 'checkCircle', c: '#27C75F', t: 'Visita confirmada', d: remind ? 'Lembrete enviado' : undefined });
+            VisitService.update(v.id, { status: VISIT_STATUS.CONFIRMED });
+            if (v.leadId) {
+              LeadService.addToTimeline(v.leadId, { icon: 'checkCircle', c: '#27C75F', t: 'Visita confirmada', d: remind ? 'Lembrete enviado' : undefined });
+              LeadService.updateHealth(v.leadId, { type: 'visit_confirmed' });
+            }
             setDone('confirmada');
           }} />
           <ChoiceTile icon="calendar" title="Remarcar" desc="Outro dia/horário" accent="#FFA31F" onClick={() => {
-            VisitService.update(v.id, { status: 'remarcando' });
+            VisitService.update(v.id, { status: VISIT_STATUS.RESCHEDULED });
+            if (v.leadId) {
+              LeadService.addToTimeline(v.leadId, { icon: 'calendar', c: '#FFA31F', t: 'Visita remarcada' });
+              LeadService.updateHealth(v.leadId, { type: 'visit_rescheduled' });
+            }
             setDone('remarcar');
           }} />
           <ChoiceTile icon="xCircle" title="Cancelou" desc="Não vem mais" accent="#FF3B3B" onClick={() => {
-            VisitService.update(v.id, { status: 'cancelada' });
-            if (v.leadId) LeadService.addToTimeline(v.leadId, { icon: 'xCircle', c: '#FF3B3B', t: 'Visita cancelada' });
+            VisitService.update(v.id, { status: VISIT_STATUS.CANCELED });
+            if (v.leadId) {
+              LeadService.addToTimeline(v.leadId, { icon: 'xCircle', c: '#FF3B3B', t: 'Visita cancelada' });
+              LeadService.updateHealth(v.leadId, { type: 'visit_canceled' });
+            }
             setDone('cancelou');
           }} />
         </div>
@@ -339,8 +354,8 @@ export function FlowRegistrarResultado({ payload, close, openFlow }: any) {
 
   const handleSave = () => {
     if (!outcome) return;
-    const statusMap: Record<string, string> = { vendeu: 'Realizada', negociando: 'Realizada', pensar: 'Realizada', sem: 'Sem interesse' };
-    VisitService.update(v.id, { status: statusMap[outcome] || 'Realizada' });
+    const statusMap: Record<string, string> = { vendeu: VISIT_STATUS.DONE, negociando: VISIT_STATUS.DONE, pensar: VISIT_STATUS.DONE, sem: VISIT_STATUS.NO_INTEREST };
+    VisitService.update(v.id, { status: statusMap[outcome] || VISIT_STATUS.DONE });
     if (v.leadId) {
       const o = opts.find(x => x.id === outcome)!;
       LeadService.addToTimeline(v.leadId, {
@@ -384,9 +399,9 @@ function parseCurrency(v: string | undefined, fallback: number): number {
 }
 
 export function FlowNovaProposta({ payload, close, openFlow }: any) {
-  const lead = payload.lead || null;
+  const [lead, setLead] = useState<any>(payload.lead || null);
   const [step, setStep] = useState(0);
-  const [client] = useState(lead ? lead.name : '');
+  const [clientQuery, setClientQuery] = useState(lead ? lead.name : '');
   const [car, setCar] = useState(lead ? lead.car : CARS[0]);
   const [customCar, setCustomCar] = useState('');
   const [pay, setPay] = useState(lead ? lead.pay : 'Financiamento');
@@ -401,11 +416,19 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
   const finalCar = customCar.trim() || car;
   const finalV = Math.round(base * (1 - disc / 100));
   const fmt = (n: number) => 'R$ ' + n.toLocaleString('pt-BR');
+  // Proposta comercial precisa estar ligada a um cliente cadastrado — texto
+  // livre não vinculado a um lead real é o que gerava propostas com
+  // client:'—' (ver M0-K1.5, bug 4). Regra de produto: Opção A.
+  const canNext = step === 0 ? !!lead : true;
+
+  const pickLead = (l: any) => { setLead(l); setClientQuery(l.name); setCar(l.car); setCustomCar(''); setPay(l.pay || pay); setBaseValueInput(String(parseCurrency(l.value, base))); };
+  const clearLead = () => { setLead(null); setClientQuery(''); };
 
   const handleCreateDeal = () => {
+    if (!lead) return;
     const user = AuthService.getCurrentUser();
     DealService.create({
-      client: lead ? lead.name : (client || '—'),
+      client: lead.name,
       car: finalCar,
       value: fmt(finalV),
       disc: `${disc}%`,
@@ -413,16 +436,14 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
       downPayment: downPayment.trim() || undefined,
       installments: installments.trim() || undefined,
       note: note.trim() || undefined,
-      status: needsApproval ? 'aprovacao' : 'aberta',
+      status: needsApproval ? DEAL_STATUS.APPROVAL : DEAL_STATUS.OPEN,
       last: 'Agora',
-      seller: user?.name || '—',
-      sellerId: user?.sellerId ?? null,
-      leadId: lead?.id ?? null,
+      seller: lead.seller || user?.name || '—',
+      sellerId: lead.sellerId ?? user?.sellerId ?? null,
+      leadId: lead.id,
     });
-    if (lead?.id) {
-      LeadService.addToTimeline(lead.id, { icon: 'handshake', c: '#E8CE72', t: 'Proposta criada', d: `${finalCar} · ${fmt(finalV)}` });
-      LeadService.updateHealth(lead.id, { type: 'deal_created', needsApproval });
-    }
+    LeadService.addToTimeline(lead.id, { icon: 'handshake', c: '#E8CE72', t: 'Proposta criada', d: `${finalCar} · ${fmt(finalV)}` });
+    LeadService.updateHealth(lead.id, { type: 'deal_created', needsApproval });
     setStep(3);
   };
 
@@ -441,14 +462,21 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 13, color: 'var(--t-500)' }}>Passo {step + 1} de 3</span>
         <LBtn kind="gold" size="lg" icon={step === 2 ? 'check' : 'arrowRight'}
-          onClick={() => { if (step === 2) handleCreateDeal(); else setStep(step + 1); }}>
+          onClick={() => { if (!canNext) return; if (step === 2) handleCreateDeal(); else setStep(step + 1); }}
+          style={{ opacity: canNext ? 1 : .5 }}>
           {step === 2 ? 'Criar proposta' : 'Continuar'}
         </LBtn>
       </>}>
       <StepRail steps={steps} current={step} />
       <div style={{ maxWidth: 760 }}>
         {step === 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {lead ? <ClientChip lead={lead} size="lg" /> : <FPanel><FField label="Cliente" icon="user" placeholder="Buscar cliente" defaultValue={client} /></FPanel>}
+          {lead ? <div>
+            <ClientChip lead={lead} size="lg" />
+            <button onClick={clearLead} style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: 'var(--t-500)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Trocar cliente</button>
+          </div> : <FPanel>
+            <LeadPicker value={clientQuery} onChange={setClientQuery} onPick={pickLead} placeholder="Buscar cliente pelo nome..." />
+            {clientQuery.trim() && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--amber)' }}>Selecione um cliente cadastrado para criar a proposta.</div>}
+          </FPanel>}
           <FPanel title="Veículo da proposta" icon="car" accent="#E8CE72">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
               {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 4).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={!customCar.trim() && car === c} onClick={() => { setCar(c); setCustomCar(''); }} />)}
@@ -483,7 +511,7 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
           </FPanel>
         </div>}
         {step === 2 && <FPanel title="Resumo da proposta" icon="checkCircle" accent="#27C75F">
-          <SummaryRow label="Cliente" value={lead ? lead.name : (client || '—')} />
+          <SummaryRow label="Cliente" value={lead?.name || '—'} />
           <SummaryRow label="Veículo" value={finalCar} />
           <SummaryRow label="Pagamento" value={pay} />
           {downPayment.trim() && <SummaryRow label="Entrada" value={downPayment} />}
@@ -541,12 +569,18 @@ export function FlowAprovarProposta({ payload, close }: any) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <LBtn kind="gold" size="lg" icon="checkCircle" onClick={() => {
             DealService.approve(d.id);
-            if (d.leadId) LeadService.addToTimeline(d.leadId, { icon: 'checkCircle', c: '#27C75F', t: 'Proposta aprovada' });
+            if (d.leadId) {
+              LeadService.addToTimeline(d.leadId, { icon: 'checkCircle', c: '#27C75F', t: 'Proposta aprovada' });
+              LeadService.updateHealth(d.leadId, { type: 'deal_approved' });
+            }
             setDone('aprovada');
           }} style={{ justifyContent: 'center', background: 'linear-gradient(180deg,#2EDC72,#15924B)', color: '#fff', border: '1px solid #2EDC72', padding: '16px' }}>Aprovar proposta</LBtn>
           <LBtn kind="danger" size="lg" icon="xCircle" onClick={() => {
             DealService.reject(d.id);
-            if (d.leadId) LeadService.addToTimeline(d.leadId, { icon: 'xCircle', c: '#FF3B3B', t: 'Proposta recusada' });
+            if (d.leadId) {
+              LeadService.addToTimeline(d.leadId, { icon: 'xCircle', c: '#FF3B3B', t: 'Proposta recusada' });
+              LeadService.updateHealth(d.leadId, { type: 'deal_rejected' });
+            }
             setDone('recusada');
           }} style={{ justifyContent: 'center', padding: '16px' }}>Recusar</LBtn>
         </div>
@@ -614,7 +648,7 @@ export function FlowRegistrarVenda({ payload, close }: any) {
       value: '—',
       pay: lead?.pay || 'Financiamento',
       date: 'Hoje',
-      status: 'Fechada',
+      status: SALE_STATUS.PENDING,
     });
     if (lead?.id) {
       LeadService.addToTimeline(lead.id, { icon: 'trophy', c: '#E8CE72', t: 'Venda fechada!', d: finalCar });

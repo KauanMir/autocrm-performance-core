@@ -1,7 +1,7 @@
 // services.ts — Backend abstraction layer.
 // Components, screens and flows must call Services — never access the store or
 // localStorage directly. When a real backend arrives, only StoreAdapter changes.
-import { USERS } from './data';
+import { USERS, VISIT_STATUS, DEAL_STATUS } from './data';
 import type { User, Lead, Visit, Deal, Sale, Task, TimelineEntry } from './data';
 import { store, getStore } from './store';
 import type { LeadInput, VisitInput, DealInput, SaleInput, TaskInput } from './store';
@@ -162,7 +162,12 @@ function _filteredTasks(): Task[] {
 export type LeadHealthEvent =
   | { type: 'call'; outcome: 'visita' | 'proposta' | 'retorno' | 'naoatendeu' }
   | { type: 'visit_scheduled'; hasDate: boolean; hasTime: boolean }
+  | { type: 'visit_confirmed' }
+  | { type: 'visit_canceled' }
+  | { type: 'visit_rescheduled' }
   | { type: 'deal_created'; needsApproval: boolean }
+  | { type: 'deal_approved' }
+  | { type: 'deal_rejected' }
   | { type: 'sale_registered' };
 
 export function calculateLeadHealth(event: LeadHealthEvent): Partial<Lead> {
@@ -185,10 +190,25 @@ export function calculateLeadHealth(event: LeadHealthEvent): Partial<Lead> {
         ? { urgency: 'green', stage: 'Visita agendada', alert: 'Visita agendada', last: 'No prazo' }
         : { urgency: 'amber', stage: 'Qualificado', alert: 'Agendar visita', last: 'Aguardando agendamento' };
 
+    case 'visit_confirmed':
+      return { urgency: 'green', alert: 'Visita confirmada', last: 'Cliente confirmou presença' };
+
+    case 'visit_canceled':
+      return { urgency: 'red', alert: 'Visita cancelada — retomar contato', last: 'Cliente cancelou a visita' };
+
+    case 'visit_rescheduled':
+      return { urgency: 'amber', alert: 'Visita remarcada — confirmar novo horário', last: 'Aguardando nova confirmação' };
+
     case 'deal_created':
       return event.needsApproval
         ? { urgency: 'amber', stage: 'Em negociação', alert: 'Acompanhar proposta', last: 'Proposta enviada' }
         : { urgency: 'green', stage: 'Em negociação', alert: 'Proposta enviada', last: 'Aguardando resposta do cliente' };
+
+    case 'deal_approved':
+      return { urgency: 'green', alert: 'Proposta aprovada — fechar venda', last: 'Aprovada pelo gestor' };
+
+    case 'deal_rejected':
+      return { urgency: 'amber', alert: 'Renegociar proposta', last: 'Recusada pelo gestor' };
 
     case 'sale_registered':
       // 'Fechamento' is the existing terminal stage in STAGES (data.ts) — reused here
@@ -225,8 +245,8 @@ export const VisitService = {
 export const DealService = {
   create:  (data: DealInput)                   => StoreAdapter.addDeal(data),
   update:  (id: string, changes: Partial<Deal>) => StoreAdapter.updateDeal(id, changes),
-  approve: (id: string)                         => StoreAdapter.updateDeal(id, { status: 'aprovada' }),
-  reject:  (id: string)                         => StoreAdapter.updateDeal(id, { status: 'recusada' }),
+  approve: (id: string)                         => StoreAdapter.updateDeal(id, { status: DEAL_STATUS.APPROVED }),
+  reject:  (id: string)                         => StoreAdapter.updateDeal(id, { status: DEAL_STATUS.REJECTED }),
   getAll:  ()                                   => _filteredDeals(),
 };
 
@@ -258,11 +278,15 @@ export const SellerService = {
 };
 
 // ── PipelineService ───────────────────────────────────────────────────
+// moveCard writes straight to lead.stage — the same field every other screen
+// (Clientes, busca, perfil, Ajustes) already reads — so a Kanban move is
+// visible everywhere immediately and survives F5. pipelineOverrides/getOverrides
+// stay defined in the store for now (harmless, unused) rather than ripping out
+// the localStorage schema in a status-contract fix; nothing reads them anymore.
 
 export const PipelineService = {
-  moveCard:      (leadId: string, stage: string) => StoreAdapter.setPipelineOverride(leadId, stage),
+  moveCard:      (leadId: string, stage: string) => StoreAdapter.updateLead(leadId, { stage }),
   reorderStages: (order: string[])               => StoreAdapter.setStagesOrder(order),
-  getOverrides:  ()                              => getStore().pipelineOverrides,
   getStages:     ()                              => getStore().stages,
 };
 

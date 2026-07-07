@@ -2,21 +2,28 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard, Stat } from '@/components/ui/kit';
-import { STAGES } from '@/lib/data';
+import { STAGES, VISIT_STATUS, DEAL_STATUS, SALE_STATUS } from '@/lib/data';
 import { useStore } from '@/lib/store';
 import { LeadService, VisitService, DealService, SaleService, SellerService } from '@/lib/services';
 import { PLACE } from '@/components/podiums/Podiums';
 
+// Every value VISIT_STATUS can produce must have an entry here — a status
+// missing from this map is what made VisitRow crash (M0-J audit, M0-K1 fix).
 const VST: Record<string, { tone: string; label: string; solid?: boolean }> = {
-  confirmada: { tone: 'green', label: 'Confirmada' },
-  realizada: { tone: 'green', label: 'Realizada', solid: true },
-  pendente: { tone: 'red', label: 'Não confirmada' },
-  agendada: { tone: 'amber', label: 'Agendada' },
-  sem_resultado: { tone: 'amber', label: 'Registrar resultado' },
+  [VISIT_STATUS.PENDING]:         { tone: 'red',   label: 'Não confirmada' },
+  [VISIT_STATUS.SCHEDULED]:       { tone: 'amber', label: 'Agendada' },
+  [VISIT_STATUS.CONFIRMED]:       { tone: 'green', label: 'Confirmada' },
+  [VISIT_STATUS.RESCHEDULED]:     { tone: 'amber', label: 'Remarcada' },
+  [VISIT_STATUS.CANCELED]:        { tone: 'red',   label: 'Cancelada' },
+  [VISIT_STATUS.AWAITING_RESULT]: { tone: 'amber', label: 'Registrar resultado' },
+  [VISIT_STATUS.DONE]:            { tone: 'green', label: 'Realizada', solid: true },
+  [VISIT_STATUS.NO_INTEREST]:     { tone: 'amber', label: 'Sem interesse' },
 };
+const VST_FALLBACK: { tone: string; label: string; solid?: boolean } = { tone: 'amber', label: 'Status desconhecido' };
 
 function VisitRow({ v, go }: any) {
-  const s = VST[v.status]; const pend = v.status === 'pendente'; const noRes = v.status === 'sem_resultado';
+  const s = VST[v.status] || VST_FALLBACK;
+  const pend = v.status === VISIT_STATUS.PENDING; const noRes = v.status === VISIT_STATUS.AWAITING_RESULT;
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderRadius: 11,
@@ -61,11 +68,11 @@ export function ScreenVisitas({ go }: any) {
     { name: 'Próximos dias', items: visits.filter((v: any) => !KNOWN_DAYS.includes(v.day)) },
     { name: 'Pendentes de resultado', items: visits.filter((v: any) => v.day === 'passado'), warn: true },
   ];
-  const unconfirmed = visits.filter((v: any) => v.status === 'pendente').length;
+  const unconfirmed = visits.filter((v: any) => v.status === VISIT_STATUS.PENDING).length;
   return (
     <LightScreen>
       <PageHead title="Visitas" sub="A agenda do dia e o que precisa ser confirmado." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
-      <Guide tone="red" icon="calendar" text={<span>Você tem <b>{unconfirmed} visitas não confirmadas</b> para hoje. Ligue para confirmar antes do horário — visita confirmada vende mais.</span>} action="Confirmar agora" onAction={() => { const v = visits.find((x: any) => x.status === 'pendente'); (window as any).__openFlow('confirmar-visita', { visit: v }); }} />
+      <Guide tone="red" icon="calendar" text={<span>Você tem <b>{unconfirmed} visitas não confirmadas</b> para hoje. Ligue para confirmar antes do horário — visita confirmada vende mais.</span>} action="Confirmar agora" onAction={() => { const v = visits.find((x: any) => x.status === VISIT_STATUS.PENDING); (window as any).__openFlow('confirmar-visita', { visit: v }); }} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         {groups.map((g: any) => (
           <div key={g.name}>
@@ -91,7 +98,8 @@ function SubHead({ icon, tone, children }: any) {
   </div>;
 }
 
-function DealRow({ d, go, approval }: any) {
+function DealRow({ d, go, approval, decided }: any) {
+  const decidedApproved = decided && d.status === DEAL_STATUS.APPROVED;
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 16, padding: '15px 18px', borderRadius: 11,
@@ -109,6 +117,7 @@ function DealRow({ d, go, approval }: any) {
         <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{d.value}</div>
         <div style={{ fontSize: 11, color: 'var(--t-400)' }}>atualizada {d.last}</div>
       </div>
+      {decided && <LBadge tone={decidedApproved ? 'green' : 'red'} solid>{decidedApproved ? 'Aprovada' : 'Recusada'}</LBadge>}
       {approval
         ? <LBtn size="sm" kind="primary" icon="check" onClick={() => (window as any).__openFlow('aprovar-proposta', { deal: d })}>Aprovar</LBtn>
         : <LBtn size="sm" kind="ghost" icon="arrowRight" onClick={() => {
@@ -124,8 +133,9 @@ function DealRow({ d, go, approval }: any) {
 export function ScreenPropostas({ go }: any) {
   useStore();
   const deals = DealService.getAll();
-  const open = deals.filter((d: any) => d.status === 'aberta');
-  const appr = deals.filter((d: any) => d.status === 'aprovacao');
+  const open = deals.filter((d: any) => d.status === DEAL_STATUS.OPEN);
+  const appr = deals.filter((d: any) => d.status === DEAL_STATUS.APPROVAL);
+  const decided = deals.filter((d: any) => d.status === DEAL_STATUS.APPROVED || d.status === DEAL_STATUS.REJECTED);
   return (
     <LightScreen>
       <PageHead title="Propostas" sub="As negociações em aberto e o que precisa de aprovação." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-proposta')}>Nova proposta</LBtn>} />
@@ -139,6 +149,10 @@ export function ScreenPropostas({ go }: any) {
           <SubHead icon="handshake">Em aberto · {open.length}</SubHead>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{open.map((d: any) => <DealRow key={d.id} d={d} go={go} />)}</div>
         </div>
+        {decided.length > 0 && <div>
+          <SubHead icon="history">Decididas · {decided.length}</SubHead>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{decided.map((d: any) => <DealRow key={d.id} d={d} go={go} decided />)}</div>
+        </div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', borderRadius: 11, background: 'var(--green-bg)', border: '1px solid var(--green-line)' }}>
           <Icon name="trophy" size={20} stroke={2} style={{ color: 'var(--green)' }} />
           <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>8 propostas fechadas este mês</span>
@@ -152,8 +166,8 @@ export function ScreenPropostas({ go }: any) {
 export function ScreenVendas({ go }: any) {
   useStore();
   const sales = SaleService.getAll();
-  const delivered = sales.filter((s: any) => s.status === 'entregue').length;
-  const pending = sales.filter((s: any) => s.status === 'aguardando').length;
+  const delivered = sales.filter((s: any) => s.status === SALE_STATUS.DELIVERED).length;
+  const pending = sales.filter((s: any) => s.status === SALE_STATUS.PENDING).length;
   return (
     <LightScreen>
       <PageHead title="Vendas" sub="O que importa primeiro: quantas vendas você fechou." actions={<LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('registrar-venda')}>Registrar venda</LBtn>} />
@@ -178,7 +192,7 @@ export function ScreenVendas({ go }: any) {
             <div style={{ fontSize: 12.5, color: 'var(--t-500)' }}>{s.seller.split(' ')[0]}</div>
             <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600, width: 100, textAlign: 'right' }}>{s.value}</div>
             <span style={{ fontSize: 12.5, color: 'var(--t-400)', width: 56 }}>{s.date}</span>
-            <LBadge tone={s.status === 'entregue' ? 'green' : 'amber'} solid={s.status === 'entregue'}>{s.status === 'entregue' ? 'Entregue' : 'Ag. entrega'}</LBadge>
+            <LBadge tone={s.status === SALE_STATUS.DELIVERED ? 'green' : 'amber'} solid={s.status === SALE_STATUS.DELIVERED}>{s.status === SALE_STATUS.DELIVERED ? 'Entregue' : 'Ag. entrega'}</LBadge>
           </div>
         ))}
       </LCard>

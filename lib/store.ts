@@ -108,6 +108,16 @@ function _load<T>(key: string, fallback: T): T {
   } catch { return fallback; }
 }
 
+// K.ver is written as a plain string ('2'), never JSON.stringify'd — reading it
+// through _load() ran it through JSON.parse anyway, turning '2' into the number
+// 2. Since `ver === V` then compared a number to the string V, it was NEVER
+// true, so every reload fell into the "unknown schema" branch of _hydrate()
+// and wiped localStorage via _clearStorage(). This was the actual cause of
+// "nothing survives F5" (M0-K1.5, bug 1) — not just Pipeline.
+function _loadVersion(): string | null {
+  try { return localStorage.getItem(K.ver); } catch { return null; }
+}
+
 function _saveAll(): void {
   if (typeof window === 'undefined') return;
   try {
@@ -172,7 +182,7 @@ function _migrate(data: {
 }
 
 function _hydrate(): void {
-  const ver = _load<string | null>(K.ver, null);
+  const ver = _loadVersion();
 
   if (ver === V) {
     const leads   = _load<Lead[]   | null>(K.leads,   null); if (leads)   _s.leads   = leads;
