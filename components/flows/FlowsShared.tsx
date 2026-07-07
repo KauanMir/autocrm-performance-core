@@ -2,13 +2,13 @@
 import React, { useState, useEffect } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge } from '@/components/ui/kit';
-import { LEADS } from '@/lib/data';
+import { LeadService } from '@/lib/services';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
 export const PAYS: [string, string][] = [['À vista', 'card'], ['Financiamento 100%', 'doc'], ['Entrada + Financiamento', 'dollar'], ['Troca', 'refresh']];
 
-export function findLead(name: string) { return LEADS.find(l => l.name === name); }
+export function findLead(name: string) { return LeadService.getAll().find((l: any) => l.name === name); }
 
 const flowField: React.CSSProperties = {
   width: '100%', padding: '13px 15px', borderRadius: 12, border: '1px solid var(--border)',
@@ -226,7 +226,7 @@ export function FlowSuccess({ icon = 'checkCircle', accent = '#27C75F', title, s
 }
 
 export function FlowLigar({ payload, close, openFlow }: any) {
-  const lead = payload.lead || LEADS[0];
+  const lead = payload.lead || LeadService.getAll()[0];
   const [phase, setPhase] = useState('ready');
   const [secs, setSecs] = useState(0);
   const [outcome, setOutcome] = useState<string | null>(null);
@@ -328,7 +328,7 @@ export function FlowLigar({ payload, close, openFlow }: any) {
 }
 
 export function FlowVerCliente({ payload, close, openFlow }: any) {
-  const lead = payload.lead || LEADS[0];
+  const lead = payload.lead || LeadService.getAll()[0];
   const u = URG[lead.urgency];
   const timeline = [
     { icon: 'phone', c: '#27C75F', t: 'Ligação realizada', d: lead.last, when: 'Hoje' },

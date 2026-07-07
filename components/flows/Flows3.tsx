@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge, Chip } from '@/components/ui/kit';
-import { SELLERS, LEADS, DEALS, VISITS, SALES } from '@/lib/data';
+import { SellerService, LeadService, DealService, VisitService, SaleService } from '@/lib/services';
 import { PLACE } from '@/components/podiums/Podiums';
 import {
   findLead,
@@ -35,8 +35,8 @@ export function ProgressBar({ pct, accent = '#E8CE72' }: { pct: number; accent?:
 }
 
 export function FlowPerfilVendedor({ payload, close, openFlow }: any) {
-  const seller = payload.seller || SELLERS[0];
-  const idx = SELLERS.findIndex((s: any) => s.id === seller.id);
+  const seller = payload.seller || SellerService.getAll()[0];
+  const idx = SellerService.getAll().findIndex((s: any) => s.id === seller.id);
   const pos = payload.pos || idx + 1;
   const up = seller.move > 0, down = seller.move < 0;
   const kpis = [
@@ -135,12 +135,12 @@ export function FlowPerfilVendedor({ payload, close, openFlow }: any) {
 export function FlowNotificacoes({ payload, close, openFlow }: any) {
   const groups = [
     { name: 'Urgente', tone: 'red', items: [
-      { icon: 'flame', t: <span>Cliente <b>Carlos Andrade</b> está sem resposta há 3 dias</span>, when: 'há 1h', action: () => openFlow('ligar', { lead: findLead('Carlos Andrade') || LEADS[0] }), label: 'Ligar' },
-      { icon: 'target', t: <span><b>João Ferreira</b> ultrapassou você no ranking</span>, when: 'há 2h', action: () => openFlow('perfil-vendedor', { seller: SELLERS[2] }), label: 'Ver' },
-      { icon: 'calendar', t: <span>Visita de <b>Juliana Prado</b> ainda não confirmada</span>, when: 'há 3h', action: () => openFlow('confirmar-visita', { visit: VISITS.find((v: any) => v.status === 'pendente') }), label: 'Confirmar' },
+      { icon: 'flame', t: <span>Cliente <b>Carlos Andrade</b> está sem resposta há 3 dias</span>, when: 'há 1h', action: () => openFlow('ligar', { lead: findLead('Carlos Andrade') || LeadService.getAll()[0] }), label: 'Ligar' },
+      { icon: 'target', t: <span><b>João Ferreira</b> ultrapassou você no ranking</span>, when: 'há 2h', action: () => openFlow('perfil-vendedor', { seller: SellerService.getAll()[2] }), label: 'Ver' },
+      { icon: 'calendar', t: <span>Visita de <b>Juliana Prado</b> ainda não confirmada</span>, when: 'há 3h', action: () => openFlow('confirmar-visita', { visit: VisitService.getAll().find((v: any) => v.status === 'pendente') }), label: 'Confirmar' },
     ]},
     { name: 'Hoje', tone: 'amber', items: [
-      { icon: 'handshake', t: <span>Nova proposta aguardando sua aprovação</span>, when: '14:20', action: () => openFlow('aprovar-proposta', { deal: DEALS.find((d: any) => d.status === 'aprovacao') }), label: 'Revisar' },
+      { icon: 'handshake', t: <span>Nova proposta aguardando sua aprovação</span>, when: '14:20', action: () => openFlow('aprovar-proposta', { deal: DealService.getAll().find((d: any) => d.status === 'aprovacao') }), label: 'Revisar' },
       { icon: 'checkCircle', t: <span><b>Mariana Luz</b> confirmou a visita das 14:00</span>, when: '11:05' },
       { icon: 'trophy', t: <span>Venda do <b>Jeep Compass</b> registrada com sucesso</span>, when: '09:30' },
     ]},
@@ -185,17 +185,17 @@ export function FlowBusca({ payload, close, openFlow }: any) {
   const [q, setQ] = useState('');
   const ql = q.trim().toLowerCase();
   const match = (s: string) => ql && s.toLowerCase().includes(ql);
-  const clientes = LEADS.filter((l: any) => !ql || match(l.name) || match(l.phone) || match(l.car));
-  const vendedores = SELLERS.filter((s: any) => !ql || match(s.name) || match(s.team));
-  const propostas = DEALS.filter((d: any) => !ql || match(d.client) || match(d.car));
-  const vendas = SALES.filter((s: any) => !ql || match(s.client) || match(s.car));
-  const visitas = VISITS.filter((v: any) => !ql || match(v.client) || match(v.car));
+  const clientes = LeadService.getAll().filter((l: any) => !ql || match(l.name) || match(l.phone) || match(l.car));
+  const vendedores = SellerService.getAll().filter((s: any) => !ql || match(s.name) || match(s.team));
+  const propostas = DealService.getAll().filter((d: any) => !ql || match(d.client) || match(d.car));
+  const vendas = SaleService.getAll().filter((s: any) => !ql || match(s.client) || match(s.car));
+  const visitas = VisitService.getAll().filter((v: any) => !ql || match(v.client) || match(v.car));
   const groups = [
     { name: 'Clientes', icon: 'users', items: clientes.slice(0, 4).map((l: any) => ({ title: l.name, sub: `${l.car} · ${l.phone}`, tone: l.urgency, onClick: () => openFlow('ver-cliente', { lead: l }) })) },
     { name: 'Vendedores', icon: 'trophy', items: vendedores.slice(0, 3).map((s: any) => ({ title: s.name, sub: `Equipe ${s.team} · ${s.sales} vendas`, onClick: () => openFlow('perfil-vendedor', { seller: s }) })) },
-    { name: 'Propostas', icon: 'handshake', items: propostas.slice(0, 3).map((d: any) => ({ title: `Proposta · ${d.client}`, sub: `${d.car} · ${d.value}`, onClick: () => openFlow('ver-cliente', { lead: findLead(d.client) || LEADS[0] }) })) },
+    { name: 'Propostas', icon: 'handshake', items: propostas.slice(0, 3).map((d: any) => ({ title: `Proposta · ${d.client}`, sub: `${d.car} · ${d.value}`, onClick: () => openFlow('ver-cliente', { lead: findLead(d.client) || LeadService.getAll()[0] }) })) },
     { name: 'Vendas', icon: 'car', items: vendas.slice(0, 3).map((s: any) => ({ title: s.client, sub: `${s.car} · ${s.date}`, onClick: close })) },
-    { name: 'Visitas', icon: 'calendar', items: visitas.slice(0, 3).map((v: any) => ({ title: v.client, sub: `${v.car} · ${v.time}`, onClick: () => openFlow('ver-cliente', { lead: findLead(v.client) || LEADS[0] }) })) },
+    { name: 'Visitas', icon: 'calendar', items: visitas.slice(0, 3).map((v: any) => ({ title: v.client, sub: `${v.car} · ${v.time}`, onClick: () => openFlow('ver-cliente', { lead: findLead(v.client) || LeadService.getAll()[0] }) })) },
   ].filter(g => g.items.length > 0);
   const empty = ql && groups.length === 0;
 
