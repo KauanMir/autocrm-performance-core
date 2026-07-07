@@ -154,11 +154,58 @@ function _filteredTasks(): Task[] {
   return all;
 }
 
+// ── Lead Health Engine ──────────────────────────────────────────────────
+// Single source of truth for how a lead's urgency/stage/alert/last react to
+// real interactions. Flows must call LeadService.updateHealth() instead of
+// hand-rolling their own urgency/stage/alert patches.
+
+export type LeadHealthEvent =
+  | { type: 'call'; outcome: 'visita' | 'proposta' | 'retorno' | 'naoatendeu' }
+  | { type: 'visit_scheduled'; hasDate: boolean; hasTime: boolean }
+  | { type: 'deal_created'; needsApproval: boolean }
+  | { type: 'sale_registered' };
+
+export function calculateLeadHealth(event: LeadHealthEvent): Partial<Lead> {
+  switch (event.type) {
+    case 'call':
+      if (event.outcome === 'visita')
+        // Intent to visit only — NOT a real Visit record yet. Stage must not jump to
+        // "Visita agendada" until FlowCriarVisita actually saves day+time (visit_scheduled).
+        return { urgency: 'amber', stage: 'Qualificado', alert: 'Agendar visita', last: 'Aguardando agendamento' };
+      if (event.outcome === 'proposta')
+        return { urgency: 'amber', stage: 'Em negociação', alert: 'Montar proposta', last: 'Agora' };
+      if (event.outcome === 'retorno')
+        return { urgency: 'amber', alert: 'Fazer follow-up', last: 'Agora' };
+      return { urgency: 'amber', alert: 'Tentar contato novamente', last: 'Agora' }; // naoatendeu
+
+    case 'visit_scheduled':
+      // Only a real, complete Visit (day + time both set) earns the "Visita agendada" stage.
+      // An incomplete attempt falls back to the same pending state as the call-outcome above.
+      return event.hasDate && event.hasTime
+        ? { urgency: 'green', stage: 'Visita agendada', alert: 'Visita agendada', last: 'No prazo' }
+        : { urgency: 'amber', stage: 'Qualificado', alert: 'Agendar visita', last: 'Aguardando agendamento' };
+
+    case 'deal_created':
+      return event.needsApproval
+        ? { urgency: 'amber', stage: 'Em negociação', alert: 'Acompanhar proposta', last: 'Proposta enviada' }
+        : { urgency: 'green', stage: 'Em negociação', alert: 'Proposta enviada', last: 'Aguardando resposta do cliente' };
+
+    case 'sale_registered':
+      // 'Fechamento' is the existing terminal stage in STAGES (data.ts) — reused here
+      // instead of a new stage value so the lead keeps showing up in the Kanban (Em progresso).
+      return { urgency: 'green', stage: 'Fechamento', alert: 'Venda registrada', last: 'Concluído' };
+
+    default:
+      return {};
+  }
+}
+
 // ── LeadService ───────────────────────────────────────────────────────
 
 export const LeadService = {
   create:        (data: LeadInput)                      => StoreAdapter.addLead(data),
   update:        (id: string, changes: Partial<Lead>)   => StoreAdapter.updateLead(id, changes),
+  updateHealth:  (leadId: string, event: LeadHealthEvent) => StoreAdapter.updateLead(leadId, calculateLeadHealth(event)),
   getAll:        ()                                     => _filteredLeads(),
   getById:       (id: string)                           => StoreAdapter.getLeadById(id),
   addToTimeline: (leadId: string, entry: Omit<TimelineEntry, 'when'> & { when?: string }) =>

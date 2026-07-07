@@ -40,6 +40,8 @@ export interface Lead {
   stage: string;
   seller: string;
   sellerId: string | null;
+  // Operational health — driven by the Lead Health Engine (lib/services.ts),
+  // never set directly from the customer's buying intent. See `temperature`.
   urgency: 'red' | 'amber' | 'green';
   last: string;
   alert: string;
@@ -47,6 +49,9 @@ export interface Lead {
   value: string;
   origem?: string;
   timeline?: TimelineEntry[];
+  // Buying-intent classification ("Quente/Morno/Frio" in the UI) — independent from
+  // `urgency`. A hot lead can still be operationally red if nobody has called yet.
+  temperature?: 'hot' | 'warm' | 'cold';
 }
 
 export interface Visit {
@@ -59,6 +64,8 @@ export interface Visit {
   car: string;
   status: string;
   day: string;
+  vehicles?: string[];
+  note?: string;
 }
 
 export interface Deal {
@@ -72,6 +79,10 @@ export interface Deal {
   status: string;
   disc?: string;
   last: string;
+  payment?: string;
+  downPayment?: string;
+  installments?: string;
+  note?: string;
 }
 
 export interface Sale {

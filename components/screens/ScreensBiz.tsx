@@ -52,9 +52,13 @@ function VisitRow({ v, go }: any) {
 export function ScreenVisitas({ go }: any) {
   useStore();
   const visits = VisitService.getAll();
+  const KNOWN_DAYS = ['hoje', 'amanha', 'passado'];
   const groups = [
     { name: 'Hoje — 14 de junho', items: visits.filter((v: any) => v.day === 'hoje') },
     { name: 'Amanhã — 15 de junho', items: visits.filter((v: any) => v.day === 'amanha') },
+    // Catches visits scheduled for any other day (custom dates, "Qui 18", etc.) so they
+    // never silently disappear from this screen just for not matching hoje/amanha/passado.
+    { name: 'Próximos dias', items: visits.filter((v: any) => !KNOWN_DAYS.includes(v.day)) },
     { name: 'Pendentes de resultado', items: visits.filter((v: any) => v.day === 'passado'), warn: true },
   ];
   const unconfirmed = visits.filter((v: any) => v.status === 'pendente').length;

@@ -10,6 +10,13 @@ import {
   FPanel, StepRail, SummaryRow, FlowShell, FlowSuccess,
 } from './FlowsShared';
 
+const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
+const TEMP_INFO: Record<string, string> = {
+  Quente: 'Forte intenção de compra — quer comprar agora ou nos próximos dias, já sabe o modelo e tem orçamento ou financiamento encaminhado.',
+  Morno: 'Interessado, mas ainda comparando opções — precisa de acompanhamento, simulação ou mais convencimento.',
+  Frio: 'Curioso, sem prazo definido ou decisão clara — precisa ser nutrido com menor urgência.',
+};
+
 export function FlowNovoCliente({ payload, close, openFlow }: any) {
   const [step, setStep] = useState(0);
   const [f, setF] = useState({ nome: '', tel: '', origem: 'Showroom', car: '', pay: 'Financiamento', urg: 'Quente' });
@@ -17,18 +24,23 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
   const steps = ['Quem é', 'O que procura', 'Revisão'];
   const canNext = step === 0 ? f.nome && f.tel : step === 1 ? f.car : true;
 
+  const [newLeadId] = useState(() => 'l' + Date.now());
+
   const handleCreate = () => {
     const user = AuthService.getCurrentUser();
-    const urgMap: Record<string, 'red' | 'amber' | 'green'> = { Quente: 'red', Morno: 'amber', Frio: 'green' };
     LeadService.create({
+      id: newLeadId,
       name: f.nome || 'Novo cliente',
       phone: f.tel,
       car: f.car || CARS[0],
       stage: 'Novo',
-      urgency: urgMap[f.urg] || 'green',
+      // Urgency is operational health, not buying intent — a brand-new lead has had
+      // no contact yet, so it always starts red regardless of temperature.
+      urgency: 'red',
+      temperature: TEMP_MAP[f.urg] || 'warm',
       pay: f.pay,
       value: '—',
-      last: 'Agora',
+      last: 'Sem contato ainda',
       alert: 'Fazer primeiro contato',
       seller: user?.name || '—',
       sellerId: user?.sellerId ?? null,
@@ -48,7 +60,7 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
   };
 
   if (step === 3) {
-    const lead = { name: f.nome || 'Novo cliente', phone: f.tel, car: f.car || CARS[0], stage: 'Novo', urgency: 'green', pay: f.pay, value: '—', last: 'Cadastrado agora', alert: 'Fazer primeiro contato' };
+    const lead = { id: newLeadId, name: f.nome || 'Novo cliente', phone: f.tel, car: f.car || CARS[0], stage: 'Novo', urgency: 'red', pay: f.pay, value: '—', last: 'Sem contato ainda', alert: 'Fazer primeiro contato' };
     return (
       <FlowShell eyebrow="NOVO ATENDIMENTO" title="Cliente criado" icon="users" accent="#27C75F" onClose={close}>
         <FlowSuccess title="Atendimento criado!" sub={`${f.nome} entrou na sua carteira. Que tal já fazer o primeiro contato e sair na frente?`}
@@ -88,8 +100,10 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
           <FField label="Veículo de interesse" icon="car" placeholder="Ex.: Corolla XEI 2023, Compass Longitude, Hilux SRX…" value={f.car} onChange={(e: any) => set('car', e.target.value)} hint="Digite o modelo e versão que o cliente procura." />
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '8px 0 9px' }}>Forma de pagamento</div>
           <div style={{ marginBottom: 18 }}><Segmented options={PAYS.map(p => p[0])} value={f.pay} onChange={v => set('pay', v)} /></div>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Nível de interesse</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 2 }}>Temperatura do lead</div>
+          <div style={{ fontSize: 11, color: 'var(--t-400)', marginBottom: 9 }}>O quanto o cliente quer comprar — não é a mesma coisa que a cor do card (essa reflete se ele precisa de ação agora).</div>
           <Segmented options={['Quente', 'Morno', 'Frio']} value={f.urg} onChange={v => set('urg', v)} accent="#FF6B3B" />
+          <div style={{ fontSize: 12, color: 'var(--t-500)', marginTop: 9, lineHeight: 1.5 }}>{TEMP_INFO[f.urg]}</div>
         </FPanel>}
         {step === 2 && <FPanel title="Confira antes de criar" icon="checkCircle" accent="#27C75F">
           <SummaryRow label="Cliente" value={f.nome || '—'} />
@@ -97,7 +111,7 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
           <SummaryRow label="Origem" value={f.origem} />
           <SummaryRow label="Veículo" value={f.car || '—'} />
           <SummaryRow label="Pagamento" value={f.pay} />
-          <SummaryRow label="Interesse" value={f.urg} accent={f.urg === 'Quente' ? '#FF6B3B' : undefined} />
+          <SummaryRow label="Temperatura" value={f.urg} accent={f.urg === 'Quente' ? '#FF6B3B' : undefined} />
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--gold-bg)', border: '1px solid var(--gold-line)' }}>
             <Icon name="sparkle" size={18} stroke={2.2} style={{ color: 'var(--gold-ink)' }} />
             <span style={{ fontSize: 13, color: 'var(--t-700)' }}>Vamos criar uma pendência de <b>primeiro contato</b> automaticamente.</span>
@@ -151,11 +165,29 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
   const [done, setDone] = useState(false);
   const [client, setClient] = useState(lead ? lead.name : '');
   const [day, setDay] = useState('Amanhã');
+  const [customDay, setCustomDay] = useState('');
   const [time, setTime] = useState('');
-  const [car, setCar] = useState(lead ? lead.car : '');
+  const [customTime, setCustomTime] = useState('');
+  const [vehicles, setVehicles] = useState<string[]>(lead ? [lead.car] : []);
+  const [customCar, setCustomCar] = useState('');
+  const [note, setNote] = useState('');
   const days = ['Hoje', 'Amanhã', 'Qui 18', 'Sex 19', 'Sáb 20'];
   const slots = ['09:00', '10:30', '14:00', '15:30', '17:00', '18:30'];
-  const ok = client && day && time;
+
+  const toggleVehicle = (c: string) => {
+    setVehicles(vs => vs.includes(c) ? vs.filter(v => v !== c) : [...vs, c]);
+  };
+
+  const finalDay = customDay.trim() || day;
+  const finalTime = customTime.trim() || time;
+  const finalVehicles = customCar.trim() ? [...vehicles, customCar.trim()] : vehicles;
+  const ok = client && finalDay && finalTime && finalVehicles.length > 0;
+  // Normalize accents (e.g. "Amanhã" -> "amanha") so it matches the plain-ASCII
+  // 'hoje'/'amanha'/'passado' buckets ScreenVisitas groups by — a mismatched
+  // accent silently hid scheduled visits from the Visitas screen.
+  const normalizeDay = (d: string) => Array.from(d.toLowerCase().normalize('NFD'))
+    .filter(ch => { const code = ch.codePointAt(0) || 0; return code < 0x300 || code > 0x36f; })
+    .join('');
 
   const handleSchedule = () => {
     if (!ok) return;
@@ -163,47 +195,58 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
     const leadId = lead?.id ?? (LeadService.getAll().find(l => l.name === client)?.id ?? null);
     VisitService.create({
       client,
-      car: car || CARS[0],
-      day: day.toLowerCase(),
-      time,
+      car: finalVehicles[0],
+      vehicles: finalVehicles.length > 1 ? finalVehicles : undefined,
+      day: normalizeDay(finalDay),
+      time: finalTime,
       status: 'agendada',
       seller: user?.name || '—',
       sellerId: user?.sellerId ?? null,
       leadId,
+      note: note.trim() || undefined,
     });
     if (leadId) {
-      LeadService.addToTimeline(leadId, { icon: 'calendar', c: '#E8CE72', t: 'Visita agendada', d: `${day} às ${time}` });
+      LeadService.addToTimeline(leadId, { icon: 'calendar', c: '#E8CE72', t: 'Visita agendada', d: `${finalDay} às ${finalTime}` });
+      LeadService.updateHealth(leadId, { type: 'visit_scheduled', hasDate: !!finalDay, hasTime: !!finalTime });
     }
     setDone(true);
   };
 
   if (done) return (
     <FlowShell eyebrow="AGENDAR VISITA" title="Visita agendada" icon="calendar" accent="#27C75F" onClose={close}>
-      <FlowSuccess title="Visita agendada!" sub={`${client} · ${day} às ${time}. Enviamos um lembrete e criamos uma pendência para confirmar a presença.`}
+      <FlowSuccess title="Visita agendada!" sub={`${client} · ${finalDay} às ${finalTime}. Enviamos um lembrete e criamos uma pendência para confirmar a presença.`}
           actions={<><LBtn kind="gold" size="lg" icon="message" onClick={() => openFlow('enviar-mensagem', { name: client })}>Enviar confirmação</LBtn><LBtn kind="ghost" size="lg" icon="check" onClick={close}>Concluir</LBtn></>} />
     </FlowShell>
   );
   return (
     <FlowShell eyebrow="AGENDAR VISITA" title="Agendar uma visita" icon="calendar" accent="#E8CE72" onClose={close}
       sub="Escolha o dia e o horário. Visita confirmada é o passo que mais aproxima da venda."
-      footer={<><div style={{ flex: 1 }} /><span style={{ fontSize: 13, color: 'var(--t-500)' }}>{ok ? `${day} às ${time}` : 'Selecione dia e horário'}</span><LBtn kind="gold" size="lg" icon="check" onClick={handleSchedule} style={{ opacity: ok ? 1 : .5 }}>Agendar visita</LBtn></>}>
+      footer={<><div style={{ flex: 1 }} /><span style={{ fontSize: 13, color: 'var(--t-500)' }}>{ok ? `${finalDay} às ${finalTime}` : 'Selecione veículo, dia e horário'}</span><LBtn kind="gold" size="lg" icon="check" onClick={handleSchedule} style={{ opacity: ok ? 1 : .5 }}>Agendar visita</LBtn></>}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start', maxWidth: 900 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {lead ? <ClientChip lead={lead} size="lg" /> : <FPanel><FField label="Cliente" icon="user" placeholder="Buscar ou digitar nome" value={client} onChange={(e: any) => setClient(e.target.value)} /></FPanel>}
-          <FPanel title="Veículo" icon="car" accent="#E8CE72">
+          <FPanel title="Veículo(s) de interesse" icon="car" accent="#E8CE72">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 4).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={car === c} onClick={() => setCar(c)} />)}
+              {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 4).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={vehicles.includes(c)} onClick={() => toggleVehicle(c)} />)}
             </div>
+            <div style={{ marginTop: 14 }}>
+              <FField label="Outro veículo (opcional)" icon="edit" placeholder="Cliente também quer ver..." value={customCar} onChange={(e: any) => setCustomCar(e.target.value)} />
+            </div>
+          </FPanel>
+          <FPanel title="Observações (opcional)" icon="clipboard" accent="#E8CE72">
+            <FArea placeholder="Ex.: cliente quer ver Golf e Civic, levar simulação de financiamento, vem com esposa..." value={note} onChange={(e: any) => setNote(e.target.value)} />
           </FPanel>
         </div>
         <FPanel title="Dia e horário" icon="calendar" accent="#E8CE72">
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
-            {days.map(d => <button key={d} onClick={() => setDay(d)} className="lift" style={{ flex: '1 1 80px', padding: '14px 8px', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', border: `1px solid ${day === d ? 'rgba(212,175,55,.6)' : 'var(--border)'}`, background: day === d ? 'var(--gold-bg)' : 'rgba(255,255,255,.03)', color: day === d ? 'var(--gold-ink)' : 'var(--t-700)', fontWeight: 700, fontSize: 13.5 }}>{d}</button>)}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            {days.map(d => <button key={d} onClick={() => { setDay(d); setCustomDay(''); }} className="lift" style={{ flex: '1 1 80px', padding: '14px 8px', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', border: `1px solid ${!customDay && day === d ? 'rgba(212,175,55,.6)' : 'var(--border)'}`, background: !customDay && day === d ? 'var(--gold-bg)' : 'rgba(255,255,255,.03)', color: !customDay && day === d ? 'var(--gold-ink)' : 'var(--t-700)', fontWeight: 700, fontSize: 13.5 }}>{d}</button>)}
           </div>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Horário disponível</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
-            {slots.map(s => <button key={s} onClick={() => setTime(s)} className="lift" style={{ padding: '14px 8px', borderRadius: 12, cursor: 'pointer', fontFamily: 'Archivo, sans-serif', border: `1px solid ${time === s ? 'rgba(212,175,55,.6)' : 'var(--border)'}`, background: time === s ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : 'rgba(255,255,255,.03)', color: time === s ? '#241c04' : 'var(--t-700)', fontWeight: 800, fontSize: 16 }}>{s}</button>)}
+          <FField label="Outra data (opcional)" icon="calendar" placeholder="Ex.: 22/07 ou daqui 2 semanas" value={customDay} onChange={(e: any) => setCustomDay(e.target.value)} />
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '4px 0 9px' }}>Horário disponível</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 12 }}>
+            {slots.map(s => <button key={s} onClick={() => { setTime(s); setCustomTime(''); }} className="lift" style={{ padding: '14px 8px', borderRadius: 12, cursor: 'pointer', fontFamily: 'Archivo, sans-serif', border: `1px solid ${!customTime && time === s ? 'rgba(212,175,55,.6)' : 'var(--border)'}`, background: !customTime && time === s ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : 'rgba(255,255,255,.03)', color: !customTime && time === s ? '#241c04' : 'var(--t-700)', fontWeight: 800, fontSize: 16 }}>{s}</button>)}
           </div>
+          <FField label="Outro horário (opcional)" icon="clock" placeholder="Ex.: 19:30" value={customTime} onChange={(e: any) => setCustomTime(e.target.value)} />
         </FPanel>
       </div>
     </FlowShell>
@@ -245,11 +288,14 @@ export function FlowConfirmarVisita({ payload, close, openFlow }: any) {
             <div>
               <div style={{ fontSize: 19, fontWeight: 800, color: 'var(--t-900)' }}>{v.client}</div>
               <div style={{ fontSize: 13, color: 'var(--t-500)', marginTop: 3, display: 'flex', gap: 12 }}>
-                <span><Icon name="car" size={13} stroke={2} style={{ verticalAlign: -2 }} /> {v.car}</span>
+                <span><Icon name="car" size={13} stroke={2} style={{ verticalAlign: -2 }} /> {v.vehicles?.length > 1 ? v.vehicles.join(' + ') : v.car}</span>
                 <span><Icon name="user" size={13} stroke={2} style={{ verticalAlign: -2 }} /> {v.seller.split(' ')[0]}</span>
               </div>
             </div>
           </div>
+          {v.note && <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border-2)', display: 'flex', alignItems: 'flex-start', gap: 9, fontSize: 12.5, color: 'var(--t-500)' }}>
+            <Icon name="clipboard" size={14} stroke={2} style={{ marginTop: 1, flexShrink: 0 }} /> {v.note}
+          </div>}
         </FPanel>
         <button onClick={() => setRemind(r => !r)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(255,255,255,.03)', cursor: 'pointer', fontFamily: 'inherit', marginBottom: 18 }}>
           <span style={{ width: 22, height: 22, borderRadius: 7, border: `2px solid ${remind ? 'var(--green)' : 'var(--border)'}`, background: remind ? 'var(--green)' : 'transparent', display: 'grid', placeItems: 'center', color: '#fff' }}>{remind && <Icon name="check" size={12} stroke={3} />}</span>
@@ -331,16 +377,28 @@ export function FlowRegistrarResultado({ payload, close, openFlow }: any) {
   );
 }
 
+function parseCurrency(v: string | undefined, fallback: number): number {
+  if (!v) return fallback;
+  const n = parseInt(v.replace(/[^\d]/g, ''), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export function FlowNovaProposta({ payload, close, openFlow }: any) {
   const lead = payload.lead || null;
   const [step, setStep] = useState(0);
   const [client] = useState(lead ? lead.name : '');
   const [car, setCar] = useState(lead ? lead.car : CARS[0]);
+  const [customCar, setCustomCar] = useState('');
   const [pay, setPay] = useState(lead ? lead.pay : 'Financiamento');
   const [disc, setDisc] = useState(3);
-  const base = 120000;
+  const [baseValueInput, setBaseValueInput] = useState(String(parseCurrency(lead?.value, 120000)));
+  const [downPayment, setDownPayment] = useState('');
+  const [installments, setInstallments] = useState('');
+  const [note, setNote] = useState('');
+  const base = parseCurrency(baseValueInput, 120000);
   const steps = ['Cliente e veículo', 'Condições', 'Revisão'];
   const needsApproval = disc > 5;
+  const finalCar = customCar.trim() || car;
   const finalV = Math.round(base * (1 - disc / 100));
   const fmt = (n: number) => 'R$ ' + n.toLocaleString('pt-BR');
 
@@ -348,9 +406,13 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
     const user = AuthService.getCurrentUser();
     DealService.create({
       client: lead ? lead.name : (client || '—'),
-      car,
+      car: finalCar,
       value: fmt(finalV),
       disc: `${disc}%`,
+      payment: pay,
+      downPayment: downPayment.trim() || undefined,
+      installments: installments.trim() || undefined,
+      note: note.trim() || undefined,
       status: needsApproval ? 'aprovacao' : 'aberta',
       last: 'Agora',
       seller: user?.name || '—',
@@ -358,7 +420,8 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
       leadId: lead?.id ?? null,
     });
     if (lead?.id) {
-      LeadService.addToTimeline(lead.id, { icon: 'handshake', c: '#E8CE72', t: 'Proposta criada', d: `${car} · ${fmt(finalV)}` });
+      LeadService.addToTimeline(lead.id, { icon: 'handshake', c: '#E8CE72', t: 'Proposta criada', d: `${finalCar} · ${fmt(finalV)}` });
+      LeadService.updateHealth(lead.id, { type: 'deal_created', needsApproval });
     }
     setStep(3);
   };
@@ -366,7 +429,7 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
   if (step === 3) {
     return (
       <FlowShell eyebrow="MONTAR PROPOSTA" title="Proposta criada" icon="handshake" accent="#27C75F" onClose={close}>
-        <FlowSuccess title="Proposta enviada!" sub={needsApproval ? 'A proposta foi enviada para aprovação do gestor (desconto acima do limite).' : `Proposta de ${car} pronta. Envie ao cliente e acompanhe pela tela de Propostas.`}
+        <FlowSuccess title="Proposta enviada!" sub={needsApproval ? 'A proposta foi enviada para aprovação do gestor (desconto acima do limite).' : `Proposta de ${finalCar} pronta. Envie ao cliente e acompanhe pela tela de Propostas.`}
           actions={<><LBtn kind="gold" size="lg" icon="message" onClick={() => openFlow('enviar-mensagem', { lead })}>Enviar ao cliente</LBtn><LBtn kind="ghost" size="lg" icon="check" onClick={close}>Concluir</LBtn></>} />
       </FlowShell>
     );
@@ -388,29 +451,45 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
           {lead ? <ClientChip lead={lead} size="lg" /> : <FPanel><FField label="Cliente" icon="user" placeholder="Buscar cliente" defaultValue={client} /></FPanel>}
           <FPanel title="Veículo da proposta" icon="car" accent="#E8CE72">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
-              {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 4).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={car === c} onClick={() => setCar(c)} />)}
+              {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 4).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={!customCar.trim() && car === c} onClick={() => { setCar(c); setCustomCar(''); }} />)}
+            </div>
+            <div style={{ marginTop: 14 }}>
+              <FField label="Outro veículo (opcional)" icon="edit" placeholder="Digitar um veículo diferente" value={customCar} onChange={(e: any) => setCustomCar(e.target.value)} />
             </div>
           </FPanel>
         </div>}
-        {step === 1 && <FPanel title="Condições" icon="card" accent="#E8CE72">
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Forma de pagamento</div>
-          <div style={{ marginBottom: 22 }}><Segmented options={PAYS.map(p => p[0])} value={pay} onChange={setPay} /></div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)' }}>Desconto aplicado</span>
-            <span className="display tnum" style={{ fontSize: 22, fontWeight: 800, color: needsApproval ? 'var(--amber)' : 'var(--gold-ink)' }}>{disc}%</span>
-          </div>
-          <input type="range" min="0" max="10" step="1" value={disc} onChange={e => setDisc(+e.target.value)} style={{ width: '100%', accentColor: needsApproval ? '#FFA31F' : '#D4AF37' }} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--t-400)', marginTop: 4 }}><span>0%</span><span>limite 5%</span><span>10%</span></div>
-          {needsApproval && <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--amber-bg)', border: '1px solid var(--amber-line)' }}>
-            <Icon name="shield" size={18} stroke={2.2} style={{ color: 'var(--amber)' }} />
-            <span style={{ fontSize: 13, color: 'var(--t-700)' }}>Desconto acima de 5% precisará de <b>aprovação do gestor</b>.</span>
-          </div>}
-        </FPanel>}
+        {step === 1 && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <FPanel title="Condições" icon="card" accent="#E8CE72">
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Forma de pagamento</div>
+            <div style={{ marginBottom: 22 }}><Segmented options={PAYS.map(p => p[0])} value={pay} onChange={setPay} /></div>
+            <FField label="Valor do veículo (R$)" icon="dollar" placeholder="120000" value={baseValueInput} onChange={(e: any) => setBaseValueInput(e.target.value)} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <FField label="Entrada (opcional)" icon="card" placeholder="Ex.: R$ 20.000" value={downPayment} onChange={(e: any) => setDownPayment(e.target.value)} />
+              <FField label="Parcelas / condição (opcional)" icon="refresh" placeholder="Ex.: 48x de R$ 2.100" value={installments} onChange={(e: any) => setInstallments(e.target.value)} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)' }}>Desconto aplicado</span>
+              <span className="display tnum" style={{ fontSize: 22, fontWeight: 800, color: needsApproval ? 'var(--amber)' : 'var(--gold-ink)' }}>{disc}%</span>
+            </div>
+            <input type="range" min="0" max="10" step="1" value={disc} onChange={e => setDisc(+e.target.value)} style={{ width: '100%', accentColor: needsApproval ? '#FFA31F' : '#D4AF37' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--t-400)', marginTop: 4 }}><span>0%</span><span>limite 5%</span><span>10%</span></div>
+            {needsApproval && <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--amber-bg)', border: '1px solid var(--amber-line)' }}>
+              <Icon name="shield" size={18} stroke={2.2} style={{ color: 'var(--amber)' }} />
+              <span style={{ fontSize: 13, color: 'var(--t-700)' }}>Desconto acima de 5% precisará de <b>aprovação do gestor</b>.</span>
+            </div>}
+          </FPanel>
+          <FPanel title="Observação interna (opcional)" icon="clipboard" accent="#E8CE72">
+            <FArea placeholder="Comentário interno sobre a proposta..." value={note} onChange={(e: any) => setNote(e.target.value)} />
+          </FPanel>
+        </div>}
         {step === 2 && <FPanel title="Resumo da proposta" icon="checkCircle" accent="#27C75F">
           <SummaryRow label="Cliente" value={lead ? lead.name : (client || '—')} />
-          <SummaryRow label="Veículo" value={car} />
+          <SummaryRow label="Veículo" value={finalCar} />
           <SummaryRow label="Pagamento" value={pay} />
+          {downPayment.trim() && <SummaryRow label="Entrada" value={downPayment} />}
+          {installments.trim() && <SummaryRow label="Parcelas" value={installments} />}
           <SummaryRow label="Desconto" value={`${disc}%`} accent={needsApproval ? 'var(--amber)' : undefined} />
+          {note.trim() && <SummaryRow label="Observação" value={note} />}
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
             <span style={{ fontSize: 12, color: 'var(--t-400)' }}>Valor final (referência)</span>
             <span className="display tnum" style={{ fontSize: 22, fontWeight: 700, color: 'var(--t-700)' }}>{fmt(finalV)}</span>
@@ -488,10 +567,12 @@ export function Confetti() {
 }
 
 export function FlowRegistrarVenda({ payload, close }: any) {
-  const lead = payload.lead || null;
+  const [lead, setLead] = useState<any>(payload.lead || null);
   const [step, setStep] = useState(lead ? 'confirm' : 'pick');
-  const [car, setCar] = useState(lead ? lead.car : CARS[0]);
+  const [car, setCar] = useState(lead ? lead.car : '');
+  const [customCar, setCustomCar] = useState('');
   const [client, setClient] = useState(lead ? lead.name : '');
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const user = AuthService.getCurrentUser();
   const storeSellers = SellerService.getAll();
@@ -500,13 +581,34 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   const third = storeSellers[2] ?? null;
   const gapTop3 = seller && third ? Math.max(0, (third.sales ?? 0) - (seller.sales ?? 0)) : 0;
 
+  const leadMatches = (!lead && client.trim())
+    ? LeadService.getAll().filter((l: any) => l.name.toLowerCase().includes(client.trim().toLowerCase())).slice(0, 6)
+    : [];
+
+  const pickLead = (l: any) => {
+    setLead(l);
+    setClient(l.name);
+    setCar(l.car);
+    setCustomCar('');
+    setShowSuggestions(false);
+  };
+
+  const clearLead = () => {
+    setLead(null);
+    setClient('');
+    setCar('');
+    setCustomCar('');
+  };
+
   const handleConfirmSale = () => {
     if (!client && !lead) return;
+    const finalCar = customCar.trim() || car;
+    if (!finalCar) return;
     SaleService.create({
       client: lead ? lead.name : client,
-      car,
-      seller: user?.name || '—',
-      sellerId: user?.sellerId ?? null,
+      car: finalCar,
+      seller: lead?.seller || user?.name || '—',
+      sellerId: lead?.sellerId ?? user?.sellerId ?? null,
       leadId: lead?.id ?? null,
       dealId: null,
       value: '—',
@@ -515,8 +617,10 @@ export function FlowRegistrarVenda({ payload, close }: any) {
       status: 'Fechada',
     });
     if (lead?.id) {
-      LeadService.addToTimeline(lead.id, { icon: 'trophy', c: '#E8CE72', t: 'Venda fechada!', d: car });
+      LeadService.addToTimeline(lead.id, { icon: 'trophy', c: '#E8CE72', t: 'Venda fechada!', d: finalCar });
+      LeadService.updateHealth(lead.id, { type: 'sale_registered' });
     }
+    setCar(finalCar);
     setStep('done');
   };
 
@@ -553,7 +657,7 @@ export function FlowRegistrarVenda({ payload, close }: any) {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <LBtn kind="gold" size="lg" icon="car" onClick={() => { setClient(''); setStep('pick'); }}>Registrar outra venda</LBtn>
+              <LBtn kind="gold" size="lg" icon="car" onClick={() => { clearLead(); setStep('pick'); }}>Registrar outra venda</LBtn>
               <LBtn kind="ghost" size="lg" icon="check" onClick={close}>Voltar ao sistema</LBtn>
             </div>
           </div>
@@ -565,13 +669,40 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   return (
     <FlowShell eyebrow="REGISTRAR VENDA" title="Confirmar venda" icon="trophy" accent="#E8CE72" onClose={close}
       sub="Confirme os dados da venda. Esse é o número que mais importa — e que te leva ao topo do ranking."
-      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="trophy" onClick={handleConfirmSale} style={{ opacity: (client || lead) ? 1 : .5, background: 'linear-gradient(180deg,#E8CE72,#C9A227)' }}>Confirmar venda 🏁</LBtn></>}>
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="trophy" onClick={handleConfirmSale} style={{ opacity: (client || lead) && (customCar.trim() || car) ? 1 : .5, background: 'linear-gradient(180deg,#E8CE72,#C9A227)' }}>Confirmar venda 🏁</LBtn></>}>
       <div style={{ maxWidth: 720 }}>
-        {!lead && <FPanel style={{ marginBottom: 16 }}><FField label="Cliente" icon="user" placeholder="Quem comprou?" value={client} onChange={(e: any) => setClient(e.target.value)} /></FPanel>}
-        {lead && <div style={{ marginBottom: 16 }}><ClientChip lead={lead} size="lg" /></div>}
+        {!lead && (
+          <FPanel style={{ marginBottom: 16, position: 'relative' }}>
+            <FField label="Cliente" icon="user" placeholder="Buscar lead pelo nome ou digitar (venda avulsa)…" value={client}
+              onChange={(e: any) => { setClient(e.target.value); setShowSuggestions(true); }}
+              onFocus={() => setShowSuggestions(true)} />
+            {showSuggestions && leadMatches.length > 0 && (
+              <div style={{ position: 'absolute', left: 20, right: 20, top: 74, zIndex: 5, background: '#1a1a1d', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
+                {leadMatches.map((l: any) => (
+                  <button key={l.id} onClick={() => pickLead(l)} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
+                    onMouseEnter={(e: any) => { e.currentTarget.style.background = 'rgba(255,255,255,.05)'; }}
+                    onMouseLeave={(e: any) => { e.currentTarget.style.background = 'transparent'; }}>
+                    <Avatar name={l.name} size={28} ring="#3B82F6" />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff' }}>{l.name}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--t-500)' }}>{l.car}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </FPanel>
+        )}
+        {lead && <div style={{ marginBottom: 16 }}>
+          <ClientChip lead={lead} size="lg" />
+          <button onClick={clearLead} style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: 'var(--t-500)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Trocar cliente</button>
+        </div>}
         <FPanel title="Veículo vendido" icon="car" accent="#E8CE72">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
-            {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 6).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={car === c} onClick={() => setCar(c)} />)}
+            {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 6).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={!customCar.trim() && car === c} onClick={() => { setCar(c); setCustomCar(''); }} />)}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <FField label="Outro veículo (opcional)" icon="edit" placeholder="Digitar um veículo diferente" value={customCar} onChange={(e: any) => setCustomCar(e.target.value)} />
           </div>
         </FPanel>
       </div>

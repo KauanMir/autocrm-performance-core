@@ -4,20 +4,27 @@ import { Icon } from '@/components/ui/Icon';
 import { Avatar, CountUp, FitBox } from '@/components/ui/kit';
 import { PLACE, Podium } from '@/components/podiums/Podiums';
 import { useStore } from '@/lib/store';
-import { AuthService } from '@/lib/services';
+import { AuthService, SellerService } from '@/lib/services';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
 
+const DEFAULT_SELLER = {
+  id: '', name: 'Equipe', first: 'Equipe', team: '',
+  leads: 0, scheduled: 0, visits: 0, sales: 0, conv: 0, move: 0,
+};
+
 function getCompetition(sellers: any[]) {
-  const currentSellerId = AuthService.getCurrentUser()?.sellerId ?? null;
-  const meIdx = currentSellerId ? sellers.findIndex((s: any) => s.id === currentSellerId) : -1;
-  const me = meIdx >= 0 ? sellers[meIdx] : sellers[0];
+  const currentUser = AuthService.getCurrentUser();
+  const me = (currentUser?.sellerId ? SellerService.getById(currentUser.sellerId) : null)
+    ?? SellerService.getAll()[0]
+    ?? DEFAULT_SELLER;
+  const meIdx = sellers.findIndex((s: any) => s.id === me.id);
   const rivalAhead = meIdx > 0 ? sellers[meIdx - 1] : null;
   const chaser = meIdx >= 0 && meIdx < sellers.length - 1 ? sellers[meIdx + 1] : null;
   const third = sellers[2] ?? sellers[sellers.length - 1] ?? null;
-  const top3Gap = (third && me) ? Math.max(0, (third.sales ?? 0) - (me.sales ?? 0)) : 0;
-  const aheadGap = (rivalAhead && me) ? Math.max(0, (rivalAhead.sales ?? 0) - (me.sales ?? 0)) : 0;
-  return { meIdx, me, pos: meIdx >= 0 ? meIdx + 1 : 1, rivalAhead, chaser, third, top3Gap, aheadGap, weeklyDone: 2, weeklyGoal: 3, leader: sellers[0] ?? null };
+  const top3Gap = Math.max(0, (third?.sales ?? 0) - (me.sales ?? 0));
+  const aheadGap = Math.max(0, (rivalAhead?.sales ?? 0) - (me.sales ?? 0));
+  return { meIdx, me, pos: meIdx >= 0 ? meIdx + 1 : 1, rivalAhead, chaser, third, top3Gap, aheadGap, weeklyDone: 2, weeklyGoal: 3, leader: sellers[0] ?? DEFAULT_SELLER };
 }
 
 function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam }: any) {

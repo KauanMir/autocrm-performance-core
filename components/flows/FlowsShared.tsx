@@ -2,7 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge } from '@/components/ui/kit';
-import { LeadService } from '@/lib/services';
+import { LeadService, TaskService } from '@/lib/services';
+import type { LeadHealthEvent } from '@/lib/services';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -237,12 +238,37 @@ export function FlowLigar({ payload, close, openFlow }: any) {
   }, [phase]);
   const mm = String(Math.floor(secs / 60)).padStart(2, '0'); const ss2 = String(secs % 60).padStart(2, '0');
   const script = ['Cumprimentar e confirmar o nome', 'Confirmar interesse no veículo', 'Apresentar condições e diferenciais', 'Propor uma visita ou test drive', 'Confirmar próximo passo'];
-  const outcomes = [
-    { id: 'visita', icon: 'calendar', title: 'Atendeu — agendar visita', accent: '#27C75F', next: 'criar-visita' },
-    { id: 'proposta', icon: 'handshake', title: 'Atendeu — montar proposta', accent: '#E8CE72', next: 'nova-proposta' },
-    { id: 'retorno', icon: 'clock', title: 'Pediu retorno — agendar follow-up', accent: '#FFA31F', next: 'criar-acompanhamento' },
-    { id: 'naoatendeu', icon: 'phone', title: 'Não atendeu — tentar mais tarde', accent: '#8B8B93', next: null },
+  const outcomes: Array<{
+    id: 'visita' | 'proposta' | 'retorno' | 'naoatendeu'; icon: string; title: string; accent: string; next: string | null;
+    task: null | { title: string; when: string; prio: string; state: string };
+  }> = [
+    { id: 'visita', icon: 'calendar', title: 'Atendeu — agendar visita', accent: '#27C75F', next: 'criar-visita', task: null },
+    { id: 'proposta', icon: 'handshake', title: 'Atendeu — montar proposta', accent: '#E8CE72', next: 'nova-proposta', task: null },
+    { id: 'retorno', icon: 'clock', title: 'Pediu retorno — agendar follow-up', accent: '#FFA31F', next: 'criar-acompanhamento',
+      task: { title: 'Follow-up', when: 'Amanhã', prio: 'media', state: 'proxima' } },
+    { id: 'naoatendeu', icon: 'phone', title: 'Não atendeu — tentar mais tarde', accent: '#8B8B93', next: null,
+      task: { title: 'Tentar contato novamente', when: 'Hoje', prio: 'alta', state: 'hoje' } },
   ];
+
+  const handleSaveOutcome = () => {
+    if (!outcome) return;
+    const o = outcomes.find(x => x.id === outcome);
+    if (!o) return;
+    LeadService.updateHealth(lead.id, { type: 'call', outcome: o.id } as LeadHealthEvent);
+    LeadService.addToTimeline(lead.id, { icon: 'phone', c: o.accent === '#8B8B93' ? '#8B8B93' : o.accent, t: `Ligação: ${o.title}` });
+    if (o.task) {
+      TaskService.create({
+        title: `${o.task.title} — ${lead.name}`,
+        lead: lead.name,
+        assignedTo: lead.sellerId ?? null,
+        when: o.task.when,
+        prio: o.task.prio,
+        state: o.task.state,
+        note: '',
+      });
+    }
+    setPhase('done');
+  };
 
   if (phase === 'done') {
     const o = outcomes.find(x => x.id === outcome);
@@ -318,7 +344,7 @@ export function FlowLigar({ payload, close, openFlow }: any) {
               {outcomes.map(o => <ChoiceTile key={o.id} icon={o.icon} title={o.title} accent={o.accent} active={outcome === o.id} onClick={() => setOutcome(o.id)} />)}
             </div>
             <div style={{ marginTop: 14 }}>
-              <LBtn kind="gold" size="lg" icon="check" onClick={() => outcome && setPhase('done')} style={{ width: '100%', justifyContent: 'center', opacity: outcome ? 1 : .5 }}>Salvar resultado e continuar</LBtn>
+              <LBtn kind="gold" size="lg" icon="check" onClick={handleSaveOutcome} style={{ width: '100%', justifyContent: 'center', opacity: outcome ? 1 : .5 }}>Salvar resultado e continuar</LBtn>
             </div>
           </FPanel>
         </div>
