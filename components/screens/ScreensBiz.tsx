@@ -2,9 +2,9 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard, Stat } from '@/components/ui/kit';
-import { STAGES, VISIT_STATUS, DEAL_STATUS, SALE_STATUS } from '@/lib/data';
+import { VISIT_STATUS, DEAL_STATUS, SALE_STATUS } from '@/lib/data';
 import { useStore } from '@/lib/store';
-import { LeadService, VisitService, DealService, SaleService, SellerService } from '@/lib/services';
+import { LeadService, VisitService, DealService, SaleService, SellerService, PipelineService, CompanyService } from '@/lib/services';
 import { PLACE } from '@/components/podiums/Podiums';
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
@@ -256,11 +256,11 @@ export function ScreenResultados({ go }: any) {
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--t-700)', marginBottom: 6 }}>{label}</label>
-      <input defaultValue={value} style={{ width: '100%', padding: '10px 13px', borderRadius: 9, border: '1px solid var(--border)', fontFamily: 'inherit', fontSize: 14, color: 'var(--t-900)', background: 'var(--surface-2)', outline: 'none' }} />
+      <input value={value} onChange={(e: any) => onChange(e.target.value)} style={{ width: '100%', padding: '10px 13px', borderRadius: 9, border: '1px solid var(--border)', fontFamily: 'inherit', fontSize: 14, color: 'var(--t-900)', background: 'var(--surface-2)', outline: 'none' }} />
     </div>
   );
 }
@@ -269,7 +269,30 @@ export function ScreenAjustes({ go }: any) {
   useStore();
   const sellers = SellerService.getAll();
   const leads = LeadService.getAll();
+  const stages = PipelineService.getStages();
   const [tab, setTab] = useState('Empresa');
+  const [companyForm, setCompanyForm] = useState(() => CompanyService.get());
+  const [saved, setSaved] = useState(false);
+  const setField = (k: keyof typeof companyForm, v: string) => { setCompanyForm((f: any) => ({ ...f, [k]: v })); setSaved(false); };
+
+  // Same drag-and-drop pattern as the Pipeline Kanban (M0-K1): lifted React
+  // state as the source of truth for what's being dragged, dataTransfer only
+  // used to satisfy Firefox's requirement to start a drag at all. "Novo" is
+  // pinned first, matching the text below the list.
+  const [draggedStage, setDraggedStage] = useState<string | null>(null);
+  const [overStage, setOverStage] = useState<string | null>(null);
+  const handleDropStage = (target: string) => {
+    const to = stages.indexOf(target);
+    if (draggedStage && draggedStage !== target && to !== 0) {
+      const order = [...stages];
+      order.splice(order.indexOf(draggedStage), 1);
+      order.splice(to, 0, draggedStage);
+      PipelineService.reorderStages(order);
+    }
+    setDraggedStage(null);
+    setOverStage(null);
+  };
+
   return (
     <LightScreen>
       <PageHead title="Ajustes" sub="Configure o sistema para a realidade da sua loja." />
@@ -279,13 +302,16 @@ export function ScreenAjustes({ go }: any) {
       {tab === 'Empresa' && (
         <LCard style={{ maxWidth: 640 }}>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 18 }}>Dados da loja</div>
-          <Field label="Nome da loja" value="Revenda Premium Veículos" />
+          <Field label="Nome da loja" value={companyForm.name} onChange={(v: string) => setField('name', v)} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="CNPJ" value="00.000.000/0001-00" />
-            <Field label="Telefone" value="(11) 3000-0000" />
+            <Field label="CNPJ" value={companyForm.cnpj} onChange={(v: string) => setField('cnpj', v)} />
+            <Field label="Telefone" value={companyForm.phone} onChange={(v: string) => setField('phone', v)} />
           </div>
-          <Field label="Fuso horário" value="América/São Paulo (GMT-3)" />
-          <div style={{ marginTop: 8 }}><LBtn kind="primary" icon="check">Salvar alterações</LBtn></div>
+          <Field label="Fuso horário" value={companyForm.timezone} onChange={(v: string) => setField('timezone', v)} />
+          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+            <LBtn kind="primary" icon="check" onClick={() => { CompanyService.update(companyForm); setSaved(true); }}>Salvar alterações</LBtn>
+            {saved && <span style={{ fontSize: 12.5, color: 'var(--green)', fontWeight: 600 }}>Salvo.</span>}
+          </div>
         </LCard>
       )}
       {tab === 'Usuários' && (
@@ -308,8 +334,14 @@ export function ScreenAjustes({ go }: any) {
         <LCard style={{ maxWidth: 520 }}>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Etapas do andamento</div>
           <div style={{ fontSize: 13, color: 'var(--t-500)', marginBottom: 16 }}>Arraste para reordenar. A primeira etapa é sempre "Novo".</div>
-          {(STAGES as string[]).map((s: string, i: number) => (
-            <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: '1px solid var(--border)', borderRadius: 10, marginBottom: 8 }}>
+          {stages.map((s: string, i: number) => (
+            <div key={s}
+              draggable={i !== 0}
+              onDragStart={(e: any) => { e.dataTransfer.setData('text/plain', s); e.dataTransfer.effectAllowed = 'move'; setDraggedStage(s); }}
+              onDragEnd={() => { setDraggedStage(null); setOverStage(null); }}
+              onDragOver={(e: any) => { e.preventDefault(); if (draggedStage && overStage !== s) setOverStage(s); }}
+              onDrop={(e: any) => { e.preventDefault(); handleDropStage(s); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: `1px solid ${overStage === s ? 'var(--gold-line)' : 'var(--border)'}`, borderRadius: 10, marginBottom: 8, cursor: i !== 0 ? 'grab' : 'default', opacity: draggedStage === s ? 0.4 : 1, transition: 'opacity .12s, border-color .15s' }}>
               <Icon name="list" size={16} stroke={2} style={{ color: 'var(--t-400)' }} />
               <span style={{ fontWeight: 600, fontSize: 14 }}>{s}</span>
               <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--t-400)' }}>{leads.filter((l: any) => l.stage === s).length} clientes</span>

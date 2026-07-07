@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard } from '@/components/ui/kit';
-import { STAGES } from '@/lib/data';
+import { STAGES, TASK_STATE } from '@/lib/data';
 import { useStore } from '@/lib/store';
 import { LeadService, TaskService, PipelineService } from '@/lib/services';
 
@@ -190,27 +190,33 @@ const PRIO: Record<string, { c: string; label: string }> = {
 };
 
 function TaskRow({ task, go }: any) {
-  const [done, setDone] = useState(false);
-  const late = task.state === 'atrasada';
+  // No local "done" state — a task marked TASK_STATE.DONE stops matching any
+  // of the 3 active groups in ScreenPendencias and simply stops rendering
+  // here, via the real store mutation + F5-safe persistence (M0-K2, was a
+  // cosmetic-only useState before that reset on every reload).
+  const late = task.state === TASK_STATE.LATE;
   const p = PRIO[task.prio];
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px',
-      background: late && !done ? 'var(--red-bg)' : 'var(--surface)',
-      border: `1px solid ${late && !done ? 'var(--red-line)' : 'var(--border)'}`,
-      borderRadius: 11, opacity: done ? 0.55 : 1, transition: 'all .2s',
+      background: late ? 'var(--red-bg)' : 'var(--surface)',
+      border: `1px solid ${late ? 'var(--red-line)' : 'var(--border)'}`,
+      borderRadius: 11, transition: 'all .2s',
     }}>
-      <button onClick={() => setDone(d => !d)} className="focus-ring" style={{
+      <button onClick={() => TaskService.update(task.id, { state: TASK_STATE.DONE })} className="focus-ring" title="Concluir pendência" style={{
         width: 24, height: 24, borderRadius: 7, flexShrink: 0, cursor: 'pointer',
-        border: `2px solid ${done ? 'var(--green)' : late ? 'var(--red)' : 'var(--border)'}`,
-        background: done ? 'var(--green)' : 'transparent', display: 'grid', placeItems: 'center', color: '#fff',
-      }}>{done && <Icon name="check" size={13} stroke={3} />}</button>
+        border: `2px solid ${late ? 'var(--red)' : 'var(--border)'}`,
+        background: 'transparent', display: 'grid', placeItems: 'center', color: '#fff',
+      }} />
       <div style={{ width: 4, height: 34, borderRadius: 3, background: p.c, flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 14.5, color: 'var(--t-900)', textDecoration: done ? 'line-through' : 'none' }}>{task.title}</div>
+        <div style={{ fontWeight: 600, fontSize: 14.5, color: 'var(--t-900)' }}>{task.title}</div>
         <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}>{task.note}</div>
       </div>
       <span style={{ fontSize: 12, fontWeight: 700, color: late ? 'var(--red)' : 'var(--t-500)', whiteSpace: 'nowrap' }}>{task.when}</span>
+      <button onClick={() => (window as any).__openFlow('reagendar-pendencia', { task })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+        <Icon name="refresh" size={14} stroke={2} /> Reagendar
+      </button>
       <button onClick={() => {
         const lead = LeadService.getAll().find((l: any) => l.name === task.lead);
         (window as any).__openFlow('ver-cliente', { lead: lead ?? LeadService.getAll()[0] });
@@ -226,9 +232,9 @@ export function ScreenPendencias({ go }: any) {
   const tasks = TaskService.getAll();
   const [tab, setTab] = useState('Atrasadas');
   const groups: Record<string, any[]> = {
-    'Atrasadas': tasks.filter((t: any) => t.state === 'atrasada'),
-    'Hoje': tasks.filter((t: any) => t.state === 'hoje'),
-    'Próximas': tasks.filter((t: any) => t.state === 'proxima'),
+    'Atrasadas': tasks.filter((t: any) => t.state === TASK_STATE.LATE),
+    'Hoje': tasks.filter((t: any) => t.state === TASK_STATE.TODAY),
+    'Próximas': tasks.filter((t: any) => t.state === TASK_STATE.UPCOMING),
   };
   const late = groups['Atrasadas'].length;
   const view = tab === 'Todas' ? Object.entries(groups) : [[tab, groups[tab]]];

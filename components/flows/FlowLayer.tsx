@@ -4,7 +4,7 @@ import { FlowLigar, FlowVerCliente } from './FlowsShared';
 import {
   FlowNovoCliente, FlowEditarCliente, FlowCriarVisita, FlowConfirmarVisita,
   FlowRegistrarResultado, FlowNovaProposta, FlowAprovarProposta,
-  FlowRegistrarVenda, FlowNovaPendencia, FlowCriarAcompanhamento,
+  FlowRegistrarVenda, FlowNovaPendencia, FlowReagendarPendencia, FlowCriarAcompanhamento,
 } from './Flows2';
 import {
   FlowPerfilVendedor, FlowNotificacoes, FlowBusca,
@@ -23,6 +23,7 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'aprovar-proposta': FlowAprovarProposta,
   'registrar-venda': FlowRegistrarVenda,
   'nova-pendencia': FlowNovaPendencia,
+  'reagendar-pendencia': FlowReagendarPendencia,
   'criar-acompanhamento': FlowCriarAcompanhamento,
   'perfil-vendedor': FlowPerfilVendedor,
   'notificacoes': FlowNotificacoes,

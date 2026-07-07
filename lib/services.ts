@@ -2,7 +2,7 @@
 // Components, screens and flows must call Services — never access the store or
 // localStorage directly. When a real backend arrives, only StoreAdapter changes.
 import { USERS, VISIT_STATUS, DEAL_STATUS } from './data';
-import type { User, Lead, Visit, Deal, Sale, Task, TimelineEntry } from './data';
+import type { User, Lead, Visit, Deal, Sale, Task, TimelineEntry, Company } from './data';
 import { store, getStore } from './store';
 import type { LeadInput, VisitInput, DealInput, SaleInput, TaskInput } from './store';
 
@@ -110,6 +110,10 @@ const StoreAdapter = {
   // Pipeline / UI state
   setPipelineOverride: (leadId: string, stage: string) => store.setPipelineOverride(leadId, stage),
   setStagesOrder:      (order: string[])               => store.setStagesOrder(order),
+
+  // Company
+  getCompany:    ()                             => getStore().company,
+  updateCompany: (changes: Partial<Company>)    => store.updateCompany(changes),
 
   // System
   resetAll: () => store.resetAll(),
@@ -288,6 +292,13 @@ export const PipelineService = {
   moveCard:      (leadId: string, stage: string) => StoreAdapter.updateLead(leadId, { stage }),
   reorderStages: (order: string[])               => StoreAdapter.setStagesOrder(order),
   getStages:     ()                              => getStore().stages,
+};
+
+// ── CompanyService — Ajustes → Empresa ────────────────────────────────
+
+export const CompanyService = {
+  get:    ()                        => StoreAdapter.getCompany(),
+  update: (changes: Partial<Company>) => StoreAdapter.updateCompany(changes),
 };
 
 // ── validateRelations (diagnostic tool) ──────────────────────────────

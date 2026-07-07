@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge } from '@/components/ui/kit';
-import { STAGES, VISIT_STATUS, DEAL_STATUS, SALE_STATUS } from '@/lib/data';
+import { STAGES, VISIT_STATUS, DEAL_STATUS, SALE_STATUS, TASK_STATE } from '@/lib/data';
 import { AuthService, LeadService, VisitService, DealService, SaleService, TaskService, SellerService } from '@/lib/services';
 import {
   CARS, ORIGINS, PAYS,
@@ -765,7 +765,7 @@ export function FlowNovaPendencia({ payload, close }: any) {
         TaskService.create({
           title: `${type}${client ? ' — ' + client : ''}`,
           lead: client,
-          state: 'hoje',
+          state: TASK_STATE.TODAY,
           prio: prioMap[prio] || 'media',
           when,
           assignedTo: user?.sellerId ?? null,
@@ -797,6 +797,29 @@ export function FlowNovaPendencia({ payload, close }: any) {
               <Segmented options={['Alta', 'Média', 'Baixa']} value={prio} onChange={setPrio} accent={prio === 'Alta' ? '#FF3B3B' : '#E8CE72'} />
             </div>
           </div>
+        </FPanel>
+      </div>
+    </FlowShell>
+  );
+}
+
+export function FlowReagendarPendencia({ payload, close }: any) {
+  const task = payload.task;
+  const [when, setWhen] = useState('Amanhã');
+  if (!task) return null;
+  const whenState: Record<string, string> = { 'Hoje': TASK_STATE.TODAY, 'Amanhã': TASK_STATE.UPCOMING, 'Esta semana': TASK_STATE.UPCOMING };
+  return (
+    <FlowShell eyebrow="REAGENDAR PENDÊNCIA" title="Reagendar" icon="refresh" accent="#3B82F6" onClose={close}
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={() => {
+        TaskService.update(task.id, { when, state: whenState[when] });
+        close();
+      }}>Reagendar</LBtn></>}>
+      <div style={{ maxWidth: 520 }}>
+        <FPanel>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-900)', marginBottom: 4 }}>{task.title}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginBottom: 16 }}>Atualmente: {task.when}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Nova data</div>
+          <Segmented options={['Hoje', 'Amanhã', 'Esta semana']} value={when} onChange={setWhen} accent="#3B82F6" />
         </FPanel>
       </div>
     </FlowShell>

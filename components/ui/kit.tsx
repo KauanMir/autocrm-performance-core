@@ -7,7 +7,7 @@ export const NAV = [
   { id: 'home',      label: 'Início',       icon: 'home' },
   { id: 'clientes',  label: 'Clientes',     icon: 'users' },
   { id: 'andamento', label: 'Em progresso', icon: 'flow' },
-  { id: 'pendencias',label: 'Pendências',   icon: 'check', badge: 3 },
+  { id: 'pendencias',label: 'Pendências',   icon: 'check' },
   { id: 'visitas',   label: 'Visitas',      icon: 'calendar' },
   { id: 'propostas', label: 'Propostas',    icon: 'handshake' },
   { id: 'vendas',    label: 'Vendas',       icon: 'trophy' },

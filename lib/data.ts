@@ -210,6 +210,29 @@ export const SALE_STATUS = {
 } as const;
 export type SaleStatus = typeof SALE_STATUS[keyof typeof SALE_STATUS];
 
+export const TASK_STATE = {
+  LATE:     'atrasada', // venceu e ninguém agiu
+  TODAY:    'hoje',
+  UPCOMING: 'proxima',
+  DONE:     'concluida', // resolvida — some das 3 filas ativas (Atrasadas/Hoje/Próximas)
+} as const;
+export type TaskState = typeof TASK_STATE[keyof typeof TASK_STATE];
+
+// ── COMPANY — Ajustes → Empresa (objeto plano, sem relações) ─────────
+
+export interface Company {
+  name: string;
+  cnpj: string;
+  phone: string;
+  timezone: string;
+}
+export const DEFAULT_COMPANY: Company = {
+  name: 'Revenda Premium Veículos',
+  cnpj: '00.000.000/0001-00',
+  phone: '(11) 3000-0000',
+  timezone: 'América/São Paulo (GMT-3)',
+};
+
 // ── TASKS — assignedTo → SELLERS.id FK ───────────────────────────────
 
 export const TASKS: Task[] = [

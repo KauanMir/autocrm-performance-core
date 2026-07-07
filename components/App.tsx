@@ -3,10 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { NAV, Avatar, PageHead, LCard, LightScreen } from '@/components/ui/kit';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle, TweakButton } from '@/components/ui/TweaksPanel';
-import { NAV_ROLES } from '@/lib/data';
+import { NAV_ROLES, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { subscribeStore } from '@/lib/store';
-import { AuthService, SellerService } from '@/lib/services';
+import { AuthService, SellerService, TaskService } from '@/lib/services';
 import { AuthFlow } from '@/components/auth/AuthFlow';
 import { Home } from '@/components/screens/Home';
 import { ScreenClientes, ScreenAndamento, ScreenPendencias } from '@/components/screens/ScreensOps';
@@ -38,6 +38,9 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
   const displayTeam = seller?.team
     ? `Vendedor · ${seller.team}`
     : currentUser.role === 'admin' ? 'Administrador' : 'Gerente';
+  // Live count (RBAC-filtered by TaskService.getAll itself) — replaces the
+  // hardcoded badge:3 that never moved regardless of real pendências (M0-K2).
+  const lateTasks = TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length;
 
   return (
     <aside style={{ width: 236, flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', background: 'linear-gradient(180deg,#0b0b0c,#070708)', borderRight: '1px solid rgba(255,255,255,.06)' }}>
@@ -58,6 +61,7 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
       <nav style={{ position: 'relative', flex: 1, overflowY: 'auto', padding: '6px 14px' }}>
         {(NAV as any[]).filter((item: any) => allowedIds.includes(item.id)).map((item: any) => {
           const on = current === item.id;
+          const badge = item.id === 'pendencias' ? lateTasks : 0;
           return (
             <button key={item.id} onClick={() => go(item.id)} style={{
               width: '100%', display: 'flex', alignItems: 'center', gap: 13, padding: '11px 13px', marginBottom: 4,
@@ -72,7 +76,7 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
               {on && <span style={{ position: 'absolute', left: -1, top: '50%', transform: 'translateY(-50%)', width: 3, height: 22, borderRadius: 3, background: 'linear-gradient(180deg,#E8CE72,#C9A227)', boxShadow: '0 0 12px 1px rgba(212,175,55,.7)' }} />}
               <Icon name={item.icon} size={19} stroke={on ? 2.2 : 2} style={{ color: on ? '#E8CE72' : 'var(--txt-lo)', filter: on ? 'drop-shadow(0 0 6px rgba(212,175,55,.5))' : 'none' }} />
               <span style={{ fontSize: 14, fontWeight: on ? 700 : 500, flex: 1, letterSpacing: '.01em' }}>{item.label}</span>
-              {item.badge && <span style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999, background: 'linear-gradient(180deg,#FF4242,#D81F2C)', color: '#fff', fontSize: 11, fontWeight: 800, display: 'grid', placeItems: 'center', fontFamily: 'Archivo, sans-serif', boxShadow: '0 0 10px -1px rgba(255,46,46,.7)', animation: on ? 'none' : 'breatheSoft 2.6s ease-in-out infinite' }}>{item.badge}</span>}
+              {badge > 0 && <span style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999, background: 'linear-gradient(180deg,#FF4242,#D81F2C)', color: '#fff', fontSize: 11, fontWeight: 800, display: 'grid', placeItems: 'center', fontFamily: 'Archivo, sans-serif', boxShadow: '0 0 10px -1px rgba(255,46,46,.7)', animation: on ? 'none' : 'breatheSoft 2.6s ease-in-out infinite' }}>{badge}</span>}
             </button>
           );
         })}

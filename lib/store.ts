@@ -10,8 +10,9 @@ import {
   SALES   as DEFAULT_SALES,
   TASKS   as DEFAULT_TASKS,
   STAGES  as DEFAULT_STAGES,
+  DEFAULT_COMPANY,
 } from './data';
-import type { Seller, Lead, Visit, Deal, Sale, Task, TimelineEntry } from './data';
+import type { Seller, Lead, Visit, Deal, Sale, Task, TimelineEntry, Company } from './data';
 
 // ── Input types (id is auto-generated when omitted) ───────────────────
 
@@ -32,6 +33,7 @@ export interface StoreState {
   sellers:           Seller[];
   stages:            string[];
   pipelineOverrides: Record<string, string>;
+  company:           Company;
 }
 
 // ── Module-level singleton ────────────────────────────────────────────
@@ -45,6 +47,7 @@ let _s: StoreState = {
   sellers:           [...DEFAULT_SELLERS],
   stages:            [...DEFAULT_STAGES],
   pipelineOverrides: {},
+  company:           { ...DEFAULT_COMPANY },
 };
 
 let _ready = false;
@@ -91,6 +94,7 @@ const K = {
   sellers:  'autocrm_sellers',
   pipeline: 'autocrm_pipeline',
   stages:   'autocrm_stages',
+  company:  'autocrm_company',
 } as const;
 
 // ── Initialization ────────────────────────────────────────────────────
@@ -130,6 +134,7 @@ function _saveAll(): void {
     localStorage.setItem(K.sellers,  JSON.stringify(_s.sellers));
     localStorage.setItem(K.pipeline, JSON.stringify(_s.pipelineOverrides));
     localStorage.setItem(K.stages,   JSON.stringify(_s.stages));
+    localStorage.setItem(K.company,  JSON.stringify(_s.company));
   } catch {}
 }
 
@@ -193,6 +198,7 @@ function _hydrate(): void {
     const sellers = _load<Seller[] | null>(K.sellers, null); if (sellers) _s.sellers = sellers;
     _s.pipelineOverrides = _load(K.pipeline, {});
     _s.stages            = _load(K.stages,   [...DEFAULT_STAGES]);
+    _s.company           = _load(K.company,  { ...DEFAULT_COMPANY });
 
   } else if (ver === '1') {
     // Migrate V1 data: add FK fields that were missing
@@ -212,6 +218,7 @@ function _hydrate(): void {
     if (m.sellers) _s.sellers = m.sellers;
     _s.pipelineOverrides = _load(K.pipeline, {});
     _s.stages            = _load(K.stages,   [...DEFAULT_STAGES]);
+    _s.company           = _load(K.company,  { ...DEFAULT_COMPANY });
     _saveAll(); // persist as V2
 
   } else {
@@ -219,6 +226,7 @@ function _hydrate(): void {
     if (ver !== null) _clearStorage();
     _s.pipelineOverrides = {};
     _s.stages = [...DEFAULT_STAGES];
+    _s.company = { ...DEFAULT_COMPANY };
     _saveAll();
   }
 }
@@ -322,6 +330,13 @@ export const store = {
   setStagesOrder(order: string[]): void {
     _ensureInit();
     _s.stages = order;
+    _saveAll(); _notify();
+  },
+
+  // COMPANY
+  updateCompany(changes: Partial<Company>): void {
+    _ensureInit();
+    Object.assign(_s.company, changes);
     _saveAll(); _notify();
   },
 
