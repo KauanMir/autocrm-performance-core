@@ -2,8 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge } from '@/components/ui/kit';
-import { LeadService, TaskService } from '@/lib/services';
+import { LeadService, TaskService, SellerService } from '@/lib/services';
 import type { LeadHealthEvent } from '@/lib/services';
+import { USERS } from '@/lib/data';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -111,7 +112,11 @@ export function LeadPicker({ value, onChange, onPick, placeholder }: {
 }) {
   const [show, setShow] = useState(false);
   const q = value.trim().toLowerCase();
-  const matches = q ? LeadService.getAll().filter((l: any) => l.name.toLowerCase().includes(q)).slice(0, 6) : [];
+  // Empty query still shows something on focus/click (M0-K3.2, correção 5) —
+  // getAll() unshifts on create, so the first 8 are already the most recent.
+  const matches = q
+    ? LeadService.getAll().filter((l: any) => l.name.toLowerCase().includes(q)).slice(0, 8)
+    : LeadService.getAll().slice(0, 8);
   return (
     <div style={{ position: 'relative' }}>
       <FField label="Cliente" icon="user" placeholder={placeholder || 'Buscar cliente pelo nome...'} value={value}
@@ -127,6 +132,51 @@ export function LeadPicker({ value, onChange, onPick, placeholder }: {
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff' }}>{l.name}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--t-500)' }}>{l.car}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Vendor selector for manager/admin flows — a native <select> renders its
+// options in the browser's own light chrome regardless of the app's dark
+// theme, so the list came out unreadable (M0-K3.2, problem 1). Same visual
+// language as LeadPicker: dark trigger, dark dropdown, avatar rows, visible
+// hover — just a closed list instead of type-to-search, since sellers are a
+// short, known set.
+export function SellerPicker({ value, onPick, placeholder }: {
+  value: any; onPick: (seller: any) => void; placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  const sellers = SellerService.getAll();
+  return (
+    <div style={{ position: 'relative' }}>
+      <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 7 }}>Vendedor responsável</span>
+      <button type="button" onClick={() => setShow((s) => !s)}
+        style={{ ...flowField, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', textAlign: 'left' }}>
+        {value ? (
+          <>
+            <Avatar name={value.name} size={24} ring="#3B82F6" />
+            <span style={{ color: '#fff', fontWeight: 600, flex: 1 }}>{value.name}</span>
+          </>
+        ) : (
+          <span style={{ color: 'var(--t-400)', flex: 1 }}>{placeholder || 'Selecione o vendedor…'}</span>
+        )}
+        <Icon name="arrowDown" size={16} stroke={2} style={{ color: 'var(--t-400)', transform: show ? 'rotate(180deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} />
+      </button>
+      {show && (
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 74, zIndex: 5, maxHeight: 280, overflowY: 'auto', background: '#1a1a1d', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow-lg)' }}>
+          {sellers.map((s: any) => (
+            <button key={s.id} onClick={() => { onPick(s); setShow(false); }} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
+              onMouseEnter={(e: any) => { e.currentTarget.style.background = 'rgba(255,255,255,.05)'; }}
+              onMouseLeave={(e: any) => { e.currentTarget.style.background = 'transparent'; }}>
+              <Avatar name={s.name} size={28} ring="#3B82F6" />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff' }}>{s.name}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--t-500)' }}>{s.team}</div>
               </div>
             </button>
           ))}
@@ -391,17 +441,25 @@ export function FlowLigar({ payload, close, openFlow }: any) {
 export function FlowVerCliente({ payload, close, openFlow }: any) {
   const lead = payload.lead || LeadService.getAll()[0];
   const u = URG[lead.urgency];
-  const timeline = [
-    { icon: 'phone', c: '#27C75F', t: 'Ligação realizada', d: lead.last, when: 'Hoje' },
-    { icon: 'message', c: '#3B82F6', t: 'WhatsApp enviado', d: 'Apresentação do veículo', when: 'Ontem' },
-    { icon: 'car', c: '#E8CE72', t: 'Demonstrou interesse', d: lead.car, when: 'há 2 dias' },
-    { icon: 'plus', c: '#8B8B93', t: 'Cliente cadastrado', d: 'Origem: Showroom', when: 'há 4 dias' },
-  ];
+  // lead.timeline is already the real record — addToTimeline() unshifts onto it
+  // from Ligar/Visita/Proposta/Venda/Acompanhamento, so insertion order is
+  // already newest-first. Seed leads and brand-new leads with no events yet
+  // have no timeline at all, hence the null fallback below (M0-K3).
+  const timeline: any[] | null = lead.timeline && lead.timeline.length > 0 ? lead.timeline : null;
+  const createdByName = lead.createdByUserId ? (USERS.find((u: any) => u.id === lead.createdByUserId)?.name || '-') : '-';
+  const createdAtLabel = (() => {
+    if (!lead.createdAt) return '-';
+    const d = new Date(lead.createdAt);
+    return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+  })();
   const actions = [
     { icon: 'phone', label: 'Ligar', flow: 'ligar', accent: '#27C75F' },
     { icon: 'calendar', label: 'Agendar visita', flow: 'criar-visita', accent: '#E8CE72' },
     { icon: 'handshake', label: 'Nova proposta', flow: 'nova-proposta', accent: '#E8CE72' },
-    { icon: 'refresh', label: 'Acompanhamento', flow: 'criar-acompanhamento', accent: '#3B82F6' },
+    // "Acompanhamento" is one unbreakable word wider than the 88px button —
+    // it overflowed the box (M0-K3.2, problem 5). Shorter label + a word-break
+    // safety net so no future long label leaks the same way.
+    { icon: 'refresh', label: 'Acompanhar', flow: 'criar-acompanhamento', accent: '#3B82F6' },
     { icon: 'edit', label: 'Editar dados', flow: 'editar-cliente', accent: '#8B8B93' },
   ];
   return (
@@ -416,13 +474,14 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
             <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="phone" size={14} stroke={2} /> {lead.phone}</span>
             <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="car" size={14} stroke={2} /> {lead.car}</span>
             <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="flow" size={14} stroke={2} /> {lead.stage}</span>
+            <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="users" size={14} stroke={2} /> {lead.seller || '-'}</span>
           </div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {actions.map(a => (
             <button key={a.label} onClick={() => openFlow(a.flow, { lead })} className="lift" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, width: 88, padding: '13px 8px', borderRadius: 13, border: '1px solid var(--border)', background: 'rgba(255,255,255,.03)', cursor: 'pointer', fontFamily: 'inherit' }}>
               <span style={{ width: 38, height: 38, borderRadius: 11, background: `${a.accent}22`, color: a.accent, display: 'grid', placeItems: 'center' }}><Icon name={a.icon} size={19} stroke={2.1} /></span>
-              <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--t-700)', textAlign: 'center' }}>{a.label}</span>
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--t-700)', textAlign: 'center', overflowWrap: 'break-word', wordBreak: 'break-word', maxWidth: '100%' }}>{a.label}</span>
             </button>
           ))}
         </div>
@@ -430,21 +489,25 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 20, alignItems: 'start' }}>
         <FPanel title="Linha do tempo" icon="history" accent="#E8CE72">
-          <div style={{ position: 'relative', paddingLeft: 8 }}>
-            {timeline.map((e, i) => (
-              <div key={i} style={{ display: 'flex', gap: 14, paddingBottom: i < timeline.length - 1 ? 20 : 0, position: 'relative' }}>
-                {i < timeline.length - 1 && <div style={{ position: 'absolute', left: 18, top: 38, bottom: 0, width: 2, background: 'var(--border)' }} />}
-                <div style={{ width: 38, height: 38, borderRadius: 11, flexShrink: 0, background: `${e.c}22`, color: e.c, display: 'grid', placeItems: 'center', border: `1px solid ${e.c}44`, zIndex: 1 }}><Icon name={e.icon} size={18} stroke={2.1} /></div>
-                <div style={{ flex: 1, paddingTop: 2 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-900)' }}>{e.t}</span>
-                    <span style={{ fontSize: 11.5, color: 'var(--t-400)', whiteSpace: 'nowrap' }}>{e.when}</span>
+          {timeline ? (
+            <div style={{ position: 'relative', paddingLeft: 8 }}>
+              {timeline.map((e: any, i: number) => (
+                <div key={i} style={{ display: 'flex', gap: 14, paddingBottom: i < timeline.length - 1 ? 20 : 0, position: 'relative' }}>
+                  {i < timeline.length - 1 && <div style={{ position: 'absolute', left: 18, top: 38, bottom: 0, width: 2, background: 'var(--border)' }} />}
+                  <div style={{ width: 38, height: 38, borderRadius: 11, flexShrink: 0, background: `${e.c}22`, color: e.c, display: 'grid', placeItems: 'center', border: `1px solid ${e.c}44`, zIndex: 1 }}><Icon name={e.icon} size={18} stroke={2.1} /></div>
+                  <div style={{ flex: 1, paddingTop: 2 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-900)' }}>{e.t}</span>
+                      <span style={{ fontSize: 11.5, color: 'var(--t-400)', whiteSpace: 'nowrap' }}>{e.when}</span>
+                    </div>
+                    {e.d && <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}>{e.d}</div>}
                   </div>
-                  <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}>{e.d}</div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '28px 12px', color: 'var(--t-500)', fontSize: 13 }}>Nenhum histórico registrado ainda.</div>
+          )}
         </FPanel>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -455,6 +518,14 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
                 <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--t-900)' }}>{lead.car}</div>
                 <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}>{lead.pay} · {lead.value}</div>
               </div>
+            </div>
+          </FPanel>
+          <FPanel title="Cadastro" icon="clipboard" accent="#E8CE72">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+              <Info icon="users" label="Vendedor responsável" value={lead.seller || '-'} />
+              {lead.origem && <Info icon="flag" label="Origem" value={lead.origem} />}
+              <Info icon="user" label="Criado por" value={createdByName} />
+              <Info icon="calendar" label="Data de cadastro" value={createdAtLabel} />
             </div>
           </FPanel>
           <FPanel title="Próxima ação recomendada" icon="sparkle" accent="#E8CE72">

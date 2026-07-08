@@ -186,6 +186,23 @@ function _migrate(data: {
   return data;
 }
 
+// Podium/ranking position is always derived from array order at render time
+// (Home.tsx, ScreenResultados, FlowPerfilVendedor all do `.map((s,i) => pos=i+1)`),
+// so keeping _s.sellers itself sorted is the single fix point for all of them —
+// no separate "sort at read time" logic needed in each screen.
+function _parseRevenue(r: string): number {
+  const n = parseFloat(String(r).replace('R$', '').trim().replace(',', '.').replace('M', ''));
+  return Number.isFinite(n) ? n : 0;
+}
+function _sortSellers(): void {
+  _s.sellers.sort((a, b) => {
+    if (b.sales !== a.sales) return b.sales - a.sales;
+    const rb = _parseRevenue(b.revenue), ra = _parseRevenue(a.revenue);
+    if (rb !== ra) return rb - ra;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 function _hydrate(): void {
   const ver = _loadVersion();
 
@@ -199,6 +216,7 @@ function _hydrate(): void {
     _s.pipelineOverrides = _load(K.pipeline, {});
     _s.stages            = _load(K.stages,   [...DEFAULT_STAGES]);
     _s.company           = _load(K.company,  { ...DEFAULT_COMPANY });
+    _sortSellers(); // self-heals any ranking persisted out-of-order before this fix
 
   } else if (ver === '1') {
     // Migrate V1 data: add FK fields that were missing
@@ -219,6 +237,7 @@ function _hydrate(): void {
     _s.pipelineOverrides = _load(K.pipeline, {});
     _s.stages            = _load(K.stages,   [...DEFAULT_STAGES]);
     _s.company           = _load(K.company,  { ...DEFAULT_COMPANY });
+    _sortSellers();
     _saveAll(); // persist as V2
 
   } else {
@@ -247,6 +266,7 @@ export const store = {
     _ensureInit();
     if (!lead.id)       lead.id       = 'l' + Date.now();
     if (!lead.timeline) lead.timeline = [];
+    if (!lead.createdAt) lead.createdAt = new Date().toISOString();
     _s.leads.unshift(lead as Lead);
     _saveAll(); _notify();
   },
@@ -260,6 +280,7 @@ export const store = {
   addVisit(visit: VisitInput): void {
     _ensureInit();
     if (!visit.id) visit.id = 'v' + Date.now();
+    if (!visit.createdAt) visit.createdAt = new Date().toISOString();
     _s.visits.unshift(visit as Visit);
     _saveAll(); _notify();
   },
@@ -273,6 +294,7 @@ export const store = {
   addDeal(deal: DealInput): void {
     _ensureInit();
     if (!deal.id) deal.id = 'd' + Date.now();
+    if (!deal.createdAt) deal.createdAt = new Date().toISOString();
     _s.deals.unshift(deal as Deal);
     _saveAll(); _notify();
   },
@@ -286,12 +308,16 @@ export const store = {
   addSale(sale: SaleInput): void {
     _ensureInit();
     if (!sale.id) sale.id = 'sa' + Date.now();
+    if (!sale.createdAt) sale.createdAt = new Date().toISOString();
     _s.sales.unshift(sale as Sale);
-    // Increment seller ranking count
+    // Increment seller ranking count and re-derive the podium order from it —
+    // M0-K3: previously the count went up but the array (and therefore every
+    // screen's rendered position) stayed frozen in seed order.
     if (sale.sellerId) {
       const seller = _s.sellers.find(s => s.id === sale.sellerId);
       if (seller) seller.sales = (seller.sales || 0) + 1;
     }
+    _sortSellers();
     _saveAll(); _notify();
   },
 
@@ -299,6 +325,7 @@ export const store = {
   addTask(task: TaskInput): void {
     _ensureInit();
     if (!task.id) task.id = 't' + Date.now();
+    if (!task.createdAt) task.createdAt = new Date().toISOString();
     _s.tasks.unshift(task as Task);
     _saveAll(); _notify();
   },

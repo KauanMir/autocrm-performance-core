@@ -4,7 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard } from '@/components/ui/kit';
 import { STAGES, TASK_STATE } from '@/lib/data';
 import { useStore } from '@/lib/store';
-import { LeadService, TaskService, PipelineService } from '@/lib/services';
+import { LeadService, TaskService, PipelineService, AuthService, SellerService } from '@/lib/services';
 
 const STAGE_TONE: Record<string, string> = {
   'Novo': 'green', 'Qualificado': 'green', 'Visita agendada': 'amber',
@@ -17,7 +17,7 @@ function LeadCard({ lead, go }: any) {
   const green = lead.urgency === 'green';
   const av = red ? 50 : green ? 36 : 42;
   return (
-    <div className="lift" style={{
+    <div className="lift" onClick={() => (window as any).__openFlow('ver-cliente', { lead })} style={{
       background: red
         ? 'linear-gradient(180deg, rgba(255,46,46,.18), rgba(255,46,46,.03)), #161618'
         : green ? 'linear-gradient(180deg, #151517, #0f0f11)'
@@ -27,7 +27,7 @@ function LeadCard({ lead, go }: any) {
       boxShadow: red ? '0 20px 46px -20px rgba(255,30,30,.42)' : 'var(--shadow-md)',
       animation: red ? 'redScream 2.4s ease-in-out infinite' : 'none',
       padding: red ? 20 : green ? 15 : 18, display: 'flex', flexDirection: 'column', gap: green ? 10 : 13,
-      opacity: green ? 0.94 : 1,
+      opacity: green ? 0.94 : 1, cursor: 'pointer',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Avatar name={lead.name} size={av} ring={u.c} />
@@ -46,6 +46,10 @@ function LeadCard({ lead, go }: any) {
         <span style={{ marginLeft: 'auto', fontSize: 11.5, padding: '3px 9px', borderRadius: 999, background: 'rgba(255,255,255,.06)', color: 'var(--t-700)', fontWeight: 600 }}>{lead.stage}</span>
       </div>
 
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--t-500)' }}>
+        <Icon name="users" size={12} stroke={2} /> {lead.seller || '-'}
+      </div>
+
       {green ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
           <Icon name="check" size={14} stroke={2.4} style={{ color: u.c }} />
@@ -60,7 +64,9 @@ function LeadCard({ lead, go }: any) {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8 }}>
+      {/* Card itself opens Central do Cliente (M0-K3.2, correção 4) — internal
+          buttons stop propagation so Ligar/Visita don't also trigger it. */}
+      <div style={{ display: 'flex', gap: 8 }} onClick={(e: any) => e.stopPropagation()}>
         <LBtn size="sm" kind={red ? 'danger' : green ? 'ghost' : 'primary'} icon="phone" style={{ flex: 1, justifyContent: 'center' }} onClick={() => (window as any).__openFlow('ligar', { lead })}>{green ? 'Ligar' : 'Ligar agora'}</LBtn>
         {!green && <LBtn size="sm" kind="ghost" icon="calendar" onClick={() => (window as any).__openFlow('criar-visita', { lead })}>Visita</LBtn>}
         <LBtn size="sm" kind="ghost" icon="arrowRight" onClick={() => (window as any).__openFlow('ver-cliente', { lead })} />
@@ -71,7 +77,14 @@ function LeadCard({ lead, go }: any) {
 
 export function ScreenClientes({ go }: any) {
   useStore();
-  const leads = LeadService.getAll();
+  const allLeads = LeadService.getAll(); // already RBAC-scoped: seller sees only their own here
+  const currentUser = AuthService.getCurrentUser();
+  const isSeller = currentUser?.role === 'seller';
+  const sellers = SellerService.getAll();
+  const [sellerFilter, setSellerFilter] = useState<string>('Todos');
+  const leads = (!isSeller && sellerFilter !== 'Todos')
+    ? allLeads.filter((l: any) => l.sellerId === sellerFilter)
+    : allLeads;
   const [filter, setFilter] = useState('Todos');
   const delayed = leads.filter((l: any) => l.urgency === 'red').length;
   const filters = ['Todos', 'Atrasados', 'Novo', 'Qualificado', 'Visita agendada', 'Em negociação'];
@@ -86,6 +99,12 @@ export function ScreenClientes({ go }: any) {
     <LightScreen>
       <PageHead title="Clientes" sub="Cada cliente mostra na cor o que precisa de você. Vermelho = aja agora." actions={<LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('novo-cliente')}>Novo cliente</LBtn>} />
       <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles — são os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
+      {!isSeller && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <Chip active={sellerFilter === 'Todos'} onClick={() => setSellerFilter('Todos')}>Todos</Chip>
+          {sellers.map((s: any) => <Chip key={s.id} active={sellerFilter === s.id} onClick={() => setSellerFilter(s.id)}>{s.first}</Chip>)}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
         {filters.map(f => <Chip key={f} active={filter === f} onClick={() => setFilter(f)}>{f === 'Atrasados' ? `Atrasados (${delayed})` : f}</Chip>)}
       </div>
@@ -135,7 +154,19 @@ function PipeCard({ lead, go, dragging, onDragStart, onDragEnd }: any) {
 
 export function ScreenAndamento({ go }: any) {
   useStore();
-  const leads = LeadService.getAll();
+  const allLeads = LeadService.getAll(); // seller already RBAC-scoped to their own leads here
+  const currentUser = AuthService.getCurrentUser();
+  const isSeller = currentUser?.role === 'seller';
+  const sellers = SellerService.getAll();
+  // Manager/admin see everyone by default and narrow by seller — a seller
+  // never sees this control at all, since LeadService.getAll() already
+  // scoped them to their own leads (M0-K3.1: dropped "Só os meus", which was
+  // either redundant for sellers or meaningless for manager/admin, who have
+  // no sellerId of their own to filter "mine" by).
+  const [sellerFilter, setSellerFilter] = useState<string>('Todos');
+  const leads = (!isSeller && sellerFilter !== 'Todos')
+    ? allLeads.filter((l: any) => l.sellerId === sellerFilter)
+    : allLeads;
   const stages = PipelineService.getStages();
   const [overStage, setOverStage] = useState<string | null>(null);
   // Source of truth for "which lead is being dragged" — deliberately not
@@ -149,7 +180,13 @@ export function ScreenAndamento({ go }: any) {
   const endDrag = () => { setDraggedId(null); setOverStage(null); };
   return (
     <LightScreen>
-      <PageHead title="Em progresso" sub="Onde cada cliente está no caminho até a venda. Arraste de etapa quando avançar." actions={<LBtn kind="ghost" icon="filter">Só os meus</LBtn>} />
+      <PageHead title="Em progresso" sub="Onde cada cliente está no caminho até a venda. Arraste de etapa quando avançar." />
+      {!isSeller && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+          <Chip active={sellerFilter === 'Todos'} onClick={() => setSellerFilter('Todos')}>Todos</Chip>
+          {sellers.map((s: any) => <Chip key={s.id} active={sellerFilter === s.id} onClick={() => setSellerFilter(s.id)}>{s.first}</Chip>)}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${stages.length}, minmax(210px, 1fr))`, gap: 14, overflowX: 'auto', paddingBottom: 8 }}>
         {stages.map((stage: string) => {
           const items = leads.filter((l: any) => l.stage === stage);

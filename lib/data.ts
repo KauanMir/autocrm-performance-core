@@ -52,6 +52,11 @@ export interface Lead {
   // Buying-intent classification ("Quente/Morno/Frio" in the UI) — independent from
   // `urgency`. A hot lead can still be operationally red if nobody has called yet.
   temperature?: 'hot' | 'warm' | 'cold';
+  // Who cadastrou this lead (may differ from sellerId when a manager/admin
+  // creates it on behalf of a seller) and when. Optional — seed leads and
+  // anything created before M0-K3.1 won't have these; callers must fall back.
+  createdByUserId?: string | null;
+  createdAt?: string;
 }
 
 export interface Visit {
@@ -66,6 +71,7 @@ export interface Visit {
   day: string;
   vehicles?: string[];
   note?: string;
+  createdAt?: string;
 }
 
 export interface Deal {
@@ -83,6 +89,7 @@ export interface Deal {
   downPayment?: string;
   installments?: string;
   note?: string;
+  createdAt?: string;
 }
 
 export interface Sale {
@@ -97,6 +104,8 @@ export interface Sale {
   date: string;
   status: string;
   pay: string;
+  createdByUserId?: string | null;
+  createdAt?: string;
 }
 
 export interface Task {
@@ -108,6 +117,7 @@ export interface Task {
   prio: string;
   state: string;
   note: string;
+  createdAt?: string;
 }
 
 // ── SELLERS ───────────────────────────────────────────────────────────

@@ -4,7 +4,8 @@ import { Icon } from '@/components/ui/Icon';
 import { Avatar, CountUp, FitBox } from '@/components/ui/kit';
 import { PLACE, Podium } from '@/components/podiums/Podiums';
 import { useStore } from '@/lib/store';
-import { AuthService, SellerService } from '@/lib/services';
+import { AuthService, SellerService, LeadService, VisitService, DealService, SaleService, TaskService } from '@/lib/services';
+import { VISIT_STATUS, DEAL_STATUS, TASK_STATE } from '@/lib/data';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
 
@@ -231,11 +232,14 @@ function SectionTitle({ icon, tone, children, right }: any) {
 }
 
 function UrgentAttention({ go }: { go: (id: string) => void }) {
+  // Real counts via services (RBAC-filtered for sellers automatically) —
+  // no fixed name or fixed count (M0-K3). Sub-labels stay generic since the
+  // specific record isn't singled out.
   const items = [
-    { n: 3, label: 'leads atrasados', sub: 'Sem contato há mais de 48h', icon: 'flame', to: 'clientes' },
-    { n: 2, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' },
-    { n: 1, label: 'proposta parada há 48h', sub: 'Roberto Dias — retomar agora', icon: 'handshake', to: 'propostas' },
-    { n: 4, label: 'leads sem contato', sub: 'Primeiro contato pendente', icon: 'phone', to: 'clientes' },
+    { n: LeadService.getAll().filter((l: any) => l.urgency === 'red').length, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' },
+    { n: VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' },
+    { n: DealService.getAll().filter((d: any) => d.status === DEAL_STATUS.APPROVAL).length, label: 'propostas aguardando aprovação', sub: 'Desconto acima do limite', icon: 'handshake', to: 'propostas' },
+    { n: TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' },
   ];
   return (
     <div>
@@ -295,20 +299,24 @@ function QuickActions({ go }: { go: (id: string) => void }) {
 }
 
 function ConversionFunnel({ active }: { active: boolean }) {
+  // Real totals via services — these are independent counts (how many of each
+  // exist right now), not a true step-by-step conversion rate: there's no
+  // event history to say how many leads actually became each visit/proposta/
+  // venda. So no "X% da etapa anterior" here — that would be exactly the
+  // fake percentage the audit flagged (M0-K3).
   const stages = [
-    { label: 'Leads', sub: 'clientes que chegaram', v: 420, icon: 'users', c: '#5B9BFF' },
-    { label: 'Agendamentos', sub: 'visitas marcadas', v: 210, icon: 'calendar', c: '#A855F7' },
-    { label: 'Visitas realizadas', sub: 'compareceram', v: 92, icon: 'check', c: '#27C75F' },
-    { label: 'Vendas concluídas', sub: 'fecharam negócio', v: 31, icon: 'trophy', c: '#E8CE72', gold: true },
+    { label: 'Leads', sub: 'clientes cadastrados', v: LeadService.getAll().length, icon: 'users', c: '#5B9BFF' },
+    { label: 'Visitas', sub: 'agendadas no total', v: VisitService.getAll().length, icon: 'calendar', c: '#A855F7' },
+    { label: 'Propostas', sub: 'criadas no total', v: DealService.getAll().length, icon: 'handshake', c: '#27C75F' },
+    { label: 'Vendas', sub: 'registradas no total', v: SaleService.getAll().length, icon: 'trophy', c: '#E8CE72', gold: true },
   ];
-  const top = stages[0].v;
+  const top = Math.max(stages[0].v, stages[1].v, stages[2].v, stages[3].v, 1);
   return (
     <div>
       <SectionTitle icon="flow">Funil de conversão</SectionTitle>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0, alignItems: 'stretch', background: 'linear-gradient(180deg,#161618,#111113)', border: '1px solid var(--line-dark)', borderRadius: 18, padding: '8px', boxShadow: 'var(--shadow-md)', position: 'relative' }}>
         {stages.map((s: any, i: number) => {
           const pct = Math.round((s.v / top) * 100);
-          const dropFromPrev = i > 0 ? Math.round((s.v / stages[i - 1].v) * 100) : null;
           return (
             <div key={s.label} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
               <div className="lift" style={{ flex: 1, height: '100%', borderRadius: 14, padding: '20px 18px', background: s.gold ? 'linear-gradient(180deg, rgba(212,175,55,.12), rgba(0,0,0,.12)), #161618' : 'rgba(255,255,255,.02)', border: `1px solid ${s.gold ? 'rgba(212,175,55,.4)' : 'var(--line-dark)'}`, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -325,8 +333,7 @@ function ConversionFunnel({ active }: { active: boolean }) {
                 <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,.07)', overflow: 'hidden' }}>
                   <div style={{ width: pct + '%', height: '100%', borderRadius: 999, background: `linear-gradient(90deg, ${s.c}, color-mix(in srgb, ${s.c} 65%, #000))`, boxShadow: `0 0 10px ${s.c}66`, animation: 'barFill 1.1s ease-out' }} />
                 </div>
-                {dropFromPrev != null && <div style={{ fontSize: 11.5, color: 'var(--txt-lo)' }}><b style={{ color: 'var(--txt-mid)' }}>{dropFromPrev}%</b> da etapa anterior</div>}
-                {dropFromPrev == null && <div style={{ fontSize: 11.5, color: 'var(--txt-lo)' }}>ponto de partida</div>}
+                <div style={{ fontSize: 11.5, color: 'var(--txt-lo)' }}>total no sistema</div>
               </div>
               {i < stages.length - 1 && <div style={{ position: 'absolute', right: -2, top: '50%', transform: 'translate(50%,-50%)', zIndex: 2, width: 26, height: 26, borderRadius: '50%', background: '#1b1b1e', border: '1px solid var(--line-dark-2)', display: 'grid', placeItems: 'center', color: 'var(--txt-lo)' }}><Icon name="arrowRight" size={14} stroke={2.4} /></div>}
             </div>

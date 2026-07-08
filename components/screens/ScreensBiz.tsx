@@ -2,9 +2,9 @@
 import React, { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard, Stat } from '@/components/ui/kit';
-import { VISIT_STATUS, DEAL_STATUS, SALE_STATUS } from '@/lib/data';
+import { VISIT_STATUS, DEAL_STATUS, SALE_STATUS, USERS } from '@/lib/data';
 import { useStore } from '@/lib/store';
-import { LeadService, VisitService, DealService, SaleService, SellerService, PipelineService, CompanyService } from '@/lib/services';
+import { LeadService, VisitService, DealService, SaleService, SellerService, PipelineService, CompanyService, AuthService } from '@/lib/services';
 import { PLACE } from '@/components/podiums/Podiums';
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
@@ -214,12 +214,97 @@ function Bar({ label, pct, value, tone }: { label: string; pct: number; value: s
   );
 }
 
+// Client-side CSV, no dependency — one file, sections separated by a blank
+// line (a real multi-sheet export would need a library, out of scope here).
+//
+// Role scoping happens at the *Service.getAll() layer (same RBAC every
+// screen already relies on) — a seller calling this only ever sees their own
+// leads/visits/deals/sales. SellerService.getAll() is the one exception
+// (unfiltered by design, since Home's podium needs the whole team), so it's
+// narrowed by hand here to just the seller's own row (M0-K3.1, correção 6).
+function exportResultadosCSV() {
+  const user = AuthService.getCurrentUser();
+  const isSeller = user?.role === 'seller';
+  const esc = (v: any) => {
+    const s = v === null || v === undefined || v === '' ? '-' : String(v);
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  const row = (cells: any[]) => cells.map(esc).join(',');
+  const rows: string[] = [];
+
+  const fmtDate = (x: any): string => {
+    if (x?.createdAt) {
+      const d = new Date(x.createdAt);
+      if (!isNaN(d.getTime())) return d.toLocaleDateString('pt-BR');
+    }
+    return x?.date || x?.day || x?.last || '-';
+  };
+  const userName = (id: string | null | undefined): string => {
+    if (!id) return '-';
+    return USERS.find((u) => u.id === id)?.name || '-';
+  };
+  const phoneForLead = (leadId: string | null): string => {
+    if (!leadId) return '-';
+    return LeadService.getById(leadId)?.phone || '-';
+  };
+
+  const allSellers = SellerService.getAll();
+  const sellers = isSeller ? allSellers.filter((s: any) => s.id === user?.sellerId) : allSellers;
+  rows.push('Vendedores');
+  rows.push(row(['Nome', 'Vendas', 'Receita', 'Leads', 'Visitas', 'Conversão']));
+  sellers.forEach((s: any) => rows.push(row([s.name, s.sales, s.revenue, s.leads, s.visits, s.conv + '%'])));
+  rows.push('');
+
+  const leads = LeadService.getAll();
+  rows.push('Leads');
+  rows.push(row(['Nome', 'Telefone', 'Veículo de interesse', 'Vendedor responsável', 'Criado por', 'Data de cadastro']));
+  leads.forEach((l: any) => rows.push(row([
+    l.name, l.phone, l.car, l.seller, userName(l.createdByUserId), fmtDate(l),
+  ])));
+  rows.push('');
+
+  const sales = SaleService.getAll();
+  rows.push('Vendas');
+  rows.push(row(['Cliente', 'Telefone', 'Veículo', 'Valor', 'Vendedor responsável', 'Registrado por', 'Status', 'Data']));
+  sales.forEach((s: any) => rows.push(row([
+    s.client, phoneForLead(s.leadId), s.car, s.value, s.seller, userName(s.createdByUserId), s.status, fmtDate(s),
+  ])));
+  rows.push('');
+
+  const deals = DealService.getAll();
+  rows.push('Propostas');
+  rows.push(row(['Cliente', 'Telefone', 'Veículo', 'Valor', 'Vendedor responsável', 'Status', 'Data']));
+  deals.forEach((d: any) => rows.push(row([
+    d.client, phoneForLead(d.leadId), d.car, d.value, d.seller, d.status, fmtDate(d),
+  ])));
+  rows.push('');
+
+  const visits = VisitService.getAll();
+  rows.push('Visitas');
+  rows.push(row(['Cliente', 'Telefone', 'Veículo', 'Vendedor responsável', 'Dia/Data', 'Horário', 'Status']));
+  visits.forEach((v: any) => rows.push(row([
+    v.client, phoneForLead(v.leadId), v.car, v.seller, fmtDate(v), v.time, v.status,
+  ])));
+
+  const BOM = '\uFEFF'; // explicit escape — Excel needs this to read acentos corretamente
+  const csv = BOM + rows.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `resultados-autocrm-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function ScreenResultados({ go }: any) {
   useStore();
   const top = SellerService.getAll();
   return (
     <LightScreen>
-      <PageHead title="Resultados" sub="Como a equipe está performando — em números simples." actions={<LBtn kind="ghost" icon="file">Exportar</LBtn>} />
+      <PageHead title="Resultados" sub="Como a equipe está performando — em números simples." actions={<LBtn kind="ghost" icon="file" onClick={exportResultadosCSV}>Exportar</LBtn>} />
       <LCard pad={0} style={{ overflow: 'hidden', marginBottom: 18 }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14, color: 'var(--t-900)' }}>Desempenho por vendedor — Junho</div>
         <div style={{ display: 'grid', gridTemplateColumns: '32px 1.6fr repeat(4, .8fr)', padding: '10px 18px', borderBottom: '1px solid var(--border)', fontSize: 11.5, color: 'var(--t-400)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>

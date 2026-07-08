@@ -6,7 +6,7 @@ import { STAGES, VISIT_STATUS, DEAL_STATUS, SALE_STATUS, TASK_STATE } from '@/li
 import { AuthService, LeadService, VisitService, DealService, SaleService, TaskService, SellerService } from '@/lib/services';
 import {
   CARS, ORIGINS, PAYS,
-  FField, FArea, Segmented, ChoiceTile, ClientChip, LeadPicker,
+  FField, FArea, Segmented, ChoiceTile, ClientChip, LeadPicker, SellerPicker,
   FPanel, StepRail, SummaryRow, FlowShell, FlowSuccess,
 } from './FlowsShared';
 
@@ -21,13 +21,22 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
   const [step, setStep] = useState(0);
   const [f, setF] = useState({ nome: '', tel: '', origem: 'Showroom', car: '', pay: 'Financiamento', urg: 'Quente' });
   const set = (k: string, v: any) => setF(s => ({ ...s, [k]: v }));
+  const user = AuthService.getCurrentUser();
+  const isSeller = user?.role === 'seller';
+  const allSellers = SellerService.getAll();
+  // A seller's own leads are always theirs; a manager/admin has no sellerId of
+  // their own and must pick who the lead actually belongs to — never fall
+  // back to the acting manager (same product rule as FlowRegistrarVenda).
+  const [assignedSellerId, setAssignedSellerId] = useState<string | null>(isSeller ? (user?.sellerId ?? null) : null);
+  const finalSellerId = isSeller ? (user?.sellerId ?? null) : assignedSellerId;
+  const finalSeller = finalSellerId ? allSellers.find((s: any) => s.id === finalSellerId) : null;
   const steps = ['Quem é', 'O que procura', 'Revisão'];
-  const canNext = step === 0 ? f.nome && f.tel : step === 1 ? f.car : true;
+  const canNext = step === 0 ? !!(f.nome && f.tel && (isSeller || finalSellerId)) : step === 1 ? f.car : true;
 
   const [newLeadId] = useState(() => 'l' + Date.now());
 
   const handleCreate = () => {
-    const user = AuthService.getCurrentUser();
+    if (!finalSellerId) return;
     LeadService.create({
       id: newLeadId,
       name: f.nome || 'Novo cliente',
@@ -42,25 +51,26 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
       value: '—',
       last: 'Sem contato ainda',
       alert: 'Fazer primeiro contato',
-      seller: user?.name || '—',
-      sellerId: user?.sellerId ?? null,
+      seller: finalSeller?.name || '—',
+      sellerId: finalSellerId,
+      createdByUserId: user?.id ?? null,
       origem: f.origem,
       timeline: [{ icon: 'plus', c: '#27C75F', t: `Cadastrado via ${f.origem}`, when: 'Agora' }],
     });
     TaskService.create({
       title: `Ligar para ${f.nome}`,
       lead: f.nome,
-      state: 'hoje',
+      state: TASK_STATE.TODAY,
       prio: 'alta',
       when: 'Hoje',
-      assignedTo: user?.sellerId ?? null,
+      assignedTo: finalSellerId,
       note: 'Primeiro contato',
     });
     setStep(3);
   };
 
   if (step === 3) {
-    const lead = { id: newLeadId, name: f.nome || 'Novo cliente', phone: f.tel, car: f.car || CARS[0], stage: 'Novo', urgency: 'red', pay: f.pay, value: '—', last: 'Sem contato ainda', alert: 'Fazer primeiro contato' };
+    const lead = { id: newLeadId, name: f.nome || 'Novo cliente', phone: f.tel, car: f.car || CARS[0], stage: 'Novo', urgency: 'red', pay: f.pay, value: '—', last: 'Sem contato ainda', alert: 'Fazer primeiro contato', seller: finalSeller?.name || '—', sellerId: finalSellerId };
     return (
       <FlowShell eyebrow="NOVO ATENDIMENTO" title="Cliente criado" icon="users" accent="#27C75F" onClose={close}>
         <FlowSuccess title="Atendimento criado!" sub={`${f.nome} entrou na sua carteira. Que tal já fazer o primeiro contato e sair na frente?`}
@@ -91,6 +101,11 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
         {step === 0 && <FPanel>
           <FField label="Nome do cliente" icon="user" placeholder="Ex.: Carlos Andrade" value={f.nome} onChange={(e: any) => set('nome', e.target.value)} />
           <FField label="Telefone / WhatsApp" icon="phone" placeholder="(11) 90000-0000" value={f.tel} onChange={(e: any) => set('tel', e.target.value)} />
+          {!isSeller && (
+            <div style={{ marginBottom: 14 }}>
+              <SellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
+            </div>
+          )}
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '6px 0 9px' }}>Como ele chegou até você?</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
             {ORIGINS.map(([o, ic]) => <ChoiceTile key={o} icon={ic} title={o} active={f.origem === o} onClick={() => set('origem', o)} />)}
@@ -108,6 +123,7 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
         {step === 2 && <FPanel title="Confira antes de criar" icon="checkCircle" accent="#27C75F">
           <SummaryRow label="Cliente" value={f.nome || '—'} />
           <SummaryRow label="Telefone" value={f.tel || '—'} />
+          {!isSeller && <SummaryRow label="Vendedor responsável" value={finalSeller?.name || '—'} />}
           <SummaryRow label="Origem" value={f.origem} />
           <SummaryRow label="Veículo" value={f.car || '—'} />
           <SummaryRow label="Pagamento" value={f.pay} />
@@ -606,25 +622,31 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   const [car, setCar] = useState(lead ? lead.car : '');
   const [customCar, setCustomCar] = useState('');
   const [client, setClient] = useState(lead ? lead.name : '');
-  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const user = AuthService.getCurrentUser();
+  const isSeller = user?.role === 'seller';
   const storeSellers = SellerService.getAll();
-  const seller = SellerService.getCurrentSeller();
-  const sellerIdx = user?.sellerId ? storeSellers.findIndex((s: any) => s.id === user.sellerId) : -1;
-  const third = storeSellers[2] ?? null;
-  const gapTop3 = seller && third ? Math.max(0, (third.sales ?? 0) - (seller.sales ?? 0)) : 0;
+  // A seller's sale is always theirs. A manager/admin has no sellerId of
+  // their own — the sale must be attributed to a real Seller, never to the
+  // acting manager (that's the exact "Parabéns, Carlos" bug this fixes).
+  // Pre-select the lead's own seller when one is picked; otherwise the
+  // manager must choose — never silently falls back to currentUser.
+  const [assignedSellerId, setAssignedSellerId] = useState<string | null>(
+    isSeller ? (user?.sellerId ?? null) : (lead?.sellerId ?? null),
+  );
+  const finalSellerId = isSeller ? (user?.sellerId ?? null) : assignedSellerId;
+  const finalSeller = finalSellerId ? storeSellers.find((s: any) => s.id === finalSellerId) ?? null : null;
 
-  const leadMatches = (!lead && client.trim())
-    ? LeadService.getAll().filter((l: any) => l.name.toLowerCase().includes(client.trim().toLowerCase())).slice(0, 6)
-    : [];
+  const [doneSeller, setDoneSeller] = useState<any>(null);
+  const [donePos, setDonePos] = useState<number>(-1);
+  const [doneGap, setDoneGap] = useState<number>(0);
 
   const pickLead = (l: any) => {
     setLead(l);
     setClient(l.name);
     setCar(l.car);
     setCustomCar('');
-    setShowSuggestions(false);
+    if (!isSeller) setAssignedSellerId(l.sellerId ?? null);
   };
 
   const clearLead = () => {
@@ -632,28 +654,43 @@ export function FlowRegistrarVenda({ payload, close }: any) {
     setClient('');
     setCar('');
     setCustomCar('');
+    if (!isSeller) setAssignedSellerId(null);
   };
 
   const handleConfirmSale = () => {
     if (!client && !lead) return;
     const finalCar = customCar.trim() || car;
     if (!finalCar) return;
+    if (!finalSeller) return; // guarded by the disabled button below too
+
     SaleService.create({
       client: lead ? lead.name : client,
       car: finalCar,
-      seller: lead?.seller || user?.name || '—',
-      sellerId: lead?.sellerId ?? user?.sellerId ?? null,
+      seller: finalSeller.name,
+      sellerId: finalSeller.id,
       leadId: lead?.id ?? null,
       dealId: null,
       value: '—',
       pay: lead?.pay || 'Financiamento',
       date: 'Hoje',
       status: SALE_STATUS.PENDING,
+      createdByUserId: user?.id ?? null,
     });
     if (lead?.id) {
       LeadService.addToTimeline(lead.id, { icon: 'trophy', c: '#E8CE72', t: 'Venda fechada!', d: finalCar });
       LeadService.updateHealth(lead.id, { type: 'sale_registered' });
     }
+
+    // Re-read after the sale so the podium reflects the post-increment,
+    // post-resort ranking (store.addSale already re-sorts sellers — M0-K3) —
+    // never derived from currentUser (Correção 2).
+    const freshSellers = SellerService.getAll();
+    const idx = freshSellers.findIndex((s: any) => s.id === finalSeller.id);
+    const third = freshSellers[2] ?? null;
+    const winner = idx >= 0 ? freshSellers[idx] : finalSeller;
+    setDoneSeller(winner);
+    setDonePos(idx);
+    setDoneGap(third ? Math.max(0, (third.sales ?? 0) - (winner.sales ?? 0)) : 0);
     setCar(finalCar);
     setStep('done');
   };
@@ -674,19 +711,19 @@ export function FlowRegistrarVenda({ payload, close }: any) {
               </div>
             </div>
             <div className="display" style={{ fontSize: 13, fontWeight: 800, color: '#E8CE72', letterSpacing: '.28em', marginBottom: 10 }}>VENDA CONFIRMADA</div>
-            <h1 className="display" style={{ margin: '0 0 14px', fontSize: 46, fontWeight: 900, color: '#fff', letterSpacing: '-.02em', lineHeight: 1 }}>Parabéns, {seller?.first || user?.name?.split(' ')[0] || '...'}! 🏁</h1>
+            <h1 className="display" style={{ margin: '0 0 14px', fontSize: 46, fontWeight: 900, color: '#fff', letterSpacing: '-.02em', lineHeight: 1 }}>Parabéns, {doneSeller?.first || doneSeller?.name?.split(' ')[0] || 'vendedor'}! 🏁</h1>
             <p style={{ margin: '0 auto 24px', color: 'var(--txt-mid)', fontSize: 16, maxWidth: 500 }}>Você fechou a venda do <b style={{ color: '#fff' }}>{car}</b>{(lead?.name || client) ? <> para <b style={{ color: '#fff' }}>{lead?.name || client}</b></> : ''}. Mais um passo rumo ao topo do ranking.</p>
             <div style={{ display: 'inline-flex', gap: 14, marginBottom: 28, flexWrap: 'wrap', justifyContent: 'center' }}>
               <div style={{ padding: '16px 26px', borderRadius: 16, background: 'linear-gradient(180deg,#1f1a08,#141103)', border: '1px solid rgba(212,175,55,.4)' }}>
-                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#E8CE72', lineHeight: 1 }}>{seller?.sales ?? '—'}</div>
+                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#E8CE72', lineHeight: 1 }}>{doneSeller?.sales ?? '—'}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginTop: 4 }}>vendas no mês</div>
               </div>
               <div style={{ padding: '16px 26px', borderRadius: 16, background: 'rgba(255,255,255,.04)', border: '1px solid var(--line-dark)' }}>
-                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{sellerIdx >= 0 ? `${sellerIdx + 1}º` : '—'}</div>
+                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{donePos >= 0 ? `${donePos + 1}º` : '—'}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginTop: 4 }}>posição</div>
               </div>
               <div style={{ padding: '16px 26px', borderRadius: 16, background: 'rgba(39,199,95,.1)', border: '1px solid var(--green-line)' }}>
-                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#27C75F', lineHeight: 1 }}>{gapTop3}</div>
+                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#27C75F', lineHeight: 1 }}>{doneGap}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginTop: 4 }}>p/ o TOP 3</div>
               </div>
             </div>
@@ -700,31 +737,22 @@ export function FlowRegistrarVenda({ payload, close }: any) {
     );
   }
 
+  const canConfirm = !!(client || lead) && !!(customCar.trim() || car) && !!finalSeller;
+
   return (
     <FlowShell eyebrow="REGISTRAR VENDA" title="Confirmar venda" icon="trophy" accent="#E8CE72" onClose={close}
       sub="Confirme os dados da venda. Esse é o número que mais importa — e que te leva ao topo do ranking."
-      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="trophy" onClick={handleConfirmSale} style={{ opacity: (client || lead) && (customCar.trim() || car) ? 1 : .5, background: 'linear-gradient(180deg,#E8CE72,#C9A227)' }}>Confirmar venda 🏁</LBtn></>}>
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="trophy" onClick={handleConfirmSale} style={{ opacity: canConfirm ? 1 : .5, background: 'linear-gradient(180deg,#E8CE72,#C9A227)' }}>Confirmar venda 🏁</LBtn></>}>
       <div style={{ maxWidth: 720 }}>
+        {!isSeller && (
+          <FPanel style={{ marginBottom: 16 }}>
+            <SellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
+            {!finalSeller && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--amber)' }}>Selecione o vendedor responsável por esta venda.</div>}
+          </FPanel>
+        )}
         {!lead && (
           <FPanel style={{ marginBottom: 16, position: 'relative' }}>
-            <FField label="Cliente" icon="user" placeholder="Buscar lead pelo nome ou digitar (venda avulsa)…" value={client}
-              onChange={(e: any) => { setClient(e.target.value); setShowSuggestions(true); }}
-              onFocus={() => setShowSuggestions(true)} />
-            {showSuggestions && leadMatches.length > 0 && (
-              <div style={{ position: 'absolute', left: 20, right: 20, top: 74, zIndex: 5, background: '#1a1a1d', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
-                {leadMatches.map((l: any) => (
-                  <button key={l.id} onClick={() => pickLead(l)} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
-                    onMouseEnter={(e: any) => { e.currentTarget.style.background = 'rgba(255,255,255,.05)'; }}
-                    onMouseLeave={(e: any) => { e.currentTarget.style.background = 'transparent'; }}>
-                    <Avatar name={l.name} size={28} ring="#3B82F6" />
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff' }}>{l.name}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--t-500)' }}>{l.car}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+            <LeadPicker value={client} onChange={setClient} onPick={pickLead} placeholder="Buscar lead pelo nome ou digitar (venda avulsa)…" />
           </FPanel>
         )}
         {lead && <div style={{ marginBottom: 16 }}>
