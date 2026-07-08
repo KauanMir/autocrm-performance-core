@@ -89,7 +89,12 @@ export interface Deal {
   downPayment?: string;
   installments?: string;
   note?: string;
+  createdByUserId?: string | null;
   createdAt?: string;
+  approvedByUserId?: string | null;
+  approvedAt?: string;
+  rejectedByUserId?: string | null;
+  rejectedAt?: string;
 }
 
 export interface Sale {
@@ -112,6 +117,7 @@ export interface Task {
   id: string;
   title: string;
   lead: string;
+  leadId?: string | null;
   assignedTo: string | null;
   when: string;
   prio: string;
@@ -211,12 +217,14 @@ export const DEAL_STATUS = {
   APPROVAL: 'aprovacao',  // desconto acima do limite, aguardando gestor
   APPROVED: 'aprovada',   // gestor aprovou
   REJECTED: 'recusada',   // gestor recusou
+  SOLD:     'vendida',    // já virou uma Sale — não pode gerar outra venda
 } as const;
 export type DealStatus = typeof DEAL_STATUS[keyof typeof DEAL_STATUS];
 
 export const SALE_STATUS = {
   PENDING:   'aguardando', // registrada, entrega ainda não realizada
   DELIVERED: 'entregue',
+  CANCELED:  'cancelada',  // venda desfeita — não conta como ativa, libera o Lead para nova venda
 } as const;
 export type SaleStatus = typeof SALE_STATUS[keyof typeof SALE_STATUS];
 

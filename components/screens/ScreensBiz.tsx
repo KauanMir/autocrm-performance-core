@@ -98,7 +98,7 @@ function SubHead({ icon, tone, children }: any) {
   </div>;
 }
 
-function DealRow({ d, go, approval, decided }: any) {
+function DealRow({ d, go, approval, decided, canDecide }: any) {
   const decidedApproved = decided && d.status === DEAL_STATUS.APPROVED;
   return (
     <div style={{
@@ -119,7 +119,12 @@ function DealRow({ d, go, approval, decided }: any) {
       </div>
       {decided && <LBadge tone={decidedApproved ? 'green' : 'red'} solid>{decidedApproved ? 'Aprovada' : 'Recusada'}</LBadge>}
       {approval
-        ? <LBtn size="sm" kind="primary" icon="check" onClick={() => (window as any).__openFlow('aprovar-proposta', { deal: d })}>Aprovar</LBtn>
+        // Seller cannot approve/reject — not even their own proposal (Correção 1,
+        // M0-K4.1). Only a badge here; the real gate lives in FlowAprovarProposta
+        // and DealService.approve/reject, so this is UI-only convenience.
+        ? (canDecide
+            ? <LBtn size="sm" kind="primary" icon="check" onClick={() => (window as any).__openFlow('aprovar-proposta', { deal: d })}>Aprovar</LBtn>
+            : <LBadge tone="amber"><Icon name="clock" size={12} stroke={2.4} />Aguardando gestor</LBadge>)
         : <LBtn size="sm" kind="ghost" icon="arrowRight" onClick={() => {
             const lead = d.leadId
               ? LeadService.getAll().find((l: any) => l.id === d.leadId)
@@ -133,17 +138,18 @@ function DealRow({ d, go, approval, decided }: any) {
 export function ScreenPropostas({ go }: any) {
   useStore();
   const deals = DealService.getAll();
+  const canDecide = AuthService.isManager();
   const open = deals.filter((d: any) => d.status === DEAL_STATUS.OPEN);
   const appr = deals.filter((d: any) => d.status === DEAL_STATUS.APPROVAL);
   const decided = deals.filter((d: any) => d.status === DEAL_STATUS.APPROVED || d.status === DEAL_STATUS.REJECTED);
   return (
     <LightScreen>
       <PageHead title="Propostas" sub="As negociações em aberto e o que precisa de aprovação." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-proposta')}>Nova proposta</LBtn>} />
-      {appr.length > 0 && <Guide tone="amber" icon="clock" text={<span><b>{appr.length} propostas</b> aguardam aprovação do gestor por desconto acima do limite.</span>} action="Revisar" onAction={() => (window as any).__openFlow('aprovar-proposta', { deal: appr[0] })} />}
+      {appr.length > 0 && <Guide tone="amber" icon="clock" text={<span><b>{appr.length} propostas</b> aguardam aprovação do gestor por desconto acima do limite.</span>} action={canDecide ? 'Revisar' : undefined} onAction={canDecide ? () => (window as any).__openFlow('aprovar-proposta', { deal: appr[0] }) : undefined} />}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         {appr.length > 0 && <div>
           <SubHead icon="clock" tone="var(--amber)">Aguardando aprovação · {appr.length}</SubHead>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{appr.map((d: any) => <DealRow key={d.id} d={d} go={go} approval />)}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{appr.map((d: any) => <DealRow key={d.id} d={d} go={go} approval canDecide={canDecide} />)}</div>
         </div>}
         <div>
           <SubHead icon="handshake">Em aberto · {open.length}</SubHead>
@@ -163,9 +169,18 @@ export function ScreenPropostas({ go }: any) {
   );
 }
 
+// Every value SALE_STATUS can produce must have an entry here (same discipline
+// as VST for Visits) — CANCELED added in M0-K4.2.
+const SST: Record<string, { tone: string; label: string }> = {
+  [SALE_STATUS.PENDING]:   { tone: 'amber', label: 'Ag. entrega' },
+  [SALE_STATUS.DELIVERED]: { tone: 'green', label: 'Entregue' },
+  [SALE_STATUS.CANCELED]:  { tone: 'red',   label: 'Cancelada' },
+};
+
 export function ScreenVendas({ go }: any) {
   useStore();
   const sales = SaleService.getAll();
+  const canCancel = AuthService.isManager();
   const delivered = sales.filter((s: any) => s.status === SALE_STATUS.DELIVERED).length;
   const pending = sales.filter((s: any) => s.status === SALE_STATUS.PENDING).length;
   return (
@@ -182,19 +197,33 @@ export function ScreenVendas({ go }: any) {
           <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--t-900)' }}>Vendas recentes</span>
           <span style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--t-400)' }}>Junho 2026</span>
         </div>
-        {sales.map((s: any, i: number) => (
-          <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 18px', borderTop: i ? '1px solid var(--border-2)' : 'none' }}>
-            <Avatar name={s.client} size={38} ring="#15924B" />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{s.client}</div>
-              <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}><Icon name="car" size={12} stroke={2} style={{ verticalAlign: -2 }} /> {s.car} · {s.pay}</div>
+        {sales.map((s: any, i: number) => {
+          const badge = SST[s.status] || SST[SALE_STATUS.PENDING];
+          const canceled = s.status === SALE_STATUS.CANCELED;
+          return (
+            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 18px', borderTop: i ? '1px solid var(--border-2)' : 'none', opacity: canceled ? .6 : 1 }}>
+              <Avatar name={s.client} size={38} ring={canceled ? '#6B7280' : '#15924B'} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{s.client}</div>
+                <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}><Icon name="car" size={12} stroke={2} style={{ verticalAlign: -2 }} /> {s.car} · {s.pay}</div>
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--t-500)' }}>{s.seller.split(' ')[0]}</div>
+              <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600, width: 100, textAlign: 'right' }}>{s.value}</div>
+              <span style={{ fontSize: 12.5, color: 'var(--t-400)', width: 56 }}>{s.date}</span>
+              <LBadge tone={badge.tone} solid={s.status !== SALE_STATUS.PENDING}>{badge.label}</LBadge>
+              {!canceled && canCancel && (
+                <LBtn size="sm" kind="ghost" icon="xCircle" onClick={() => (window as any).__openFlow('confirmar', {
+                  title: 'Cancelar esta venda?',
+                  message: `A venda de ${s.car} para ${s.client} será desfeita: o ranking do vendedor e a proposta/lead relacionados voltam ao estado anterior.`,
+                  confirmLabel: 'Cancelar venda',
+                  tone: 'danger',
+                  icon: 'xCircle',
+                  onConfirm: () => SaleService.cancel(s.id),
+                })}>Cancelar</LBtn>
+              )}
             </div>
-            <div style={{ fontSize: 12.5, color: 'var(--t-500)' }}>{s.seller.split(' ')[0]}</div>
-            <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600, width: 100, textAlign: 'right' }}>{s.value}</div>
-            <span style={{ fontSize: 12.5, color: 'var(--t-400)', width: 56 }}>{s.date}</span>
-            <LBadge tone={s.status === SALE_STATUS.DELIVERED ? 'green' : 'amber'} solid={s.status === SALE_STATUS.DELIVERED}>{s.status === SALE_STATUS.DELIVERED ? 'Entregue' : 'Ag. entrega'}</LBadge>
-          </div>
-        ))}
+          );
+        })}
       </LCard>
     </LightScreen>
   );

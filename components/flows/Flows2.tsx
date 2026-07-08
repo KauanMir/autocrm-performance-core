@@ -60,6 +60,7 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
     TaskService.create({
       title: `Ligar para ${f.nome}`,
       lead: f.nome,
+      leadId: newLeadId,
       state: TASK_STATE.TODAY,
       prio: 'alta',
       when: 'Hoje',
@@ -368,6 +369,17 @@ export function FlowRegistrarResultado({ payload, close, openFlow }: any) {
 
   if (!v) return null;
 
+  // Maps the visit outcome to a Lead Health Engine event — a registered result
+  // must always move the lead's operational health, not just the Visit record,
+  // or urgency/alert stay frozen at whatever they were before the visit
+  // (Correção 3, M0-K4.1).
+  const healthEventMap: Record<string, 'visit_result_done' | 'visit_result_thinking' | 'visit_result_no_interest'> = {
+    vendeu: 'visit_result_done',
+    negociando: 'visit_result_done',
+    pensar: 'visit_result_thinking',
+    sem: 'visit_result_no_interest',
+  };
+
   const handleSave = () => {
     if (!outcome) return;
     const statusMap: Record<string, string> = { vendeu: VISIT_STATUS.DONE, negociando: VISIT_STATUS.DONE, pensar: VISIT_STATUS.DONE, sem: VISIT_STATUS.NO_INTEREST };
@@ -377,6 +389,7 @@ export function FlowRegistrarResultado({ payload, close, openFlow }: any) {
       LeadService.addToTimeline(v.leadId, {
         icon: o.icon, c: o.accent === '#8B8B93' ? '#888' : o.accent, t: `Visita: ${o.title}`, d: note || undefined,
       });
+      LeadService.updateHealth(v.leadId, { type: healthEventMap[outcome] });
     }
     setDone(true);
   };
@@ -551,8 +564,23 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
 export function FlowAprovarProposta({ payload, close }: any) {
   const d = payload.deal;
   const [done, setDone] = useState<string | null>(null);
+  // Internal guard — never trust that the caller already hid the Aprovar/Recusar
+  // buttons. A Seller reaching this flow by any path (deep link, notification,
+  // stale UI) still can't decide; DealService.approve/reject re-check this too
+  // (Correção 1, M0-K4.1).
+  const canDecide = AuthService.isManager();
 
   if (!d) return null;
+
+  if (!canDecide) {
+    return (
+      <FlowShell eyebrow="APROVAÇÃO DO GESTOR" title="Acesso restrito" icon="shield" accent="#FF3B3B" onClose={close}>
+        <FlowSuccess icon="xCircle" accent="#FF3B3B" title="Apenas gestores decidem propostas"
+          sub="Aprovar ou recusar uma proposta é uma ação exclusiva de gerente/admin. Peça para o seu gestor revisar esta proposta."
+          actions={<LBtn kind="ghost" size="lg" icon="check" onClick={close}>Fechar</LBtn>} />
+      </FlowShell>
+    );
+  }
 
   if (done) return (
     <FlowShell eyebrow="APROVAÇÃO" title={done === 'aprovada' ? 'Proposta aprovada' : 'Proposta recusada'} icon="shield" accent={done === 'aprovada' ? '#27C75F' : '#FF3B3B'} onClose={close}>
@@ -616,12 +644,25 @@ export function Confetti() {
   );
 }
 
+// Only deals that could still legitimately be sold — a pending-approval or
+// already-rejected proposal must never show up as sellable, and a SOLD one
+// is excluded by construction (Correção 2, M0-K4.1).
+function dealsForLead(leadId: string) {
+  return DealService.getAll().filter((d: any) => d.leadId === leadId && (d.status === DEAL_STATUS.OPEN || d.status === DEAL_STATUS.APPROVED));
+}
+function bestDealFor(leadId: string) {
+  const ds = dealsForLead(leadId);
+  return ds.find((d: any) => d.status === DEAL_STATUS.APPROVED) || ds[0] || null;
+}
+
 export function FlowRegistrarVenda({ payload, close }: any) {
   const [lead, setLead] = useState<any>(payload.lead || null);
+  const [deal, setDeal] = useState<any>(() => (payload.lead ? bestDealFor(payload.lead.id) : null));
   const [step, setStep] = useState(lead ? 'confirm' : 'pick');
-  const [car, setCar] = useState(lead ? lead.car : '');
+  const [car, setCar] = useState(() => (deal ? deal.car : (lead ? lead.car : '')));
   const [customCar, setCustomCar] = useState('');
   const [client, setClient] = useState(lead ? lead.name : '');
+  const [blocked, setBlocked] = useState(false);
 
   const user = AuthService.getCurrentUser();
   const isSeller = user?.role === 'seller';
@@ -632,7 +673,7 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   // Pre-select the lead's own seller when one is picked; otherwise the
   // manager must choose — never silently falls back to currentUser.
   const [assignedSellerId, setAssignedSellerId] = useState<string | null>(
-    isSeller ? (user?.sellerId ?? null) : (lead?.sellerId ?? null),
+    isSeller ? (user?.sellerId ?? null) : (deal?.sellerId ?? lead?.sellerId ?? null),
   );
   const finalSellerId = isSeller ? (user?.sellerId ?? null) : assignedSellerId;
   const finalSeller = finalSellerId ? storeSellers.find((s: any) => s.id === finalSellerId) ?? null : null;
@@ -641,20 +682,45 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   const [donePos, setDonePos] = useState<number>(-1);
   const [doneGap, setDoneGap] = useState<number>(0);
 
+  const leadDeals = lead ? dealsForLead(lead.id) : [];
+  // A lead can have only one active (non-canceled) sale — this drives the
+  // button state proactively, SaleService.create is still the authoritative
+  // guard if this check misses anything (Correção 1, M0-K4.2).
+  const existingActiveSale = lead
+    ? SaleService.getAll().find((s: any) => s.leadId === lead.id && s.status !== SALE_STATUS.CANCELED)
+    : null;
+
   const pickLead = (l: any) => {
     setLead(l);
     setClient(l.name);
-    setCar(l.car);
+    const best = bestDealFor(l.id);
+    setDeal(best);
+    setCar(best ? best.car : l.car);
     setCustomCar('');
-    if (!isSeller) setAssignedSellerId(l.sellerId ?? null);
+    setBlocked(false);
+    if (!isSeller) setAssignedSellerId(best?.sellerId ?? l.sellerId ?? null);
   };
 
   const clearLead = () => {
     setLead(null);
+    setDeal(null);
     setClient('');
     setCar('');
     setCustomCar('');
+    setBlocked(false);
     if (!isSeller) setAssignedSellerId(null);
+  };
+
+  // Lead → Deal → Sale: picking a proposta fills veículo, valor, vendedor and
+  // dealId all at once (Correção 2). Picking "venda avulsa" clears the link.
+  const selectDeal = (d: any | null) => {
+    setDeal(d);
+    setBlocked(false);
+    if (d) {
+      setCar(d.car);
+      setCustomCar('');
+      if (!isSeller) setAssignedSellerId(d.sellerId ?? assignedSellerId);
+    }
   };
 
   const handleConfirmSale = () => {
@@ -662,20 +728,29 @@ export function FlowRegistrarVenda({ payload, close }: any) {
     const finalCar = customCar.trim() || car;
     if (!finalCar) return;
     if (!finalSeller) return; // guarded by the disabled button below too
+    if (existingActiveSale) { setBlocked(true); return; } // guarded by the disabled button below too
 
-    SaleService.create({
+    // SaleService.create refuses (and creates nothing) if the lead already has
+    // an active sale, or the linked Deal was already sold — and marks the
+    // Deal SOLD on success. Same lead/proposta never generates two vendas
+    // (Correção 1, M0-K4.2 — was only checking the Deal, not the Lead).
+    const ok = SaleService.create({
       client: lead ? lead.name : client,
       car: finalCar,
       seller: finalSeller.name,
       sellerId: finalSeller.id,
       leadId: lead?.id ?? null,
-      dealId: null,
-      value: '—',
+      dealId: deal?.id ?? null,
+      value: deal?.value ?? '—',
       pay: lead?.pay || 'Financiamento',
       date: 'Hoje',
       status: SALE_STATUS.PENDING,
       createdByUserId: user?.id ?? null,
     });
+    if (!ok) {
+      setBlocked(true);
+      return;
+    }
     if (lead?.id) {
       LeadService.addToTimeline(lead.id, { icon: 'trophy', c: '#E8CE72', t: 'Venda fechada!', d: finalCar });
       LeadService.updateHealth(lead.id, { type: 'sale_registered' });
@@ -737,7 +812,7 @@ export function FlowRegistrarVenda({ payload, close }: any) {
     );
   }
 
-  const canConfirm = !!(client || lead) && !!(customCar.trim() || car) && !!finalSeller;
+  const canConfirm = !!(client || lead) && !!(customCar.trim() || car) && !!finalSeller && !existingActiveSale;
 
   return (
     <FlowShell eyebrow="REGISTRAR VENDA" title="Confirmar venda" icon="trophy" accent="#E8CE72" onClose={close}
@@ -759,6 +834,20 @@ export function FlowRegistrarVenda({ payload, close }: any) {
           <ClientChip lead={lead} size="lg" />
           <button onClick={clearLead} style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: 'var(--t-500)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Trocar cliente</button>
         </div>}
+        {(blocked || existingActiveSale) && <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--amber-bg)', border: '1px solid var(--amber-line)' }}>
+          <Icon name="alert" size={18} stroke={2.2} style={{ color: 'var(--amber)' }} />
+          <span style={{ fontSize: 13, color: 'var(--t-700)' }}>Este cliente já possui uma venda registrada. Cancele a venda atual antes de registrar outra.</span>
+        </div>}
+        {lead && leadDeals.length > 0 && (
+          <FPanel title="Proposta vinculada" icon="handshake" accent="#E8CE72" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {leadDeals.map((d: any) => (
+                <ChoiceTile key={d.id} icon="handshake" title={`${d.car} · ${d.value}`} desc={d.status === DEAL_STATUS.APPROVED ? 'Aprovada' : 'Em aberto'} accent={d.status === DEAL_STATUS.APPROVED ? '#27C75F' : '#E8CE72'} active={deal?.id === d.id} onClick={() => selectDeal(d)} />
+              ))}
+              <ChoiceTile icon="car" title="Venda avulsa (sem proposta)" active={!deal} onClick={() => selectDeal(null)} />
+            </div>
+          </FPanel>
+        )}
         <FPanel title="Veículo vendido" icon="car" accent="#E8CE72">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
             {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 6).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={!customCar.trim() && car === c} onClick={() => { setCar(c); setCustomCar(''); }} />)}
@@ -772,35 +861,63 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   );
 }
 
+// 'Hoje' is the only state naturally due today — every other option (including
+// a custom hand-typed prazo, which could be anything from "amanhã" to "daqui
+// 10 dias") lands in UPCOMING rather than guessing (Correção 4, M0-K4.2).
+const NOVA_PENDENCIA_WHEN_STATE: Record<string, string> = {
+  'Hoje': TASK_STATE.TODAY,
+  'Amanhã': TASK_STATE.UPCOMING,
+  'Esta semana': TASK_STATE.UPCOMING,
+  'Personalizado': TASK_STATE.UPCOMING,
+};
+
 export function FlowNovaPendencia({ payload, close }: any) {
   const [done, setDone] = useState(false);
   const [type, setType] = useState('Ligar');
   const [client, setClient] = useState(payload.lead ? payload.lead.name : '');
   const [when, setWhen] = useState('Hoje');
+  const [customWhen, setCustomWhen] = useState('');
   const [prio, setPrio] = useState('Alta');
   const types: [string, string][] = [['Ligar', 'phone'], ['Visita', 'calendar'], ['Follow-up', 'refresh'], ['Proposta', 'handshake'], ['Documento', 'doc']];
 
+  const user = AuthService.getCurrentUser();
+  const isSeller = user?.role === 'seller';
+  const allSellers = SellerService.getAll();
+  // Seller creates a task for themself. Manager/admin has no sellerId of
+  // their own — an avulsa task must never save with assignedTo null (that's
+  // what let it silently show up for every seller, Correção 4, M0-K4.1). If
+  // it came from a lead, pre-select that lead's own seller.
+  const [assignedSellerId, setAssignedSellerId] = useState<string | null>(
+    isSeller ? (user?.sellerId ?? null) : (payload.lead?.sellerId ?? null),
+  );
+  const finalSellerId = isSeller ? (user?.sellerId ?? null) : assignedSellerId;
+  const finalSeller = finalSellerId ? allSellers.find((s: any) => s.id === finalSellerId) : null;
+  const isCustomWhen = when === 'Personalizado';
+  const finalWhen = isCustomWhen ? customWhen.trim() : when;
+  const canCreate = !!finalSellerId && !!finalWhen;
+
   if (done) return (
     <FlowShell eyebrow="NOVA PENDÊNCIA" title="Pendência criada" icon="check" accent="#27C75F" onClose={close}>
-      <FlowSuccess title="Pendência criada!" sub={`"${type}${client ? ' — ' + client : ''}" foi adicionada para ${when.toLowerCase()}.`} actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      <FlowSuccess title="Pendência criada!" sub={`"${type}${client ? ' — ' + client : ''}" foi adicionada para ${finalWhen.toLowerCase()}.`} actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
     </FlowShell>
   );
   return (
     <FlowShell eyebrow="NOVA PENDÊNCIA" title="Criar uma pendência" icon="check" accent="#E8CE72" onClose={close}
       footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={() => {
-        const user = AuthService.getCurrentUser();
+        if (!finalSellerId || !finalWhen) return;
         const prioMap: Record<string, string> = { Alta: 'alta', Média: 'media', Baixa: 'baixa' };
         TaskService.create({
           title: `${type}${client ? ' — ' + client : ''}`,
           lead: client,
-          state: TASK_STATE.TODAY,
+          leadId: payload.lead?.id ?? null,
+          state: NOVA_PENDENCIA_WHEN_STATE[when] || TASK_STATE.UPCOMING,
           prio: prioMap[prio] || 'media',
-          when,
-          assignedTo: user?.sellerId ?? null,
+          when: finalWhen,
+          assignedTo: finalSellerId,
           note: '',
         });
         setDone(true);
-      }}>Criar pendência</LBtn></>}>
+      }} style={{ opacity: canCreate ? 1 : .5 }}>Criar pendência</LBtn></>}>
       <div style={{ maxWidth: 720 }}>
         <FPanel style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Tipo de tarefa</div>
@@ -813,18 +930,29 @@ export function FlowNovaPendencia({ payload, close }: any) {
             ))}
           </div>
         </FPanel>
+        {!isSeller && (
+          <FPanel style={{ marginBottom: 16 }}>
+            <SellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
+            {!finalSeller && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--amber)' }}>Selecione o vendedor responsável por esta pendência.</div>}
+          </FPanel>
+        )}
         <FPanel>
           <FField label="Cliente relacionado (opcional)" icon="user" placeholder="Buscar cliente" value={client} onChange={(e: any) => setClient(e.target.value)} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginTop: 4 }}>
             <div>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Quando</div>
-              <Segmented options={['Hoje', 'Amanhã', 'Esta semana']} value={when} onChange={setWhen} />
+              <Segmented options={['Hoje', 'Amanhã', 'Esta semana', 'Personalizado']} value={when} onChange={setWhen} />
             </div>
             <div>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Prioridade</div>
               <Segmented options={['Alta', 'Média', 'Baixa']} value={prio} onChange={setPrio} accent={prio === 'Alta' ? '#FF3B3B' : '#E8CE72'} />
             </div>
           </div>
+          {isCustomWhen && (
+            <div style={{ marginTop: 4 }}>
+              <FField label="Data ou prazo" icon="calendar" placeholder="Ex.: 12/07/2026, sexta-feira, daqui 10 dias…" value={customWhen} onChange={(e: any) => setCustomWhen(e.target.value)} />
+            </div>
+          )}
         </FPanel>
       </div>
     </FlowShell>
@@ -834,20 +962,30 @@ export function FlowNovaPendencia({ payload, close }: any) {
 export function FlowReagendarPendencia({ payload, close }: any) {
   const task = payload.task;
   const [when, setWhen] = useState('Amanhã');
+  const [customWhen, setCustomWhen] = useState('');
   if (!task) return null;
-  const whenState: Record<string, string> = { 'Hoje': TASK_STATE.TODAY, 'Amanhã': TASK_STATE.UPCOMING, 'Esta semana': TASK_STATE.UPCOMING };
+  const whenState: Record<string, string> = { 'Hoje': TASK_STATE.TODAY, 'Amanhã': TASK_STATE.UPCOMING, 'Esta semana': TASK_STATE.UPCOMING, 'Personalizado': TASK_STATE.UPCOMING };
+  const isCustomWhen = when === 'Personalizado';
+  const finalWhen = isCustomWhen ? customWhen.trim() : when;
+  const canSave = !!finalWhen;
   return (
     <FlowShell eyebrow="REAGENDAR PENDÊNCIA" title="Reagendar" icon="refresh" accent="#3B82F6" onClose={close}
       footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={() => {
-        TaskService.update(task.id, { when, state: whenState[when] });
+        if (!finalWhen) return;
+        TaskService.update(task.id, { when: finalWhen, state: whenState[when] });
         close();
-      }}>Reagendar</LBtn></>}>
+      }} style={{ opacity: canSave ? 1 : .5 }}>Reagendar</LBtn></>}>
       <div style={{ maxWidth: 520 }}>
         <FPanel>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-900)', marginBottom: 4 }}>{task.title}</div>
           <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginBottom: 16 }}>Atualmente: {task.when}</div>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Nova data</div>
-          <Segmented options={['Hoje', 'Amanhã', 'Esta semana']} value={when} onChange={setWhen} accent="#3B82F6" />
+          <Segmented options={['Hoje', 'Amanhã', 'Esta semana', 'Personalizado']} value={when} onChange={setWhen} accent="#3B82F6" />
+          {isCustomWhen && (
+            <div style={{ marginTop: 14 }}>
+              <FField label="Data ou prazo" icon="calendar" placeholder="Ex.: 12/07/2026, sexta-feira, daqui 10 dias…" value={customWhen} onChange={(e: any) => setCustomWhen(e.target.value)} />
+            </div>
+          )}
         </FPanel>
       </div>
     </FlowShell>
@@ -878,10 +1016,13 @@ export function FlowCriarAcompanhamento({ payload, close }: any) {
         TaskService.create({
           title: `${canal}${lead ? ' — ' + lead.name : ''}`,
           lead: lead ? lead.name : '',
-          state: 'proxima',
+          leadId: lead?.id ?? null,
+          state: TASK_STATE.UPCOMING,
           prio: 'media',
           when,
-          assignedTo: user?.sellerId ?? null,
+          // Task vinda de um lead: vendedor responsável é o dono do lead, não
+          // o gestor que abriu o acompanhamento (Correção 4).
+          assignedTo: lead?.sellerId ?? user?.sellerId ?? null,
           note: note || '',
         });
         setDone(true);

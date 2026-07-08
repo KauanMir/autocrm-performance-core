@@ -11,6 +11,7 @@ import {
   TASKS   as DEFAULT_TASKS,
   STAGES  as DEFAULT_STAGES,
   DEFAULT_COMPANY,
+  SALE_STATUS,
 } from './data';
 import type { Seller, Lead, Visit, Deal, Sale, Task, TimelineEntry, Company } from './data';
 
@@ -32,7 +33,6 @@ export interface StoreState {
   tasks:             Task[];
   sellers:           Seller[];
   stages:            string[];
-  pipelineOverrides: Record<string, string>;
   company:           Company;
 }
 
@@ -46,7 +46,6 @@ let _s: StoreState = {
   tasks:             [...DEFAULT_TASKS],
   sellers:           [...DEFAULT_SELLERS],
   stages:            [...DEFAULT_STAGES],
-  pipelineOverrides: {},
   company:           { ...DEFAULT_COMPANY },
 };
 
@@ -92,6 +91,8 @@ const K = {
   sales:    'autocrm_sales',
   tasks:    'autocrm_tasks',
   sellers:  'autocrm_sellers',
+  // pipeline: legacy key from the dead pipelineOverrides side-table (removed
+  // M0-K4.1) — kept here only so resetAll() still purges it from old browsers.
   pipeline: 'autocrm_pipeline',
   stages:   'autocrm_stages',
   company:  'autocrm_company',
@@ -132,7 +133,6 @@ function _saveAll(): void {
     localStorage.setItem(K.sales,    JSON.stringify(_s.sales));
     localStorage.setItem(K.tasks,    JSON.stringify(_s.tasks));
     localStorage.setItem(K.sellers,  JSON.stringify(_s.sellers));
-    localStorage.setItem(K.pipeline, JSON.stringify(_s.pipelineOverrides));
     localStorage.setItem(K.stages,   JSON.stringify(_s.stages));
     localStorage.setItem(K.company,  JSON.stringify(_s.company));
   } catch {}
@@ -182,8 +182,21 @@ function _migrate(data: {
         if (lead?.sellerId) t.assignedTo = lead.sellerId;
       }
     }
+    if (!('leadId' in t)) t.leadId = clientToLeadId[t.lead] ?? null;
   });
   return data;
+}
+
+// Task.leadId (M0-K4.1): old saved tasks never had a real FK to the Lead
+// they were about, only a free-text `lead` name — best-effort resolve it by
+// name so existing tasks link to the right Lead instead of staying orphaned
+// forever. Idempotent: only touches tasks that never went through this.
+function _backfillTaskLeadIds(): void {
+  const nameToLeadId: Record<string, string> = {};
+  _s.leads.forEach(l => { nameToLeadId[l.name] = l.id; });
+  _s.tasks.forEach((t: any) => {
+    if (t.leadId === undefined) t.leadId = nameToLeadId[t.lead] ?? null;
+  });
 }
 
 // Podium/ranking position is always derived from array order at render time
@@ -213,10 +226,10 @@ function _hydrate(): void {
     const sales   = _load<Sale[]   | null>(K.sales,   null); if (sales)   _s.sales   = sales;
     const tasks   = _load<Task[]   | null>(K.tasks,   null); if (tasks)   _s.tasks   = tasks;
     const sellers = _load<Seller[] | null>(K.sellers, null); if (sellers) _s.sellers = sellers;
-    _s.pipelineOverrides = _load(K.pipeline, {});
-    _s.stages            = _load(K.stages,   [...DEFAULT_STAGES]);
-    _s.company           = _load(K.company,  { ...DEFAULT_COMPANY });
+    _s.stages   = _load(K.stages,   [...DEFAULT_STAGES]);
+    _s.company  = _load(K.company,  { ...DEFAULT_COMPANY });
     _sortSellers(); // self-heals any ranking persisted out-of-order before this fix
+    _backfillTaskLeadIds();
 
   } else if (ver === '1') {
     // Migrate V1 data: add FK fields that were missing
@@ -234,18 +247,17 @@ function _hydrate(): void {
     if (m.sales)   _s.sales   = m.sales;
     if (m.tasks)   _s.tasks   = m.tasks;
     if (m.sellers) _s.sellers = m.sellers;
-    _s.pipelineOverrides = _load(K.pipeline, {});
-    _s.stages            = _load(K.stages,   [...DEFAULT_STAGES]);
-    _s.company           = _load(K.company,  { ...DEFAULT_COMPANY });
+    _s.stages  = _load(K.stages,   [...DEFAULT_STAGES]);
+    _s.company = _load(K.company,  { ...DEFAULT_COMPANY });
     _sortSellers();
     _saveAll(); // persist as V2
 
   } else {
     // First run or unknown schema — start fresh from defaults
     if (ver !== null) _clearStorage();
-    _s.pipelineOverrides = {};
     _s.stages = [...DEFAULT_STAGES];
     _s.company = { ...DEFAULT_COMPANY };
+    _backfillTaskLeadIds(); // seed TASKS (data.ts) have no leadId either
     _saveAll();
   }
 }
@@ -320,6 +332,23 @@ export const store = {
     _sortSellers();
     _saveAll(); _notify();
   },
+  // Pure Sale + ranking mutation — Deal/Lead reversal lives in SaleService.cancel
+  // (services.ts), which has access to those services. Returns false (no-op)
+  // if the sale doesn't exist or is already canceled, so seller.sales can
+  // never be decremented twice for the same cancellation (Correção 2, M0-K4.2).
+  cancelSale(id: string): boolean {
+    _ensureInit();
+    const sale = _s.sales.find(s => s.id === id);
+    if (!sale || sale.status === SALE_STATUS.CANCELED) return false;
+    sale.status = SALE_STATUS.CANCELED;
+    if (sale.sellerId) {
+      const seller = _s.sellers.find(s => s.id === sale.sellerId);
+      if (seller) seller.sales = Math.max(0, (seller.sales || 0) - 1);
+    }
+    _sortSellers();
+    _saveAll(); _notify();
+    return true;
+  },
 
   // TASKS
   addTask(task: TaskInput): void {
@@ -344,13 +373,6 @@ export const store = {
       lead.timeline.unshift({ when: 'Agora', ...entry } as TimelineEntry);
       _saveAll(); _notify();
     }
-  },
-
-  // PIPELINE
-  setPipelineOverride(leadId: string, stage: string): void {
-    _ensureInit();
-    _s.pipelineOverrides[leadId] = stage;
-    _saveAll(); _notify();
   },
 
   // STAGES ORDER

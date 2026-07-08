@@ -1,7 +1,7 @@
 // services.ts — Backend abstraction layer.
 // Components, screens and flows must call Services — never access the store or
 // localStorage directly. When a real backend arrives, only StoreAdapter changes.
-import { USERS, VISIT_STATUS, DEAL_STATUS } from './data';
+import { USERS, VISIT_STATUS, DEAL_STATUS, SALE_STATUS } from './data';
 import type { User, Lead, Visit, Deal, Sale, Task, TimelineEntry, Company } from './data';
 import { store, getStore } from './store';
 import type { LeadInput, VisitInput, DealInput, SaleInput, TaskInput } from './store';
@@ -100,6 +100,7 @@ const StoreAdapter = {
 
   // Sales
   addSale:       (data: SaleInput)          => store.addSale(data),
+  cancelSale:    (id: string)               => store.cancelSale(id),
   getSales:      ()                         => getStore().sales,
 
   // Tasks
@@ -108,8 +109,7 @@ const StoreAdapter = {
   getTasks:      ()                         => getStore().tasks,
 
   // Pipeline / UI state
-  setPipelineOverride: (leadId: string, stage: string) => store.setPipelineOverride(leadId, stage),
-  setStagesOrder:      (order: string[])               => store.setStagesOrder(order),
+  setStagesOrder: (order: string[]) => store.setStagesOrder(order),
 
   // Company
   getCompany:    ()                             => getStore().company,
@@ -172,7 +172,11 @@ export type LeadHealthEvent =
   | { type: 'deal_created'; needsApproval: boolean }
   | { type: 'deal_approved' }
   | { type: 'deal_rejected' }
-  | { type: 'sale_registered' };
+  | { type: 'sale_registered' }
+  | { type: 'sale_canceled' }
+  | { type: 'visit_result_done' }
+  | { type: 'visit_result_thinking' }
+  | { type: 'visit_result_no_interest' };
 
 export function calculateLeadHealth(event: LeadHealthEvent): Partial<Lead> {
   switch (event.type) {
@@ -219,6 +223,22 @@ export function calculateLeadHealth(event: LeadHealthEvent): Partial<Lead> {
       // instead of a new stage value so the lead keeps showing up in the Kanban (Em progresso).
       return { urgency: 'green', stage: 'Fechamento', alert: 'Venda registrada', last: 'Concluído' };
 
+    case 'sale_canceled':
+      // Venda desfeita — lead volta para negociação em vez de ficar preso em
+      // 'Fechamento' com urgência verde (Correção 2, M0-K4.2).
+      return { urgency: 'amber', stage: 'Em negociação', alert: 'Venda cancelada', last: 'Retomar negociação' };
+
+    case 'visit_result_done':
+      return { urgency: 'green', stage: 'Em negociação', alert: 'Próximo passo comercial', last: 'Visita realizada' };
+
+    case 'visit_result_thinking':
+      return { urgency: 'amber', stage: 'Em negociação', alert: 'Acompanhar cliente', last: 'Cliente ficou de pensar' };
+
+    case 'visit_result_no_interest':
+      // Motivo de perda ainda não existe como campo — ver Correção 10 (decisão
+      // técnica registrada, não implementada agora).
+      return { urgency: 'amber', alert: 'Sem interesse no momento', last: 'Registrar motivo de perda futuramente' };
+
     default:
       return {};
   }
@@ -247,18 +267,87 @@ export const VisitService = {
 // ── DealService ───────────────────────────────────────────────────────
 
 export const DealService = {
-  create:  (data: DealInput)                   => StoreAdapter.addDeal(data),
-  update:  (id: string, changes: Partial<Deal>) => StoreAdapter.updateDeal(id, changes),
-  approve: (id: string)                         => StoreAdapter.updateDeal(id, { status: DEAL_STATUS.APPROVED }),
-  reject:  (id: string)                         => StoreAdapter.updateDeal(id, { status: DEAL_STATUS.REJECTED }),
-  getAll:  ()                                   => _filteredDeals(),
+  create: (data: DealInput) => StoreAdapter.addDeal({ ...data, createdByUserId: AuthService.getCurrentUser()?.id ?? null }),
+  update: (id: string, changes: Partial<Deal>) => StoreAdapter.updateDeal(id, changes),
+  // Only manager/admin may decide — this is the actual mutation boundary, so
+  // it re-checks the role instead of trusting that the UI already hid the
+  // buttons for a Seller (Correção 1, M0-K4.1: a Seller could otherwise
+  // approve their own high-discount proposal by calling the flow directly).
+  approve: (id: string) => {
+    if (!AuthService.isManager()) return;
+    StoreAdapter.updateDeal(id, {
+      status: DEAL_STATUS.APPROVED,
+      approvedByUserId: AuthService.getCurrentUser()?.id ?? null,
+      approvedAt: new Date().toISOString(),
+    });
+  },
+  reject: (id: string) => {
+    if (!AuthService.isManager()) return;
+    StoreAdapter.updateDeal(id, {
+      status: DEAL_STATUS.REJECTED,
+      rejectedByUserId: AuthService.getCurrentUser()?.id ?? null,
+      rejectedAt: new Date().toISOString(),
+    });
+  },
+  getAll: () => _filteredDeals(),
 };
 
 // ── SaleService ───────────────────────────────────────────────────────
 
 export const SaleService = {
-  create: (data: SaleInput) => StoreAdapter.addSale(data),
-  getAll: ()                => _filteredSales(),
+  // A Lead can have only one *active* Sale at a time (active = any status
+  // other than CANCELED) — repeated clicks/re-registrations on the same
+  // lead must not pile up duplicate Sales (Correção 1, M0-K4.2). A Deal
+  // consumed by an active Sale is likewise protected, on top of the
+  // already-SOLD check kept from M0-K4.1. Returns false and creates
+  // nothing when blocked.
+  create: (data: SaleInput): boolean => {
+    if (data.leadId) {
+      const hasActiveSale = StoreAdapter.getSales().some(
+        s => s.leadId === data.leadId && s.status !== SALE_STATUS.CANCELED,
+      );
+      if (hasActiveSale) return false;
+    }
+    if (data.dealId) {
+      const deal = StoreAdapter.getDeals().find(d => d.id === data.dealId);
+      if (deal && deal.status === DEAL_STATUS.SOLD) return false;
+      const hasActiveSaleForDeal = StoreAdapter.getSales().some(
+        s => s.dealId === data.dealId && s.status !== SALE_STATUS.CANCELED,
+      );
+      if (hasActiveSaleForDeal) return false;
+    }
+    StoreAdapter.addSale(data);
+    if (data.dealId) StoreAdapter.updateDeal(data.dealId, { status: DEAL_STATUS.SOLD });
+    return true;
+  },
+  // Only manager/admin may cancel — Seller has no cancel path, not even for
+  // their own sale (Correção 2, M0-K4.2; same re-check-at-the-boundary
+  // pattern as DealService.approve/reject). Reverses everything the Sale
+  // touched: ranking count, the linked Deal (back to APPROVED if it had
+  // gestor approval on record, otherwise OPEN — using the approvedByUserId
+  // audit field from M0-K4.1 instead of guessing), and the Lead's health +
+  // timeline. No-ops (returns false) if already canceled, so seller.sales
+  // is never decremented twice for the same sale.
+  cancel: (id: string): boolean => {
+    if (!AuthService.isManager()) return false;
+    const sale = StoreAdapter.getSales().find(s => s.id === id);
+    if (!sale) return false;
+    const ok = StoreAdapter.cancelSale(id);
+    if (!ok) return false;
+
+    if (sale.dealId) {
+      const deal = StoreAdapter.getDeals().find(d => d.id === sale.dealId);
+      if (deal && deal.status === DEAL_STATUS.SOLD) {
+        StoreAdapter.updateDeal(deal.id, { status: deal.approvedByUserId ? DEAL_STATUS.APPROVED : DEAL_STATUS.OPEN });
+      }
+    }
+    if (sale.leadId) {
+      StoreAdapter.updateLead(sale.leadId, calculateLeadHealth({ type: 'sale_canceled' }));
+      StoreAdapter.addToTimeline(sale.leadId, { icon: 'xCircle', c: '#FF3B3B', t: 'Venda cancelada' });
+    }
+    return true;
+  },
+  getAll: () => _filteredSales(),
 };
 
 // ── TaskService ───────────────────────────────────────────────────────
@@ -284,9 +373,8 @@ export const SellerService = {
 // ── PipelineService ───────────────────────────────────────────────────
 // moveCard writes straight to lead.stage — the same field every other screen
 // (Clientes, busca, perfil, Ajustes) already reads — so a Kanban move is
-// visible everywhere immediately and survives F5. pipelineOverrides/getOverrides
-// stay defined in the store for now (harmless, unused) rather than ripping out
-// the localStorage schema in a status-contract fix; nothing reads them anymore.
+// visible everywhere immediately and survives F5. The old pipelineOverrides
+// side-table (dead code — no screen ever read it) was removed in M0-K4.1.
 
 export const PipelineService = {
   moveCard:      (leadId: string, stage: string) => StoreAdapter.updateLead(leadId, { stage }),

@@ -355,9 +355,9 @@ export function Home({ t, setTweak, go, active }: any) {
     return () => window.removeEventListener('resize', onR);
   }, []);
 
-  const store = useStore();
+  useStore(); // subscribes to store changes for re-render — sellers read via SellerService below (Correção 9)
   const variant = t.podium;
-  const allSellers = store.sellers;
+  const allSellers = SellerService.getAll();
   const sellers = team === 'Todos' ? allSellers : allSellers.filter((s: any) => s.team === team);
   const top3 = sellers.slice(0, 3);
   const comp = getCompetition(allSellers);

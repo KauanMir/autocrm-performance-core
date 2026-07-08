@@ -4,7 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge } from '@/components/ui/kit';
 import { LeadService, TaskService, SellerService } from '@/lib/services';
 import type { LeadHealthEvent } from '@/lib/services';
-import { USERS } from '@/lib/data';
+import { USERS, TASK_STATE } from '@/lib/data';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -330,9 +330,9 @@ export function FlowLigar({ payload, close, openFlow }: any) {
     { id: 'visita', icon: 'calendar', title: 'Atendeu — agendar visita', accent: '#27C75F', next: 'criar-visita', task: null },
     { id: 'proposta', icon: 'handshake', title: 'Atendeu — montar proposta', accent: '#E8CE72', next: 'nova-proposta', task: null },
     { id: 'retorno', icon: 'clock', title: 'Pediu retorno — agendar follow-up', accent: '#FFA31F', next: 'criar-acompanhamento',
-      task: { title: 'Follow-up', when: 'Amanhã', prio: 'media', state: 'proxima' } },
+      task: { title: 'Follow-up', when: 'Amanhã', prio: 'media', state: TASK_STATE.UPCOMING } },
     { id: 'naoatendeu', icon: 'phone', title: 'Não atendeu — tentar mais tarde', accent: '#8B8B93', next: null,
-      task: { title: 'Tentar contato novamente', when: 'Hoje', prio: 'alta', state: 'hoje' } },
+      task: { title: 'Tentar contato novamente', when: 'Hoje', prio: 'alta', state: TASK_STATE.TODAY } },
   ];
 
   const handleSaveOutcome = () => {
@@ -345,6 +345,7 @@ export function FlowLigar({ payload, close, openFlow }: any) {
       TaskService.create({
         title: `${o.task.title} — ${lead.name}`,
         lead: lead.name,
+        leadId: lead.id,
         assignedTo: lead.sellerId ?? null,
         when: o.task.when,
         prio: o.task.prio,
