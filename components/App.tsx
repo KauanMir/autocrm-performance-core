@@ -104,10 +104,12 @@ export function App() {
   const [current, setCurrent] = useState('home');
   const [animKey, setAnimKey] = useState(0);
   const [flow, setFlow] = useState<{ id: string; payload: any } | null>(null);
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    if (typeof window === 'undefined') return null;
-    try { return AuthService.getCurrentUser(); } catch { return null; }
-  });
+  // M1-B: Supabase session recovery is async (there's no synchronous way to
+  // know if a session exists), so currentUser starts null and authLoading
+  // gates the first render until restoreSession() resolves — see the effect
+  // below. Everything downstream (Rail, RBAC, screens) is unchanged from M0.
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [authView, setAuthView] = useState('login');
   const [, _setTick] = useState(0);
 
@@ -123,6 +125,20 @@ export function App() {
   const enter = (user: User) => { setCurrentUser(user); setFlow(null); };
 
   useEffect(() => subscribeStore(() => _setTick(n => n + 1)), []);
+
+  // M1-B: recover an existing Supabase session on boot (e.g. after F5) before
+  // deciding whether to show the login screen or the app — mirrors what the
+  // old synchronous `AuthService.getCurrentUser()` lazy-init used to do, just
+  // necessarily async now that there's a real network/session check involved.
+  useEffect(() => {
+    let alive = true;
+    AuthService.restoreSession().then((user) => {
+      if (!alive) return;
+      setCurrentUser(user);
+      setAuthLoading(false);
+    });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     (window as any).__openFlow = openFlow;
@@ -157,6 +173,17 @@ export function App() {
 
   const Cur = Screens[current];
   const navItem = (NAV as any[]).find((n: any) => n.id === current);
+
+  if (authLoading) {
+    // Minimal, unstyled-on-purpose gate — just long enough to avoid flashing
+    // the login screen while restoreSession() is still resolving. No new
+    // visual system introduced for this (M1-B scope: auth only).
+    return (
+      <div style={{ height: '100vh', display: 'grid', placeItems: 'center', background: '#0a0a0b', color: 'var(--t-500, #8b8b93)', fontSize: 14 }}>
+        Carregando…
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return <AuthFlow view={authView} setView={setAuthView} onAuthed={enter} onSignedUp={() => setAuthView('onboarding')} />;

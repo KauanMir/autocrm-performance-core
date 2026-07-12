@@ -23,11 +23,32 @@ export interface Seller {
   revenue: string;
 }
 
+// The authenticated user, as returned by AuthService (M1-B: backed by
+// Supabase Auth + the `profiles` table — id is auth.users.id/profiles.id,
+// never the old hardcoded 'u1'..'u4'). No `password` field on purpose —
+// Supabase Auth owns credentials entirely; this object never carries one.
 export interface User {
   id: string;
   name: string;
   email: string;
-  password: string;
+  role: 'admin' | 'manager' | 'seller';
+  sellerId: string | null;
+  companyId: string | null;
+}
+
+// LEGACY — kept only so a couple of display-name lookups (FlowVerCliente's
+// "Criado por", exportResultadosCSV's userName()) can still resolve
+// createdByUserId/approvedByUserId values that predate Supabase Auth (M1-B).
+// Never used for authentication anymore — AuthService.login talks to
+// Supabase Auth exclusively, and this list intentionally carries no
+// passwords (that would defeat the entire point of removing them from the
+// client bundle). New records created after M1-B carry a real profile uuid
+// that won't be found here — the lookups just fall back to '-' for those,
+// which is a known, accepted limitation until M1-C+ migrates profiles too.
+export interface LegacyUserRef {
+  id: string;
+  name: string;
+  email: string;
   role: 'admin' | 'manager' | 'seller';
   sellerId: string | null;
 }
@@ -143,13 +164,13 @@ export const SELLERS: Seller[] = [
   { id: 's12', name: 'Thiago Moraes',   first: 'Thiago',   team: 'Novos',     leads: 13, scheduled: 3,  visits: 2,  sales: 2,  conv: 15, growth: +1,  move: 0,   revenue: 'R$ 0,23M' },
 ];
 
-// ── USERS (auth credentials) ──────────────────────────────────────────
+// ── USERS — legacy display-name reference, NOT used for auth (see LegacyUserRef) ──
 
-export const USERS: User[] = [
-  { id: 'u1', name: 'Admin',          email: 'admin@autocrm.com',     password: '123456', role: 'admin',   sellerId: null },
-  { id: 'u2', name: 'Carlos Mendes',  email: 'gerente@autocrm.com',   password: '123456', role: 'manager', sellerId: null },
-  { id: 'u3', name: 'Lucas Martins',  email: 'vendedor1@autocrm.com', password: '123456', role: 'seller',  sellerId: 's4' },
-  { id: 'u4', name: 'Fernanda Costa', email: 'vendedor2@autocrm.com', password: '123456', role: 'seller',  sellerId: 's11' },
+export const USERS: LegacyUserRef[] = [
+  { id: 'u1', name: 'Admin',          email: 'admin@autocrm.com',     role: 'admin',   sellerId: null },
+  { id: 'u2', name: 'Carlos Mendes',  email: 'gerente@autocrm.com',   role: 'manager', sellerId: null },
+  { id: 'u3', name: 'Lucas Martins',  email: 'vendedor1@autocrm.com', role: 'seller',  sellerId: 's4' },
+  { id: 'u4', name: 'Fernanda Costa', email: 'vendedor2@autocrm.com', role: 'seller',  sellerId: 's11' },
 ];
 
 // ── NAV_ROLES — role-based navigation permissions ─────────────────────

@@ -1,64 +1,100 @@
 // services.ts — Backend abstraction layer.
 // Components, screens and flows must call Services — never access the store or
 // localStorage directly. When a real backend arrives, only StoreAdapter changes.
-import { USERS, VISIT_STATUS, DEAL_STATUS, SALE_STATUS } from './data';
+import { VISIT_STATUS, DEAL_STATUS, SALE_STATUS } from './data';
 import type { User, Lead, Visit, Deal, Sale, Task, TimelineEntry, Company } from './data';
 import { store, getStore } from './store';
 import type { LeadInput, VisitInput, DealInput, SaleInput, TaskInput } from './store';
+import { supabase, isSupabaseConfigured } from './supabase/client';
+import type { ProfileRow } from './supabase/types';
 
-// ── Session ───────────────────────────────────────────────────────────
+// ── AuthService — Supabase Auth + profiles (M1-B) ───────────────────────
+// Login/logout/session now talk to Supabase Auth for real; the old
+// USERS.find() + localStorage 'acrm_session' comparison is gone. Role,
+// company and sellerId always come from the `profiles` row read back from
+// the database after auth succeeds — never trusted from anything the client
+// itself sets, so nobody can hand-edit their way into a different role.
+//
+// getCurrentUser() stays synchronous on purpose: every screen/flow in this
+// app already calls it mid-render (17 call sites audited before this
+// change), and none of that was rewritten in this phase. The actual async
+// Supabase calls only happen inside login()/logout()/restoreSession(); their
+// result is cached in _cachedUser so every other read is instant, exactly
+// like the old localStorage version behaved.
 
-const SESSION_KEY = 'acrm_session';
+let _cachedUser: User | null = null;
 
-interface Session {
-  userId: string;
-  role: 'admin' | 'manager' | 'seller';
-  sellerId: string | null;
+async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise<User | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, company_id, name, email, role, seller_id, is_active')
+    .eq('id', authUserId)
+    .single<ProfileRow>();
+  if (error || !data || !data.is_active) return null;
+  return {
+    id: data.id,
+    name: data.name,
+    email: data.email || fallbackEmail || '',
+    role: data.role,
+    sellerId: data.seller_id,
+    companyId: data.company_id,
+  };
 }
-
-function _readSession(): Session | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw || raw === '1') return null; // '1' is legacy pre-M0 format
-    const s = JSON.parse(raw);
-    return (s && s.userId) ? s : null;
-  } catch { return null; }
-}
-
-// ── AuthService ───────────────────────────────────────────────────────
 
 export const AuthService = {
-  login(email: string, password: string): User | null {
-    const user = USERS.find(
-      u => u.email.toLowerCase() === email.toLowerCase().trim() && u.password === password,
-    ) ?? null;
-    if (user) {
-      try {
-        const session: Session = { userId: user.id, role: user.role, sellerId: user.sellerId };
-        localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-      } catch {}
+  async login(email: string, password: string): Promise<User | null> {
+    if (!isSupabaseConfigured) {
+      // eslint-disable-next-line no-console
+      console.error('[AutoCRM] Supabase não configurado — preencha .env.local antes de logar (ver .env.local.example).');
+      return null;
     }
+    const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (error || !data.user) { _cachedUser = null; return null; }
+    const user = await _loadProfile(data.user.id, data.user.email);
+    if (!user) { await supabase.auth.signOut(); } // authenticated but no active profile — don't leave a half session
+    _cachedUser = user;
     return user;
   },
 
-  logout(): void {
-    try { localStorage.removeItem(SESSION_KEY); } catch {}
+  async logout(): Promise<void> {
+    await supabase.auth.signOut();
+    _cachedUser = null;
     // Trigger any registered logout handler (set by App.tsx via window.__logout)
     if (typeof window !== 'undefined' && (window as any).__logout) {
       (window as any).__logout();
     }
   },
 
+  // Synchronous — reads the in-memory cache populated by login()/restoreSession().
+  // Returns null until restoreSession() has resolved at least once; App.tsx
+  // awaits that on boot before it will render anything that depends on it.
   getCurrentUser(): User | null {
-    const s = _readSession();
-    if (!s) return null;
-    return USERS.find(u => u.id === s.userId) ?? null;
+    return _cachedUser;
+  },
+
+  getSession() {
+    return supabase.auth.getSession();
+  },
+
+  // Called once on app boot (components/App.tsx) to recover an existing
+  // Supabase session — e.g. after F5 — before deciding whether to show the
+  // login screen or the app.
+  async restoreSession(): Promise<User | null> {
+    if (!isSupabaseConfigured) { _cachedUser = null; return null; }
+    const { data } = await supabase.auth.getSession();
+    const authUser = data.session?.user;
+    if (!authUser) { _cachedUser = null; return null; }
+    const user = await _loadProfile(authUser.id, authUser.email);
+    _cachedUser = user;
+    return user;
+  },
+
+  isAuthenticated(): boolean {
+    return !!_cachedUser;
   },
 
   currentRole(): 'admin' | 'manager' | 'seller' | null {
-    const u = AuthService.getCurrentUser();
-    return u ? u.role : null;
+    return _cachedUser ? _cachedUser.role : null;
   },
 
   isAdmin(): boolean {
@@ -70,8 +106,13 @@ export const AuthService = {
     return r === 'manager' || r === 'admin';
   },
 
+  // Fixed while rewriting this function for M1-B: the old version returned
+  // `!!AuthService.currentRole()`, which is true for ANY authenticated user
+  // (admin/manager included), not specifically a seller. Audited as unused
+  // by any current call site, so this was a dormant bug, not a behavior
+  // change anything relies on.
   isSeller(): boolean {
-    return !!AuthService.currentRole();
+    return AuthService.currentRole() === 'seller';
   },
 };
 

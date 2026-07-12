@@ -117,8 +117,11 @@ function LoginView({ go, onDone }: { go: (v: string) => void; onDone: (user: Use
   const [remember, setRemember] = useState(true);
   const [err, setErr] = useState('');
 
-  const handleLogin = () => {
-    const user = AuthService.login(email, pw);
+  // M1-B: AuthService.login now talks to Supabase Auth for real, so this has
+  // to await it — React onClick handlers are fine being async (fire-and-forget
+  // from React's own perspective), no other change needed here.
+  const handleLogin = async () => {
+    const user = await AuthService.login(email, pw);
     if (!user) { setErr('E-mail ou senha incorretos.'); return; }
     setErr('');
     onDone(user);
