@@ -13,3 +13,6 @@ out/
 # misc
 .DS_Store
 *.pem
+
+# supabase local metadata
+supabase/.temp/
