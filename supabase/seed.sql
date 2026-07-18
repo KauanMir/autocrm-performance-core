@@ -1,9 +1,9 @@
--- M1-B — seed inicial (companies + sellers + profiles)
--- Rodar DEPOIS da migration 20260708120000_m1b_auth_profiles_sellers.sql.
+-- M1-B — seed inicial (companies + sellers + profiles) — LOCAL/DEV
+-- Aplicado automaticamente pelo `supabase db reset` / `supabase start` locais,
+-- depois das migrations.
 --
--- Este arquivo tem 3 partes. As Partes 1 e 2 são SQL puro e podem rodar
--- direto no SQL editor do Supabase (ou via `supabase db execute`). A Parte 3
--- PRECISA de um passo manual fora do SQL antes de rodar — ver instruções.
+-- Este arquivo tem 3 partes: company, sellers e (auth.users + profiles).
+-- A Parte 3 cria usuários locais de referência SEM senha — ver aviso lá.
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- PARTE 1 — company (não depende de nada)
@@ -18,6 +18,31 @@ values (
   'America/Sao_Paulo'
 )
 on conflict (id) do nothing;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- PARTE 1B — pipeline_stages padrão da company local (LOCAL/DEV)
+-- ─────────────────────────────────────────────────────────────────────────
+-- A migration 20260717100200_m1c_02_pipeline_stages.sql povoa os 5 estágios
+-- oficiais apenas nas companies que EXISTEM no momento em que ela roda. No
+-- ambiente local, o `db reset` aplica as migrations ANTES deste seed.sql —
+-- ou seja, a company acima ainda não existe quando a migration executa, e o
+-- INSERT dela produz zero linhas. Por isso o MESMO conjunto de estágios da
+-- migration (mesmos codes, names, sort_order e is_terminal, mesma estratégia
+-- idempotente de ON CONFLICT) é inserido aqui, mantendo o reset local
+-- reproduzível. Os ids dos stages vêm do default da tabela.
+
+insert into public.pipeline_stages (company_id, code, name, sort_order, is_terminal)
+select c.id, s.code, s.name, s.sort_order, s.is_terminal
+from public.companies c
+cross join (
+  values
+    ('new',             'Novo',            0, false),
+    ('qualified',       'Qualificado',     1, false),
+    ('visit_scheduled', 'Visita agendada', 2, false),
+    ('negotiation',     'Em negociação',   3, false),
+    ('closing',         'Fechamento',      4, true)
+) as s(code, name, sort_order, is_terminal)
+on conflict (company_id, code) do nothing;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- PARTE 2 — sellers (não depende de auth.users; ids iguais ao seed atual do
@@ -41,42 +66,38 @@ insert into sellers (id, company_id, name, first_name, team) values
 on conflict (id) do nothing;
 
 -- ─────────────────────────────────────────────────────────────────────────
--- PARTE 3 — profiles (PRECISA de auth.users primeiro — passo manual)
+-- PARTE 3 — auth.users + profiles (LOCAL/DEV)
 -- ─────────────────────────────────────────────────────────────────────────
 --
--- Não dá para criar usuários reais do Supabase Auth com um INSERT direto em
--- auth.users de forma segura/suportada — senha precisa passar pelo GoTrue
--- (hash, validação, etc.), não por um `insert` cru. Duas formas oficiais:
+-- Usuários LOCAIS de referência, exclusivos do ambiente local/dev
+-- (`supabase start` / `supabase db reset`). Os UUIDs abaixo são fixos,
+-- determinísticos e escolhidos à mão — NÃO são ids do projeto remoto.
+-- Nenhuma senha é definida (encrypted_password fica nulo), então login via
+-- GoTrue não funciona para eles, de propósito: servem apenas para satisfazer
+-- a FK profiles.id -> auth.users.id e permitir validar profiles, sellers,
+-- RLS e RPCs direto no PostgreSQL local. NÃO destinados à produção.
 --
---   (a) Dashboard → Authentication → Users → "Add user" → marcar
---       "Auto Confirm User" para não depender de e-mail de confirmação.
---   (b) Admin API (server-side, nunca no client — exige a service role key):
---         await supabaseAdmin.auth.admin.createUser({
---           email: 'admin@autocrm.com',
---           password: '<escolha uma senha real aqui, não "123456">',
---           email_confirm: true,
---         });
---
--- Crie os 4 usuários abaixo (mesmos e-mails do protótipo original) por (a)
--- ou (b), copie o `id` (uuid) que o Supabase gerar para cada um, e troque os
--- placeholders <UUID_ADMIN> / <UUID_MANAGER> / <UUID_SELLER1> / <UUID_SELLER2>
--- pelos valores reais antes de rodar o bloco abaixo.
---
---   admin@autocrm.com      → role admin,   seller_id null
---   gerente@autocrm.com    → role manager, seller_id null
---   vendedor1@autocrm.com  → role seller,  seller_id 's4'  (Lucas Martins)
---   vendedor2@autocrm.com  → role seller,  seller_id 's11' (Fernanda Dias)
---
--- Nenhuma senha é gravada aqui nem em nenhum outro arquivo deste repositório.
+--   11111111-…  admin@autocrm.com      → role admin,   seller_id null
+--   22222222-…  gerente@autocrm.com    → role manager, seller_id null
+--   33333333-…  vendedor1@autocrm.com  → role seller,  seller_id 's4'  (Lucas Martins)
+--   44444444-…  vendedor2@autocrm.com  → role seller,  seller_id 's11' (Fernanda Dias)
+
+insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
+values
+  ('00000000-0000-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'admin@autocrm.com',     now(), now(), now()),
+  ('00000000-0000-0000-0000-000000000000', '22222222-2222-2222-2222-222222222222', 'authenticated', 'authenticated', 'gerente@autocrm.com',   now(), now(), now()),
+  ('00000000-0000-0000-0000-000000000000', '33333333-3333-3333-3333-333333333333', 'authenticated', 'authenticated', 'vendedor1@autocrm.com', now(), now(), now()),
+  ('00000000-0000-0000-0000-000000000000', '44444444-4444-4444-4444-444444444444', 'authenticated', 'authenticated', 'vendedor2@autocrm.com', now(), now(), now())
+on conflict (id) do nothing;
 
 insert into profiles (id, company_id, name, email, role, seller_id) values
-  ('<UUID_ADMIN>',    '00000000-0000-0000-0000-000000000001', 'Admin',          'admin@autocrm.com',     'admin',   null),
-  ('<UUID_MANAGER>',  '00000000-0000-0000-0000-000000000001', 'Carlos Mendes',  'gerente@autocrm.com',   'manager', null),
-  ('<UUID_SELLER1>',  '00000000-0000-0000-0000-000000000001', 'Lucas Martins',  'vendedor1@autocrm.com', 'seller',  's4'),
-  ('<UUID_SELLER2>',  '00000000-0000-0000-0000-000000000001', 'Fernanda Costa', 'vendedor2@autocrm.com', 'seller',  's11')
+  ('11111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-000000000001', 'Admin',          'admin@autocrm.com',     'admin',   null),
+  ('22222222-2222-2222-2222-222222222222', '00000000-0000-0000-0000-000000000001', 'Carlos Mendes',  'gerente@autocrm.com',   'manager', null),
+  ('33333333-3333-3333-3333-333333333333', '00000000-0000-0000-0000-000000000001', 'Lucas Martins',  'vendedor1@autocrm.com', 'seller',  's4'),
+  ('44444444-4444-4444-4444-444444444444', '00000000-0000-0000-0000-000000000001', 'Fernanda Costa', 'vendedor2@autocrm.com', 'seller',  's11')
 on conflict (id) do nothing;
 
 -- Opcional, mas recomendado: linkar sellers.profile_id de volta para os dois
 -- vendedores de teste, agora que os profiles existem.
-update sellers set profile_id = '<UUID_SELLER1>' where id = 's4';
-update sellers set profile_id = '<UUID_SELLER2>' where id = 's11';
+update sellers set profile_id = '33333333-3333-3333-3333-333333333333' where id = 's4';
+update sellers set profile_id = '44444444-4444-4444-4444-444444444444' where id = 's11';
