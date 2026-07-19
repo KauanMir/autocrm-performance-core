@@ -2,6 +2,7 @@
 // Only Auth/profiles/sellers talk to this so far — leads/visits/deals/sales/
 // tasks still live in lib/store.ts (localStorage) until M1-C+.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from './database.types';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -22,7 +23,7 @@ if (!isSupabaseConfigured && typeof window !== 'undefined') {
   );
 }
 
-export const supabase: SupabaseClient = createClient(
+export const supabase: SupabaseClient<Database> = createClient<Database>(
   SUPABASE_URL || 'https://placeholder.supabase.co',
   SUPABASE_ANON_KEY || 'placeholder-anon-key',
   {

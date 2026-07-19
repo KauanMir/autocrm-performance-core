@@ -1,7 +1,9 @@
-// Tipos manuais para as 3 tabelas desta fase (M1-B: companies/profiles/sellers).
-// Não gerados via `supabase gen types typescript` porque ainda não existe um
-// projeto Supabase real conectado a este repositório — quando existir, troque
-// este arquivo pela saída do CLI e mantenha só os alias que o resto do app usa.
+// Tipos manuais para as 3 tabelas do M1-B (companies/profiles/sellers) —
+// preservados porque lib/services.ts depende deles. A partir do M1-D os tipos
+// oficiais vivem em ./database.types.ts (gerados via
+// `supabase gen types typescript --local`, nunca editados à mão); tipos novos
+// devem DERIVAR de Database, como PipelineStageRow abaixo.
+import type { Database } from './database.types';
 
 export type UserRole = 'admin' | 'manager' | 'seller';
 
@@ -28,6 +30,11 @@ export interface ProfileRow {
   created_at: string;
   updated_at: string;
 }
+
+// ── M1-D — derivados do schema gerado (não recriar manualmente) ──────────
+
+export type PipelineStageRow =
+  Database['public']['Tables']['pipeline_stages']['Row'];
 
 export interface SellerRow {
   // text, não uuid nesta fase — ver nota acima e no README de supabase/.
