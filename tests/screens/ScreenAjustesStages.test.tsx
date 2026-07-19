@@ -187,14 +187,19 @@ describe('ScreenAjustes/Etapas — caminho remoto (flag ON)', () => {
     expect(screen.getByTestId('stage-row-new')).toBeInTheDocument();
   });
 
-  it('canReorder=false (usuário sem permissão) não dispara a mutation nem torna linhas draggable', () => {
+  it('seller: acesso negado, nenhuma linha de etapa e hook recebe canReorder=false', () => {
     m.user.current = { ...m.user.current, role: 'seller' };
     const reorder = reorderResult();
     m.useReorderStages.mockReturnValue(reorder);
-    openEtapas();
-    expect(screen.getByTestId('stage-row-new')).toHaveAttribute('draggable', 'false');
-    dragTo('stage-row-new', 'stage-row-closing');
+    render(<ScreenAjustes go={() => {}} />);
+    // Capabilities (commit 8): seller não tem NENHUMA aba — conteúdo proibido
+    // não é montado, então não existe handler de reorder alcançável.
+    expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
+    expect(screen.queryByTestId('stage-row-new')).toBeNull();
     expect(reorder.reorderStages).not.toHaveBeenCalled();
+    expect(m.useReorderStages).toHaveBeenCalledWith(
+      expect.objectContaining({ canReorder: false }),
+    );
   });
 });
 
@@ -215,6 +220,95 @@ describe('ScreenAjustes/Etapas — estados remotos bloqueiam reorder', () => {
     m.usePipelineStages.mockReturnValue(pipelineResult(over));
     openEtapas();
     expect(screen.getByTestId('stages-remote-state')).toHaveTextContent(text);
+    expect(screen.queryByTestId('stage-row-new')).toBeNull();
+    expect(reorder.reorderStages).not.toHaveBeenCalled();
+  });
+});
+
+// ── D. Capabilities por role (commit 8) ──────────────────────────────────
+
+describe('ScreenAjustes — capabilities e abas permitidas', () => {
+  it('admin flag OFF: abas completas e Etapas local preservada', () => {
+    render(<ScreenAjustes go={() => {}} />);
+    expect(screen.getByText('Empresa')).toBeInTheDocument();
+    expect(screen.getByText('Usuários')).toBeInTheDocument();
+    expect(screen.getByText('Etapas')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Etapas'));
+    expect(screen.getByTestId('stage-row-new')).toHaveAttribute('draggable', 'false'); // Novo fixado no legado
+    expect(screen.getByTestId('stage-row-qualified')).toHaveAttribute('draggable', 'true');
+  });
+
+  it('admin flag ON: abas completas e reorder remoto permitido (canReorder=true no hook)', () => {
+    m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
+    openEtapas();
+    expect(screen.getByText('Empresa')).toBeInTheDocument();
+    expect(screen.getByTestId('stage-row-new')).toHaveAttribute('draggable', 'true');
+    expect(m.useReorderStages).toHaveBeenCalledWith(
+      expect.objectContaining({ canReorder: true, companyId: 'company-a' }),
+    );
+  });
+
+  it('manager flag ON: somente a aba Etapas, sem conteúdo administrativo montado', () => {
+    m.user.current = { ...m.user.current, role: 'manager' };
+    m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
+    const reorder = reorderResult();
+    m.useReorderStages.mockReturnValue(reorder);
+    render(<ScreenAjustes go={() => {}} />);
+
+    // Só o chip Etapas; nada de Empresa/Usuários nem seus conteúdos.
+    expect(screen.getByText('Etapas')).toBeInTheDocument();
+    expect(screen.queryByText('Empresa')).toBeNull();
+    expect(screen.queryByText('Usuários')).toBeNull();
+    expect(screen.queryByText('Dados da loja')).toBeNull();
+    expect(screen.queryByText('Equipe')).toBeNull();
+
+    // Aba Etapas já ativa por derivação síncrona (sem clique, sem flash).
+    expect(screen.getByTestId('stage-row-new')).toHaveAttribute('draggable', 'true');
+    expect(m.useReorderStages).toHaveBeenCalledWith(
+      expect.objectContaining({ canReorder: true }),
+    );
+
+    // Manager pode mover inclusive "Novo"; mutation recebe os ids; local nunca.
+    dragTo('stage-row-new', 'stage-row-closing');
+    expect(reorder.reorderStages).toHaveBeenCalledTimes(1);
+    expect(m.reorderStagesLocal).not.toHaveBeenCalled();
+  });
+
+  it('manager flag OFF: acesso negado, sem Etapas local, sem reorder algum', () => {
+    m.user.current = { ...m.user.current, role: 'manager' };
+    const reorder = reorderResult();
+    m.useReorderStages.mockReturnValue(reorder);
+    render(<ScreenAjustes go={() => {}} />); // pipeline default = local/flag OFF
+    expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
+    expect(screen.queryByTestId('stage-row-new')).toBeNull();
+    expect(screen.queryByText('Dados da loja')).toBeNull();
+    expect(reorder.reorderStages).not.toHaveBeenCalled();
+    expect(m.reorderStagesLocal).not.toHaveBeenCalled();
+  });
+
+  it('troca admin → manager: aba administrativa some imediatamente e manager cai em Etapas', () => {
+    m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
+    const view = render(<ScreenAjustes go={() => {}} />);
+    // Admin na aba default 'Empresa'.
+    expect(screen.getByText('Dados da loja')).toBeInTheDocument();
+
+    m.user.current = { ...m.user.current, role: 'manager' };
+    view.rerender(<ScreenAjustes go={() => {}} />);
+    expect(screen.queryByText('Dados da loja')).toBeNull();
+    expect(screen.getByTestId('stage-row-new')).toBeInTheDocument();
+  });
+
+  it('troca manager → seller: todo o conteúdo some e nenhum handler antigo funciona', () => {
+    m.user.current = { ...m.user.current, role: 'manager' };
+    m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
+    const reorder = reorderResult();
+    m.useReorderStages.mockReturnValue(reorder);
+    const view = render(<ScreenAjustes go={() => {}} />);
+    expect(screen.getByTestId('stage-row-new')).toBeInTheDocument();
+
+    m.user.current = { ...m.user.current, role: 'seller' };
+    view.rerender(<ScreenAjustes go={() => {}} />);
+    expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
     expect(screen.queryByTestId('stage-row-new')).toBeNull();
     expect(reorder.reorderStages).not.toHaveBeenCalled();
   });

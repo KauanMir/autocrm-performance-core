@@ -5,6 +5,8 @@ import { NAV, Avatar, PageHead, LCard, LightScreen } from '@/components/ui/kit';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle, TweakButton } from '@/components/ui/TweaksPanel';
 import { NAV_ROLES, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
+import { isRemoteStagesEnabled } from '@/lib/flags';
+import { canAccessStageSettings } from '@/lib/capabilities';
 import { subscribeStore } from '@/lib/store';
 import { AuthService, SellerService, TaskService } from '@/lib/services';
 import { AuthFlow } from '@/components/auth/AuthFlow';
@@ -18,6 +20,19 @@ const TWEAK_DEFAULTS = {
   anim: true,
   showRevenue: false,
 };
+
+// M1-D (commit 8): navegação efetiva. Base = NAV_ROLES legado; o manager
+// ganha 'ajustes' SOMENTE com a flag remota ON (e dentro da tela vê apenas a
+// aba Etapas — ver ScreenAjustes). Com a flag OFF a lista é idêntica ao
+// legado. A combinação capability×flag mora aqui, nunca em lib/capabilities.
+function allowedNavIds(user: User | null): string[] {
+  if (!user) return [];
+  const base = NAV_ROLES[user.role] || [];
+  if (!base.includes('ajustes') && isRemoteStagesEnabled() && canAccessStageSettings(user)) {
+    return [...base, 'ajustes'];
+  }
+  return base;
+}
 
 function Placeholder({ title }: { title: string }) {
   return (
@@ -33,7 +48,7 @@ function PlaceholderScreen({ title }: { title: string }) {
 }
 
 function Rail({ current, go, currentUser }: { current: string; go: (id: string) => void; currentUser: User }) {
-  const allowedIds = NAV_ROLES[currentUser.role] || [];
+  const allowedIds = allowedNavIds(currentUser);
   const seller = currentUser.sellerId ? SellerService.getById(currentUser.sellerId) : null;
   const displayTeam = seller?.team
     ? `Vendedor · ${seller.team}`
@@ -115,7 +130,7 @@ export function App() {
 
   const go = (id: string) => {
     if (!currentUser) return;
-    const allowed = NAV_ROLES[currentUser.role] || [];
+    const allowed = allowedNavIds(currentUser);
     if (!allowed.includes(id)) return;
     setCurrent(id);
     document.querySelector('#scroll-host')?.scrollTo(0, 0);
@@ -153,7 +168,7 @@ export function App() {
 
   useEffect(() => {
     if (!currentUser) return;
-    const allowed = NAV_ROLES[currentUser.role] || [];
+    const allowed = allowedNavIds(currentUser);
     if (!allowed.includes(current)) setCurrent('home');
   }, [currentUser, current]);
 
@@ -171,8 +186,12 @@ export function App() {
     ajustes: ScreenAjustes,
   };
 
-  const Cur = Screens[current];
-  const navItem = (NAV as any[]).find((n: any) => n.id === current);
+  // Guarda SÍNCRONA de render: uma tela proibida nunca é renderizada, nem por
+  // um frame — o useEffect acima só sincroniza o estado depois. Cobre troca de
+  // usuário com estado antigo de navegação apontando para tela agora proibida.
+  const effectiveCurrent = currentUser && allowedNavIds(currentUser).includes(current) ? current : 'home';
+  const Cur = Screens[effectiveCurrent];
+  const navItem = (NAV as any[]).find((n: any) => n.id === effectiveCurrent);
 
   if (authLoading) {
     // Minimal, unstyled-on-purpose gate — just long enough to avoid flashing
@@ -191,9 +210,9 @@ export function App() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Rail current={current} go={go} currentUser={currentUser} />
+      <Rail current={effectiveCurrent} go={go} currentUser={currentUser} />
       <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
-        {current === 'home'
+        {effectiveCurrent === 'home'
           ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} />
           : (Cur ? <Cur go={go} t={t} /> : <PlaceholderScreen title={navItem?.label} />)}
       </main>

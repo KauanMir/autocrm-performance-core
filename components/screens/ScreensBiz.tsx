@@ -9,6 +9,7 @@ import { PLACE } from '@/components/podiums/Podiums';
 import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
+import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages } from '@/lib/capabilities';
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
 // missing from this map is what made VisitRow crash (M0-J audit, M0-K1 fix).
@@ -399,20 +400,36 @@ export function ScreenAjustes({ go }: any) {
   const [draggedStage, setDraggedStage] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<string | null>(null);
 
-  // M1-D (commit 7): etapas podem vir do Supabase sob a flag, e o reorder
-  // remoto vai pela RPC. Permissão = a da tela hoje (admin-only via
-  // NAV_ROLES); a ampliação para manager é o Commit 8. Boolean(currentUser)
-  // significa "profile ativo resolvido" (AuthService rejeita inativos).
-  const canReorder = currentUser?.role === 'admin';
+  // M1-D (commit 7+8): etapas podem vir do Supabase sob a flag, e o reorder
+  // remoto vai pela RPC. Permissões agora vêm de capabilities explícitas
+  // (lib/capabilities) combinadas com a flag AQUI, na camada de UI.
+  // Boolean(currentUser) significa "profile ativo resolvido" (AuthService
+  // rejeita inativos).
   const pipeline = usePipelineStages({
     userId: currentUser?.id ?? null,
     companyId: currentUser?.companyId ?? null,
     userIsActive: Boolean(currentUser),
     localStageNames: PipelineService.getStages(),
   });
+
+  // Acesso efetivo: admin sempre tem os Ajustes completos; manager só a área
+  // de Etapas e SOMENTE com a flag remota ON; seller nada. Flag OFF ⇒
+  // stageSettingsAccess=false ⇒ manager não ganha nenhum acesso (legado).
+  const fullSettingsAccess = canAccessFullSettings(currentUser);
+  const stageSettingsAccess = pipeline.remoteStagesEnabled && canAccessStageSettings(currentUser);
+  const allowedTabs: string[] = fullSettingsAccess
+    ? ['Empresa', 'Usuários', 'Etapas']
+    : stageSettingsAccess ? ['Etapas'] : [];
+  // Derivação SÍNCRONA: aba proibida nunca renderiza, nem por um frame, e o
+  // estado antigo de aba não atravessa troca de usuário.
+  const activeTab: string | null = allowedTabs.includes(tab) ? tab : (allowedTabs[0] ?? null);
+
+  // Permissão efetiva do reorder REMOTO fornecida ao hook: capability +
+  // flag/área de Etapas. (remoteReady e isPending são reavaliados no handler.)
+  const canReorderRemote = stageSettingsAccess && canReorderPipelineStages(currentUser);
   const reorder = useReorderStages({
     companyId: currentUser?.companyId ?? null,
-    canReorder,
+    canReorder: canReorderRemote,
   });
 
   const isRemote = pipeline.source === 'remote';
@@ -424,7 +441,7 @@ export function ScreenAjustes({ go }: any) {
     if (isRemote) {
       // Remoto: qualquer permutação é válida (a regra "Novo fixado" era só
       // frontend e foi removida deste caminho — a RPC aceita qualquer ordem).
-      return remoteReady && canReorder && !reorder.isPending;
+      return remoteReady && canReorderRemote && !reorder.isPending;
     }
     return index !== 0; // legado: "Novo" fixado no caminho local
   };
@@ -434,9 +451,9 @@ export function ScreenAjustes({ go }: any) {
     if (isRemote) {
       // SEM optimistic update: a ordem visual só muda quando o cache é
       // atualizado com o retorno da RPC (onSuccess do hook). Erro ⇒ ordem
-      // anterior permanece na tela.
+      // anterior permanece na tela. O handler REVALIDA a capability.
       if (draggedStage && draggedStage !== targetKey
-        && remoteReady && canReorder && !reorder.isPending) {
+        && remoteReady && canReorderRemote && !reorder.isPending) {
         const ids = stages.map((s) => s.id);
         const from = ids.indexOf(draggedStage);
         const to = ids.indexOf(targetKey);
@@ -466,9 +483,16 @@ export function ScreenAjustes({ go }: any) {
     <LightScreen>
       <PageHead title="Ajustes" sub="Configure o sistema para a realidade da sua loja." />
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
-        {['Empresa', 'Usuários', 'Etapas'].map(t => <Chip key={t} active={tab === t} onClick={() => setTab(t)}>{t}</Chip>)}
+        {allowedTabs.map(t => <Chip key={t} active={activeTab === t} onClick={() => setTab(t)}>{t}</Chip>)}
       </div>
-      {tab === 'Empresa' && (
+      {activeTab === null && (
+        <LCard style={{ maxWidth: 520 }}>
+          <div data-testid="settings-denied" style={{ padding: '18px 6px', fontSize: 13.5, color: 'var(--t-500)' }}>
+            Você não tem acesso às configurações.
+          </div>
+        </LCard>
+      )}
+      {activeTab === 'Empresa' && (
         <LCard style={{ maxWidth: 640 }}>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 18 }}>Dados da loja</div>
           <Field label="Nome da loja" value={companyForm.name} onChange={(v: string) => setField('name', v)} />
@@ -483,7 +507,7 @@ export function ScreenAjustes({ go }: any) {
           </div>
         </LCard>
       )}
-      {tab === 'Usuários' && (
+      {activeTab === 'Usuários' && (
         <LCard pad={0} style={{ overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>Equipe</span>
@@ -499,7 +523,7 @@ export function ScreenAjustes({ go }: any) {
           ))}
         </LCard>
       )}
-      {tab === 'Etapas' && (
+      {activeTab === 'Etapas' && (
         <LCard style={{ maxWidth: 520 }}>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Etapas do andamento</div>
           <div style={{ fontSize: 13, color: 'var(--t-500)', marginBottom: 16 }}>
