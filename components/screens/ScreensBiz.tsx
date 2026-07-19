@@ -6,6 +6,9 @@ import { VISIT_STATUS, DEAL_STATUS, SALE_STATUS, USERS } from '@/lib/data';
 import { useStore } from '@/lib/store';
 import { LeadService, VisitService, DealService, SaleService, SellerService, PipelineService, CompanyService, AuthService } from '@/lib/services';
 import { PLACE } from '@/components/podiums/Podiums';
+import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
+import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
+import type { PipelineStage } from '@/lib/pipeline/adapter';
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
 // missing from this map is what made VisitRow crash (M0-J audit, M0-K1 fix).
@@ -383,7 +386,7 @@ export function ScreenAjustes({ go }: any) {
   useStore();
   const sellers = SellerService.getAll();
   const leads = LeadService.getAll();
-  const stages = PipelineService.getStages();
+  const currentUser = AuthService.getCurrentUser();
   const [tab, setTab] = useState('Empresa');
   const [companyForm, setCompanyForm] = useState(() => CompanyService.get());
   const [saved, setSaved] = useState(false);
@@ -391,17 +394,69 @@ export function ScreenAjustes({ go }: any) {
 
   // Same drag-and-drop pattern as the Pipeline Kanban (M0-K1): lifted React
   // state as the source of truth for what's being dragged, dataTransfer only
-  // used to satisfy Firefox's requirement to start a drag at all. "Novo" is
-  // pinned first, matching the text below the list.
+  // used to satisfy Firefox's requirement to start a drag at all. No caminho
+  // LOCAL o token do drag é o NAME (como sempre); no REMOTO é o stage.id.
   const [draggedStage, setDraggedStage] = useState<string | null>(null);
   const [overStage, setOverStage] = useState<string | null>(null);
-  const handleDropStage = (target: string) => {
-    const to = stages.indexOf(target);
-    if (draggedStage && draggedStage !== target && to !== 0) {
-      const order = [...stages];
-      order.splice(order.indexOf(draggedStage), 1);
-      order.splice(to, 0, draggedStage);
-      PipelineService.reorderStages(order);
+
+  // M1-D (commit 7): etapas podem vir do Supabase sob a flag, e o reorder
+  // remoto vai pela RPC. Permissão = a da tela hoje (admin-only via
+  // NAV_ROLES); a ampliação para manager é o Commit 8. Boolean(currentUser)
+  // significa "profile ativo resolvido" (AuthService rejeita inativos).
+  const canReorder = currentUser?.role === 'admin';
+  const pipeline = usePipelineStages({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.companyId ?? null,
+    userIsActive: Boolean(currentUser),
+    localStageNames: PipelineService.getStages(),
+  });
+  const reorder = useReorderStages({
+    companyId: currentUser?.companyId ?? null,
+    canReorder,
+  });
+
+  const isRemote = pipeline.source === 'remote';
+  const remoteReady = isRemote && pipeline.queryEnabled && !pipeline.isLoading
+    && !pipeline.isError && !pipeline.configError && !pipeline.isEmpty;
+  const stages: readonly PipelineStage[] = pipeline.stages;
+  const stageDragKey = (s: PipelineStage) => (isRemote ? s.id : s.name);
+  const stageDraggable = (s: PipelineStage, index: number) => {
+    if (isRemote) {
+      // Remoto: qualquer permutação é válida (a regra "Novo fixado" era só
+      // frontend e foi removida deste caminho — a RPC aceita qualquer ordem).
+      return remoteReady && canReorder && !reorder.isPending;
+    }
+    return index !== 0; // legado: "Novo" fixado no caminho local
+  };
+
+  const handleDropStage = (target: PipelineStage) => {
+    const targetKey = stageDragKey(target);
+    if (isRemote) {
+      // SEM optimistic update: a ordem visual só muda quando o cache é
+      // atualizado com o retorno da RPC (onSuccess do hook). Erro ⇒ ordem
+      // anterior permanece na tela.
+      if (draggedStage && draggedStage !== targetKey
+        && remoteReady && canReorder && !reorder.isPending) {
+        const ids = stages.map((s) => s.id);
+        const from = ids.indexOf(draggedStage);
+        const to = ids.indexOf(targetKey);
+        if (from >= 0 && to >= 0 && from !== to) {
+          const nextIds = [...ids];
+          nextIds.splice(from, 1);
+          nextIds.splice(to, 0, draggedStage);
+          reorder.reorderStages(nextIds).catch(() => { /* exposto em reorder.error */ });
+        }
+      }
+    } else {
+      // Legado intacto: names + "Novo" fixado + persistência local.
+      const names = stages.map((s) => s.name);
+      const to = names.indexOf(target.name);
+      if (draggedStage && draggedStage !== target.name && to !== 0) {
+        const order = [...names];
+        order.splice(order.indexOf(draggedStage), 1);
+        order.splice(to, 0, draggedStage);
+        PipelineService.reorderStages(order);
+      }
     }
     setDraggedStage(null);
     setOverStage(null);
@@ -447,20 +502,52 @@ export function ScreenAjustes({ go }: any) {
       {tab === 'Etapas' && (
         <LCard style={{ maxWidth: 520 }}>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Etapas do andamento</div>
-          <div style={{ fontSize: 13, color: 'var(--t-500)', marginBottom: 16 }}>Arraste para reordenar. A primeira etapa é sempre "Novo".</div>
-          {stages.map((s: string, i: number) => (
-            <div key={s}
-              draggable={i !== 0}
-              onDragStart={(e: any) => { e.dataTransfer.setData('text/plain', s); e.dataTransfer.effectAllowed = 'move'; setDraggedStage(s); }}
-              onDragEnd={() => { setDraggedStage(null); setOverStage(null); }}
-              onDragOver={(e: any) => { e.preventDefault(); if (draggedStage && overStage !== s) setOverStage(s); }}
-              onDrop={(e: any) => { e.preventDefault(); handleDropStage(s); }}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: `1px solid ${overStage === s ? 'var(--gold-line)' : 'var(--border)'}`, borderRadius: 10, marginBottom: 8, cursor: i !== 0 ? 'grab' : 'default', opacity: draggedStage === s ? 0.4 : 1, transition: 'opacity .12s, border-color .15s' }}>
-              <Icon name="list" size={16} stroke={2} style={{ color: 'var(--t-400)' }} />
-              <span style={{ fontWeight: 600, fontSize: 14 }}>{s}</span>
-              <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--t-400)' }}>{leads.filter((l: any) => l.stage === s).length} clientes</span>
+          <div style={{ fontSize: 13, color: 'var(--t-500)', marginBottom: 16 }}>
+            {isRemote
+              ? 'Arraste para reordenar as etapas da sua loja.'
+              : 'Arraste para reordenar. A primeira etapa é sempre "Novo".'}
+          </div>
+          {isRemote && !remoteReady ? (
+            <div data-testid="stages-remote-state" style={{ padding: '18px 6px', fontSize: 13.5, color: 'var(--t-500)' }}>
+              {!pipeline.queryEnabled ? 'Sessão indisponível. Entre novamente para gerenciar as etapas.'
+                : pipeline.isLoading ? 'Carregando etapas…'
+                : pipeline.configError ? 'As etapas da loja não correspondem à configuração esperada.'
+                : pipeline.isError ? 'Não foi possível carregar as etapas.'
+                : 'Nenhuma etapa configurada para sua loja.'}
             </div>
-          ))}
+          ) : (
+            <>
+              {stages.map((s: PipelineStage, i: number) => (
+                <div key={s.id} data-testid={`stage-row-${s.code}`}
+                  draggable={stageDraggable(s, i)}
+                  onDragStart={(e: any) => {
+                    if (!stageDraggable(s, i)) return;
+                    e.dataTransfer.setData('text/plain', stageDragKey(s));
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDraggedStage(stageDragKey(s));
+                  }}
+                  onDragEnd={() => { setDraggedStage(null); setOverStage(null); }}
+                  onDragOver={(e: any) => { e.preventDefault(); if (draggedStage && overStage !== stageDragKey(s)) setOverStage(stageDragKey(s)); }}
+                  onDrop={(e: any) => { e.preventDefault(); handleDropStage(s); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: `1px solid ${overStage === stageDragKey(s) ? 'var(--gold-line)' : 'var(--border)'}`, borderRadius: 10, marginBottom: 8, cursor: stageDraggable(s, i) ? 'grab' : 'default', opacity: draggedStage === stageDragKey(s) ? 0.4 : 1, transition: 'opacity .12s, border-color .15s' }}>
+                  <Icon name="list" size={16} stroke={2} style={{ color: 'var(--t-400)' }} />
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</span>
+                  <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--t-400)' }}>{leads.filter((l: any) => l.stage === s.name).length} clientes</span>
+                </div>
+              ))}
+              {isRemote && reorder.isPending && (
+                <div data-testid="stages-saving" style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 4 }}>Salvando ordem…</div>
+              )}
+              {isRemote && reorder.isError && !reorder.isPending && (
+                <div data-testid="stages-reorder-error" style={{ fontSize: 12.5, color: 'var(--red)', marginTop: 4 }}>
+                  {getReorderStagesErrorMessage(reorder.error)}
+                </div>
+              )}
+              {isRemote && reorder.isSuccess && !reorder.isPending && !reorder.isError && (
+                <div data-testid="stages-reorder-saved" style={{ fontSize: 12.5, color: 'var(--green)', marginTop: 4 }}>Ordem salva.</div>
+              )}
+            </>
+          )}
         </LCard>
       )}
     </LightScreen>
