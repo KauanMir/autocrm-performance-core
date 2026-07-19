@@ -4,6 +4,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { User } from '@/lib/data';
 
 // jsdom não implementa Element.scrollTo (App.go rola o #scroll-host) —
@@ -80,7 +81,14 @@ function user(role: User['role']): User {
 
 async function renderApp(initial: User | null) {
   m.restoredUser.current = initial;
-  render(<App />);
+  // App usa useQueryCacheIdentity (commit 9), que exige um QueryClientProvider
+  // na árvore — igual à produção via AppProviders.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>,
+  );
   await waitFor(() => expect(screen.queryByText('Carregando…')).toBeNull());
 }
 

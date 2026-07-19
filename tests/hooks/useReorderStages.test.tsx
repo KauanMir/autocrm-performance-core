@@ -10,6 +10,7 @@ import {
   REORDER_LOCAL_ERRORS,
 } from '@/lib/hooks/useReorderStages';
 import { pipelineStageQueryKeys } from '@/lib/pipeline/queryKeys';
+import { resetQueryCache } from '@/lib/query/resetQueryCache';
 
 const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
 
@@ -173,6 +174,39 @@ describe('useReorderStages — respostas', () => {
     resolveRpc({ data: RPC_ROWS, error: null });
     await pending;
     await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+    expect((queryClient.getQueryData(KEY_A) as { ok: boolean }).ok).toBe(true);
+  });
+});
+
+describe('useReorderStages — identidade obsoleta (commit 9)', () => {
+  it('reset do cache durante a RPC descarta o resultado: erro estável, sem setQueryData/invalidate', async () => {
+    let resolveRpc!: (v: { data: unknown; error: unknown }) => void;
+    mocks.rpc.mockReturnValue(new Promise((resolve) => { resolveRpc = resolve; }));
+    const { hook, queryClient, invalidateSpy } = setup();
+
+    const pending = hook.result.current.reorderStages(IDS);
+    const settled = pending.catch((e) => e);
+    await waitFor(() => expect(hook.result.current.isPending).toBe(true));
+
+    // Troca de identidade no meio do voo (logout/troca de empresa).
+    resetQueryCache(queryClient);
+    resolveRpc({ data: RPC_ROWS, error: null });
+
+    const err = await settled;
+    expect((err as Error).message).toBe(REORDER_LOCAL_ERRORS.staleIdentity);
+    expect(getReorderStagesErrorMessage(err))
+      .toBe('A sessão mudou antes da conclusão da operação.');
+    // O cache limpo pelo reset NÃO é repovoado pela resposta antiga.
+    expect(queryClient.getQueryData(KEY_A)).toBeUndefined();
+    expect(queryClient.getQueryData(KEY_B)).toBeUndefined();
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+    expect(invalidateSpy).not.toHaveBeenCalled();
+    await waitFor(() => expect(hook.result.current.isPending).toBe(false));
+  });
+
+  it('reorder normal sem mudança de geração continua atualizando o cache', async () => {
+    const { hook, queryClient } = setup();
+    await hook.result.current.reorderStages(IDS);
     expect((queryClient.getQueryData(KEY_A) as { ok: boolean }).ok).toBe(true);
   });
 });

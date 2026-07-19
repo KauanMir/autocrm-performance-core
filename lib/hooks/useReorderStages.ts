@@ -8,6 +8,7 @@
 // Identidade vem por parâmetro — nada de AuthService aqui.
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase/client';
+import { getQueryCacheGeneration } from '@/lib/query/cacheIdentity';
 import { pipelineStageQueryKeys } from '@/lib/pipeline/queryKeys';
 import {
   adaptPipelineStageRows,
@@ -30,6 +31,7 @@ export const REORDER_LOCAL_ERRORS = {
   duplicateIds: 'reorder-duplicate-ids',
   emptyResponse: 'reorder-empty-response',
   configMismatch: 'reorder-config-mismatch',
+  staleIdentity: 'reorder-stale-identity',
 } as const;
 
 type OkStages = Extract<AdaptPipelineStagesResult, { ok: true }>;
@@ -65,6 +67,9 @@ export function getReorderStagesErrorMessage(error: unknown): string {
   if (message === REORDER_LOCAL_ERRORS.configMismatch) {
     return 'As etapas retornadas não correspondem à configuração esperada.';
   }
+  if (message === REORDER_LOCAL_ERRORS.staleIdentity) {
+    return 'A sessão mudou antes da conclusão da operação.';
+  }
   return 'Não foi possível salvar a nova ordem das etapas.';
 }
 
@@ -89,10 +94,22 @@ export function useReorderStages(
         throw new Error(REORDER_LOCAL_ERRORS.duplicateIds);
       }
 
+      // Geração capturada imediatamente antes da RPC (commit 9): se a
+      // identidade mudar enquanto a RPC voa, o resultado é descartado.
+      const generationAtStart = getQueryCacheGeneration(queryClient);
+
       // Payload: array NOVO e mutável — o array recebido nunca é modificado.
       const { data, error } = await supabase.rpc('reorder_pipeline_stages', {
         p_ordered_ids: [...orderedIds],
       });
+
+      // Resposta obsoleta: a sessão/empresa mudou durante a chamada. A RPC
+      // pode até ter concluído no banco da identidade antiga — aqui protegemos
+      // apenas o cache e a sessão nova; nada de desfazer remoto.
+      if (getQueryCacheGeneration(queryClient) !== generationAtStart) {
+        throw new Error(REORDER_LOCAL_ERRORS.staleIdentity);
+      }
+
       if (error) throw error;
       // Reorder válido sempre retorna os stages da empresa — null é anômalo.
       if (!data) throw new Error(REORDER_LOCAL_ERRORS.emptyResponse);

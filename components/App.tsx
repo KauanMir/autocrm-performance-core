@@ -7,6 +7,7 @@ import { NAV_ROLES, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { isRemoteStagesEnabled } from '@/lib/flags';
 import { canAccessStageSettings } from '@/lib/capabilities';
+import { useQueryCacheIdentity } from '@/lib/hooks/useQueryCacheIdentity';
 import { subscribeStore } from '@/lib/store';
 import { AuthService, SellerService, TaskService } from '@/lib/services';
 import { AuthFlow } from '@/components/auth/AuthFlow';
@@ -127,6 +128,15 @@ export function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authView, setAuthView] = useState('login');
   const [, _setTick] = useState(0);
+
+  // M1-D (commit 9): identidade comercial → limpeza do cache de queries.
+  // Boolean(currentUser) = "profile ativo resolvido" (AuthService não mantém
+  // User com profile inativo). Chamado incondicionalmente, independe da flag.
+  useQueryCacheIdentity({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.companyId ?? null,
+    isActive: Boolean(currentUser),
+  });
 
   const go = (id: string) => {
     if (!currentUser) return;
