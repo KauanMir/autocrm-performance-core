@@ -1,10 +1,12 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard } from '@/components/ui/kit';
 import { STAGES, TASK_STATE } from '@/lib/data';
 import { useStore } from '@/lib/store';
 import { LeadService, TaskService, PipelineService, AuthService, SellerService } from '@/lib/services';
+import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
+import type { PipelineStage } from '@/lib/pipeline/adapter';
 
 const STAGE_TONE: Record<string, string> = {
   'Novo': 'green', 'Qualificado': 'green', 'Visita agendada': 'amber',
@@ -120,6 +122,7 @@ function PipeCard({ lead, go, dragging, onDragStart, onDragEnd }: any) {
   return (
     <div
       draggable
+      data-testid={`pipe-card-${lead.id}`}
       onDragStart={(e: any) => {
         // dataTransfer.setData is required for Firefox to allow the drag to start at
         // all, but the id is read back from lifted React state on drop, not from
@@ -152,6 +155,30 @@ function PipeCard({ lead, go, dragging, onDragStart, onDragEnd }: any) {
   );
 }
 
+// M1-D: cores das colunas do Kanban por CODE (contrato estável), não por name —
+// o name é editável no futuro; o code não. O caminho local também recebe os
+// codes oficiais via adaptLocalStageNames, então uma única função serve os
+// dois sources. Code desconhecido cai no tom neutro.
+const STAGE_CODE_TONES: Record<string, string> = {
+  new: '#8B8B93', qualified: '#27C75F', visit_scheduled: '#FFA31F',
+  negotiation: '#3B82F6', closing: '#E8CE72',
+};
+const NEUTRAL_STAGE_TONE = '#8B8B93';
+export function getPipelineStageTone(code: string): string {
+  return STAGE_CODE_TONES[code] ?? NEUTRAL_STAGE_TONE;
+}
+
+function KanbanStateCard({ testId, children, onRetry }: { testId: string; children: React.ReactNode; onRetry?: () => void }) {
+  return (
+    <LCard style={{ minHeight: 360, display: 'grid', placeItems: 'center' }}>
+      <div data-testid={testId} style={{ display: 'grid', placeItems: 'center', gap: 14, textAlign: 'center' }}>
+        <div style={{ color: 'var(--t-500)', fontSize: 14, maxWidth: 420 }}>{children}</div>
+        {onRetry && <LBtn kind="primary" icon="refresh" onClick={onRetry}>Tentar novamente</LBtn>}
+      </div>
+    </LCard>
+  );
+}
+
 export function ScreenAndamento({ go }: any) {
   useStore();
   const allLeads = LeadService.getAll(); // seller already RBAC-scoped to their own leads here
@@ -164,20 +191,129 @@ export function ScreenAndamento({ go }: any) {
   // either redundant for sellers or meaningless for manager/admin, who have
   // no sellerId of their own to filter "mine" by).
   const [sellerFilter, setSellerFilter] = useState<string>('Todos');
-  const leads = (!isSeller && sellerFilter !== 'Todos')
-    ? allLeads.filter((l: any) => l.sellerId === sellerFilter)
-    : allLeads;
-  const stages = PipelineService.getStages();
   const [overStage, setOverStage] = useState<string | null>(null);
   // Source of truth for "which lead is being dragged" — deliberately not
   // dataTransfer.getData() at drop time, which is what silently dropped
   // moves before they ever reached PipelineService.moveCard (M0-K1.5, bug 1).
   const [draggedId, setDraggedId] = useState<string | null>(null);
-  const colTone: Record<string, string> = {
-    'Novo': '#8B8B93', 'Qualificado': '#27C75F', 'Visita agendada': '#FFA31F',
-    'Em negociação': '#3B82F6', 'Fechamento': '#E8CE72',
-  };
+
+  // M1-D: colunas podem vir do Supabase sob a feature flag. Identidade já
+  // resolvida pelo caller do app: AuthService só cacheia profiles ATIVOS
+  // (_loadProfile rejeita is_active=false e login desfaz meia-sessão), então
+  // Boolean(currentUser) significa "profile ativo resolvido" — nunca um
+  // true fixo. Com a flag OFF o hook devolve os mesmos names locais de
+  // PipelineService.getStages() adaptados, sem nenhuma chamada remota.
+  const pipeline = usePipelineStages({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.companyId ?? null,
+    userIsActive: Boolean(currentUser),
+    localStageNames: PipelineService.getStages(),
+  });
+
+  // Diagnóstico de configuração incompatível: detalhes só em development —
+  // o usuário final vê apenas a mensagem amigável do estado dedicado.
+  useEffect(() => {
+    if (pipeline.configError && process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-console
+      console.error('[AutoCRM] pipeline_stages name-mismatch:', pipeline.configError);
+    }
+  }, [pipeline.configError]);
+
+  const leads = (!isSeller && sellerFilter !== 'Todos')
+    ? allLeads.filter((l: any) => l.sellerId === sellerFilter)
+    : allLeads;
   const endDrag = () => { setDraggedId(null); setOverStage(null); };
+
+  // Estados exclusivos do caminho remoto (flag ON). Com source='local' nada
+  // disso aparece — o Kanban renderiza direto, como sempre.
+  const isRemote = pipeline.source === 'remote';
+  const showDisabled = isRemote && !pipeline.queryEnabled;
+  const showSkeleton = isRemote && pipeline.queryEnabled && pipeline.isLoading && !pipeline.hasData;
+  const showConfigError = isRemote && pipeline.configError !== null;
+  const showBlockingError = isRemote && pipeline.isError && !pipeline.hasData && !showConfigError;
+  const showEmpty = isRemote && pipeline.isEmpty && !pipeline.isError && !showConfigError;
+  const showStaleWarning = isRemote && pipeline.isError && pipeline.hasData;
+
+  let body: React.ReactNode;
+  if (showDisabled) {
+    // Defensivo: App.tsx nunca monta telas sem currentUser ativo (mostra a
+    // AuthFlow antes) — se chegar aqui, a sessão/profile ficou indisponível.
+    body = (
+      <KanbanStateCard testId="kanban-state-disabled">
+        Sessão indisponível. Entre novamente para ver o pipeline da sua loja.
+      </KanbanStateCard>
+    );
+  } else if (showSkeleton) {
+    body = (
+      <div data-testid="kanban-skeleton" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(210px, 1fr))', gap: 14, overflowX: 'auto', paddingBottom: 8 }}>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div key={i} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 12, minHeight: 360, opacity: 0.55 }} />
+        ))}
+      </div>
+    );
+  } else if (showConfigError) {
+    body = (
+      <KanbanStateCard testId="kanban-state-config-error" onRetry={() => pipeline.refetch()}>
+        As etapas da loja não correspondem à configuração esperada.
+      </KanbanStateCard>
+    );
+  } else if (showBlockingError) {
+    body = (
+      <KanbanStateCard testId="kanban-state-error" onRetry={() => pipeline.refetch()}>
+        Não foi possível carregar as etapas do pipeline.
+      </KanbanStateCard>
+    );
+  } else if (showEmpty) {
+    body = (
+      <KanbanStateCard testId="kanban-state-empty">
+        Nenhuma etapa configurada para sua loja.
+      </KanbanStateCard>
+    );
+  } else {
+    body = (
+      <>
+        {showStaleWarning && (
+          <div data-testid="kanban-stale-warning" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', marginBottom: 12, borderRadius: 10, background: 'var(--amber-bg, rgba(255,163,31,.08))', border: '1px solid var(--amber-line, rgba(255,163,31,.3))', color: 'var(--t-700)', fontSize: 13 }}>
+            <Icon name="alert" size={15} stroke={2.2} style={{ color: 'var(--amber)' }} />
+            <span>Não foi possível atualizar as etapas. Exibindo dados anteriores.</span>
+            <button onClick={() => pipeline.refetch()} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--t-700)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, textDecoration: 'underline' }}>Tentar novamente</button>
+          </div>
+        )}
+        <div data-testid="kanban-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${pipeline.stages.length}, minmax(210px, 1fr))`, gap: 14, overflowX: 'auto', paddingBottom: 8 }}>
+          {pipeline.stages.map((stage: PipelineStage) => {
+            // Cards continuam vinculados pelo NAME (leads são 100% locais até
+            // a migração dos leads) — nunca por stage.id/code.
+            const items = leads.filter((l: any) => l.stage === stage.name);
+            const isOver = overStage === stage.name;
+            return (
+              <div key={stage.id} data-testid={`kanban-col-${stage.code}`} data-terminal={stage.isTerminal ? 'true' : 'false'}
+                onDragOver={(e: any) => { e.preventDefault(); if (draggedId && overStage !== stage.name) setOverStage(stage.name); }}
+                onDragLeave={() => setOverStage((s: string | null) => (s === stage.name ? null : s))}
+                onDrop={(e: any) => {
+                  e.preventDefault();
+                  if (draggedId) PipelineService.moveCard(draggedId, stage.name);
+                  endDrag();
+                }}
+                style={{ background: 'var(--surface-2)', border: `1px solid ${isOver ? 'var(--gold-line)' : 'var(--border)'}`, borderRadius: 12, display: 'flex', flexDirection: 'column', minHeight: 360, transition: 'border-color .15s' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
+                  <span data-testid={`kanban-tone-${stage.code}`} style={{ width: 8, height: 8, borderRadius: 3, background: getPipelineStageTone(stage.code) }} />
+                  <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--t-900)' }}>{stage.name}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--t-500)', background: 'rgba(255,255,255,.06)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 8px' }}>{items.length}</span>
+                </div>
+                <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+                  {items.length ? items.map((l: any) => (
+                    <PipeCard key={l.id} lead={l} go={go} dragging={draggedId === l.id} onDragStart={setDraggedId} onDragEnd={endDrag} />
+                  ))
+                    : <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--t-400)', fontSize: 12.5, textAlign: 'center', padding: 20 }}>Nenhum cliente nesta etapa</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+
   return (
     <LightScreen>
       <PageHead title="Em progresso" sub="Onde cada cliente está no caminho até a venda. Arraste de etapa quando avançar." />
@@ -187,35 +323,7 @@ export function ScreenAndamento({ go }: any) {
           {sellers.map((s: any) => <Chip key={s.id} active={sellerFilter === s.id} onClick={() => setSellerFilter(s.id)}>{s.first}</Chip>)}
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${stages.length}, minmax(210px, 1fr))`, gap: 14, overflowX: 'auto', paddingBottom: 8 }}>
-        {stages.map((stage: string) => {
-          const items = leads.filter((l: any) => l.stage === stage);
-          const isOver = overStage === stage;
-          return (
-            <div key={stage}
-              onDragOver={(e: any) => { e.preventDefault(); if (draggedId && overStage !== stage) setOverStage(stage); }}
-              onDragLeave={() => setOverStage((s: string | null) => (s === stage ? null : s))}
-              onDrop={(e: any) => {
-                e.preventDefault();
-                if (draggedId) PipelineService.moveCard(draggedId, stage);
-                endDrag();
-              }}
-              style={{ background: 'var(--surface-2)', border: `1px solid ${isOver ? 'var(--gold-line)' : 'var(--border)'}`, borderRadius: 12, display: 'flex', flexDirection: 'column', minHeight: 360, transition: 'border-color .15s' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
-                <span style={{ width: 8, height: 8, borderRadius: 3, background: colTone[stage] }} />
-                <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--t-900)' }}>{stage}</span>
-                <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--t-500)', background: 'rgba(255,255,255,.06)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 8px' }}>{items.length}</span>
-              </div>
-              <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-                {items.length ? items.map((l: any) => (
-                  <PipeCard key={l.id} lead={l} go={go} dragging={draggedId === l.id} onDragStart={setDraggedId} onDragEnd={endDrag} />
-                ))
-                  : <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--t-400)', fontSize: 12.5, textAlign: 'center', padding: 20 }}>Nenhum cliente nesta etapa</div>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {body}
     </LightScreen>
   );
 }
