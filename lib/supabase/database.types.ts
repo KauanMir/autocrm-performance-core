@@ -34,6 +34,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_log: {
+        Row: {
+          action: string
+          actor_profile_id: string | null
+          after_data: Json | null
+          before_data: Json | null
+          company_id: string | null
+          entity_id: string | null
+          entity_type: string
+          id: string
+          occurred_at: string
+          origin: string | null
+          reason: string | null
+          result: string
+        }
+        Insert: {
+          action: string
+          actor_profile_id?: string | null
+          after_data?: Json | null
+          before_data?: Json | null
+          company_id?: string | null
+          entity_id?: string | null
+          entity_type: string
+          id?: string
+          occurred_at?: string
+          origin?: string | null
+          reason?: string | null
+          result: string
+        }
+        Update: {
+          action?: string
+          actor_profile_id?: string | null
+          after_data?: Json | null
+          before_data?: Json | null
+          company_id?: string | null
+          entity_id?: string | null
+          entity_type?: string
+          id?: string
+          occurred_at?: string
+          origin?: string | null
+          reason?: string | null
+          result?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "audit_log_actor_profile_id_fkey"
+            columns: ["actor_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "audit_log_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           cnpj: string | null
@@ -126,6 +186,79 @@ export type Database = {
           {
             foreignKeyName: "company_memberships_profile_id_fkey"
             columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invites: {
+        Row: {
+          accepted_at: string | null
+          accepted_profile_id: string | null
+          company_id: string | null
+          created_at: string
+          email: string
+          email_normalized: string | null
+          expires_at: string
+          id: string
+          invited_by_profile_id: string | null
+          name: string
+          role_kind: Database["public"]["Enums"]["invite_role_kind"]
+          status: Database["public"]["Enums"]["invite_status"]
+          token_hash: string
+          updated_at: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          accepted_profile_id?: string | null
+          company_id?: string | null
+          created_at?: string
+          email: string
+          email_normalized?: string | null
+          expires_at: string
+          id?: string
+          invited_by_profile_id?: string | null
+          name: string
+          role_kind: Database["public"]["Enums"]["invite_role_kind"]
+          status?: Database["public"]["Enums"]["invite_status"]
+          token_hash: string
+          updated_at?: string
+        }
+        Update: {
+          accepted_at?: string | null
+          accepted_profile_id?: string | null
+          company_id?: string | null
+          created_at?: string
+          email?: string
+          email_normalized?: string | null
+          expires_at?: string
+          id?: string
+          invited_by_profile_id?: string | null
+          name?: string
+          role_kind?: Database["public"]["Enums"]["invite_role_kind"]
+          status?: Database["public"]["Enums"]["invite_status"]
+          token_hash?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invites_accepted_profile_id_fkey"
+            columns: ["accepted_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invites_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invites_invited_by_profile_id_fkey"
+            columns: ["invited_by_profile_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -822,6 +955,13 @@ export type Database = {
     Enums: {
       company_role: "manager" | "seller"
       company_status: "implantacao" | "ativa" | "suspensa" | "cancelada"
+      invite_role_kind: "super_admin" | "manager" | "seller"
+      invite_status:
+        | "pending"
+        | "accepted"
+        | "expired"
+        | "canceled"
+        | "superseded"
       lead_duplicate_status: "none" | "accessible" | "restricted"
       lead_event_type:
         | "call_outcome_visit"
@@ -978,6 +1118,14 @@ export const Constants = {
     Enums: {
       company_role: ["manager", "seller"],
       company_status: ["implantacao", "ativa", "suspensa", "cancelada"],
+      invite_role_kind: ["super_admin", "manager", "seller"],
+      invite_status: [
+        "pending",
+        "accepted",
+        "expired",
+        "canceled",
+        "superseded",
+      ],
       lead_duplicate_status: ["none", "accessible", "restricted"],
       lead_event_type: [
         "call_outcome_visit",
