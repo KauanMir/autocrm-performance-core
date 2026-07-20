@@ -158,22 +158,16 @@ select throws_ok($$select public.current_profile_seller_id_for_company('22eeeeee
   '42501', null, 'current_profile_seller_id_for_company: seller de outra empresa nem valida acesso (require_company_access nega primeiro)');
 reset role;
 
--- ambiguidade real: sellers.membership_id nao tem constraint UNIQUE no
--- schema atual (pre-existente desde m1f_s1_01) — nada estruturalmente
--- impede duas linhas de sellers apontarem para a MESMA membership. Prova
--- empirica de que a funcao falha fechado (NULL) nesse cenario, em vez de
--- escolher uma linha arbitrariamente ou lancar erro de "mais de uma linha".
-insert into public.sellers (id, company_id, name, first_name, profile_id, membership_id) values (
-  'hSeller1Dup', '11eeeeee-1111-1111-1111-111111111111', 'Seller Helper 1 Duplicado', 'S1D',
-  'a1000000-0000-0000-0000-000000000002',
-  (select id from public.company_memberships where profile_id = 'a1000000-0000-0000-0000-000000000002')
-);
-select set_config('request.jwt.claims', '{"sub":"a1000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
-set local role authenticated;
-select is(public.current_profile_seller_id_for_company('11eeeeee-1111-1111-1111-111111111111'), null::text,
-  'current_profile_seller_id_for_company: duas linhas de sellers para a mesma membership -> NULL (falha fechado, nao escolha arbitraria)');
-reset role;
-delete from public.sellers where id = 'hSeller1Dup';
+-- ATUALIZAÇÃO (m1f_s2_015): o cenário "duas linhas de sellers para a mesma
+-- membership" descrito aqui deixou de ser construível por INSERT comum —
+-- a migration m1f_s2_015 (posterior a este arquivo) adicionou
+-- sellers_membership_id_uidx (UNIQUE em sellers.membership_id), fechando a
+-- lacuna estrutural que tornava esse teste possível. O padrão "falha
+-- fechado" (count(*) = 1) do helper permanece como defesa em profundidade
+-- no código, mas a via empírica de prová-lo por duplicidade real de linha
+-- não existe mais — a garantia agora é validada no nível do banco, coberta
+-- em supabase/tests/19_m1f_s2_seller_membership_uniqueness.sql (constraint
+-- rejeita a segunda linha com 23505, antes mesmo de o helper ser chamado).
 
 select * from finish();
 rollback;
