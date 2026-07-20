@@ -568,6 +568,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      can_access_company: {
+        Args: { p_target_company_id: string }
+        Returns: boolean
+      }
       check_lead_phone_duplicate: {
         Args: { p_phone: string }
         Returns: {
@@ -617,13 +621,27 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      current_membership_company_id: { Args: never; Returns: string }
+      current_membership_role: {
+        Args: never
+        Returns: Database["public"]["Enums"]["company_role"]
+      }
       current_profile_company_id: { Args: never; Returns: string }
       current_profile_role: {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
       }
       current_profile_seller_id: { Args: never; Returns: string }
+      current_profile_seller_id_for_company: {
+        Args: { p_target_company_id: string }
+        Returns: string
+      }
       is_manager_or_admin: { Args: never; Returns: boolean }
+      is_manager_or_platform: {
+        Args: { p_target_company_id: string }
+        Returns: boolean
+      }
+      is_platform_super_admin: { Args: never; Returns: boolean }
       move_lead_to_stage: {
         Args: {
           p_expected_version?: number
@@ -678,6 +696,10 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      require_company_access: {
+        Args: { p_target_company_id: string }
+        Returns: string
       }
       unarchive_lead: {
         Args: { p_expected_version: number; p_lead_id: string }
