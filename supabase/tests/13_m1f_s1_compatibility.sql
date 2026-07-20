@@ -2,15 +2,26 @@
 -- RPCs do M1-E continuam funcionando exatamente como antes, mesmo com
 -- company_memberships/platform_role/sellers.membership_id presentes no
 -- schema. Roda contra o estado seedado por supabase/seed.sql (os 4
--- usuários legados de sempre) — que, no momento em que este arquivo roda,
--- NÃO têm nenhuma company_memberships (o backfill de m1f_s1_02 executa
--- ANTES do seed.sql, ver nota lá): isso é exatamente o que prova que o
--- runtime atual não depende da tabela nova. Rollback ao final.
+-- usuários legados de sempre).
+--
+-- ATUALIZAÇÃO (M1-F S2): a partir de supabase/seed.sql Parte 4 (adicionada
+-- no S2, catch-up + policy do S2 aprovados), os 4 usuários seedados PASSAM
+-- a ter company_memberships (mesmo mapeamento das migrations: admin/manager
+-- -> MANAGER, seller -> SELLER) — a asserção original ("0 memberships,
+-- backfill roda antes do seed.sql") descrevia com precisão o estado do S1
+-- isoladamente, mas deixou de refletir o estado real depois do S2. A
+-- intenção do teste é inalterada e continua válida: provar que o runtime
+-- legado (AuthService, helpers antigos, RLS de leads, as 9 RPCs do M1-E)
+-- funciona de forma IDÊNTICA independente de company_memberships existir
+-- ou não — antes provava isso com 0 linhas, agora prova o mesmo com 4
+-- linhas presentes (prova mais forte, não mais fraca: nenhum comportamento
+-- observável mudou mesmo com os dados novos no lugar). Rollback ao final.
 begin;
 create extension if not exists pgtap;
 select * from no_plan();
 
--- ── usuários seedados não têm nenhuma membership ────────────────────────
+-- ── usuários seedados têm exatamente 1 membership cada (S2: seed.sql Parte
+--    4 cobre o que o catch-up backfill sozinho não cobre neste ambiente) ─
 select is(
   (select count(*)::int from public.company_memberships
     where profile_id in (
@@ -18,7 +29,7 @@ select is(
       '22222222-2222-2222-2222-222222222222',
       '33333333-3333-3333-3333-333333333333',
       '44444444-4444-4444-4444-444444444444')),
-  0, 'usuarios seedados (ADMIN/MANAGER/2 SELLER) nao tem membership — backfill roda antes do seed.sql');
+  4, 'usuarios seedados (ADMIN/MANAGER/2 SELLER) tem exatamente 1 membership cada, via seed.sql Parte 4 (S2)');
 
 -- ── helpers de RLS continuam retornando exatamente o que retornavam ─────
 select set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}', true);

@@ -142,6 +142,12 @@ select is(
 --    assignment em profiles — busca textual na definição de toda função
 --    SECURITY DEFINER do schema public, exceto as que este próprio módulo
 --    criou (que legitimamente mencionam a coluna) ───────────────────────
+-- ATUALIZAÇÃO (M1-F S2): is_platform_super_admin() foi adicionada à lista
+-- de exclusão — é o helper de leitura do S2 cuja função inteira é
+-- verificar platform_role (design §7/§8), não um caminho de escrita/mass
+-- assignment. A intenção do teste (nenhuma RPC do M1-C/M1-E, nem nenhum
+-- helper de ESCRITA, referencia platform_role) permanece 100% coberta:
+-- is_platform_super_admin() é STABLE (só leitura), nunca faz UPDATE.
 select is(
   (select count(*)::int
      from pg_proc p
@@ -149,9 +155,15 @@ select is(
     where n.nspname = 'public'
       and p.prosecdef
       and p.proname not in ('profiles_guard_platform_role', 'company_memberships_check_mutation',
-                             'sellers_check_membership_consistency')
+                             'sellers_check_membership_consistency', 'is_platform_super_admin')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
+-- Reforço específico do S2: is_platform_super_admin() referencia
+-- platform_role, mas é STABLE (nunca escreve) — confirmado explicitamente
+-- para não deixar a exclusão acima como um "buraco" não verificado.
+select is(
+  (select p.provolatile from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = 'is_platform_super_admin'),
+  's', 'is_platform_super_admin() e STABLE (somente leitura) — a excecao acima nao abre caminho de escrita');
 select is(
   (select count(*)::int
      from pg_proc p
