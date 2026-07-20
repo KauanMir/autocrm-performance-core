@@ -598,6 +598,33 @@ export type Database = {
           status: Database["public"]["Enums"]["lead_duplicate_status"]
         }[]
       }
+      create_company: {
+        Args: {
+          p_cnpj?: string
+          p_name: string
+          p_phone?: string
+          p_timezone?: string
+          p_trade_name?: string
+        }
+        Returns: {
+          cnpj: string | null
+          created_at: string
+          created_by_profile_id: string | null
+          id: string
+          name: string
+          phone: string | null
+          status: Database["public"]["Enums"]["company_status"]
+          timezone: string
+          trade_name: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "companies"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_lead: {
         Args: {
           p_car: string
