@@ -30,7 +30,7 @@ let _cachedUser: User | null = null;
 async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise<User | null> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, company_id, name, email, role, seller_id, is_active')
+    .select('id, company_id, name, email, role, seller_id, is_active, platform_role')
     .eq('id', authUserId)
     .single<ProfileRow>();
   if (error || !data || !data.is_active) return null;
@@ -41,6 +41,7 @@ async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise
     role: data.role,
     sellerId: data.seller_id,
     companyId: data.company_id,
+    platformRole: data.platform_role,
   };
 }
 
@@ -116,6 +117,13 @@ export const AuthService = {
   // change anything relies on.
   isSeller(): boolean {
     return AuthService.currentRole() === 'seller';
+  },
+
+  // M1-F S3-B: platform_role, independente de role/companyId (um Super
+  // Admin nunca tem empresa). UX/exibição apenas — nunca a autoridade real
+  // (RLS + is_platform_super_admin() no banco decidem de verdade).
+  isPlatformSuperAdmin(): boolean {
+    return _cachedUser?.platformRole === 'super_admin';
   },
 };
 

@@ -5,8 +5,8 @@ import { NAV, Avatar, PageHead, LCard, LightScreen } from '@/components/ui/kit';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle, TweakButton } from '@/components/ui/TweaksPanel';
 import { NAV_ROLES, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
-import { isRemoteStagesEnabled } from '@/lib/flags';
-import { canAccessStageSettings } from '@/lib/capabilities';
+import { isRemoteStagesEnabled, isPlatformAdminEnabled } from '@/lib/flags';
+import { canAccessStageSettings, canAccessPlatformAdmin } from '@/lib/capabilities';
 import { useQueryCacheIdentity } from '@/lib/hooks/useQueryCacheIdentity';
 import { subscribeStore } from '@/lib/store';
 import { AuthService, SellerService, TaskService } from '@/lib/services';
@@ -14,6 +14,7 @@ import { AuthFlow } from '@/components/auth/AuthFlow';
 import { Home } from '@/components/screens/Home';
 import { ScreenClientes, ScreenAndamento, ScreenPendencias } from '@/components/screens/ScreensOps';
 import { ScreenVisitas, ScreenPropostas, ScreenVendas, ScreenResultados, ScreenAjustes } from '@/components/screens/ScreensBiz';
+import { ScreenEmpresas } from '@/components/screens/ScreenEmpresas';
 import { FlowLayer } from '@/components/flows/FlowLayer';
 
 const TWEAK_DEFAULTS = {
@@ -26,13 +27,24 @@ const TWEAK_DEFAULTS = {
 // ganha 'ajustes' SOMENTE com a flag remota ON (e dentro da tela vê apenas a
 // aba Etapas — ver ScreenAjustes). Com a flag OFF a lista é idêntica ao
 // legado. A combinação capability×flag mora aqui, nunca em lib/capabilities.
+//
+// M1-F S3-B: 'empresas' segue o mesmo molde — só entra com
+// NEXT_PUBLIC_FF_PLATFORM_ADMIN ON E platformRole === 'super_admin'
+// (canAccessPlatformAdmin). Independente da condição de 'ajustes' acima:
+// um Super Admin nunca tem `role`/`companyId` de empresa, então NAV_ROLES[
+// user.role] pode nem fazer sentido para ele — mesmo assim a entrada
+// 'empresas' é adicionada normalmente, sem depender de `base`.
 function allowedNavIds(user: User | null): string[] {
   if (!user) return [];
   const base = NAV_ROLES[user.role] || [];
-  if (!base.includes('ajustes') && isRemoteStagesEnabled() && canAccessStageSettings(user)) {
-    return [...base, 'ajustes'];
+  let ids = base;
+  if (!ids.includes('ajustes') && isRemoteStagesEnabled() && canAccessStageSettings(user)) {
+    ids = [...ids, 'ajustes'];
   }
-  return base;
+  if (isPlatformAdminEnabled() && canAccessPlatformAdmin(user)) {
+    ids = [...ids, 'empresas'];
+  }
+  return ids;
 }
 
 function Placeholder({ title }: { title: string }) {
@@ -194,6 +206,7 @@ export function App() {
     vendas: ScreenVendas,
     resultados: ScreenResultados,
     ajustes: ScreenAjustes,
+    empresas: ScreenEmpresas,
   };
 
   // Guarda SÍNCRONA de render: uma tela proibida nunca é renderizada, nem por

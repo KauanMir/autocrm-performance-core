@@ -13,6 +13,10 @@ export const NAV = [
   { id: 'vendas',    label: 'Vendas',       icon: 'trophy' },
   { id: 'resultados',label: 'Resultados',   icon: 'bars' },
   { id: 'ajustes',   label: 'Ajustes',      icon: 'gear' },
+  // M1-F S3-B: só aparece para Super Admin da plataforma com a flag
+  // NEXT_PUBLIC_FF_PLATFORM_ADMIN ON — visibilidade real decidida em
+  // allowedNavIds (components/App.tsx), nunca aqui.
+  { id: 'empresas',  label: 'Empresas',     icon: 'building' },
 ];
 
 export const URG: Record<string, { c: string; bg: string; line: string; label: string }> = {

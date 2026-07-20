@@ -34,6 +34,15 @@ export interface User {
   role: 'admin' | 'manager' | 'seller';
   sellerId: string | null;
   companyId: string | null;
+  // M1-F S3-B: platform_role da profile (independente de `role`/`companyId`
+  // — um Super Admin não tem empresa). Opcional (não `| null` obrigatório)
+  // de propósito: dezenas de fixtures de teste pré-existentes constroem
+  // User sem este campo — undefined e null são equivalentes em todo check
+  // (`=== 'super_admin'`), então tornar obrigatório só quebraria testes
+  // sem relação nenhuma com o S3-B, sem ganho de segurança real (a
+  // autoridade nunca foi este campo, sempre RLS/is_platform_super_admin()
+  // no banco). null para todo usuário comum carregado via _loadProfile.
+  platformRole?: 'super_admin' | null;
 }
 
 // LEGACY — kept only so a couple of display-name lookups (FlowVerCliente's

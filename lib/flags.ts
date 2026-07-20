@@ -1,19 +1,25 @@
-// lib/flags.ts — feature flags dos módulos remotos (M1-D stages, M1-E leads).
+// lib/flags.ts — feature flags dos módulos remotos (M1-D stages, M1-E leads,
+// M1-F platform admin).
 //
 // OFF por padrão. A ativação real acontece somente via variável de ambiente
-// (NEXT_PUBLIC_FF_REMOTE_STAGES / NEXT_PUBLIC_FF_REMOTE_LEADS) depois da
-// validação de cada módulo — nenhum commit liga flag por padrão.
+// (NEXT_PUBLIC_FF_REMOTE_STAGES / NEXT_PUBLIC_FF_REMOTE_LEADS /
+// NEXT_PUBLIC_FF_PLATFORM_ADMIN) depois da validação de cada módulo — nenhum
+// commit liga flag por padrão.
 //
 // Override de desenvolvimento: localStorage['autocrm_ff_remote_stages'] /
-// localStorage['autocrm_ff_remote_leads'], reconhecido EXCLUSIVAMENTE quando
-// NODE_ENV === 'development'. Em produção o localStorage nunca é consultado —
-// nenhum usuário ativa flag pelo navegador. As flags não são reativas: mudar
-// o override exige recarregar a página.
+// localStorage['autocrm_ff_remote_leads'] / localStorage['autocrm_ff_platform_admin'],
+// reconhecido EXCLUSIVAMENTE quando NODE_ENV === 'development'. Em produção o
+// localStorage nunca é consultado — nenhum usuário ativa flag pelo navegador.
+// As flags não são reativas: mudar o override exige recarregar a página.
 //
 // Nenhum estado React, nenhum hook, nenhum log — funções puras de leitura.
+// A flag controla exclusivamente a exposição da UI (rollout) — nunca é
+// autoridade de segurança: quem decide de verdade continua sendo a RLS de
+// companies e is_platform_super_admin() no banco (M1-F S3).
 
 export const REMOTE_STAGES_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_stages';
 export const REMOTE_LEADS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_leads';
+export const PLATFORM_ADMIN_DEV_OVERRIDE_KEY = 'autocrm_ff_platform_admin';
 
 // Somente as strings exatas 'true'/'false' são reconhecidas (case-sensitive);
 // qualquer outro valor (1, yes, on, TRUE, vazio…) é tratado como inválido.
@@ -55,4 +61,8 @@ export function isRemoteStagesEnabled(): boolean {
 
 export function isRemoteLeadsEnabled(): boolean {
   return resolveFlag(process.env.NEXT_PUBLIC_FF_REMOTE_LEADS, REMOTE_LEADS_DEV_OVERRIDE_KEY);
+}
+
+export function isPlatformAdminEnabled(): boolean {
+  return resolveFlag(process.env.NEXT_PUBLIC_FF_PLATFORM_ADMIN, PLATFORM_ADMIN_DEV_OVERRIDE_KEY);
 }

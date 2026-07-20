@@ -23,3 +23,16 @@ export function canAccessStageSettings(user: CapabilityUser): boolean {
 export function canReorderPipelineStages(user: CapabilityUser): boolean {
   return user?.role === 'admin' || user?.role === 'manager';
 }
+
+// M1-F S3-B — área administrativa de empresas da KAPA: só Super Admin de
+// plataforma (platform_role, independente de role/companyId — um Super
+// Admin nunca tem empresa). A UI ainda exige a flag
+// NEXT_PUBLIC_FF_PLATFORM_ADMIN ON — ver a regra de acesso efetivo na
+// navegação (mesma combinação capability×flag de canAccessStageSettings).
+// Espelha is_platform_super_admin() no banco — mas quem decide de verdade
+// continua sendo a RLS/RPC do servidor.
+export type PlatformCapabilityUser = Pick<User, 'platformRole'> | null | undefined;
+
+export function canAccessPlatformAdmin(user: PlatformCapabilityUser): boolean {
+  return user?.platformRole === 'super_admin';
+}

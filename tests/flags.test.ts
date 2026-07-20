@@ -5,12 +5,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   isRemoteLeadsEnabled,
   isRemoteStagesEnabled,
+  isPlatformAdminEnabled,
   REMOTE_LEADS_DEV_OVERRIDE_KEY,
   REMOTE_STAGES_DEV_OVERRIDE_KEY,
+  PLATFORM_ADMIN_DEV_OVERRIDE_KEY,
 } from '@/lib/flags';
 
 const ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_STAGES';
 const LEADS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_LEADS';
+const PLATFORM_ADMIN_ENV_KEY = 'NEXT_PUBLIC_FF_PLATFORM_ADMIN';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -33,6 +36,15 @@ function setLeadsEnv(nodeEnv: string, flagValue?: string) {
     vi.stubEnv(LEADS_ENV_KEY, undefined as unknown as string);
   } else {
     vi.stubEnv(LEADS_ENV_KEY, flagValue);
+  }
+}
+
+function setPlatformAdminEnv(nodeEnv: string, flagValue?: string) {
+  vi.stubEnv('NODE_ENV', nodeEnv);
+  if (flagValue === undefined) {
+    vi.stubEnv(PLATFORM_ADMIN_ENV_KEY, undefined as unknown as string);
+  } else {
+    vi.stubEnv(PLATFORM_ADMIN_ENV_KEY, flagValue);
   }
 }
 
@@ -274,6 +286,126 @@ describe('isRemoteLeadsEnabled — ambiente sem window (SSR)', () => {
   });
 });
 
+// ── M1-F S3-B — isPlatformAdminEnabled (mesmo contrato, chave/env próprias) ─
+
+describe('isPlatformAdminEnabled — valor do ambiente', () => {
+  it('variável ausente ⇒ false (OFF por padrão)', () => {
+    setPlatformAdminEnv('production');
+    expect(isPlatformAdminEnabled()).toBe(false);
+  });
+
+  it('"false" ⇒ false', () => {
+    setPlatformAdminEnv('production', 'false');
+    expect(isPlatformAdminEnabled()).toBe(false);
+  });
+
+  it('"true" ⇒ true', () => {
+    setPlatformAdminEnv('production', 'true');
+    expect(isPlatformAdminEnabled()).toBe(true);
+  });
+
+  it('valores inválidos ⇒ false', () => {
+    for (const invalid of ['1', 'yes', 'on', '', 'enabled']) {
+      setPlatformAdminEnv('production', invalid);
+      expect(isPlatformAdminEnabled()).toBe(false);
+    }
+  });
+
+  it('comparação é estrita e case-sensitive ("TRUE"/"True" não ativam)', () => {
+    for (const invalid of ['TRUE', 'True', ' true', 'true ']) {
+      setPlatformAdminEnv('production', invalid);
+      expect(isPlatformAdminEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('isPlatformAdminEnabled — development (override via localStorage)', () => {
+  it('env false + override "true" ⇒ true', () => {
+    setPlatformAdminEnv('development', 'false');
+    window.localStorage.setItem(PLATFORM_ADMIN_DEV_OVERRIDE_KEY, 'true');
+    expect(isPlatformAdminEnabled()).toBe(true);
+  });
+
+  it('env true + override "false" ⇒ false', () => {
+    setPlatformAdminEnv('development', 'true');
+    window.localStorage.setItem(PLATFORM_ADMIN_DEV_OVERRIDE_KEY, 'false');
+    expect(isPlatformAdminEnabled()).toBe(false);
+  });
+
+  it('override inválido ⇒ usa o env', () => {
+    setPlatformAdminEnv('development', 'true');
+    window.localStorage.setItem(PLATFORM_ADMIN_DEV_OVERRIDE_KEY, 'yes');
+    expect(isPlatformAdminEnabled()).toBe(true);
+
+    setPlatformAdminEnv('development', 'false');
+    window.localStorage.setItem(PLATFORM_ADMIN_DEV_OVERRIDE_KEY, '1');
+    expect(isPlatformAdminEnabled()).toBe(false);
+  });
+
+  it('override ausente ⇒ usa o env', () => {
+    setPlatformAdminEnv('development', 'true');
+    expect(isPlatformAdminEnabled()).toBe(true);
+
+    setPlatformAdminEnv('development', 'false');
+    expect(isPlatformAdminEnabled()).toBe(false);
+  });
+
+  it('localStorage lançando erro ⇒ usa o env sem propagar', () => {
+    setPlatformAdminEnv('development', 'true');
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    expect(isPlatformAdminEnabled()).toBe(true);
+
+    setPlatformAdminEnv('development', 'false');
+    expect(isPlatformAdminEnabled()).toBe(false);
+  });
+});
+
+describe('isPlatformAdminEnabled — production (localStorage ignorado)', () => {
+  it('env true ⇒ true', () => {
+    setPlatformAdminEnv('production', 'true');
+    expect(isPlatformAdminEnabled()).toBe(true);
+  });
+
+  it('env false ⇒ false', () => {
+    setPlatformAdminEnv('production', 'false');
+    expect(isPlatformAdminEnabled()).toBe(false);
+  });
+
+  it('override "true" com env false ⇒ continua false', () => {
+    setPlatformAdminEnv('production', 'false');
+    window.localStorage.setItem(PLATFORM_ADMIN_DEV_OVERRIDE_KEY, 'true');
+    expect(isPlatformAdminEnabled()).toBe(false);
+  });
+
+  it('override "false" com env true ⇒ continua true', () => {
+    setPlatformAdminEnv('production', 'true');
+    window.localStorage.setItem(PLATFORM_ADMIN_DEV_OVERRIDE_KEY, 'false');
+    expect(isPlatformAdminEnabled()).toBe(true);
+  });
+
+  it('localStorage.getItem NUNCA é chamado em produção (spy)', () => {
+    setPlatformAdminEnv('production', 'true');
+    const spy = vi.spyOn(Storage.prototype, 'getItem');
+    isPlatformAdminEnabled();
+    setPlatformAdminEnv('production', 'false');
+    isPlatformAdminEnabled();
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('isPlatformAdminEnabled — ambiente sem window (SSR)', () => {
+  it('sem window ⇒ usa o env sem lançar erro', () => {
+    setPlatformAdminEnv('development', 'true');
+    vi.stubGlobal('window', undefined);
+    expect(isPlatformAdminEnabled()).toBe(true);
+
+    setPlatformAdminEnv('development', 'false');
+    expect(isPlatformAdminEnabled()).toBe(false);
+  });
+});
+
 describe('isolamento entre as flags de stages e de leads', () => {
   it('as chaves de override são distintas', () => {
     expect(REMOTE_LEADS_DEV_OVERRIDE_KEY).toBe('autocrm_ff_remote_leads');
@@ -294,5 +426,32 @@ describe('isolamento entre as flags de stages e de leads', () => {
     window.localStorage.setItem(REMOTE_STAGES_DEV_OVERRIDE_KEY, 'true');
     expect(isRemoteStagesEnabled()).toBe(true);
     expect(isRemoteLeadsEnabled()).toBe(false);
+  });
+});
+
+describe('isolamento da flag de platform admin em relação às demais', () => {
+  it('a chave de override é distinta das outras duas', () => {
+    expect(PLATFORM_ADMIN_DEV_OVERRIDE_KEY).toBe('autocrm_ff_platform_admin');
+    expect(PLATFORM_ADMIN_DEV_OVERRIDE_KEY).not.toBe(REMOTE_STAGES_DEV_OVERRIDE_KEY);
+    expect(PLATFORM_ADMIN_DEV_OVERRIDE_KEY).not.toBe(REMOTE_LEADS_DEV_OVERRIDE_KEY);
+  });
+
+  it('env/override de platform admin não afeta stages/leads (e vice-versa)', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(ENV_KEY, 'true');
+    vi.stubEnv(LEADS_ENV_KEY, 'true');
+    vi.stubEnv(PLATFORM_ADMIN_ENV_KEY, 'false');
+    window.localStorage.setItem(PLATFORM_ADMIN_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteStagesEnabled()).toBe(true);
+    expect(isRemoteLeadsEnabled()).toBe(true);
+    expect(isPlatformAdminEnabled()).toBe(true);
+
+    window.localStorage.clear();
+    vi.stubEnv(ENV_KEY, 'false');
+    vi.stubEnv(LEADS_ENV_KEY, 'false');
+    vi.stubEnv(PLATFORM_ADMIN_ENV_KEY, 'true');
+    expect(isRemoteStagesEnabled()).toBe(false);
+    expect(isRemoteLeadsEnabled()).toBe(false);
+    expect(isPlatformAdminEnabled()).toBe(true);
   });
 });
