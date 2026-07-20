@@ -101,3 +101,37 @@ on conflict (id) do nothing;
 -- vendedores de teste, agora que os profiles existem.
 update sellers set profile_id = '33333333-3333-3333-3333-333333333333' where id = 's4';
 update sellers set profile_id = '44444444-4444-4444-4444-444444444444' where id = 's11';
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- PARTE 4 — company_memberships + sellers.membership_id (M1-F S2)
+-- ─────────────────────────────────────────────────────────────────────────
+-- Mesmo motivo já documentado na Parte 1B (pipeline_stages) e nas
+-- migrations m1f_s1_02/m1f_s2_01: o catch-up backfill roda como MIGRATION,
+-- ANTES deste seed.sql — os 4 usuários acima ainda não existiam quando o
+-- catch-up rodou, então nasceriam sem membership se nada aqui os cobrisse.
+-- Mapeamento idêntico ao das migrations (design §5.4): admin/manager ->
+-- MANAGER, seller -> SELLER. Sem isso, os helpers/RLS novos do S2
+-- (m1f_s2_02/03) não teriam nenhum vínculo válido para testar contra os
+-- usuários seedados de sempre.
+--
+-- Nenhum SUPER_ADMIN é criado aqui — platform_role permanece null para
+-- os 4 usuários, exatamente como nas migrations. Nenhuma senha ou
+-- credencial é alterada. Nenhum id existente muda.
+
+insert into public.company_memberships (company_id, profile_id, role, is_active, joined_at)
+values
+  ('00000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'manager', true, now()),
+  ('00000000-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'manager', true, now()),
+  ('00000000-0000-0000-0000-000000000001', '33333333-3333-3333-3333-333333333333', 'seller',  true, now()),
+  ('00000000-0000-0000-0000-000000000001', '44444444-4444-4444-4444-444444444444', 'seller',  true, now())
+on conflict (company_id, profile_id) do nothing;
+
+update public.sellers s
+set membership_id = cm.id
+from public.company_memberships cm
+where s.profile_id is not null
+  and s.company_id is not null
+  and cm.company_id = s.company_id
+  and cm.profile_id = s.profile_id
+  and cm.role = 'seller'
+  and s.membership_id is null;
