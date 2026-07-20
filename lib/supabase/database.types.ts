@@ -64,6 +64,57 @@ export type Database = {
         }
         Relationships: []
       }
+      company_memberships: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          invited_at: string | null
+          is_active: boolean
+          joined_at: string | null
+          profile_id: string
+          role: Database["public"]["Enums"]["company_role"]
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          invited_at?: string | null
+          is_active?: boolean
+          joined_at?: string | null
+          profile_id: string
+          role: Database["public"]["Enums"]["company_role"]
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          invited_at?: string | null
+          is_active?: boolean
+          joined_at?: string | null
+          profile_id?: string
+          role?: Database["public"]["Enums"]["company_role"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_memberships_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_memberships_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_timeline_entries: {
         Row: {
           actor_profile_id: string | null
@@ -275,6 +326,7 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
+          platform_role: Database["public"]["Enums"]["platform_role"] | null
           role: Database["public"]["Enums"]["user_role"]
           seller_id: string | null
           updated_at: string
@@ -286,6 +338,7 @@ export type Database = {
           id: string
           is_active?: boolean
           name: string
+          platform_role?: Database["public"]["Enums"]["platform_role"] | null
           role: Database["public"]["Enums"]["user_role"]
           seller_id?: string | null
           updated_at?: string
@@ -297,6 +350,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
+          platform_role?: Database["public"]["Enums"]["platform_role"] | null
           role?: Database["public"]["Enums"]["user_role"]
           seller_id?: string | null
           updated_at?: string
@@ -325,6 +379,7 @@ export type Database = {
           first_name: string
           id: string
           is_active: boolean
+          membership_id: string | null
           name: string
           profile_id: string | null
           team: string | null
@@ -336,6 +391,7 @@ export type Database = {
           first_name: string
           id?: string
           is_active?: boolean
+          membership_id?: string | null
           name: string
           profile_id?: string | null
           team?: string | null
@@ -347,6 +403,7 @@ export type Database = {
           first_name?: string
           id?: string
           is_active?: boolean
+          membership_id?: string | null
           name?: string
           profile_id?: string | null
           team?: string | null
@@ -359,6 +416,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "companies"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sellers_membership_company_fk"
+            columns: ["company_id", "membership_id"]
+            isOneToOne: false
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "id"]
           },
           {
             foreignKeyName: "sellers_profile_id_fkey"
@@ -690,6 +754,7 @@ export type Database = {
       }
     }
     Enums: {
+      company_role: "manager" | "seller"
       lead_duplicate_status: "none" | "accessible" | "restricted"
       lead_event_type:
         | "call_outcome_visit"
@@ -712,6 +777,7 @@ export type Database = {
         | "visit_result_no_interest"
       lead_temperature: "hot" | "warm" | "cold"
       lead_urgency: "red" | "amber" | "green"
+      platform_role: "super_admin"
       user_role: "admin" | "manager" | "seller"
     }
     CompositeTypes: {
@@ -843,6 +909,7 @@ export const Constants = {
   },
   public: {
     Enums: {
+      company_role: ["manager", "seller"],
       lead_duplicate_status: ["none", "accessible", "restricted"],
       lead_event_type: [
         "call_outcome_visit",
@@ -866,6 +933,7 @@ export const Constants = {
       ],
       lead_temperature: ["hot", "warm", "cold"],
       lead_urgency: ["red", "amber", "green"],
+      platform_role: ["super_admin"],
       user_role: ["admin", "manager", "seller"],
     },
   },
