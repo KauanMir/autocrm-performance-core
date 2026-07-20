@@ -38,31 +38,48 @@ export type Database = {
         Row: {
           cnpj: string | null
           created_at: string
+          created_by_profile_id: string | null
           id: string
           name: string
           phone: string | null
+          status: Database["public"]["Enums"]["company_status"]
           timezone: string
+          trade_name: string | null
           updated_at: string
         }
         Insert: {
           cnpj?: string | null
           created_at?: string
+          created_by_profile_id?: string | null
           id?: string
           name: string
           phone?: string | null
+          status?: Database["public"]["Enums"]["company_status"]
           timezone?: string
+          trade_name?: string | null
           updated_at?: string
         }
         Update: {
           cnpj?: string | null
           created_at?: string
+          created_by_profile_id?: string | null
           id?: string
           name?: string
           phone?: string | null
+          status?: Database["public"]["Enums"]["company_status"]
           timezone?: string
+          trade_name?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "companies_created_by_profile_id_fkey"
+            columns: ["created_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       company_memberships: {
         Row: {
@@ -777,6 +794,7 @@ export type Database = {
     }
     Enums: {
       company_role: "manager" | "seller"
+      company_status: "implantacao" | "ativa" | "suspensa" | "cancelada"
       lead_duplicate_status: "none" | "accessible" | "restricted"
       lead_event_type:
         | "call_outcome_visit"
@@ -932,6 +950,7 @@ export const Constants = {
   public: {
     Enums: {
       company_role: ["manager", "seller"],
+      company_status: ["implantacao", "ativa", "suspensa", "cancelada"],
       lead_duplicate_status: ["none", "accessible", "restricted"],
       lead_event_type: [
         "call_outcome_visit",
