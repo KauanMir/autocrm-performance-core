@@ -137,13 +137,19 @@ select is(
   (select created_by_profile_id from public.companies where id = 'e5eeeeee-5555-5555-5555-555555555555'),
   null::uuid, 'created_by_profile_id vira NULL apos o profile ser excluido (ON DELETE SET NULL)');
 
--- nenhum privilegio de escrita foi ampliado (mesma exposicao zero de
--- antes desta migration para anon/authenticated)
+-- ATUALIZAÇÃO (M1-F S3-A): esta asserção originalmente provava "zero
+-- grants" como limite do S1.1. O S3-A (etapa posterior, aprovada
+-- separadamente) concede SELECT a authenticated de propósito, como parte
+-- da RLS de leitura de companies via can_access_company() — nenhuma
+-- escrita direta (INSERT/UPDATE/DELETE) é concedida em nenhuma etapa;
+-- criação continua exclusiva de create_company(). A intenção original do
+-- teste (nenhuma escrita direta ampliada) permanece 100% coberta, agora
+-- separada do SELECT que passou a existir legitimamente.
 select is(
   (select count(*)::int from information_schema.role_table_grants
     where table_schema='public' and table_name='companies' and grantee in ('anon','authenticated')
-      and privilege_type in ('SELECT','INSERT','UPDATE','DELETE')),
-  0, 'anon/authenticated continuam sem SELECT/INSERT/UPDATE/DELETE em companies');
+      and privilege_type in ('INSERT','UPDATE','DELETE')),
+  0, 'anon/authenticated continuam sem INSERT/UPDATE/DELETE direto em companies (SELECT concedido pelo S3-A via RLS)');
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- ACESSO
@@ -340,14 +346,18 @@ select is(
   (select platform_role from public.profiles where id = 'e9000000-0000-0000-0000-000000000002'),
   null::public.platform_role, 'ADMIN legado (e9legacyadmin) nao e Super Admin');
 
--- nenhuma RPC de transicao de status foi criada nesta etapa (fora de
--- escopo do S1.1, pertence ao S3 oficial ou etapa posterior)
+-- ATUALIZAÇÃO (M1-F S3-A): esta asserção originalmente provava que NENHUMA
+-- das cinco RPCs (incluindo create_company) existia como limite do S1.1.
+-- O S3-A (etapa posterior, aprovada separadamente) cria create_company()
+-- de propósito — as RPCs de TRANSIÇÃO de status (suspend/reactivate/
+-- cancel/set_company_status) continuam fora de escopo, inclusive do
+-- S3-A, e sua ausência permanece verificada abaixo.
 select is(
   (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.proname in (
-      'suspend_company', 'reactivate_company', 'cancel_company', 'set_company_status', 'create_company'
+      'suspend_company', 'reactivate_company', 'cancel_company', 'set_company_status'
     )),
-  0, 'nenhuma RPC de transicao de status ou create_company foi criada nesta etapa');
+  0, 'nenhuma RPC de transicao de status foi criada (create_company e tratado separadamente pelo S3-A)');
 
 -- nenhum Super Admin real criado por este arquivo (fixture revertida pelo
 -- rollback, contada aqui apenas para provar que nao sobra alem da fixture
