@@ -135,3 +135,16 @@ where s.profile_id is not null
   and cm.profile_id = s.profile_id
   and cm.role = 'seller'
   and s.membership_id is null;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- PARTE 5 — companies.status (M1-F S1.1)
+-- ─────────────────────────────────────────────────────────────────────────
+-- Mesmo motivo já documentado nas Partes 1B e 4: o backfill de
+-- companies.status roda como MIGRATION (m1f_s11), ANTES deste seed.sql —
+-- a company da Parte 1 ainda não existia quando o backfill rodou, então
+-- nasceria com o DEFAULT da coluna ('implantacao', pensado para empresas
+-- NOVAS) em vez de refletir que já é uma empresa operacional (já tem
+-- managers/sellers/leads seedados). Sem isso, os testes de acesso por
+-- status do S1.1 não teriam uma company seedada "ativa" de verdade para
+-- validar contra o runtime legado.
+update public.companies set status = 'ativa' where id = '00000000-0000-0000-0000-000000000001';
