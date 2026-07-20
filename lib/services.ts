@@ -7,6 +7,9 @@ import { store, getStore } from './store';
 import type { LeadInput, VisitInput, DealInput, SaleInput, TaskInput } from './store';
 import { supabase, isSupabaseConfigured } from './supabase/client';
 import type { ProfileRow } from './supabase/types';
+import { isRemoteLeadsEnabled } from './flags';
+import { getRemoteLeadSnapshot, type RemoteLeadSnapshot } from './leads/remoteSnapshot';
+import { RemoteLeadsError } from './leads/errors';
 
 // ── AuthService — Supabase Auth + profiles (M1-B) ───────────────────────
 // Login/logout/session now talk to Supabase Auth for real; the old
@@ -285,16 +288,77 @@ export function calculateLeadHealth(event: LeadHealthEvent): Partial<Lead> {
   }
 }
 
+// ── Seam remoto de leads (M1-E, E3) ───────────────────────────────────
+// Flag OFF: nada abaixo executa — caminho local 100% intacto. Flag ON: a
+// leitura vem EXCLUSIVAMENTE do snapshot remoto (espelho do cache TanStack,
+// design §10) e toda mutação local de leads é bloqueada com erro tipado —
+// mutations remotas chegam via hooks nas fases E4+; o service nunca escreve
+// no caminho remoto. Sem fallback local em nenhuma hipótese.
+
+function _remoteLeadSnapshotOrThrow(): RemoteLeadSnapshot {
+  // Identidade obtida do mecanismo real de sessão (cache do Supabase Auth via
+  // AuthService) — nunca de um parâmetro vindo da UI. identityKey é o id do
+  // usuário autenticado: a RLS entrega conjuntos diferentes por usuário, então
+  // o snapshot de um usuário jamais serve outro, mesmo na mesma empresa.
+  const user = AuthService.getCurrentUser();
+  const companyId = user?.companyId ?? null;
+  const identityKey = user?.id ?? null;
+  if (!companyId || !identityKey) {
+    throw new RemoteLeadsError('remote_leads_invalid_context', {
+      operation: 'LeadService.read',
+    });
+  }
+  const snapshot = getRemoteLeadSnapshot(companyId, identityKey);
+  if (!snapshot) {
+    // Snapshot ausente OU pertencente a outra identidade/empresa: estado
+    // explícito, NUNCA os leads locais, NUNCA o snapshot antigo como fallback.
+    throw new RemoteLeadsError('remote_leads_snapshot_unavailable', {
+      operation: 'LeadService.read',
+    });
+  }
+  return snapshot;
+}
+
+function _assertLocalLeadWriteAllowed(operation: string): void {
+  if (isRemoteLeadsEnabled()) {
+    // Nada acontece: store intacta, localStorage intacto, nenhuma RPC.
+    throw new RemoteLeadsError('remote_leads_read_only', { operation });
+  }
+}
+
 // ── LeadService ───────────────────────────────────────────────────────
 
 export const LeadService = {
-  create:        (data: LeadInput)                      => StoreAdapter.addLead(data),
-  update:        (id: string, changes: Partial<Lead>)   => StoreAdapter.updateLead(id, changes),
-  updateHealth:  (leadId: string, event: LeadHealthEvent) => StoreAdapter.updateLead(leadId, calculateLeadHealth(event)),
-  getAll:        ()                                     => _filteredLeads(),
-  getById:       (id: string)                           => StoreAdapter.getLeadById(id),
-  addToTimeline: (leadId: string, entry: Omit<TimelineEntry, 'when'> & { when?: string }) =>
-                   StoreAdapter.addToTimeline(leadId, entry),
+  create: (data: LeadInput) => {
+    _assertLocalLeadWriteAllowed('LeadService.create');
+    return StoreAdapter.addLead(data);
+  },
+  update: (id: string, changes: Partial<Lead>) => {
+    _assertLocalLeadWriteAllowed('LeadService.update');
+    return StoreAdapter.updateLead(id, changes);
+  },
+  updateHealth: (leadId: string, event: LeadHealthEvent) => {
+    _assertLocalLeadWriteAllowed('LeadService.updateHealth');
+    return StoreAdapter.updateLead(leadId, calculateLeadHealth(event));
+  },
+  getAll: (): Lead[] => {
+    if (isRemoteLeadsEnabled()) {
+      // Cópia nova a cada chamada — RLS já decidiu a visibilidade no banco;
+      // nenhuma filtragem client-side por role tenta substituí-la.
+      return [..._remoteLeadSnapshotOrThrow().leads];
+    }
+    return _filteredLeads();
+  },
+  getById: (id: string): Lead | null => {
+    if (isRemoteLeadsEnabled()) {
+      return _remoteLeadSnapshotOrThrow().leads.find(l => l.id === id) ?? null;
+    }
+    return StoreAdapter.getLeadById(id);
+  },
+  addToTimeline: (leadId: string, entry: Omit<TimelineEntry, 'when'> & { when?: string }) => {
+    _assertLocalLeadWriteAllowed('LeadService.addToTimeline');
+    return StoreAdapter.addToTimeline(leadId, entry);
+  },
 };
 
 // ── VisitService ──────────────────────────────────────────────────────
@@ -370,6 +434,11 @@ export const SaleService = {
   // timeline. No-ops (returns false) if already canceled, so seller.sales
   // is never decremented twice for the same sale.
   cancel: (id: string): boolean => {
+    // Cancelamento reverte health e timeline do LEAD (mutação indireta) — em
+    // modo remoto é bloqueado ANTES de tocar qualquer coisa, para nunca
+    // deixar venda cancelada com lead intacto. SaleService.create não toca
+    // leads e permanece livre.
+    _assertLocalLeadWriteAllowed('SaleService.cancel');
     if (!AuthService.isManager()) return false;
     const sale = StoreAdapter.getSales().find(s => s.id === id);
     if (!sale) return false;
@@ -418,7 +487,13 @@ export const SellerService = {
 // side-table (dead code — no screen ever read it) was removed in M0-K4.1.
 
 export const PipelineService = {
-  moveCard:      (leadId: string, stage: string) => StoreAdapter.updateLead(leadId, { stage }),
+  moveCard: (leadId: string, stage: string) => {
+    // Mutação de LEAD (escreve lead.stage) — bloqueada em modo remoto até o
+    // move_lead_to_stage chegar via hook (E5). reorderStages/getStages são do
+    // domínio de stages e permanecem livres.
+    _assertLocalLeadWriteAllowed('PipelineService.moveCard');
+    return StoreAdapter.updateLead(leadId, { stage });
+  },
   reorderStages: (order: string[])               => StoreAdapter.setStagesOrder(order),
   getStages:     ()                              => getStore().stages,
 };
