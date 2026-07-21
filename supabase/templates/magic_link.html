@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Convite AutoCRM</title>
+  </head>
+  <body style="margin:0;padding:24px;background-color:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#18181b;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;margin:0 auto;background-color:#ffffff;border-radius:8px;padding:32px;">
+      <tr>
+        <td>
+          <p style="font-size:16px;line-height:24px;margin:0 0 16px;">
+            Existe um convite para você acessar o AutoCRM.
+          </p>
+          <p style="font-size:14px;line-height:22px;margin:0 0 24px;color:#3f3f46;">
+            Clique no botão abaixo para continuar o convite e acessar o sistema.
+          </p>
+          <p style="margin:0 0 24px;">
+            <a
+              href="{{ .RedirectTo }}&amp;auth_token_hash={{ .TokenHash }}&amp;auth_type=magiclink"
+              style="display:inline-block;background-color:#18181b;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:14px;font-weight:bold;"
+            >Continuar convite</a>
+          </p>
+          <p style="font-size:12px;line-height:20px;margin:0;color:#71717a;">
+            Este link expira em 24 horas. Se ele já tiver vencido, peça um novo convite ao administrador responsável.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

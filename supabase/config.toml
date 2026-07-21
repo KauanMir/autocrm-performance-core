@@ -230,8 +230,11 @@ secure_password_change = false
 max_frequency = "1s"
 # Number of characters used in the email OTP.
 otp_length = 6
-# Number of seconds before the email OTP expires (defaults to 1 hour).
-otp_expiry = 3600
+# Number of seconds before the email OTP expires. M1-F S4-A2B: 24h (86400s)
+# para o link do Supabase Auth — deliberadamente mais curto que os 7 dias
+# do convite próprio do CRM (não aumentar o convite nem igualar este valor
+# a 7 dias; se o link Auth vencer, o administrador usa resend).
+otp_expiry = 86400
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]
@@ -243,10 +246,15 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Uncomment to customize email template
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
+# M1-F S4-A2B — templates locais de convite/magic link, sem SMTP externo
+# (Mailpit local continua sendo o único destinatário).
+[auth.email.template.invite]
+subject = "Você foi convidado para o AutoCRM"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.template.magic_link]
+subject = "Continue seu convite para o AutoCRM"
+content_path = "./supabase/templates/magic_link.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
