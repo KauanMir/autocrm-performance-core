@@ -192,6 +192,41 @@ export type Database = {
           },
         ]
       }
+      invite_activation_rate_limit_events: {
+        Row: {
+          actor_profile_id: string | null
+          dimension: string
+          id: string
+          invite_id: string | null
+          key_hash: string
+          occurred_at: string
+        }
+        Insert: {
+          actor_profile_id?: string | null
+          dimension: string
+          id?: string
+          invite_id?: string | null
+          key_hash: string
+          occurred_at?: string
+        }
+        Update: {
+          actor_profile_id?: string | null
+          dimension?: string
+          id?: string
+          invite_id?: string | null
+          key_hash?: string
+          occurred_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invite_activation_rate_limit_events_invite_id_fkey"
+            columns: ["invite_id"]
+            isOneToOne: false
+            referencedRelation: "invites"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invite_rate_limit_events: {
         Row: {
           actor_profile_id: string | null
@@ -652,6 +687,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_invite: {
+        Args: { p_token_hash: string }
+        Returns: {
+          code: string
+          company_id: string
+          invite_id: string
+          retry_after_seconds: number
+          role_kind: Database["public"]["Enums"]["invite_role_kind"]
+          success: boolean
+        }[]
+      }
       add_lead_timeline_entry: {
         Args: {
           p_color: string
@@ -1034,6 +1080,14 @@ export type Database = {
           retry_after_seconds: number
         }[]
       }
+      reserve_invite_validation_rate_limit: {
+        Args: { p_ip_hash: string; p_token_hash: string }
+        Returns: {
+          allowed: boolean
+          code: string
+          retry_after_seconds: number
+        }[]
+      }
       reserve_resend_invite_rate_limit: {
         Args: { p_actor_profile_id: string; p_invite_id: string }
         Returns: {
@@ -1114,6 +1168,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      validate_invite_token: {
+        Args: { p_token_hash: string }
+        Returns: {
+          code: string
+          masked_email: string
+          valid: boolean
+        }[]
       }
     }
     Enums: {
