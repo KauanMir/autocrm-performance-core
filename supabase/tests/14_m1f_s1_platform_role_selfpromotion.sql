@@ -168,6 +168,16 @@ select is(
 -- são executáveis por authenticated (EXECUTE restrito a service_role);
 -- nenhuma das duas jamais grava em profiles.platform_role — escrevem
 -- apenas em invites (delivery_status e colunas relacionadas)/audit_log.
+--
+-- ATUALIZAÇÃO (M1-F S4-A2B.1): reserve_create_invite_rate_limit() e
+-- reserve_resend_invite_rate_limit() adicionadas à lista de exclusão pelo
+-- MESMO motivo — revalidam INTEGRALMENTE a autorização de create_invite()/
+-- resend_invite() (mesma lógica, deliberadamente duplicada como defesa em
+-- profundidade) ANTES de reservar o rate limit, o que exige ler
+-- platform_role de p_actor_profile_id. EXECUTE restrito a service_role;
+-- nenhuma das duas jamais grava em profiles.platform_role — só em
+-- audit_log (falhas de domínio) e invite_rate_limit_events (via o helper
+-- interno reserve_invite_rate_limit(), que elas chamam).
 select is(
   (select count(*)::int
      from pg_proc p
@@ -177,7 +187,8 @@ select is(
       and p.proname not in ('profiles_guard_platform_role', 'company_memberships_check_mutation',
                              'sellers_check_membership_consistency', 'is_platform_super_admin',
                              'create_invite', 'resend_invite', 'cancel_invite',
-                             'complete_invite_resend_delivery', 'complete_invite_delivery')
+                             'complete_invite_resend_delivery', 'complete_invite_delivery',
+                             'reserve_create_invite_rate_limit', 'reserve_resend_invite_rate_limit')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
 -- Reforço específico do S2: is_platform_super_admin() referencia

@@ -843,8 +843,19 @@ select is((select delivery_status from public.invites where token_hash = repeat(
 select has_function('public'::name, 'reserve_invite_rate_limit'::name,
   array['uuid','uuid','text','text']::name[], 'reserve_invite_rate_limit() existe com a assinatura exata');
 
-select is(has_function_privilege('service_role', 'public.reserve_invite_rate_limit(uuid,uuid,text,text)', 'EXECUTE'), true,
-  'service_role tem EXECUTE em reserve_invite_rate_limit()');
+-- ATUALIZAÇÃO (M1-F S4-A2B.1): service_role deixou de ter EXECUTE direto
+-- nesta função — vulnerabilidade real encontrada em auditoria adversarial
+-- pós-S4-A2B (Route Handler): reserve_invite_rate_limit() só validava
+-- existência do ator + formato, nunca autorização, permitindo que um ator
+-- sem NENHUMA capacidade administrativa consumisse o rate limit antes de
+-- create_invite()/resend_invite() rejeitarem com forbidden. Rebaixada a
+-- helper interno (só chamável por reserve_create_invite_rate_limit()/
+-- reserve_resend_invite_rate_limit(), SECURITY DEFINER owned by postgres,
+-- que revalidam autorização INTEGRALMENTE antes de reservar — ver teste
+-- 25). Nenhuma mudança de corpo/lógica/algoritmo/locks/thresholds desta
+-- função, só a ACL.
+select is(has_function_privilege('service_role', 'public.reserve_invite_rate_limit(uuid,uuid,text,text)', 'EXECUTE'), false,
+  'service_role NÃO tem mais EXECUTE direto em reserve_invite_rate_limit() (rebaixado a helper interno em M1-F S4-A2B.1)');
 select is(has_function_privilege('authenticated', 'public.reserve_invite_rate_limit(uuid,uuid,text,text)', 'EXECUTE'), false,
   'authenticated NÃO tem EXECUTE em reserve_invite_rate_limit()');
 select is(has_function_privilege('anon', 'public.reserve_invite_rate_limit(uuid,uuid,text,text)', 'EXECUTE'), false,
@@ -872,18 +883,24 @@ select is(
   array['allowed','code','retry_after_seconds'],
   'reserve_invite_rate_limit() retorna EXATAMENTE allowed/code/retry_after_seconds — nenhuma contagem interna exposta');
 
+-- ATUALIZAÇÃO (M1-F S4-A2B.1): daqui até o fim desta seção, as chamadas
+-- diretas a reserve_invite_rate_limit() rodam SEM "set local role
+-- service_role" — service_role perdeu EXECUTE direto nesta função (ver
+-- ACL acima). Rodar como postgres (dono da função, sempre com EXECUTE
+-- implícito sobre seus próprios objetos) preserva exatamente o mesmo
+-- algoritmo/thresholds/locks sendo exercitados — só troca QUEM chama,
+-- nunca o que é testado. `service_role` continua sendo usado normalmente
+-- no resto do arquivo para create_invite()/resend_invite()/complete_*.
+
 -- ator inexistente/inativo é negado (forbidden)
-set local role service_role;
 select throws_ok(
   $$select * from public.reserve_invite_rate_limit('99999999-9999-9999-9999-999999999999'::uuid, null, 'x@exemplo.com', 'create')$$,
   '42501', null, 'ator inexistente é negado (forbidden)');
 select throws_ok(
   $$select * from public.reserve_invite_rate_limit('aa900000-0000-0000-0000-000000000005'::uuid, null, 'x@exemplo.com', 'create')$$,
   '42501', null, 'ator inativo é negado (forbidden)');
-reset role;
 
 -- validação de entrada
-set local role service_role;
 select ok(
   (with r as (select rr.* from public.reserve_invite_rate_limit('aa900000-0000-0000-0000-000000000001', 'aa100000-0000-0000-0000-000000000001', '   ', 'create') rr)
    select not r.allowed and r.code = 'invalid_input' from r),
@@ -892,14 +909,12 @@ select ok(
   (with r as (select rr.* from public.reserve_invite_rate_limit('aa900000-0000-0000-0000-000000000001', 'aa100000-0000-0000-0000-000000000001', 'x@exemplo.com', 'bogus_operation') rr)
    select not r.allowed and r.code = 'invalid_operation' from r),
   'operação fora de create/resend -> invalid_operation');
-reset role;
 select is(
   (select count(*)::int from public.invite_rate_limit_events),
   0, 'nenhuma das validações rejeitadas acima inseriu evento (só allowed=true insere)');
 
 -- 20 reservas do MESMO ator (create+resend alternados, provando que
 -- contam juntos) são permitidas; a 21a é bloqueada
-set local role service_role;
 do $$
 declare
   i int;
@@ -917,72 +932,58 @@ begin
     end if;
   end loop;
 end $$;
-reset role;
 select is(
   (select count(*)::int from public.invite_rate_limit_events where actor_profile_id = 'aa900000-0000-0000-0000-000000000001'),
   20, '20 reservas do mesmo ator (create+resend alternados) foram todas permitidas e inseridas');
 
-set local role service_role;
 select ok(
   (with r as (select rr.* from public.reserve_invite_rate_limit(
       'aa900000-0000-0000-0000-000000000001', 'aa100000-0000-0000-0000-000000000001', 'ratorquota21@exemplo.com', 'create') rr)
    select not r.allowed and r.code = 'actor_rate_limited' and r.retry_after_seconds > 0 from r),
   '21a reserva do mesmo ator em 15 minutos é bloqueada (actor_rate_limited, retry_after_seconds positivo)');
-reset role;
 select is(
   (select count(*)::int from public.invite_rate_limit_events where actor_profile_id = 'aa900000-0000-0000-0000-000000000001'),
   20, 'a 21a tentativa (bloqueada) NÃO inseriu evento — continua exatamente 20');
 
 -- 3 reservas do MESMO e-mail+empresa (ator diferente, para não colidir
 -- com a quota de 20 já usada acima) são permitidas; a 4a é bloqueada
-set local role service_role;
 select public.reserve_invite_rate_limit('aa900000-0000-0000-0000-000000000002', 'aa100000-0000-0000-0000-000000000001', 'mesmoescopo@exemplo.com', 'create');
 select public.reserve_invite_rate_limit('aa900000-0000-0000-0000-000000000002', 'aa100000-0000-0000-0000-000000000001', 'mesmoescopo@exemplo.com', 'resend');
 select public.reserve_invite_rate_limit('aa900000-0000-0000-0000-000000000002', 'aa100000-0000-0000-0000-000000000001', 'mesmoescopo@exemplo.com', 'create');
-reset role;
 select is(
   (select count(*)::int from public.invite_rate_limit_events where email_normalized = 'mesmoescopo@exemplo.com' and company_id = 'aa100000-0000-0000-0000-000000000001'),
   3, '3 reservas do mesmo e-mail+empresa foram permitidas e inseridas');
 
-set local role service_role;
 select ok(
   (with r as (select rr.* from public.reserve_invite_rate_limit(
       'aa900000-0000-0000-0000-000000000002', 'aa100000-0000-0000-0000-000000000001', 'mesmoescopo@exemplo.com', 'create') rr)
    select not r.allowed and r.code = 'email_scope_rate_limited' and r.retry_after_seconds > 0 from r),
   '4a reserva do mesmo e-mail+empresa em 24h é bloqueada (email_scope_rate_limited, retry_after_seconds positivo)');
-reset role;
 select is(
   (select count(*)::int from public.invite_rate_limit_events where email_normalized = 'mesmoescopo@exemplo.com' and company_id = 'aa100000-0000-0000-0000-000000000001'),
   3, 'a 4a tentativa (bloqueada) NÃO inseriu evento — continua exatamente 3');
 
 -- outro e-mail (mesmo ator h9...002, ainda longe da quota de 20) NÃO
 -- compartilha o limite de e-mail+escopo
-set local role service_role;
 select ok(
   (with r as (select rr.* from public.reserve_invite_rate_limit(
       'aa900000-0000-0000-0000-000000000002', 'aa100000-0000-0000-0000-000000000001', 'outroemailescopo@exemplo.com', 'create') rr)
    select r.allowed from r),
   'outro e-mail (mesma empresa) NÃO compartilha o limite de e-mail+escopo já esgotado');
-reset role;
 
 -- mesmo e-mail, OUTRA empresa (escopo diferente) NÃO compartilha o
 -- limite já esgotado em h1
-set local role service_role;
 select ok(
   (with r as (select rr.* from public.reserve_invite_rate_limit(
       'aa900000-0000-0000-0000-000000000002', 'aa200000-0000-0000-0000-000000000002', 'mesmoescopo@exemplo.com', 'create') rr)
    select r.allowed from r),
   'mesmo e-mail, empresa DIFERENTE (h2) NÃO compartilha o limite de e-mail+escopo esgotado em h1 — escopos isolados');
-reset role;
 
 -- company_id null (escopo de plataforma) é isolado corretamente do
 -- escopo de qualquer empresa real, mesmo para o MESMO e-mail
-set local role service_role;
 select public.reserve_invite_rate_limit('aa900000-0000-0000-0000-000000000003', null, 'escopoplataforma@exemplo.com', 'create');
 select public.reserve_invite_rate_limit('aa900000-0000-0000-0000-000000000003', null, 'escopoplataforma@exemplo.com', 'create');
 select public.reserve_invite_rate_limit('aa900000-0000-0000-0000-000000000003', null, 'escopoplataforma@exemplo.com', 'create');
-reset role;
-set local role service_role;
 select ok(
   (with r as (select rr.* from public.reserve_invite_rate_limit(
       'aa900000-0000-0000-0000-000000000003', null, 'escopoplataforma@exemplo.com', 'create') rr)
@@ -993,7 +994,6 @@ select ok(
       'aa900000-0000-0000-0000-000000000003', 'aa100000-0000-0000-0000-000000000001', 'escopoplataforma@exemplo.com', 'create') rr)
    select r.allowed from r),
   'o MESMO e-mail, mas em escopo de EMPRESA (company_id preenchido), não compartilha o limite já esgotado no escopo de plataforma — isolamento correto de company_id null');
-reset role;
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- AUDIT_LOG — conteúdo, nunca só contagem
