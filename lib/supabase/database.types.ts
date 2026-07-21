@@ -192,20 +192,67 @@ export type Database = {
           },
         ]
       }
+      invite_rate_limit_events: {
+        Row: {
+          actor_profile_id: string | null
+          company_id: string | null
+          email_normalized: string
+          id: string
+          occurred_at: string
+          operation: string
+        }
+        Insert: {
+          actor_profile_id?: string | null
+          company_id?: string | null
+          email_normalized: string
+          id?: string
+          occurred_at?: string
+          operation: string
+        }
+        Update: {
+          actor_profile_id?: string | null
+          company_id?: string | null
+          email_normalized?: string
+          id?: string
+          occurred_at?: string
+          operation?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invite_rate_limit_events_actor_profile_id_fkey"
+            columns: ["actor_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invite_rate_limit_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invites: {
         Row: {
           accepted_at: string | null
           accepted_profile_id: string | null
           company_id: string | null
           created_at: string
+          delivery_attempted_at: string | null
+          delivery_status: Database["public"]["Enums"]["invite_delivery_status"]
           email: string
           email_normalized: string | null
+          email_sent_at: string | null
           expires_at: string
           id: string
           invited_by_profile_id: string | null
+          last_delivery_error_code: string | null
           name: string
           role_kind: Database["public"]["Enums"]["invite_role_kind"]
           status: Database["public"]["Enums"]["invite_status"]
+          supersedes_invite_id: string | null
           token_hash: string
           updated_at: string
         }
@@ -214,14 +261,19 @@ export type Database = {
           accepted_profile_id?: string | null
           company_id?: string | null
           created_at?: string
+          delivery_attempted_at?: string | null
+          delivery_status?: Database["public"]["Enums"]["invite_delivery_status"]
           email: string
           email_normalized?: string | null
+          email_sent_at?: string | null
           expires_at: string
           id?: string
           invited_by_profile_id?: string | null
+          last_delivery_error_code?: string | null
           name: string
           role_kind: Database["public"]["Enums"]["invite_role_kind"]
           status?: Database["public"]["Enums"]["invite_status"]
+          supersedes_invite_id?: string | null
           token_hash: string
           updated_at?: string
         }
@@ -230,14 +282,19 @@ export type Database = {
           accepted_profile_id?: string | null
           company_id?: string | null
           created_at?: string
+          delivery_attempted_at?: string | null
+          delivery_status?: Database["public"]["Enums"]["invite_delivery_status"]
           email?: string
           email_normalized?: string | null
+          email_sent_at?: string | null
           expires_at?: string
           id?: string
           invited_by_profile_id?: string | null
+          last_delivery_error_code?: string | null
           name?: string
           role_kind?: Database["public"]["Enums"]["invite_role_kind"]
           status?: Database["public"]["Enums"]["invite_status"]
+          supersedes_invite_id?: string | null
           token_hash?: string
           updated_at?: string
         }
@@ -261,6 +318,13 @@ export type Database = {
             columns: ["invited_by_profile_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invites_supersedes_invite_id_fkey"
+            columns: ["supersedes_invite_id"]
+            isOneToOne: false
+            referencedRelation: "invites"
             referencedColumns: ["id"]
           },
         ]
@@ -740,6 +804,31 @@ export type Database = {
           status: Database["public"]["Enums"]["lead_duplicate_status"]
         }[]
       }
+      complete_invite_delivery: {
+        Args: {
+          p_actor_profile_id: string
+          p_error_code?: string
+          p_invite_id: string
+          p_success: boolean
+        }
+        Returns: {
+          code: string
+          success: boolean
+        }[]
+      }
+      complete_invite_resend_delivery: {
+        Args: {
+          p_actor_profile_id: string
+          p_error_code?: string
+          p_invite_id: string
+          p_previous_invite_id: string
+          p_success: boolean
+        }
+        Returns: {
+          code: string
+          success: boolean
+        }[]
+      }
       create_company: {
         Args: {
           p_cnpj?: string
@@ -919,6 +1008,19 @@ export type Database = {
           success: boolean
         }[]
       }
+      reserve_invite_rate_limit: {
+        Args: {
+          p_actor_profile_id: string
+          p_company_id: string
+          p_email: string
+          p_operation: string
+        }
+        Returns: {
+          allowed: boolean
+          code: string
+          retry_after_seconds: number
+        }[]
+      }
       unarchive_lead: {
         Args: { p_expected_version: number; p_lead_id: string }
         Returns: {
@@ -996,6 +1098,7 @@ export type Database = {
     Enums: {
       company_role: "manager" | "seller"
       company_status: "implantacao" | "ativa" | "suspensa" | "cancelada"
+      invite_delivery_status: "not_sent" | "sent" | "failed"
       invite_role_kind: "super_admin" | "manager" | "seller"
       invite_status:
         | "pending"
@@ -1159,6 +1262,7 @@ export const Constants = {
     Enums: {
       company_role: ["manager", "seller"],
       company_status: ["implantacao", "ativa", "suspensa", "cancelada"],
+      invite_delivery_status: ["not_sent", "sent", "failed"],
       invite_role_kind: ["super_admin", "manager", "seller"],
       invite_status: [
         "pending",
