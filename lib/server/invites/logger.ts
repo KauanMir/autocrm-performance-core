@@ -5,7 +5,7 @@
 // do Supabase/stack.
 export interface InviteLogFields {
   requestId: string;
-  operation: 'create' | 'resend';
+  operation: 'create' | 'resend' | 'validate' | 'accept';
   result: string;
   actorProfileId?: string;
   companyId?: string | null;
