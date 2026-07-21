@@ -722,6 +722,15 @@ export type Database = {
         Args: { p_target_company_id: string }
         Returns: boolean
       }
+      cancel_invite: {
+        Args: { p_invite_id: string }
+        Returns: {
+          code: string
+          invite_id: string
+          status: Database["public"]["Enums"]["invite_status"]
+          success: boolean
+        }[]
+      }
       check_lead_phone_duplicate: {
         Args: { p_phone: string }
         Returns: {
@@ -757,6 +766,23 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      create_invite: {
+        Args: {
+          p_actor_profile_id: string
+          p_company_id: string
+          p_email: string
+          p_name: string
+          p_role_kind: Database["public"]["Enums"]["invite_role_kind"]
+          p_token_hash: string
+        }
+        Returns: {
+          code: string
+          expires_at: string
+          invite_id: string
+          status: Database["public"]["Enums"]["invite_status"]
+          success: boolean
+        }[]
       }
       create_lead: {
         Args: {
@@ -877,6 +903,21 @@ export type Database = {
       require_company_access: {
         Args: { p_target_company_id: string }
         Returns: string
+      }
+      resend_invite: {
+        Args: {
+          p_actor_profile_id: string
+          p_invite_id: string
+          p_token_hash: string
+        }
+        Returns: {
+          code: string
+          expires_at: string
+          invite_id: string
+          previous_invite_id: string
+          status: Database["public"]["Enums"]["invite_status"]
+          success: boolean
+        }[]
       }
       unarchive_lead: {
         Args: { p_expected_version: number; p_lead_id: string }
