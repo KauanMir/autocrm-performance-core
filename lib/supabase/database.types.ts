@@ -1008,6 +1008,19 @@ export type Database = {
           success: boolean
         }[]
       }
+      reserve_create_invite_rate_limit: {
+        Args: {
+          p_actor_profile_id: string
+          p_company_id: string
+          p_email: string
+          p_role_kind: Database["public"]["Enums"]["invite_role_kind"]
+        }
+        Returns: {
+          allowed: boolean
+          code: string
+          retry_after_seconds: number
+        }[]
+      }
       reserve_invite_rate_limit: {
         Args: {
           p_actor_profile_id: string
@@ -1015,6 +1028,14 @@ export type Database = {
           p_email: string
           p_operation: string
         }
+        Returns: {
+          allowed: boolean
+          code: string
+          retry_after_seconds: number
+        }[]
+      }
+      reserve_resend_invite_rate_limit: {
+        Args: { p_actor_profile_id: string; p_invite_id: string }
         Returns: {
           allowed: boolean
           code: string
