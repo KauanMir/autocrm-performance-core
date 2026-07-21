@@ -41,3 +41,25 @@ export function getAppUrl(): URL {
 
   return new URL(parsed.origin);
 }
+
+export class InvalidInviteRateLimitPepperError extends Error {
+  constructor() {
+    super('invite_rate_limit_pepper_invalid');
+    this.name = 'InvalidInviteRateLimitPepperError';
+  }
+}
+
+const PEPPER_PATTERN = /^[0-9a-f]{64}$/;
+
+// INVITE_RATE_LIMIT_PEPPER: chave HMAC server-only para hash de IP (M1-F
+// S4-C2A) — nunca a service_role key, a anon key, APP_URL ou o token do
+// convite (nenhuma delas tem o formato/propósito de uma chave HMAC
+// dedicada). Exatamente 32 bytes hex minúsculos (64 caracteres). Mensagem
+// de erro contém só o nome da variável, nunca o valor recebido.
+export function getInviteRateLimitPepper(): Buffer {
+  const raw = process.env.INVITE_RATE_LIMIT_PEPPER;
+  if (!raw || !PEPPER_PATTERN.test(raw)) {
+    throw new InvalidInviteRateLimitPepperError();
+  }
+  return Buffer.from(raw, 'hex');
+}
