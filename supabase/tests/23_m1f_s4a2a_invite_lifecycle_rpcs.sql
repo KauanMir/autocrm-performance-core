@@ -481,6 +481,12 @@ reset role;
 
 -- ator real registrado no audit (o Manager/Super Admin que executou o
 -- resend, não necessariamente o convidador original)
+-- ATUALIZAÇÃO (M1-F S4-A2A.1): resend_invite() não grava mais
+-- audit_log/success sozinha (lacuna corrigida — auditava sucesso de
+-- envio antes de qualquer tentativa real de entrega); essa gravação
+-- passou para complete_invite_resend_delivery(), chamada aqui
+-- explicitamente para preservar a garantia original deste teste (ator
+-- real, não o convidador original, aparece no audit_log).
 set local role service_role;
 select public.create_invite('d9000000-0000-0000-0000-000000000001', 'd1000000-0000-0000-0000-000000000001', 'resend6@exemplo.com', 'Resend Seis', 'seller', repeat('cc', 32));
 reset role;
@@ -488,14 +494,21 @@ set local role service_role;
 select public.resend_invite('d9000000-0000-0000-0000-000000000004',
   (select id from public.invites where token_hash = repeat('cc', 32)), repeat('cd', 32));
 reset role;
+select is((select invited_by_profile_id from public.invites where token_hash = repeat('cd', 32)),
+  'd9000000-0000-0000-0000-000000000001', 'mesmo com outro ator executando o resend, invited_by_profile_id do NOVO convite continua sendo o convidador ORIGINAL');
+set local role service_role;
+select public.complete_invite_resend_delivery(
+  'd9000000-0000-0000-0000-000000000004',
+  (select id from public.invites where token_hash = repeat('cd', 32)),
+  (select id from public.invites where token_hash = repeat('cc', 32)),
+  true, null);
+reset role;
 select is(
   (select actor_profile_id from public.audit_log
     where action = 'invite_resent' and result = 'success'
-      and entity_id = (select id from public.invites where token_hash = repeat('cc', 32))::text),
+      and entity_id = (select id from public.invites where token_hash = repeat('cd', 32))::text),
   'd9000000-0000-0000-0000-000000000004',
-  'audit_log registra o ATOR REAL do resend (Super Admin), mesmo o convite original tendo sido criado pelo Manager Alpha');
-select is((select invited_by_profile_id from public.invites where token_hash = repeat('cd', 32)),
-  'd9000000-0000-0000-0000-000000000001', 'mesmo com outro ator executando o resend, invited_by_profile_id do NOVO convite continua sendo o convidador ORIGINAL');
+  'audit_log (gravado por complete_invite_resend_delivery) registra o ATOR REAL do resend (Super Admin), mesmo o convite original tendo sido criado pelo Manager Alpha');
 
 -- transação atômica: falha do INSERT novo preserva o convite antigo (não
 -- fica superseded sem substituto) — força token_conflict no passo final
@@ -770,12 +783,27 @@ select is(
 -- ═══════════════════════════════════════════════════════════════════════
 
 -- sucesso e falha de domínio persistem (não fazem rollback um do outro)
-select ok((select count(*)::int from public.audit_log where action = 'invite_sent' and result = 'success') > 0,
-  'existem entradas invite_sent/success no audit_log');
+-- ATUALIZAÇÃO (M1-F S4-A2A.1): "existem entradas invite_sent/success"
+-- foi REMOVIDA — create_invite() não grava mais audit_log de sucesso
+-- sozinha (lacuna corrigida: auditava envio antes de qualquer tentativa
+-- real de entrega). A finalização da entrega passou para duas funções
+-- server-only dedicadas, ambas adicionadas nesta mesma etapa (S4-A2A.1):
+-- complete_invite_delivery() finaliza SOMENTE convites de criação
+-- inicial (a distinção é feita por supersedes_invite_id IS NULL — ver
+-- migration m1f_s4a2a1) e complete_invite_resend_delivery() finaliza
+-- SOMENTE convites com vínculo explícito (supersedes_invite_id) ao
+-- convite anterior informado. Nenhum cenário deste arquivo (23) chama
+-- complete_invite_delivery(), então nenhuma entrada invite_sent/success
+-- é produzida legitimamente aqui — a cobertura detalhada de ambas as
+-- funções de finalização (sucesso, falha, ACL, proveniência) está no
+-- teste 24, não neste arquivo. A garantia equivalente para RESEND
+-- continua coberta abaixo, porque complete_invite_resend_delivery() já
+-- existe e é chamada mais acima neste arquivo (seção "ator real
+-- registrado no audit").
 select ok((select count(*)::int from public.audit_log where action = 'invite_sent' and result = 'failure') > 0,
   'existem entradas invite_sent/failure no audit_log (falhas de domínio, sem RAISE, preservadas)');
 select ok((select count(*)::int from public.audit_log where action = 'invite_resent' and result = 'success') > 0,
-  'existem entradas invite_resent/success no audit_log');
+  'existem entradas invite_resent/success no audit_log (gravada por complete_invite_resend_delivery(), chamada mais acima neste arquivo)');
 select ok((select count(*)::int from public.audit_log where action = 'invite_resent' and result = 'failure') > 0,
   'existem entradas invite_resent/failure no audit_log');
 select ok((select count(*)::int from public.audit_log where action = 'invite_canceled' and result = 'success') > 0,

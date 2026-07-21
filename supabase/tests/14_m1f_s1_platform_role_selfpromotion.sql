@@ -158,6 +158,16 @@ select is(
 -- profiles.platform_role — escrevem apenas em invites/audit_log; a
 -- intenção original do teste (nenhuma escrita/mass assignment de
 -- platform_role fora do trigger de guarda) permanece 100% coberta.
+--
+-- ATUALIZAÇÃO (M1-F S4-A2A.1): complete_invite_resend_delivery() e
+-- complete_invite_delivery() adicionadas à lista de exclusão pelo mesmo
+-- motivo — ambas precisam LER platform_role (de p_actor_profile_id, que
+-- chega já validado pelo servidor/service_role, nunca de auth.uid())
+-- para revalidar INTEGRALMENTE no banco a autoridade sobre o convite
+-- sendo finalizado, mesmo padrão de resend_invite()/cancel_invite(). Não
+-- são executáveis por authenticated (EXECUTE restrito a service_role);
+-- nenhuma das duas jamais grava em profiles.platform_role — escrevem
+-- apenas em invites (delivery_status e colunas relacionadas)/audit_log.
 select is(
   (select count(*)::int
      from pg_proc p
@@ -166,7 +176,8 @@ select is(
       and p.prosecdef
       and p.proname not in ('profiles_guard_platform_role', 'company_memberships_check_mutation',
                              'sellers_check_membership_consistency', 'is_platform_super_admin',
-                             'create_invite', 'resend_invite', 'cancel_invite')
+                             'create_invite', 'resend_invite', 'cancel_invite',
+                             'complete_invite_resend_delivery', 'complete_invite_delivery')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
 -- Reforço específico do S2: is_platform_super_admin() referencia
