@@ -1,0 +1,36 @@
+-- M1-F S4-C2C hotfix — public.profiles nunca recebeu GRANT SELECT para
+-- `authenticated` desde a migration original do M1-B
+-- (20260708120000_m1b_auth_profiles_sellers.sql), embora RLS já estivesse
+-- habilitada com policies corretas (profiles_select_own: id = auth.uid();
+-- profiles_select_company: mesma empresa + is_manager_or_admin()) desde
+-- sempre. Sem o GRANT de tabela, TODA consulta de login
+-- (lib/services.ts::_loadProfile — a única consulta client-side a esta
+-- tabela em todo o repositório) falhava com "permission denied for table
+-- profiles" (42501) — PostgREST recusa a operação antes mesmo de a RLS
+-- ter qualquer chance de filtrar linhas. Reproduzido com um usuário
+-- sintético totalmente alheio ao módulo de convites (Super Admin de
+-- fixture, criado direto via Admin API), confirmando que o gap é
+-- pré-existente e não foi introduzido pelo S4-C2A/S4-C2B.
+--
+-- Escopo mínimo, por design:
+--   - GRANT SELECT por COLUNA (nunca a tabela inteira, nunca `*`) —
+--     exatamente as 8 colunas que _loadProfile() lê
+--     ('id, company_id, name, email, role, seller_id, is_active,
+--     platform_role'); created_at/updated_at nunca são lidas pelo
+--     frontend e não são concedidas.
+--   - Somente `authenticated` — nunca `anon` (login exige sessão; sem
+--     esse grant, `anon` continua sem qualquer acesso a profiles).
+--   - Nenhum INSERT/UPDATE/DELETE concedido a ninguém aqui — a única
+--     mutação client-side em profiles (profiles_update_admin, já
+--     existente) continua exigindo `role='admin'` na própria empresa,
+--     inalterada.
+--   - public.sellers e public.company_memberships NÃO recebem nada
+--     nesta migration: nenhum código client-side consulta essas tabelas
+--     via PostgREST hoje (SellerService em lib/services.ts ainda lê do
+--     store local em localStorage, não do Supabase) — conceder ali seria
+--     privilégio não exercitado por nenhum caminho de código real, e
+--     company_memberships tem RLS habilitada SEM nenhuma policy (default
+--     deny total), então um grant ali não abriria nenhuma linha mesmo
+--     que fosse concedido.
+grant select (id, company_id, name, email, role, seller_id, is_active, platform_role)
+  on public.profiles to authenticated;
