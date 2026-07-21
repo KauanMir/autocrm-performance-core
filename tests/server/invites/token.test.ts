@@ -2,7 +2,12 @@
 // convite (M1-F S4-A2B). Nenhuma rede, nenhum mock — funções puras sobre
 // node:crypto.
 import { describe, expect, it } from 'vitest';
-import { generateInviteToken, buildInviteRedirectUrl } from '@/lib/server/invites/token';
+import {
+  generateInviteToken,
+  buildInviteRedirectUrl,
+  isValidRawInviteToken,
+  hashInviteToken,
+} from '@/lib/server/invites/token';
 
 describe('generateInviteToken', () => {
   it('rawToken tem 43 caracteres base64url (32 bytes, sem padding)', () => {
@@ -36,6 +41,63 @@ describe('generateInviteToken', () => {
       const { tokenHash } = generateInviteToken();
       expect(/^[0-9a-f]{64}$/.test(tokenHash)).toBe(true);
     }
+  });
+});
+
+describe('hashInviteToken', () => {
+  it('mesmo algoritmo de generateInviteToken (SHA-256 hex minúsculo, 64 chars)', () => {
+    const { rawToken, tokenHash } = generateInviteToken();
+    expect(hashInviteToken(rawToken)).toBe(tokenHash);
+  });
+
+  it('determinístico: mesmo rawToken sempre produz o mesmo hash', () => {
+    const { rawToken } = generateInviteToken();
+    expect(hashInviteToken(rawToken)).toBe(hashInviteToken(rawToken));
+  });
+
+  it('rawTokens diferentes produzem hashes diferentes', () => {
+    expect(hashInviteToken('a'.repeat(43))).not.toBe(hashInviteToken('b'.repeat(43)));
+  });
+});
+
+describe('isValidRawInviteToken', () => {
+  it('aceita um rawToken real gerado por generateInviteToken', () => {
+    const { rawToken } = generateInviteToken();
+    expect(isValidRawInviteToken(rawToken)).toBe(true);
+  });
+
+  it('rejeita string curta (42 caracteres)', () => {
+    expect(isValidRawInviteToken('a'.repeat(42))).toBe(false);
+  });
+
+  it('rejeita string longa (44 caracteres)', () => {
+    expect(isValidRawInviteToken('a'.repeat(44))).toBe(false);
+  });
+
+  it('rejeita padding "="', () => {
+    expect(isValidRawInviteToken(`${'a'.repeat(42)}=`)).toBe(false);
+  });
+
+  it('rejeita caractere fora de A-Za-z0-9_-', () => {
+    expect(isValidRawInviteToken(`${'a'.repeat(42)}+`)).toBe(false);
+    expect(isValidRawInviteToken(`${'a'.repeat(42)}/`)).toBe(false);
+  });
+
+  it('rejeita espaço embutido', () => {
+    expect(isValidRawInviteToken(`${'a'.repeat(21)} ${'a'.repeat(21)}`)).toBe(false);
+  });
+
+  it('rejeita string vazia', () => {
+    expect(isValidRawInviteToken('')).toBe(false);
+  });
+
+  it('nunca normaliza silenciosamente: caixa alta é aceita como está, sem lowercasing', () => {
+    const candidate = 'A'.repeat(43);
+    expect(isValidRawInviteToken(candidate)).toBe(true);
+  });
+
+  it('aceita _ e - (alfabeto base64url)', () => {
+    expect(isValidRawInviteToken(`${'a'.repeat(41)}_-`)).toBe(true);
   });
 });
 

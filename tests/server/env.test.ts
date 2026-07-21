@@ -2,7 +2,7 @@
 // §7). Nunca aceitar path arbitrário, credenciais embutidas ou protocolo
 // diferente de http/https; sempre normalizar sem barra final.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getAppUrl, InvalidAppUrlError } from '@/lib/server/env';
+import { getAppUrl, InvalidAppUrlError, getInviteRateLimitPepper, InvalidInviteRateLimitPepperError } from '@/lib/server/env';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -66,5 +66,66 @@ describe('getAppUrl', () => {
   it('rejeita hash', () => {
     vi.stubEnv('APP_URL', 'http://127.0.0.1:3000#frag');
     expect(() => getAppUrl()).toThrow(InvalidAppUrlError);
+  });
+});
+
+describe('getInviteRateLimitPepper', () => {
+  const VALID_PEPPER = 'a'.repeat(64);
+
+  it('aceita exatamente 64 caracteres hex minúsculos, devolvendo um Buffer de 32 bytes', () => {
+    vi.stubEnv('INVITE_RATE_LIMIT_PEPPER', VALID_PEPPER);
+    const pepper = getInviteRateLimitPepper();
+    expect(pepper).toBeInstanceOf(Buffer);
+    expect(pepper.length).toBe(32);
+  });
+
+  it('rejeita ausência da variável', () => {
+    vi.stubEnv('INVITE_RATE_LIMIT_PEPPER', '');
+    expect(() => getInviteRateLimitPepper()).toThrow(InvalidInviteRateLimitPepperError);
+  });
+
+  it('rejeita string vazia explícita', () => {
+    vi.stubEnv('INVITE_RATE_LIMIT_PEPPER', '');
+    expect(() => getInviteRateLimitPepper()).toThrow(InvalidInviteRateLimitPepperError);
+  });
+
+  it('rejeita valor curto (63 caracteres)', () => {
+    vi.stubEnv('INVITE_RATE_LIMIT_PEPPER', 'a'.repeat(63));
+    expect(() => getInviteRateLimitPepper()).toThrow(InvalidInviteRateLimitPepperError);
+  });
+
+  it('rejeita valor longo (65 caracteres)', () => {
+    vi.stubEnv('INVITE_RATE_LIMIT_PEPPER', 'a'.repeat(65));
+    expect(() => getInviteRateLimitPepper()).toThrow(InvalidInviteRateLimitPepperError);
+  });
+
+  it('rejeita caixa alta (não normaliza silenciosamente)', () => {
+    vi.stubEnv('INVITE_RATE_LIMIT_PEPPER', 'A'.repeat(64));
+    expect(() => getInviteRateLimitPepper()).toThrow(InvalidInviteRateLimitPepperError);
+  });
+
+  it('rejeita caractere não hexadecimal', () => {
+    vi.stubEnv('INVITE_RATE_LIMIT_PEPPER', `${'a'.repeat(63)}g`);
+    expect(() => getInviteRateLimitPepper()).toThrow(InvalidInviteRateLimitPepperError);
+  });
+
+  it('mensagem de erro nunca contém o valor recebido, só o nome da classe/variável', () => {
+    vi.stubEnv('INVITE_RATE_LIMIT_PEPPER', 'not-a-real-secret-value-should-never-leak');
+    try {
+      getInviteRateLimitPepper();
+      expect.unreachable();
+    } catch (error) {
+      expect((error as Error).message).not.toContain('not-a-real-secret-value-should-never-leak');
+      expect((error as Error).message).toBe('invite_rate_limit_pepper_invalid');
+    }
+  });
+
+  it('sem cache entre chamadas: variável alterada entre duas leituras reflete o novo valor', () => {
+    vi.stubEnv('INVITE_RATE_LIMIT_PEPPER', VALID_PEPPER);
+    const first = getInviteRateLimitPepper();
+    const otherPepper = 'b'.repeat(64);
+    vi.stubEnv('INVITE_RATE_LIMIT_PEPPER', otherPepper);
+    const second = getInviteRateLimitPepper();
+    expect(first.equals(second)).toBe(false);
   });
 });
