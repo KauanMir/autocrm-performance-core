@@ -148,6 +148,16 @@ select is(
 -- assignment. A intenção do teste (nenhuma RPC do M1-C/M1-E, nem nenhum
 -- helper de ESCRITA, referencia platform_role) permanece 100% coberta:
 -- is_platform_super_admin() é STABLE (só leitura), nunca faz UPDATE.
+--
+-- ATUALIZAÇÃO (M1-F S4-A2A): create_invite()/resend_invite()/
+-- cancel_invite() adicionadas à lista de exclusão pelo mesmo motivo —
+-- as três precisam LER platform_role (de p_actor_profile_id, ou de
+-- auth.uid() no caso de cancel_invite) para revalidar no banco se o
+-- ator é Super Admin, contrato exigido pela autorização de convites
+-- (M1-F S4-A2 E0 §6/§8). Nenhuma das três jamais grava em
+-- profiles.platform_role — escrevem apenas em invites/audit_log; a
+-- intenção original do teste (nenhuma escrita/mass assignment de
+-- platform_role fora do trigger de guarda) permanece 100% coberta.
 select is(
   (select count(*)::int
      from pg_proc p
@@ -155,7 +165,8 @@ select is(
     where n.nspname = 'public'
       and p.prosecdef
       and p.proname not in ('profiles_guard_platform_role', 'company_memberships_check_mutation',
-                             'sellers_check_membership_consistency', 'is_platform_super_admin')
+                             'sellers_check_membership_consistency', 'is_platform_super_admin',
+                             'create_invite', 'resend_invite', 'cancel_invite')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
 -- Reforço específico do S2: is_platform_super_admin() referencia

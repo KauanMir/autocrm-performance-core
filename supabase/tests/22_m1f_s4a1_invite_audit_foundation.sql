@@ -488,10 +488,18 @@ select is(
 -- COMPATIBILIDADE
 -- ═══════════════════════════════════════════════════════════════════════
 
+-- ATUALIZAÇÃO (M1-F S4-A2A): create_invite()/resend_invite()/
+-- cancel_invite() passaram a existir (etapa seguinte, autorizada
+-- separadamente) — a intenção original deste teste (nenhuma RPC de
+-- convite nesta etapa S4-A1, que é só schema) permanece coberta pela
+-- ausência das 3 no momento em que o S4-A1 foi commitado; accept_invite()
+-- continua inexistente até hoje (S4-C, ainda não implementado) e é a
+-- única checagem que ainda faz sentido manter como "deve ser 0" de forma
+-- absoluta neste ponto do histórico.
 select is(
   (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname in ('create_invite', 'accept_invite', 'cancel_invite', 'resend_invite')),
-  0, 'nenhuma RPC de convite foi criada nesta etapa (create_invite/accept_invite/cancel_invite/resend_invite inexistentes)');
+    where n.nspname = 'public' and p.proname = 'accept_invite'),
+  0, 'accept_invite() continua inexistente (S4-C, fora de escopo até hoje)');
 
 select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.proname in ('create_lead','update_lead','move_lead_to_stage',
