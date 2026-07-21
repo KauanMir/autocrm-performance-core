@@ -178,6 +178,13 @@ select is(
 -- nenhuma das duas jamais grava em profiles.platform_role — só em
 -- audit_log (falhas de domínio) e invite_rate_limit_events (via o helper
 -- interno reserve_invite_rate_limit(), que elas chamam).
+--
+-- ATUALIZAÇÃO (M1-F S4-C1): accept_invite() adicionada à lista de
+-- exclusão — é a ÚNICA das exceções desta lista que efetivamente ESCREVE
+-- em platform_role (UPDATE profiles SET platform_role='super_admin', só
+-- quando role_kind='super_admin' do próprio convite sendo aceito, nunca
+-- por parâmetro do cliente — ator sempre auth.uid()). EXECUTE restrito a
+-- authenticated (nunca anon), ator sempre derivado da sessão real.
 select is(
   (select count(*)::int
      from pg_proc p
@@ -188,7 +195,8 @@ select is(
                              'sellers_check_membership_consistency', 'is_platform_super_admin',
                              'create_invite', 'resend_invite', 'cancel_invite',
                              'complete_invite_resend_delivery', 'complete_invite_delivery',
-                             'reserve_create_invite_rate_limit', 'reserve_resend_invite_rate_limit')
+                             'reserve_create_invite_rate_limit', 'reserve_resend_invite_rate_limit',
+                             'accept_invite')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
 -- Reforço específico do S2: is_platform_super_admin() referencia

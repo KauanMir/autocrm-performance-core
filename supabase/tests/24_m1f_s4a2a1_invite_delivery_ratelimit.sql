@@ -1051,10 +1051,9 @@ select is(
 -- COMPATIBILIDADE
 -- ═══════════════════════════════════════════════════════════════════════
 
-select is(
-  (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname = 'accept_invite'),
-  0, 'accept_invite() continua inexistente (S4-C, fora de escopo)');
+-- ATUALIZAÇÃO (M1-F S4-C1): accept_invite() passou a existir.
+select has_function('public'::name, 'accept_invite'::name, array['text']::name[],
+  'accept_invite(text) passou a existir (M1-F S4-C1) — hash apenas, nunca token bruto');
 select is(
   (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.proname in ('create_invite', 'resend_invite', 'cancel_invite',

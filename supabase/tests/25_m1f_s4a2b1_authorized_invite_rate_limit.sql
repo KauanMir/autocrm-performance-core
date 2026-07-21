@@ -551,10 +551,9 @@ select is(
       'reserve_create_invite_rate_limit', 'reserve_resend_invite_rate_limit')),
   8, 'exatamente as 8 RPCs de convite esperadas existem (6 anteriores + as 2 novas desta etapa), sem duplicata');
 
-select is(
-  (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname = 'accept_invite'),
-  0, 'accept_invite() continua inexistente (S4-C, fora de escopo)');
+-- ATUALIZAÇÃO (M1-F S4-C1): accept_invite() passou a existir.
+select has_function('public'::name, 'accept_invite'::name, array['text']::name[],
+  'accept_invite(text) passou a existir (M1-F S4-C1) — hash apenas, nunca token bruto');
 
 -- create_invite()/resend_invite() continuam revalidando tudo de novo —
 -- não confiam cegamente em reserve_create/resend_invite_rate_limit() ter

@@ -492,14 +492,14 @@ select is(
 -- cancel_invite() passaram a existir (etapa seguinte, autorizada
 -- separadamente) — a intenção original deste teste (nenhuma RPC de
 -- convite nesta etapa S4-A1, que é só schema) permanece coberta pela
--- ausência das 3 no momento em que o S4-A1 foi commitado; accept_invite()
--- continua inexistente até hoje (S4-C, ainda não implementado) e é a
--- única checagem que ainda faz sentido manter como "deve ser 0" de forma
--- absoluta neste ponto do histórico.
-select is(
-  (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname = 'accept_invite'),
-  0, 'accept_invite() continua inexistente (S4-C, fora de escopo até hoje)');
+-- ausência das 3 no momento em que o S4-A1 foi commitado.
+--
+-- ATUALIZAÇÃO (M1-F S4-C1): accept_invite() passou a existir — a
+-- checagem "deve ser 0" não faz mais sentido; substituída por uma
+-- confirmação positiva de existência com a assinatura exata (mesmo
+-- padrão das outras 3 RPCs de convite já atualizadas nesta seção).
+select has_function('public'::name, 'accept_invite'::name, array['text']::name[],
+  'accept_invite(text) passou a existir (M1-F S4-C1) — hash apenas, nunca token bruto');
 
 select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public' and p.proname in ('create_lead','update_lead','move_lead_to_stage',
