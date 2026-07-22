@@ -83,9 +83,59 @@ select has_trigger('public'::name, 'sellers'::name, 'sellers_membership_consiste
 select is(
   (select relrowsecurity from pg_class where oid = 'public.company_memberships'::regclass),
   true, 'RLS habilitada em company_memberships');
+
+-- CORREÇÃO (M1-F S4-F1, aprovada explicitamente pelo usuário): este arquivo
+-- (S1) originalmente esperava ZERO policies em company_memberships — correto
+-- na época (S1 é só schema; S2 definiria as policies "definitivas" para o
+-- consumo do M1-E/M1-C via can_access_company/is_manager_or_platform, ainda
+-- não escrito). O S4-F1 introduziu um consumidor REAL e diferente — o
+-- próprio frontend resolvendo a própria membership ativa para
+-- canManageInvites() — não antecipado nem pelo S1 nem pelo S2. A asserção
+-- abaixo foi atualizada para validar o contrato EXATO aprovado nessa etapa
+-- (nome, comando, permissividade, roles e expressão USING), não só a
+-- contagem — continua provando que NENHUMA outra policy além desta foi
+-- adicionada por engano.
 select is(
   (select count(*)::int from pg_policies where schemaname='public' and tablename='company_memberships'),
-  0, 'nenhuma policy em company_memberships (S1 fechado de propósito — S2 define as definitivas)');
+  1, 'company_memberships tem EXATAMENTE 1 policy (M1-F S4-F1 — nenhuma outra foi adicionada além da leitura própria)');
+select is(
+  (select policyname::text from pg_policies where schemaname='public' and tablename='company_memberships'),
+  'company_memberships_select_own', 'a única policy tem o nome exato criado pelo S4-F1: company_memberships_select_own');
+select is(
+  (select cmd::text from pg_policies where schemaname='public' and tablename='company_memberships' and policyname='company_memberships_select_own'),
+  'SELECT', 'company_memberships_select_own é para o comando SELECT — nenhum INSERT/UPDATE/DELETE habilitado por policy');
+select is(
+  (select permissive::text from pg_policies where schemaname='public' and tablename='company_memberships' and policyname='company_memberships_select_own'),
+  'PERMISSIVE', 'company_memberships_select_own é PERMISSIVE (nunca RESTRICTIVE)');
+select is(
+  (select roles from pg_policies where schemaname='public' and tablename='company_memberships' and policyname='company_memberships_select_own'),
+  array['authenticated']::name[], 'company_memberships_select_own se aplica exclusivamente a authenticated, nunca a anon/public');
+select is(
+  (select qual from pg_policies where schemaname='public' and tablename='company_memberships' and policyname='company_memberships_select_own'),
+  '(profile_id = auth.uid())', 'USING exige profile_id = auth.uid() — nenhuma linha de outro usuário pode satisfazer essa condição, nenhuma linha de outra empresa por tabela alguma');
+select is(
+  (select with_check from pg_policies where schemaname='public' and tablename='company_memberships' and policyname='company_memberships_select_own'),
+  null::text, 'policy de SELECT não tem WITH CHECK (cláusula não se aplica a SELECT)');
+
+-- Grants por coluna do S4-F1: authenticated tem SELECT exatamente nas 3
+-- colunas mínimas (company_id/role/is_active) que canManageInvites()
+-- precisa — nunca id/profile_id/invited_at/joined_at/created_at/updated_at,
+-- nunca INSERT/UPDATE/DELETE, nunca nada para anon.
+select is(
+  (select array_agg(column_name::text order by column_name::text) from information_schema.role_column_grants
+    where table_schema='public' and table_name='company_memberships'
+      and grantee='authenticated' and privilege_type='SELECT'),
+  (select array_agg(c order by c) from unnest(array['company_id','is_active','role']) as c),
+  'authenticated tem SELECT exatamente em company_id/is_active/role, nunca id/profile_id/invited_at/joined_at/created_at/updated_at');
+select is(
+  (select count(*)::int from information_schema.role_column_grants
+    where table_schema='public' and table_name='company_memberships' and grantee='anon' and privilege_type='SELECT'),
+  0, 'anon continua sem SELECT em nenhuma coluna de company_memberships');
+select is(
+  (select count(*)::int from information_schema.role_table_grants
+    where table_schema='public' and table_name='company_memberships'
+      and grantee='authenticated' and privilege_type in ('INSERT','UPDATE','DELETE')),
+  0, 'nenhum INSERT/UPDATE/DELETE foi concedido a authenticated em company_memberships pelo S4-F1');
 
 select is(
   (select array_agg(priv order by priv) from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) as priv
@@ -125,9 +175,15 @@ select throws_ok($$update public.company_memberships set is_active = false$$, '4
 select throws_ok($$delete from public.company_memberships$$, '42501', null, 'anon: DELETE direto em company_memberships falha');
 reset role;
 
+-- ATUALIZAÇÃO (M1-F S4-F1, aprovada explicitamente): SELECT direto de
+-- company_memberships por authenticated não falha mais por completo — a
+-- policy company_memberships_select_own deixa cada ator ler a PRÓPRIA linha
+-- (seed.sql: o admin legado tem membership própria, role=manager,
+-- is_active=true), então a consulta sem filtro retorna 1, nunca lança.
+-- INSERT/UPDATE/DELETE continuam sem nenhum grant e seguem falhando.
 select set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}', true);
 set local role authenticated;
-select throws_ok($$select count(*) from public.company_memberships$$, '42501', null, 'authenticated (admin legado): SELECT direto em company_memberships falha');
+select is((select count(*)::int from public.company_memberships), 1, 'authenticated (admin legado): SELECT direto em company_memberships devolve so a propria linha (S4-F1)');
 select throws_ok($$insert into public.company_memberships (company_id, profile_id, role) values ('00000000-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'manager')$$, '42501', null, 'authenticated (admin legado): INSERT direto em company_memberships falha');
 select throws_ok($$update public.company_memberships set is_active = false$$, '42501', null, 'authenticated (admin legado): UPDATE direto em company_memberships falha');
 select throws_ok($$delete from public.company_memberships$$, '42501', null, 'authenticated (admin legado): DELETE direto em company_memberships falha');

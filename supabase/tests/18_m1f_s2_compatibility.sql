@@ -66,16 +66,26 @@ select is(
 select is(
   (select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'profiles'),
   3, 'policies de profiles inalteradas (3: select_own, select_company, update_admin)');
+-- ATUALIZAÇÃO (M1-F S4-F1, aprovada explicitamente): o S2 fechava
+-- company_memberships por completo (0 policies). O S4-F1 introduziu o
+-- primeiro consumidor real (leitura da própria membership pelo frontend)
+-- e adicionou exatamente 1 policy — cobertura completa do contrato exato
+-- (nome/comando/USING/grants) está em 10_m1f_s1_schema.sql e
+-- 28_m1f_s4f1_01_own_membership_read.sql; aqui só confirmamos que isso não
+-- regrediu por acidente (continua sendo exatamente 1, não mais).
 select is(
   (select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'company_memberships'),
-  0, 'company_memberships permanece SEM nenhuma policy nesta etapa (decisao explicita do S2 — sem consumidor real ainda)');
+  1, 'company_memberships tem exatamente 1 policy pós-S4-F1 (company_memberships_select_own — S2 fechava com 0)');
 
--- ── nenhum grant de escrita direta apareceu em company_memberships; e o
---    SELECT que o S2 decidiu NAO conceder continua ausente ──────────────
+-- ── nenhum grant de ESCRITA nem de TABELA INTEIRA apareceu em
+--    company_memberships. O S4-F1 concedeu SELECT por COLUNA (3 colunas,
+--    ver teste 28) a authenticated, o que não aparece em
+--    role_table_grants (só reflete grants de tabela inteira) — por isso a
+--    contagem abaixo continua 0 mesmo após o S4-F1, de propósito ──────────
 select is(
   (select count(*)::int from information_schema.role_table_grants
     where table_schema='public' and table_name='company_memberships' and grantee in ('anon','authenticated')),
-  0, 'company_memberships continua com zero grants para anon/authenticated (RLS/policy adiadas nesta etapa)');
+  0, 'company_memberships continua sem GRANT de tabela inteira para anon/authenticated (S4-F1 concedeu só por coluna, ver teste 28)');
 
 -- ── nenhuma promoção global apareceu por causa do S2 ─────────────────────
 select is(

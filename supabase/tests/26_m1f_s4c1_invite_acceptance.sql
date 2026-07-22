@@ -302,14 +302,19 @@ select ok(
   'convite vencido -> invite_expired');
 reset role;
 
--- canceled
+-- canceled. id buscado como service_role (nunca sob o grant restrito de
+-- authenticated — token_hash nao esta nas colunas concedidas pelo M1-F
+-- S4-F1, ver teste 29), mesmo padrao ja usado no teste 23.
 set local role service_role;
 select public.create_invite('fa900000-0000-0000-0000-000000000001', 'fa100000-0000-0000-0000-000000000001', 'g6.validate.canceled@test.local', 'Validate Canceled', 'seller', repeat('e3', 32));
+create temporary table t26_cancel_e3 as select id from public.invites where token_hash = repeat('e3', 32);
+grant select on t26_cancel_e3 to authenticated;
 reset role;
 set local role authenticated;
 select pg_temp.as_user('fa900000-0000-0000-0000-000000000001');
-select public.cancel_invite((select id from public.invites where token_hash = repeat('e3', 32)));
+select public.cancel_invite((select id from t26_cancel_e3));
 reset role;
+drop table t26_cancel_e3;
 set local role service_role;
 select ok(
   (with r as (select rr.* from public.validate_invite_token(repeat('e3', 32)) rr)

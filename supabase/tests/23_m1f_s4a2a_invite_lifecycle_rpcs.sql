@@ -614,38 +614,51 @@ select is((select status from public.invites where token_hash = repeat('d9', 32)
 -- CANCEL_INVITE
 -- ═══════════════════════════════════════════════════════════════════════
 
--- Super Admin cancela qualquer pending
+-- Super Admin cancela qualquer pending. id buscado como postgres (nunca sob
+-- o grant restrito de authenticated — token_hash nao esta nas colunas
+-- concedidas pelo M1-F S4-F1, ver teste 29), mesmo padrao ja usado em
+-- t23_regressao_cancel mais abaixo.
 set local role service_role;
 select public.create_invite('d9000000-0000-0000-0000-000000000001', 'd1000000-0000-0000-0000-000000000001', 'cancel1@exemplo.com', 'Cancel Um', 'seller', repeat('e1', 32));
 reset role;
+create temporary table t23_cancel_e1 as select id from public.invites where token_hash = repeat('e1', 32);
+grant select on t23_cancel_e1 to authenticated;
 select set_config('request.jwt.claims', '{"sub":"d9000000-0000-0000-0000-000000000004","role":"authenticated"}', true);
 set local role authenticated;
 select ok(
-  (with r as (select rr.* from public.cancel_invite((select id from public.invites where token_hash = repeat('e1', 32))) rr)
+  (with r as (select rr.* from public.cancel_invite((select id from t23_cancel_e1)) rr)
    select r.success and r.code = 'ok' and r.status = 'canceled' from r),
   'Super Admin cancela qualquer convite pending, mesmo não tendo sido o autor');
 reset role;
+drop table t23_cancel_e1;
 
 -- Manager cancela o próprio pending
 set local role service_role;
 select public.create_invite('d9000000-0000-0000-0000-000000000001', 'd1000000-0000-0000-0000-000000000001', 'cancel2@exemplo.com', 'Cancel Dois', 'seller', repeat('e2', 32));
 reset role;
+create temporary table t23_cancel_e2 as select id from public.invites where token_hash = repeat('e2', 32);
+grant select on t23_cancel_e2 to authenticated;
 select set_config('request.jwt.claims', '{"sub":"d9000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 set local role authenticated;
 select ok(
-  (with r as (select rr.* from public.cancel_invite((select id from public.invites where token_hash = repeat('e2', 32))) rr)
+  (with r as (select rr.* from public.cancel_invite((select id from t23_cancel_e2)) rr)
    select r.success and r.code = 'ok' from r),
   'Manager Alpha cancela convite que ELE MESMO criou');
 reset role;
+drop table t23_cancel_e2;
 
--- Manager não cancela convite alheio (outro Manager da MESMA empresa)
+-- Manager não cancela convite alheio (outro Manager da MESMA empresa). id
+-- de e3 fica numa tabela temporária que sobrevive até seu segundo uso mais
+-- abaixo (Manager inativo).
 set local role service_role;
 select public.create_invite('d9000000-0000-0000-0000-000000000010', 'd1000000-0000-0000-0000-000000000001', 'cancel3@exemplo.com', 'Cancel Tres', 'seller', repeat('e3', 32));
 reset role;
+create temporary table t23_cancel_e3 as select id from public.invites where token_hash = repeat('e3', 32);
+grant select on t23_cancel_e3 to authenticated;
 select set_config('request.jwt.claims', '{"sub":"d9000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 set local role authenticated;
 select ok(
-  (with r as (select rr.* from public.cancel_invite((select id from public.invites where token_hash = repeat('e3', 32))) rr)
+  (with r as (select rr.* from public.cancel_invite((select id from t23_cancel_e3)) rr)
    select not r.success and r.code = 'invite_not_found' from r),
   'Manager Alpha não cancela convite criado por Manager Gamma (outro convidador, mesma empresa) — colapsa em invite_not_found');
 reset role;
@@ -689,9 +702,10 @@ update public.company_memberships set is_active = false
 select set_config('request.jwt.claims', '{"sub":"d9000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
 set local role authenticated;
 select throws_ok(
-  format($$select * from public.cancel_invite(%L::uuid)$$, (select id from public.invites where token_hash = repeat('e3', 32))),
+  format($$select * from public.cancel_invite(%L::uuid)$$, (select id from t23_cancel_e3)),
   '42501', null, 'Manager Gamma com membership DESATIVADA não cancela mais nada — nenhuma capacidade administrativa (forbidden)');
 reset role;
+drop table t23_cancel_e3;
 
 -- Seller / ADMIN legado negados
 select set_config('request.jwt.claims', '{"sub":"d9000000-0000-0000-0000-000000000003","role":"authenticated"}', true);
@@ -708,15 +722,18 @@ select throws_ok(
   '42501', null, 'ADMIN legado sem membership real é negado ao tentar cancel_invite');
 reset role;
 
--- empresa suspensa/cancelada NÃO impede cancelamento
+-- empresa suspensa/cancelada NÃO impede cancelamento. id de e4 usado aqui
+-- e na chamada repetida logo abaixo (idempotência).
 set local role service_role;
 select public.create_invite('d9000000-0000-0000-0000-000000000004', 'd3000000-0000-0000-0000-000000000003', 'cancel4@exemplo.com', 'Cancel Quatro', 'seller', repeat('e4', 32));
 reset role;
+create temporary table t23_cancel_e4 as select id from public.invites where token_hash = repeat('e4', 32);
+grant select on t23_cancel_e4 to authenticated;
 update public.companies set status = 'suspensa' where id = 'd3000000-0000-0000-0000-000000000003';
 select set_config('request.jwt.claims', '{"sub":"d9000000-0000-0000-0000-000000000004","role":"authenticated"}', true);
 set local role authenticated;
 select ok(
-  (with r as (select rr.* from public.cancel_invite((select id from public.invites where token_hash = repeat('e4', 32))) rr)
+  (with r as (select rr.* from public.cancel_invite((select id from t23_cancel_e4)) rr)
    select r.success and r.code = 'ok' from r),
   'cancelamento de convite pending permanece permitido mesmo com a empresa agora suspensa (ação corretiva, sem gate operacional)');
 reset role;
@@ -726,10 +743,11 @@ update public.companies set status = 'implantacao' where id = 'd3000000-0000-000
 select set_config('request.jwt.claims', '{"sub":"d9000000-0000-0000-0000-000000000004","role":"authenticated"}', true);
 set local role authenticated;
 select ok(
-  (with r as (select rr.* from public.cancel_invite((select id from public.invites where token_hash = repeat('e4', 32))) rr)
+  (with r as (select rr.* from public.cancel_invite((select id from t23_cancel_e4)) rr)
    select not r.success and r.code = 'invite_not_actionable' from r),
   'cancelar novamente um convite já canceled retorna invite_not_actionable, sem alterar nada');
 reset role;
+drop table t23_cancel_e4;
 select is((select count(*)::int from public.invites where token_hash = repeat('e4', 32) and status = 'canceled'), 1,
   'a segunda chamada não produziu nenhum efeito colateral — o convite continua canceled, uma única vez');
 
@@ -738,13 +756,16 @@ set local role service_role;
 select public.create_invite('d9000000-0000-0000-0000-000000000001', 'd1000000-0000-0000-0000-000000000001', 'cancel5@exemplo.com', 'Cancel Cinco', 'seller', repeat('e5', 32));
 reset role;
 update public.invites set expires_at = now() - interval '1 hour' where token_hash = repeat('e5', 32);
+create temporary table t23_cancel_e5 as select id from public.invites where token_hash = repeat('e5', 32);
+grant select on t23_cancel_e5 to authenticated;
 select set_config('request.jwt.claims', '{"sub":"d9000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 set local role authenticated;
 select ok(
-  (with r as (select rr.* from public.cancel_invite((select id from public.invites where token_hash = repeat('e5', 32))) rr)
+  (with r as (select rr.* from public.cancel_invite((select id from t23_cancel_e5)) rr)
    select not r.success and r.code = 'invite_not_actionable' from r),
   'cancelar um pending já VENCIDO materializa expired e retorna invite_not_actionable (nunca vira canceled)');
 reset role;
+drop table t23_cancel_e5;
 select is((select status from public.invites where token_hash = repeat('e5', 32)), 'expired'::public.invite_status,
   'o convite vencido ficou expired (materializado), não canceled');
 
@@ -761,13 +782,16 @@ reset role;
 set local role service_role;
 select public.create_invite('d9000000-0000-0000-0000-000000000002', 'd2000000-0000-0000-0000-000000000002', 'cancel6@exemplo.com', 'Cancel Seis', 'seller', repeat('e6', 32));
 reset role;
+create temporary table t23_cancel_e6 as select id from public.invites where token_hash = repeat('e6', 32);
+grant select on t23_cancel_e6 to authenticated;
 select set_config('request.jwt.claims', '{"sub":"d9000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 set local role authenticated;
 select ok(
-  (with r as (select rr.* from public.cancel_invite((select id from public.invites where token_hash = repeat('e6', 32))) rr)
+  (with r as (select rr.* from public.cancel_invite((select id from t23_cancel_e6)) rr)
    select not r.success and r.code = 'invite_not_found' from r),
   'Manager Alpha cancelando convite de OUTRA empresa (Beta) -> invite_not_found (mesmo código do id inexistente — sem enumeração)');
 reset role;
+drop table t23_cancel_e6;
 
 -- retorno mínimo de cancel_invite
 select is(

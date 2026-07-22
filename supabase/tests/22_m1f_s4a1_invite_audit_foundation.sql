@@ -395,18 +395,20 @@ select is(
 reset role;
 
 -- Manager nao ve convite de OUTRO Manager (E2 criou 1 convite; E1 nao deve
--- ve-lo)
+-- ve-lo). Identificado por invited_by_profile_id+email (colunas concedidas
+-- a authenticated pelo M1-F S4-F1 — token_hash nao e mais uma delas, entao
+-- nao pode aparecer nem no WHERE de uma consulta como authenticated).
 select set_config('request.jwt.claims', '{"sub":"e1000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 set local role authenticated;
 select is(
-  (select count(*)::int from public.invites where token_hash = 'hash-dup-b-001'),
+  (select count(*)::int from public.invites where invited_by_profile_id = 'e1000000-0000-0000-0000-000000000002' and email = 'duplicado@exemplo.com'),
   0, 'Manager E1 nao ve o convite criado pelo Manager E2 (isolamento entre convidadores)');
 reset role;
 
 select set_config('request.jwt.claims', '{"sub":"e1000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
 set local role authenticated;
 select is(
-  (select count(*)::int from public.invites where token_hash = 'hash-dup-b-001'),
+  (select count(*)::int from public.invites where invited_by_profile_id = 'e1000000-0000-0000-0000-000000000002' and email = 'duplicado@exemplo.com'),
   1, 'Manager E2 ve o proprio convite');
 reset role;
 
@@ -475,10 +477,15 @@ select is(
   (select count(*)::int from information_schema.role_table_grants
     where table_schema='public' and table_name='audit_log' and grantee in ('public','anon','authenticated')),
   0, 'PUBLIC/anon/authenticated sem nenhum grant em audit_log (fechada por completo)');
+-- ATUALIZAÇÃO (M1-F S4-F1, aprovada explicitamente): o grant de SELECT de
+-- tabela inteira do S4-A1 foi endurecido para SELECT por COLUNA (10
+-- colunas, sem token_hash — ver 29_m1f_s4f1_02_invites_column_grants.sql).
+-- Grant por coluna não aparece em role_table_grants (só reflete grants de
+-- tabela inteira), então a contagem correta pós-S4-F1 é 0, não 1.
 select is(
   (select count(*)::int from information_schema.role_table_grants
     where table_schema='public' and table_name='invites' and grantee='authenticated' and privilege_type='SELECT'),
-  1, 'authenticated tem exatamente o grant de SELECT em invites, nada mais');
+  0, 'authenticated NAO tem mais SELECT de tabela inteira em invites (S4-F1 endureceu para grant por coluna, ver teste 29)');
 select is(
   (select count(*)::int from information_schema.role_table_grants
     where table_schema='public' and table_name='invites' and grantee='authenticated' and privilege_type in ('INSERT','UPDATE','DELETE')),
