@@ -313,3 +313,97 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
     expect(reorder.reorderStages).not.toHaveBeenCalled();
   });
 });
+
+// ── E. canManageInvites — aba "Usuários" (M1-F S4-F1) ────────────────────
+// capability PRÓPRIA, independente de canAccessFullSettings/flag de Etapas.
+// Manager com membership ativa vê Usuários MAS NUNCA Empresa/Etapas
+// (decisão explícita: não ampliar canAccessFullSettings). Super Admin
+// (platformRole) também vê Usuários. Seller e Manager sem membership ativa
+// continuam sem nenhum acesso, exatamente como antes desta etapa.
+
+describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
+  it('Manager com membership ATIVA (role=manager) vê Usuários mesmo com flag de Etapas OFF, mas NÃO vê Empresa/Etapas', () => {
+    m.user.current = {
+      ...m.user.current,
+      role: 'manager',
+      activeMembership: { companyId: 'company-a', role: 'manager' },
+    };
+    render(<ScreenAjustes go={() => {}} />);
+
+    expect(screen.getByText('Usuários')).toBeInTheDocument();
+    expect(screen.queryByText('Empresa')).toBeNull();
+    expect(screen.queryByText('Etapas')).toBeNull();
+    expect(screen.queryByTestId('settings-denied')).toBeNull();
+  });
+
+  it('Manager com membership ATIVA + flag de Etapas ON: vê Usuários E Etapas, mas nunca Empresa', () => {
+    m.user.current = {
+      ...m.user.current,
+      role: 'manager',
+      activeMembership: { companyId: 'company-a', role: 'manager' },
+    };
+    m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
+    render(<ScreenAjustes go={() => {}} />);
+
+    expect(screen.getByText('Usuários')).toBeInTheDocument();
+    expect(screen.getByText('Etapas')).toBeInTheDocument();
+    expect(screen.queryByText('Empresa')).toBeNull();
+  });
+
+  it('Manager com membership INATIVA (activeMembership null): sem acesso a Usuários — legado profiles.role="manager" sozinho não concede nada', () => {
+    m.user.current = { ...m.user.current, role: 'manager', activeMembership: null };
+    render(<ScreenAjustes go={() => {}} />);
+
+    expect(screen.queryByText('Usuários')).toBeNull();
+    expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
+  });
+
+  it('Super Admin (platformRole=super_admin) vê Usuários, mesmo sem companyId/membership', () => {
+    m.user.current = {
+      ...m.user.current,
+      role: 'seller',
+      companyId: null,
+      platformRole: 'super_admin',
+      activeMembership: null,
+    };
+    render(<ScreenAjustes go={() => {}} />);
+
+    expect(screen.getByText('Usuários')).toBeInTheDocument();
+    expect(screen.queryByText('Empresa')).toBeNull();
+    expect(screen.queryByText('Etapas')).toBeNull();
+  });
+
+  it('Seller (activeMembership.role=seller) nunca vê Usuários nem nenhum outro controle administrativo', () => {
+    m.user.current = {
+      ...m.user.current,
+      role: 'seller',
+      activeMembership: { companyId: 'company-a', role: 'seller' },
+    };
+    render(<ScreenAjustes go={() => {}} />);
+
+    expect(screen.queryByText('Usuários')).toBeNull();
+    expect(screen.queryByText('Empresa')).toBeNull();
+    expect(screen.queryByText('Etapas')).toBeNull();
+    expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
+  });
+
+  it('admin (canAccessFullSettings) continua vendo Empresa+Usuários+Etapas juntos, sem depender de canManageInvites', () => {
+    m.user.current = { ...m.user.current, role: 'admin', activeMembership: null };
+    render(<ScreenAjustes go={() => {}} />);
+
+    expect(screen.getByText('Empresa')).toBeInTheDocument();
+    expect(screen.getByText('Usuários')).toBeInTheDocument();
+    expect(screen.getByText('Etapas')).toBeInTheDocument();
+  });
+
+  it('troca Manager-sem-membership → Manager-com-membership-ativa: Usuários aparece imediatamente, Empresa continua nunca aparecendo', () => {
+    m.user.current = { ...m.user.current, role: 'manager', activeMembership: null };
+    const view = render(<ScreenAjustes go={() => {}} />);
+    expect(screen.queryByText('Usuários')).toBeNull();
+
+    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-a', role: 'manager' } };
+    view.rerender(<ScreenAjustes go={() => {}} />);
+    expect(screen.getByText('Usuários')).toBeInTheDocument();
+    expect(screen.queryByText('Empresa')).toBeNull();
+  });
+});

@@ -149,6 +149,31 @@ describe('menu Ajustes por role e flag', () => {
   });
 });
 
+describe('M1-F S4-F1: "Ajustes" via canManageInvites, independente da flag de Etapas', () => {
+  it('manager com membership ATIVA vê Ajustes com a flag de Etapas OFF (canManageInvites libera, não precisa da flag)', async () => {
+    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager' } };
+    await renderApp(managerAtivo);
+    expect(screen.getByText('Ajustes')).toBeInTheDocument();
+  });
+
+  it('manager SEM membership ativa continua sem Ajustes com a flag OFF (nada mudou para esse caso)', async () => {
+    await renderApp(user('manager'));
+    expect(screen.queryByText('Ajustes')).toBeNull();
+  });
+
+  it('Super Admin (platformRole=super_admin) vê Ajustes mesmo com a flag de Etapas OFF e sem membership', async () => {
+    const superAdmin: User = { ...user('seller'), companyId: null, platformRole: 'super_admin' };
+    await renderApp(superAdmin);
+    expect(screen.getByText('Ajustes')).toBeInTheDocument();
+  });
+
+  it('seller nunca vê Ajustes, mesmo com activeMembership.role=seller preenchido', async () => {
+    const sellerComMembership: User = { ...user('seller'), activeMembership: { companyId: 'company-a', role: 'seller' } };
+    await renderApp(sellerComMembership);
+    expect(screen.queryByText('Ajustes')).toBeNull();
+  });
+});
+
 describe('troca de usuário com tela Ajustes aberta', () => {
   it('admin → manager com flag OFF: acesso removido imediatamente (volta para home)', async () => {
     await renderApp(user('admin'));
