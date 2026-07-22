@@ -6,7 +6,7 @@ import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle, TweakBut
 import { NAV_ROLES, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { isRemoteStagesEnabled, isPlatformAdminEnabled } from '@/lib/flags';
-import { canAccessStageSettings, canAccessPlatformAdmin } from '@/lib/capabilities';
+import { canAccessStageSettings, canAccessPlatformAdmin, canManageInvites } from '@/lib/capabilities';
 import { useQueryCacheIdentity } from '@/lib/hooks/useQueryCacheIdentity';
 import { subscribeStore } from '@/lib/store';
 import { AuthService, SellerService, TaskService } from '@/lib/services';
@@ -28,6 +28,15 @@ const TWEAK_DEFAULTS = {
 // aba Etapas — ver ScreenAjustes). Com a flag OFF a lista é idêntica ao
 // legado. A combinação capability×flag mora aqui, nunca em lib/capabilities.
 //
+// M1-F S4-F1: canManageInvites (Super Admin OU Manager com membership
+// ATIVA) também libera 'ajustes', SEM depender de nenhuma flag — diferente
+// de canAccessStageSettings, a superfície de convites/Usuários não está
+// atrás de NEXT_PUBLIC_FF_REMOTE_STAGES nem de NEXT_PUBLIC_FF_PLATFORM_ADMIN
+// (essa é especificamente a área global da KAPA, ScreenEmpresas — convites
+// são uma ação DE EMPRESA, não de plataforma). Dentro da tela, ScreenAjustes
+// decide sozinha quais abas mostrar (Empresa/Etapas continuam exigindo seus
+// próprios guards — ver allowedTabs em ScreensBiz.tsx).
+//
 // M1-F S3-B: 'empresas' segue o mesmo molde — só entra com
 // NEXT_PUBLIC_FF_PLATFORM_ADMIN ON E platformRole === 'super_admin'
 // (canAccessPlatformAdmin). Independente da condição de 'ajustes' acima:
@@ -38,7 +47,9 @@ function allowedNavIds(user: User | null): string[] {
   if (!user) return [];
   const base = NAV_ROLES[user.role] || [];
   let ids = base;
-  if (!ids.includes('ajustes') && isRemoteStagesEnabled() && canAccessStageSettings(user)) {
+  if (!ids.includes('ajustes') && (
+    (isRemoteStagesEnabled() && canAccessStageSettings(user)) || canManageInvites(user)
+  )) {
     ids = [...ids, 'ajustes'];
   }
   if (isPlatformAdminEnabled() && canAccessPlatformAdmin(user)) {

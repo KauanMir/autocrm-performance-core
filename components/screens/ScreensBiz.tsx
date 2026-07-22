@@ -9,7 +9,7 @@ import { PLACE } from '@/components/podiums/Podiums';
 import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
-import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages } from '@/lib/capabilities';
+import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites } from '@/lib/capabilities';
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
 // missing from this map is what made VisitRow crash (M0-J audit, M0-K1 fix).
@@ -415,11 +415,22 @@ export function ScreenAjustes({ go }: any) {
   // Acesso efetivo: admin sempre tem os Ajustes completos; manager só a área
   // de Etapas e SOMENTE com a flag remota ON; seller nada. Flag OFF ⇒
   // stageSettingsAccess=false ⇒ manager não ganha nenhum acesso (legado).
+  //
+  // M1-F S4-F1: "Usuários" ganhou uma capability PRÓPRIA (canManageInvites —
+  // Super Admin OU Manager com membership ativa), independente de
+  // canAccessFullSettings/flag de Etapas. fullSettingsAccess (admin) continua
+  // liberando Empresa+Usuários+Etapas juntos, exatamente como antes — a
+  // capability nova só amplia quem vê Usuários SEM ganhar Empresa/Etapas
+  // (decisão explícita do usuário: não ampliar canAccessFullSettings).
   const fullSettingsAccess = canAccessFullSettings(currentUser);
+  const invitesAccess = canManageInvites(currentUser);
   const stageSettingsAccess = pipeline.remoteStagesEnabled && canAccessStageSettings(currentUser);
   const allowedTabs: string[] = fullSettingsAccess
     ? ['Empresa', 'Usuários', 'Etapas']
-    : stageSettingsAccess ? ['Etapas'] : [];
+    : [
+        ...(invitesAccess ? ['Usuários'] : []),
+        ...(stageSettingsAccess ? ['Etapas'] : []),
+      ];
   // Derivação SÍNCRONA: aba proibida nunca renderiza, nem por um frame, e o
   // estado antigo de aba não atravessa troca de usuário.
   const activeTab: string | null = allowedTabs.includes(tab) ? tab : (allowedTabs[0] ?? null);
