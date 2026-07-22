@@ -6,7 +6,7 @@ import type { User, Lead, Visit, Deal, Sale, Task, TimelineEntry, Company } from
 import { store, getStore } from './store';
 import type { LeadInput, VisitInput, DealInput, SaleInput, TaskInput } from './store';
 import { supabase, isSupabaseConfigured } from './supabase/client';
-import type { ProfileRow } from './supabase/types';
+import type { ProfileRow, CompanyMembershipRow } from './supabase/types';
 import { isRemoteLeadsEnabled } from './flags';
 import { getRemoteLeadSnapshot, type RemoteLeadSnapshot } from './leads/remoteSnapshot';
 import { RemoteLeadsError } from './leads/errors';
@@ -27,6 +27,25 @@ import { RemoteLeadsError } from './leads/errors';
 
 let _cachedUser: User | null = null;
 
+// M1-F S4-F1: membership ATIVA do próprio usuário (company_memberships),
+// nunca profiles.role legado. RLS (company_memberships_select_own) só deixa
+// ler linhas onde profile_id = auth.uid() — nenhum filtro de empresa/outro
+// usuário é possível aqui, mesmo que alguém tentasse. is_active=true filtra
+// no próprio SELECT: no máximo 1 linha pode satisfazer isso por profile
+// (unique index parcial), então .maybeSingle() nunca ambiguidade. Erro ou
+// ausência de linha ativa vira null — nunca lança, login não pode falhar
+// por causa de membership.
+async function _loadActiveMembership(profileId: string): Promise<{ companyId: string; role: 'manager' | 'seller' } | null> {
+  const { data, error } = await supabase
+    .from('company_memberships')
+    .select('company_id, role, is_active')
+    .eq('profile_id', profileId)
+    .eq('is_active', true)
+    .maybeSingle<CompanyMembershipRow>();
+  if (error || !data) return null;
+  return { companyId: data.company_id, role: data.role };
+}
+
 async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise<User | null> {
   const { data, error } = await supabase
     .from('profiles')
@@ -34,6 +53,7 @@ async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise
     .eq('id', authUserId)
     .single<ProfileRow>();
   if (error || !data || !data.is_active) return null;
+  const activeMembership = await _loadActiveMembership(data.id);
   return {
     id: data.id,
     name: data.name,
@@ -42,6 +62,7 @@ async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise
     sellerId: data.seller_id,
     companyId: data.company_id,
     platformRole: data.platform_role,
+    activeMembership,
   };
 }
 

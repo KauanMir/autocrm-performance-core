@@ -43,6 +43,14 @@ export interface User {
   // autoridade nunca foi este campo, sempre RLS/is_platform_super_admin()
   // no banco). null para todo usuário comum carregado via _loadProfile.
   platformRole?: 'super_admin' | null;
+  // M1-F S4-F1: membership ATIVA em company_memberships (nunca profiles.role
+  // legado) — carregada junto do profile em _loadProfile(). null quando não
+  // há membership ativa (Super Admin nunca tem, por design; qualquer conta
+  // sem vínculo de empresa ativo também). Presença do objeto já implica
+  // is_active=true (a consulta em _loadProfile filtra por isso) — não repete
+  // o booleano aqui. Opcional pelo mesmo motivo de platformRole: fixtures de
+  // teste pré-existentes constroem User sem este campo.
+  activeMembership?: { companyId: string; role: 'manager' | 'seller' } | null;
 }
 
 // LEGACY — kept only so a couple of display-name lookups (FlowVerCliente's

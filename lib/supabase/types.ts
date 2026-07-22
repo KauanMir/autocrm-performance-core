@@ -42,6 +42,15 @@ export interface ProfileRow {
 export type PipelineStageRow =
   Database['public']['Tables']['pipeline_stages']['Row'];
 
+// M1-F S4-F1: só as 3 colunas que _loadActiveMembership() (lib/services.ts)
+// lê — company_memberships tem GRANT SELECT por coluna, nunca a linha
+// inteira (id/profile_id/invited_at/joined_at/created_at/updated_at não são
+// necessários para determinar canManageInvites e não são concedidos).
+export type CompanyMembershipRow = Pick<
+  Database['public']['Tables']['company_memberships']['Row'],
+  'company_id' | 'role' | 'is_active'
+>;
+
 export interface SellerRow {
   // text, não uuid nesta fase — ver nota acima e no README de supabase/.
   id: string;

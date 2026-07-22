@@ -36,3 +36,34 @@ export type PlatformCapabilityUser = Pick<User, 'platformRole'> | null | undefin
 export function canAccessPlatformAdmin(user: PlatformCapabilityUser): boolean {
   return user?.platformRole === 'super_admin';
 }
+
+// M1-F S4-F1 — superfície de convites/usuários (aba "Usuários"): capability
+// PRÓPRIA e restrita, nunca uma ampliação de canAccessFullSettings (que
+// continua exigindo role==='admin' e continua liberando Empresa/Etapas
+// normalmente). Autoriza:
+//   - platformRole==='super_admin' (qualquer empresa, decisão de produto
+//     §4 do S4-F1);
+//   - OU membership ATIVA (company_memberships.role==='manager') — NUNCA
+//     profiles.role legado sozinho: um Manager suspenso (membership
+//     is_active=false) tem profiles.role==='manager' inalterado mas
+//     activeMembership null (a consulta que popula esse campo já filtra
+//     is_active=true, ver lib/services.ts._loadActiveMembership) — o
+//     legado nunca concede acesso por si só, de propósito.
+// Seller (activeMembership.role==='seller'), Auth user sem profile/
+// membership (activeMembership undefined/null) e anon (user null) sempre
+// caem em false pelo mesmo optional chaining.
+//
+// profile.is_active NÃO é checado aqui de propósito: User não carrega esse
+// campo (não existe no tipo) porque _loadProfile() (lib/services.ts) já
+// retorna null para qualquer profile inativo ANTES de montar o User —
+// Super Admin incluso, o `!data.is_active` ali roda antes de qualquer
+// branch por platform_role. Ou seja: um User inativo nunca existe em
+// memória, então esta função nunca é chamada com um. Prova permanente
+// em tests/services/authService.test.ts ('Super Admin com profile
+// INATIVO').
+export type InviteCapabilityUser = Pick<User, 'platformRole' | 'activeMembership'> | null | undefined;
+
+export function canManageInvites(user: InviteCapabilityUser): boolean {
+  if (user?.platformRole === 'super_admin') return true;
+  return user?.activeMembership?.role === 'manager';
+}
