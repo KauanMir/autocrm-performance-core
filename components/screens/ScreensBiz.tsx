@@ -10,6 +10,8 @@ import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
 import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites } from '@/lib/capabilities';
+import { InviteUserModal } from '@/components/invites/InviteUserModal';
+import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
 // missing from this map is what made VisitRow crash (M0-J audit, M0-K1 fix).
@@ -391,6 +393,7 @@ export function ScreenAjustes({ go }: any) {
   const [tab, setTab] = useState('Empresa');
   const [companyForm, setCompanyForm] = useState(() => CompanyService.get());
   const [saved, setSaved] = useState(false);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const setField = (k: keyof typeof companyForm, v: string) => { setCompanyForm((f: any) => ({ ...f, [k]: v })); setSaved(false); };
 
   // Same drag-and-drop pattern as the Pipeline Kanban (M0-K1): lifted React
@@ -424,6 +427,17 @@ export function ScreenAjustes({ go }: any) {
   // (decisão explícita do usuário: não ampliar canAccessFullSettings).
   const fullSettingsAccess = canAccessFullSettings(currentUser);
   const invitesAccess = canManageInvites(currentUser);
+  // M1-F S4-F2: actor do modal "Convidar" — resolvido a cada render, nunca
+  // congelado na abertura (ver InviteUserModal). Super Admin ganha escolha
+  // livre de função/empresa; Manager é travado na própria membership ativa.
+  // null quando invitesAccess é true por outro caminho que não seja esses
+  // dois (ex.: admin legado sem membership real) — nesse caso o botão nem
+  // aparece, ver JSX abaixo.
+  const inviteActor: CreateInviteActor | null = currentUser?.platformRole === 'super_admin'
+    ? { kind: 'super_admin' }
+    : currentUser?.activeMembership?.role === 'manager'
+      ? { kind: 'manager', companyId: currentUser.activeMembership.companyId }
+      : null;
   const stageSettingsAccess = pipeline.remoteStagesEnabled && canAccessStageSettings(currentUser);
   const allowedTabs: string[] = fullSettingsAccess
     ? ['Empresa', 'Usuários', 'Etapas']
@@ -522,7 +536,15 @@ export function ScreenAjustes({ go }: any) {
         <LCard pad={0} style={{ overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>Equipe</span>
-            <LBtn size="sm" kind="primary" icon="plus" style={{ marginLeft: 'auto' }}>Convidar</LBtn>
+            {/* M1-F S4-F2: botão real, gated por inviteActor (não por
+                invitesAccess/fullSettingsAccess sozinhos) — um admin legado
+                sem Super Admin/membership de manager real vê a aba mas não
+                o botão, porque o backend também não autorizaria o envio. A
+                lista abaixo continua mock (S4-F1 congelou isso; a
+                listagem real é escopo do S4-F2 seguinte). */}
+            {inviteActor && (
+              <LBtn size="sm" kind="primary" icon="plus" style={{ marginLeft: 'auto' }} onClick={() => setInviteModalOpen(true)}>Convidar</LBtn>
+            )}
           </div>
           {sellers.slice(0, 6).map((s: any, i: number) => (
             <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderTop: i ? '1px solid var(--border-2)' : 'none' }}>
@@ -584,6 +606,13 @@ export function ScreenAjustes({ go }: any) {
             </>
           )}
         </LCard>
+      )}
+      {inviteModalOpen && currentUser && inviteActor && (
+        <InviteUserModal
+          userId={currentUser.id}
+          actor={inviteActor}
+          onClose={() => setInviteModalOpen(false)}
+        />
       )}
     </LightScreen>
   );
