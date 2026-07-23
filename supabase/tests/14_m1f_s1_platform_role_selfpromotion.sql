@@ -204,6 +204,12 @@ select is(
 -- is_platform_super_admin()/create_invite()/accept_invite(). Nunca grava
 -- em profiles.platform_role — a única coluna que esta RPC escreve é
 -- profiles.name (contrato fechado, S5-B E0/migration).
+--
+-- ATUALIZAÇÃO (M1-F S5-C): update_membership_role consulta platform_role
+-- somente para exigir Super Admin como ator. A função nunca altera
+-- platform_role e modifica exclusivamente o papel empresarial, a ponte
+-- temporária profiles.role e o vínculo operacional de sellers necessário à
+-- troca de papel.
 select is(
   (select count(*)::int
      from pg_proc p
@@ -215,7 +221,7 @@ select is(
                              'create_invite', 'resend_invite', 'cancel_invite',
                              'complete_invite_resend_delivery', 'complete_invite_delivery',
                              'reserve_create_invite_rate_limit', 'reserve_resend_invite_rate_limit',
-                             'accept_invite', 'update_profile_name')
+                             'accept_invite', 'update_profile_name', 'update_membership_role')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
 -- Reforço específico do S2: is_platform_super_admin() referencia
