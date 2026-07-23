@@ -10,8 +10,7 @@ const mocks = vi.hoisted(() => ({
   profilesSingle: vi.fn(),
   membershipMaybeSingle: vi.fn(),
   profilesEq: vi.fn(),
-  membershipEq1: vi.fn(),
-  membershipEq2: vi.fn(),
+  membershipEq: vi.fn(),
 }));
 
 vi.mock('@/lib/supabase/client', () => ({
@@ -30,11 +29,18 @@ vi.mock('@/lib/supabase/client', () => ({
         };
       }
       if (table === 'company_memberships') {
+        // CORREÇÃO (M1-F S4-F2, bug real de produção encontrado em
+        // validação E2E): a query real NUNCA filtra por profile_id — essa
+        // coluna nunca foi concedida a authenticated (grant é só
+        // company_id/role/is_active, m1f_s4f1_01), e referenciá-la em
+        // QUALQUER parte da query (WHERE incluso) fazia o PostgREST negar
+        // a query inteira com 42501. A RLS (profile_id = auth.uid()) já
+        // restringe à própria linha — o único .eq() real é is_active=true.
+        // Este mock antes tinha uma cadeia eq().eq() simulando um filtro
+        // de profile_id que não existe mais.
         return {
           select: () => ({
-            eq: mocks.membershipEq1.mockReturnValue({
-              eq: mocks.membershipEq2.mockReturnValue({ maybeSingle: mocks.membershipMaybeSingle }),
-            }),
+            eq: mocks.membershipEq.mockReturnValue({ maybeSingle: mocks.membershipMaybeSingle }),
           }),
         };
       }
@@ -114,14 +120,14 @@ describe('AuthService.login — carrega activeMembership junto do profile', () =
     expect(user?.activeMembership).toBeNull();
   });
 
-  it('consulta de membership filtra por profile_id=id do profile carregado e is_active=true', async () => {
+  it('consulta de membership filtra SOMENTE por is_active=true, nunca por profile_id (coluna não concedida a authenticated — RLS já restringe à própria linha, ver m1f_s4f1_01)', async () => {
     mockProfile({ id: 'profile-xyz' });
     mockMembership({ company_id: 'company-a', role: 'manager', is_active: true });
 
     await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
 
-    expect(mocks.membershipEq1).toHaveBeenCalledWith('profile_id', 'profile-xyz');
-    expect(mocks.membershipEq2).toHaveBeenCalledWith('is_active', true);
+    expect(mocks.membershipEq).toHaveBeenCalledWith('is_active', true);
+    expect(mocks.membershipEq).not.toHaveBeenCalledWith('profile_id', expect.anything());
   });
 
   it('profile inativo: login inteiro falha ANTES de qualquer consulta de membership (is_active=false continua rejeitando tudo)', async () => {
@@ -130,7 +136,7 @@ describe('AuthService.login — carrega activeMembership junto do profile', () =
     const user = await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
 
     expect(user).toBeNull();
-    expect(mocks.membershipEq1).not.toHaveBeenCalled();
+    expect(mocks.membershipEq).not.toHaveBeenCalled();
   });
 
   it('Super Admin com profile INATIVO: login retorna null — platform_role=super_admin nunca contorna is_active=false, canManageInvites nem chega a ser chamada (nenhum User é construído)', async () => {
@@ -139,7 +145,7 @@ describe('AuthService.login — carrega activeMembership junto do profile', () =
     const user = await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
 
     expect(user).toBeNull();
-    expect(mocks.membershipEq1).not.toHaveBeenCalled();
+    expect(mocks.membershipEq).not.toHaveBeenCalled();
   });
 });
 
