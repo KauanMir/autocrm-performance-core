@@ -35,11 +35,29 @@ let _cachedUser: User | null = null;
 // (unique index parcial), então .maybeSingle() nunca ambiguidade. Erro ou
 // ausência de linha ativa vira null — nunca lança, login não pode falhar
 // por causa de membership.
-async function _loadActiveMembership(profileId: string): Promise<{ companyId: string; role: 'manager' | 'seller' } | null> {
+//
+// CORREÇÃO (M1-F S4-F2, bug real encontrado em validação E2E contra
+// Supabase local): esta função filtrava explicitamente por
+// `.eq('profile_id', profileId)` — mas profile_id NUNCA foi concedido a
+// authenticated (o GRANT de m1f_s4f1_01 cobre só company_id/role/
+// is_active, de propósito, ver migration). Referenciar profile_id em
+// QUALQUER parte da query — inclusive só no WHERE, nunca no SELECT —
+// exige privilégio SELECT nessa coluna; sem ele, o PostgREST nega a
+// query INTEIRA com 42501 (permission denied for table
+// company_memberships), não um erro silencioso. Resultado real: TODO
+// Manager real tinha activeMembership sempre null (o catch envolta
+// disso mascarava o erro), então canManageInvites nunca autorizava
+// ninguém — bug presente desde o S4-F1, invisível nos testes porque
+// tests/services/authService.test.ts mockava o Supabase por completo
+// (mock não aplica GRANT/RLS reais). A RLS já restringe a QUALQUER
+// select nesta tabela à própria linha (profile_id = auth.uid()) —
+// filtrar por profile_id no cliente era redundante E quebrava a
+// permissão. Sem esse filtro (só is_active=true, coluna concedida), a
+// consulta funciona exatamente como pretendido.
+async function _loadActiveMembership(): Promise<{ companyId: string; role: 'manager' | 'seller' } | null> {
   const { data, error } = await supabase
     .from('company_memberships')
     .select('company_id, role, is_active')
-    .eq('profile_id', profileId)
     .eq('is_active', true)
     .maybeSingle<CompanyMembershipRow>();
   if (error || !data) return null;
@@ -53,7 +71,7 @@ async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise
     .eq('id', authUserId)
     .single<ProfileRow>();
   if (error || !data || !data.is_active) return null;
-  const activeMembership = await _loadActiveMembership(data.id);
+  const activeMembership = await _loadActiveMembership();
   return {
     id: data.id,
     name: data.name,
