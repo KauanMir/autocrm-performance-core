@@ -93,9 +93,9 @@ export function PageHead({ title, sub, actions }: { title: string; sub?: string;
   );
 }
 
-export function LBtn({ children, kind = 'primary', icon, size = 'md', onClick, style }: {
+export function LBtn({ children, kind = 'primary', icon, size = 'md', onClick, style, 'aria-label': ariaLabel }: {
   children?: React.ReactNode; kind?: 'primary' | 'gold' | 'danger' | 'ghost'; icon?: string;
-  size?: 'sm' | 'md' | 'lg'; onClick?: () => void; style?: React.CSSProperties;
+  size?: 'sm' | 'md' | 'lg'; onClick?: () => void; style?: React.CSSProperties; 'aria-label'?: string;
 }) {
   const sizes: Record<string, { p: string; fs: number; ic: number }> = {
     sm: { p: '7px 12px',  fs: 13,   ic: 15 },
@@ -110,7 +110,7 @@ export function LBtn({ children, kind = 'primary', icon, size = 'md', onClick, s
     ghost:   { background: 'rgba(255,255,255,.04)', color: 'var(--t-700)', border: '1px solid var(--border)' },
   };
   return (
-    <button onClick={onClick} className="focus-ring" style={{
+    <button onClick={onClick} aria-label={ariaLabel} className="focus-ring" style={{
       display: 'inline-flex', alignItems: 'center', gap: 8, padding: s.p, fontSize: s.fs,
       fontWeight: 600, borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
       transition: 'transform .12s, filter .12s, box-shadow .12s', whiteSpace: 'nowrap',

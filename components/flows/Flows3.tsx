@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge, Chip } from '@/components/ui/kit';
 import { SellerService, LeadService, DealService, VisitService, SaleService } from '@/lib/services';
@@ -280,16 +280,39 @@ export function FlowEnviarMensagem({ payload, close }: any) {
 }
 
 export function FlowConfirmar({ payload, close }: any) {
-  const { title = 'Confirmar ação?', message = '', confirmLabel = 'Confirmar', tone = 'danger', icon = 'alert', onConfirm } = payload;
+  // cancelLabel (M1-F S4-F3): opcional, default 'Cancelar' preserva todo
+  // chamador existente (ex.: logout em App.tsx) — só o diálogo de cancelar
+  // convite precisa de 'Voltar' para não colidir com o próprio verbo da
+  // ação confirmada ("Cancelar convite").
+  // onDismiss (M1-F S4-F3): opcional, chamado quando o usuário desiste
+  // (backdrop ou botão de dispensa) SEM confirmar — nunca no caminho de
+  // confirmação (que já tem onConfirm próprio). Permite ao chamador
+  // devolver o foco ao elemento que abriu o diálogo nos dois desfechos.
+  const { title = 'Confirmar ação?', message = '', confirmLabel = 'Confirmar', cancelLabel = 'Cancelar', tone = 'danger', icon = 'alert', onConfirm, onDismiss } = payload;
   const accent = tone === 'danger' ? '#FF3B3B' : '#E8CE72';
+  const dismiss = () => { onDismiss && onDismiss(); close(); };
+  const cardRef = useRef<HTMLDivElement>(null);
+  const titleId = React.useId();
+
+  // Foco no diálogo ao abrir (não num botão específico — evita enviesar
+  // ação destrutiva x segura) e Escape fecha, mesmo padrão de FlowShell.
+  useEffect(() => {
+    cardRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') dismiss(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 75, background: 'rgba(4,4,5,.7)', backdropFilter: 'blur(8px)', display: 'grid', placeItems: 'center', padding: 24, animation: 'flowFade .2s' }} onClick={close}>
-      <div onClick={(e: any) => e.stopPropagation()} style={{ width: 'min(440px, 92vw)', background: 'linear-gradient(180deg,#1a1a1d,#131315)', border: '1px solid var(--border)', borderRadius: 20, padding: 30, boxShadow: 'var(--shadow-lg)', textAlign: 'center', animation: 'flowIn .26s cubic-bezier(.2,.7,.2,1)' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 75, background: 'rgba(4,4,5,.7)', backdropFilter: 'blur(8px)', display: 'grid', placeItems: 'center', padding: 24, animation: 'flowFade .2s' }} onClick={dismiss}>
+      <div ref={cardRef} role="alertdialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+        onClick={(e: any) => e.stopPropagation()} style={{ width: 'min(440px, 92vw)', background: 'linear-gradient(180deg,#1a1a1d,#131315)', border: '1px solid var(--border)', borderRadius: 20, padding: 30, boxShadow: 'var(--shadow-lg)', textAlign: 'center', animation: 'flowIn .26s cubic-bezier(.2,.7,.2,1)', outline: 'none' }}>
         <div style={{ width: 64, height: 64, borderRadius: 18, margin: '0 auto 18px', background: `${accent}22`, border: `1px solid ${accent}55`, color: accent, display: 'grid', placeItems: 'center' }}><Icon name={icon} size={32} stroke={2.2} /></div>
-        <h3 className="display" style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 800, color: '#fff' }}>{title}</h3>
+        <h3 id={titleId} className="display" style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 800, color: '#fff' }}>{title}</h3>
         {message && <p style={{ margin: '0 0 24px', color: 'var(--t-500)', fontSize: 14.5, lineHeight: 1.55 }}>{message}</p>}
         <div style={{ display: 'flex', gap: 12 }}>
-          <LBtn kind="ghost" size="lg" onClick={close} style={{ flex: 1, justifyContent: 'center' }}>Cancelar</LBtn>
+          <LBtn kind="ghost" size="lg" onClick={dismiss} style={{ flex: 1, justifyContent: 'center' }}>{cancelLabel}</LBtn>
           <LBtn kind={tone === 'danger' ? 'danger' : 'gold'} size="lg" icon={icon} onClick={() => { close(); onConfirm && onConfirm(); }} style={{ flex: 1, justifyContent: 'center' }}>{confirmLabel}</LBtn>
         </div>
       </div>

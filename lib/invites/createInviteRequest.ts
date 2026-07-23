@@ -13,6 +13,15 @@
 // (fetchInvites) fica lá; criação via Route Handler fica aqui.
 export type CreateInviteRoleKind = 'super_admin' | 'manager' | 'seller';
 
+// Rótulos compartilhados (M1-F S4-F3): mesmo texto usado no seletor de
+// função do modal de criação e na coluna "Função" da listagem real — um
+// único lugar evita rótulos divergentes entre os dois.
+export const ROLE_KIND_LABELS: Record<CreateInviteRoleKind, string> = {
+  seller: 'Vendedor',
+  manager: 'Gerente',
+  super_admin: 'Super Admin',
+};
+
 export type CreateInvitePayload = {
   companyId: string | null;
   email: string;
