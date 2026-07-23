@@ -25,13 +25,13 @@ import {
   EMAIL_PATTERN,
   type CreateInviteActor,
 } from '@/lib/hooks/useCreateInvite';
-import type { CreateInviteRoleKind } from '@/lib/invites/createInviteRequest';
+import { ROLE_KIND_LABELS, type CreateInviteRoleKind } from '@/lib/invites/createInviteRequest';
 import { AuthService } from '@/lib/services';
 
 const ROLE_OPTIONS: [CreateInviteRoleKind, string][] = [
-  ['seller', 'Vendedor'],
-  ['manager', 'Gerente'],
-  ['super_admin', 'Super Admin'],
+  ['seller', ROLE_KIND_LABELS.seller],
+  ['manager', ROLE_KIND_LABELS.manager],
+  ['super_admin', ROLE_KIND_LABELS.super_admin],
 ];
 
 // Empresa "operacional" para convite — mesma regra de create_invite()

@@ -10,7 +10,7 @@ import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
 import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites } from '@/lib/capabilities';
-import { InviteUserModal } from '@/components/invites/InviteUserModal';
+import { InviteList } from '@/components/invites/InviteList';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
@@ -387,13 +387,11 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
 
 export function ScreenAjustes({ go }: any) {
   useStore();
-  const sellers = SellerService.getAll();
   const leads = LeadService.getAll();
   const currentUser = AuthService.getCurrentUser();
   const [tab, setTab] = useState('Empresa');
   const [companyForm, setCompanyForm] = useState(() => CompanyService.get());
   const [saved, setSaved] = useState(false);
-  const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const setField = (k: keyof typeof companyForm, v: string) => { setCompanyForm((f: any) => ({ ...f, [k]: v })); setSaved(false); };
 
   // Same drag-and-drop pattern as the Pipeline Kanban (M0-K1): lifted React
@@ -427,12 +425,13 @@ export function ScreenAjustes({ go }: any) {
   // (decisão explícita do usuário: não ampliar canAccessFullSettings).
   const fullSettingsAccess = canAccessFullSettings(currentUser);
   const invitesAccess = canManageInvites(currentUser);
-  // M1-F S4-F2: actor do modal "Convidar" — resolvido a cada render, nunca
-  // congelado na abertura (ver InviteUserModal). Super Admin ganha escolha
-  // livre de função/empresa; Manager é travado na própria membership ativa.
-  // null quando invitesAccess é true por outro caminho que não seja esses
-  // dois (ex.: admin legado sem membership real) — nesse caso o botão nem
-  // aparece, ver JSX abaixo.
+  // M1-F S4-F2/S4-F3: actor da área Usuários (modal Convidar + escopo da
+  // listagem em InviteList) — resolvido a cada render, nunca congelado.
+  // Super Admin ganha escolha livre de função/empresa e escopo de
+  // plataforma; Manager é travado na própria membership ativa (escopo de
+  // empresa). null quando invitesAccess é true por outro caminho que não
+  // seja esses dois (ex.: admin legado sem membership real) — nesse caso
+  // InviteList não renderiza nada (defesa em profundidade).
   const inviteActor: CreateInviteActor | null = currentUser?.platformRole === 'super_admin'
     ? { kind: 'super_admin' }
     : currentUser?.activeMembership?.role === 'manager'
@@ -532,29 +531,14 @@ export function ScreenAjustes({ go }: any) {
           </div>
         </LCard>
       )}
-      {activeTab === 'Usuários' && (
-        <LCard pad={0} style={{ overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
-            <span style={{ fontWeight: 700, fontSize: 14 }}>Equipe</span>
-            {/* M1-F S4-F2: botão real, gated por inviteActor (não por
-                invitesAccess/fullSettingsAccess sozinhos) — um admin legado
-                sem Super Admin/membership de manager real vê a aba mas não
-                o botão, porque o backend também não autorizaria o envio. A
-                lista abaixo continua mock (S4-F1 congelou isso; a
-                listagem real é escopo do S4-F2 seguinte). */}
-            {inviteActor && (
-              <LBtn size="sm" kind="primary" icon="plus" style={{ marginLeft: 'auto' }} onClick={() => setInviteModalOpen(true)}>Convidar</LBtn>
-            )}
-          </div>
-          {sellers.slice(0, 6).map((s: any, i: number) => (
-            <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderTop: i ? '1px solid var(--border-2)' : 'none' }}>
-              <Avatar name={s.name} size={34} />
-              <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</div><div style={{ fontSize: 12, color: 'var(--t-500)' }}>{s.first.toLowerCase()}@revenda.com.br</div></div>
-              <span style={{ fontSize: 12, color: 'var(--t-500)', background: 'rgba(255,255,255,.06)', padding: '3px 10px', borderRadius: 999, fontWeight: 600 }}>Vendedor</span>
-              <LBadge tone="green">Ativo</LBadge>
-            </div>
-          ))}
-        </LCard>
+      {/* M1-F S4-F3: lista real, substitui a lista mock do S4-F1/S4-F2.
+          InviteList é seu próprio guard (retorna null com actor=null) e
+          possui seu próprio botão Convidar/modal internamente — nenhuma
+          duplicação de estado aqui. currentUser garantido não-nulo neste
+          ponto (activeTab só chega a 'Usuários' com invitesAccess ou
+          fullSettingsAccess true, ambos exigindo currentUser). */}
+      {activeTab === 'Usuários' && currentUser && (
+        <InviteList userId={currentUser.id} actor={inviteActor} />
       )}
       {activeTab === 'Etapas' && (
         <LCard style={{ maxWidth: 520 }}>
@@ -606,13 +590,6 @@ export function ScreenAjustes({ go }: any) {
             </>
           )}
         </LCard>
-      )}
-      {inviteModalOpen && currentUser && inviteActor && (
-        <InviteUserModal
-          userId={currentUser.id}
-          actor={inviteActor}
-          onClose={() => setInviteModalOpen(false)}
-        />
       )}
     </LightScreen>
   );
