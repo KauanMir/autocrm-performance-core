@@ -60,9 +60,17 @@ set local role authenticated;
 select isnt(current_user, session_user, 'current_user difere de session_user sob SET ROLE (a distincao que o trigger depende de acertar)');
 select is(current_user, 'authenticated', 'current_user reflete o role efetivo da operacao (authenticated), nao a conexao subjacente');
 
-select throws_ok(
+-- ATUALIZAÇÃO (M1-F S5-A1, aprovada explicitamente): profiles_update_admin
+-- foi removida (hardening — ver 20260723150000_m1f_s5a1_...). Sem NENHUMA
+-- policy de UPDATE em profiles, a linha do admin nunca é alcançada em
+-- primeiro lugar (RLS "default deny" filtra antes do trigger ser avaliado)
+-- — defesa mais forte, não regressão: o resultado observável (platform_role
+-- nunca muda) é idêntico, mas agora por uma camada a mais que nem chega a
+-- exercitar o trigger desta migration. Cobertura completa do hardening está
+-- em 30_m1f_s5a1_profiles_hardening.sql.
+select lives_ok(
   $$update public.profiles set platform_role = 'super_admin' where id = auth.uid()$$,
-  'P0001', null, 'admin autenticado NAO consegue setar o proprio platform_role (trigger bloqueia mesmo com UPDATE amplo na tabela)');
+  'admin autenticado: UPDATE de platform_role nao lanca excecao (RLS ja filtra a linha, sem policy de UPDATE — trigger nem chega a ser avaliado)');
 
 select is(
   (select platform_role from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
@@ -76,11 +84,14 @@ select lives_ok(
   'admin ainda consegue atualizar colunas legitimas (o trigger e o revoke sao especificos da coluna nova)');
 
 -- inclusão indireta: platform_role junto de uma coluna legítima na MESMA
--- instrução falha por inteiro (trigger nega o statement completo antes de
--- qualquer coluna ser persistida) — não existe aplicação parcial
-select throws_ok(
+-- instrução também não aplica nada — mas, pós S5-A1 (profiles_update_admin
+-- removida), o motivo não é mais o trigger negando o statement completo:
+-- é a ausência de qualquer policy de UPDATE, que já filtra a linha antes de
+-- qualquer avaliação de trigger. O resultado observável (nenhuma aplicação
+-- parcial, nenhuma coluna persistida) é idêntico ao de antes.
+select lives_ok(
   $$update public.profiles set name = 'Tentativa Indireta', platform_role = 'super_admin' where id = auth.uid()$$,
-  'P0001', null, 'combinar platform_role com uma coluna permitida no mesmo UPDATE falha por inteiro');
+  'combinar platform_role com uma coluna permitida no mesmo UPDATE nao lanca excecao (RLS ja filtra a linha, sem aplicacao parcial)');
 select isnt(
   (select name from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
   'Tentativa Indireta', 'name NAO foi alterado pela tentativa combinada (nenhuma aplicacao parcial)');

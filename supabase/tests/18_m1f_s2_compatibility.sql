@@ -63,9 +63,16 @@ select is(
 select is(
   (select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'lead_timeline_entries'),
   1, 'policy de lead_timeline_entries inalterada (1 policy, lead_timeline_select)');
+-- ATUALIZAÇÃO (M1-F S5-A1, aprovada explicitamente): profiles_update_admin
+-- foi removida (hardening — a policy dependia de profiles.role='admin'
+-- legado, não tinha whitelist própria e estava estruturalmente inalcançável
+-- por ausência de GRANT UPDATE, ver 20260723150000_m1f_s5a1_...). Cobertura
+-- completa do hardening (policy ausente, zero grant de escrita/DDL, SELECT
+-- preservado) está em 30_m1f_s5a1_profiles_hardening.sql; aqui só
+-- confirmamos que a contagem de policies de leitura não regrediu.
 select is(
   (select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'profiles'),
-  3, 'policies de profiles inalteradas (3: select_own, select_company, update_admin)');
+  2, 'policies de profiles: 2 restantes (select_own, select_company) — update_admin removida no S5-A1');
 -- ATUALIZAÇÃO (M1-F S4-F1, aprovada explicitamente): o S2 fechava
 -- company_memberships por completo (0 policies). O S4-F1 introduziu o
 -- primeiro consumidor real (leitura da própria membership pelo frontend)
