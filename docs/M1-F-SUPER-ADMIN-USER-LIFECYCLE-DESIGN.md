@@ -1602,3 +1602,202 @@ nesta etapa.
 | Deploy remoto, SMTP remoto de produção | S9 |
 | Retenção/limpeza de `invite_rate_limit_events`/`invite_activation_rate_limit_events` | operação futura — sem política definida, não bloqueia S4 |
 | 2FA obrigatório para Super Admin | S6 para o mecanismo; S9 para exigi-lo no rollout real |
+
+---
+
+## 22. Decisões congeladas — S5 (M1-F S5-D0)
+
+> Adendo de arquitetura, registrado no congelamento de decisões do S5
+> (M1-F S5-D0), após a auditoria E0 (§21 cobre o fechamento do S4; esta
+> seção não o altera). Nenhum código, migration, RPC, Route Handler ou
+> teste foi criado a partir desta seção — somente desenho de contrato,
+> pendente de implementação em S5-A+.
+
+### 22.1 Correção em relação ao E0
+
+A auditoria E0 havia classificado "alterar empresa"/"segunda membership"
+como fora do M1-F ou proibido pela arquitetura, sem nomear o estágio
+correto. **Correção**: transferência de usuário entre empresas pertence
+ao **S6**, não está fora do M1-F. A arquitetura atual (índice único
+parcial `company_memberships_profile_single_active_uidx`, no máximo 1
+membership ativa por profile) permanece inalterada até o S6 definir o
+contrato de transferência (desativar vínculo anterior, criar/ativar novo,
+nunca duas memberships ativas simultâneas, nunca `DELETE` físico).
+
+A arquitetura de leitura recomendada no E0 (§9 do relatório de auditoria
+— SELECT direto sob RLS nova em `company_memberships`) é **substituída**
+pela decisão congelada abaixo: RPC estreita de listagem. Motivo: evita
+grants amplos em `profiles`, centraliza autorização e paginação num único
+ponto, e não depende da policy legada `profiles_update_admin`.
+
+### 22.2 Matriz de atores (congelada)
+
+| Ator | Pode | Não pode |
+|---|---|---|
+| **Super Admin** | listar usuários globalmente (empresa como filtro visual, nunca autorização); visualizar Managers e Sellers de qualquer empresa; editar nome; alterar papel `seller ↔ manager`; alterar e-mail somente pela operação server-side específica (S5-E1) | alterar `platform_role`; remover outro Super Admin; alterar o próprio papel; usar `selectedCompanyId` como fonte de autorização; atravessar tenant sem empresa explícita revalidada no servidor |
+| **Manager** | listar Sellers da própria empresa; visualizar outros Managers da própria empresa **somente leitura**; editar nome de Sellers da própria empresa | editar outro Manager; editar e-mail; alterar qualquer papel (nem promover Seller, nem ser rebaixado, nem editar o próprio papel); agir sobre Super Admin; agir fora de `activeMembership.companyId` |
+| **Seller** | nada | zero listagem administrativa, zero edição administrativa |
+| **Sem profile/membership ou inativo** | nada | falha fechada |
+
+Motivo congelado da restrição de Manager sobre papel: o S4 já não permite
+que Manager convide outro Manager (§9.2); permitir que Manager promova um
+Seller a Manager por edição seria uma forma indireta de contornar essa
+mesma regra. Por isso a troca de papel é **exclusiva de Super Admin**.
+
+### 22.3 Alteração de papel — ponte temporária com `profiles.role`
+
+`company_memberships.role` é a autoridade do M1-F; `profiles.role`
+(legado, `user_role`) continua sendo lido por RLS/helpers pré-M1-F de
+`leads`/`sellers` (`current_profile_role()`, `is_manager_or_admin()`, não
+migrados por este estágio — migração real fica para o S8, junto da
+retomada do E4 do M1-E). Até lá, `update_membership_role` deve atualizar
+**atomicamente**, na mesma transação:
+
+- `company_memberships.role`
+- `profiles.role`, pelo mapeamento fechado `manager → 'manager'`,
+  `seller → 'seller'` — **nunca** produz `profiles.role = 'admin'`.
+
+Esta sincronização é compatibilidade temporária, não torna `profiles.role`
+autoridade do M1-F, precisa de teste de consistência dedicado, e será
+removida no S8 quando as RLS antigas de `leads`/`sellers` migrarem para os
+helpers novos (`is_manager_or_platform`). A RPC nunca pode autorizar a
+própria ação usando o papel recém-gravado na mesma transação.
+
+### 22.4 Guarda do último Manager (entra no S5)
+
+Mesmo com offboarding completo reservado ao S6, `update_membership_role`
+não pode deixar uma empresa sem Manager ativo:
+
+- `seller → manager`: sempre permitido (Super Admin).
+- `manager → seller`: permitido somente se restar ao menos um Manager
+  ativo na empresa após a troca; caso contrário, falha com
+  `last_manager_requires_successor`.
+- Contagem de Managers ativos da empresa protegida por lock (mesma linha
+  de raciocínio de `SELECT ... FOR UPDATE` já usada em `offboard_seller`,
+  §11), para impedir corrida entre duas trocas simultâneas.
+- Nenhuma criação automática de sucessor.
+
+Esta guarda **não inicia o S6** — protege apenas a invariante necessária
+para a própria operação do S5.
+
+### 22.5 Arquitetura de listagem (revisada)
+
+RPC estreita `SECURITY DEFINER` (nome provisório `list_company_users`,
+mesmo padrão de owner/`search_path` fixo/`REVOKE PUBLIC`/`EXECUTE` restrito
+a `authenticated` já usado por `create_company`/`accept_invite`), em vez
+de SELECT direto ampliado sobre `profiles`. Combina `profiles` +
+`company_memberships` + `companies` internamente; nunca expõe
+`auth.users`, `platform_role`, `profiles.role` legado ou `seller_id` ao
+chamador.
+
+- **Super Admin**: escopo global; `company_id` só como filtro opcional,
+  nunca autorização; lista Managers e Sellers; não retorna Super Admins na
+  listagem empresarial comum (reservado a uma futura tela global
+  separada, fora deste estágio).
+- **Manager**: `company_id` sempre derivado server-side de
+  `current_membership_company_id()`/membership ativa — qualquer
+  `company_id` enviado pelo cliente é ignorado/rejeitado; lista Sellers;
+  recebe Managers da própria empresa marcados como somente leitura; nunca
+  recebe usuários de outra empresa.
+- **Seller**: chamada proibida (`forbidden`).
+
+**Campos de retorno (fechado)**: `profile_id`, `membership_id`, `name`,
+`email`, `company_id`, `company_name`, `company_role`,
+`profile_is_active`, `membership_is_active`, `created_at`. Nunca:
+`profiles.role` legado, `platform_role`, `seller_id`, metadados de
+`auth.users`, último login, tokens, `audit_log`, campos internos de
+convite. IDs nunca renderizados como conteúdo visual — só chave interna
+de cache/ação. Para Manager, a coluna de empresa pode ser omitida
+visualmente; `company_id` continua disponível internamente quando
+necessário para query key/contrato.
+
+**Paginação/busca/ordenação**: a listagem global do Super Admin nasce com
+paginação **server-side** (cursor estável `created_at + membership_id`,
+`limit` com máximo seguro, busca normalizada por nome/e-mail, filtro
+opcional por `company_id` — só Super Admin — e por `company_role`,
+ordenação determinística, sem contagem total obrigatória nesta primeira
+versão). Query keys futuras carregam `userId`, tipo de ator, escopo,
+filtro de empresa, filtro de papel, busca normalizada e cursor/página —
+nenhum cache mistura identidades ou empresas, mesmo padrão de isolamento
+já usado por `adminInviteQueryKeys`/`platformCompanyQueryKeys`.
+
+### 22.6 Contratos conceituais do S5 (fechados, não combináveis)
+
+| Contrato | Responsabilidade | Ator |
+|---|---|---|
+| `list_company_users` | leitura paginada e autorizada | Super Admin (global) / Manager (própria empresa) |
+| `update_profile_name` | altera somente `name` | self (se a superfície de perfil pessoal já permitir) / Manager sobre Seller da própria empresa / Super Admin sobre Manager ou Seller |
+| `update_membership_role` | altera somente `seller ↔ manager`, sincroniza `profiles.role` temporariamente, guarda último Manager | Super Admin apenas |
+| `update_user_email` | fluxo server-side, Route Handler + Admin API | Super Admin apenas — subetapa própria (§22.7), não entra na primeira leva de migrations |
+
+Explicitamente **não criar**: `update_user`, `update_profile_admin`,
+payload genérico, PATCH arbitrário, update de colunas dinâmicas. Cada
+contrato é estreito e de responsabilidade única.
+
+### 22.7 E-mail — subetapa própria antes de implementar
+
+Edição administrativa de e-mail permanece no escopo do S5, mas **não
+entra na primeira migration**. Requer um E0 técnico dedicado
+(`S5-E0`, distinto do `M1-F S5-E0` que gerou este documento — é uma
+auditoria específica de e-mail, escopo menor) que confirme, antes de
+qualquer implementação: versão real da API de Admin do Supabase Auth
+instalada, estratégia de duplicidade, tratamento de falha parcial entre
+`auth.users.email` e `profiles.email`, e desenho de auditoria. Nenhuma
+estratégia de compensação é escolhida nesta etapa. Permissões já
+congeladas para quando a subetapa avançar: somente Super Admin, nunca
+Manager, nunca edição direta pelo browser, nunca update isolado de
+`profiles.email` sem tocar `auth.users`, nunca reutilização de
+`profiles_update_admin`.
+
+### 22.8 `profiles_update_admin` — direção aprovada
+
+Continua sendo uma **RLS policy legada** (não uma RPC), com superfície
+ampla (qualquer coluna de `profiles` da linha-alvo, sem whitelist),
+dependente de `profiles.role = 'admin'` (papel legado) e sem consumidor
+atual conhecido (§4 do relatório E0). Permanece **congelada** nesta
+etapa: nenhuma alteração, nenhum novo consumidor, nenhuma ampliação de
+grants. Direção para S5-A: avaliar (não executar agora) a neutralização
+ou remoção explícita da policy, e avaliar `REVOKE` explícito de `UPDATE`
+direto em `profiles` para `authenticated` — condicionado a auditoria do
+estado real de grants em produção (a ambiguidade de GRANT já documentada
+em `20260720100000_m1f_s1_01_platform_memberships.sql` para
+`platform_role` se aplica igualmente ao restante da policy) e protegido
+por testes de grants/policies dedicados.
+
+### 22.9 Frontend congelado
+
+Aba "Usuários" passa a ter duas seções distintas, na ordem: **Usuários
+ativos** (nova), depois **Convites** (`InviteList`, sem regressão).
+Colunas da lista de usuários: Nome, E-mail, Papel, Empresa (só Super
+Admin), Ações. Manager vê Sellers com ação de editar nome e Managers da
+própria empresa em modo somente leitura; Super Admin vê Managers e
+Sellers, edita nome e papel, e-mail fica desabilitado até `S5-E1`. Nenhum
+controle de suspensão/reativação/transferência/exclusão/revogação de
+sessão nesta etapa — pertencem ao S6. Nenhum seletor global de empresa
+persistente — pertence ao S7.
+
+### 22.10 Divisão interna do S5 (revisada)
+
+| Subetapa | Escopo |
+|---|---|
+| S5-A | Hardening (avaliação de `profiles_update_admin`/grants) + RPC `list_company_users` + grants + testes SQL de ACL/escopo/paginação/colunas |
+| S5-B | RPC `update_profile_name` + auditoria + testes SQL + repository/hook + integração mínima |
+| S5-C | RPC `update_membership_role` (Super Admin apenas) + sincronização temporária de `profiles.role` + guarda do último Manager + concorrência + auditoria + testes SQL |
+| S5-D | `MemberList` no frontend + busca + filtros + paginação + modal de edição + integração com `InviteList` + testes TypeScript/acessibilidade |
+| S5-E0 | Auditoria específica de edição de e-mail (versão real do Supabase, contratos Admin API, duplicidade, compensação, sincronização, auditoria) |
+| S5-E1 | Edição de e-mail — só após aprovação do S5-E0; Route Handler; testes server-side; frontend Super Admin |
+| S5-F | E2E, documentação e fechamento — matriz de atores, cross-tenant, cache, concorrência, decisão formal de encerramento do S5 |
+
+Estas divisões são decomposição interna do estágio oficial **S5** — não
+são novos estágios do roadmap de §16.
+
+### 22.11 Fronteira S5/S6/S7 (reafirmada)
+
+- **S5**: listagem, edição de nome, troca de papel `seller ↔ manager`
+  (Super Admin apenas), edição de e-mail (subetapa própria).
+- **S6**: suspensão/reativação de membership, `offboard_seller`,
+  `offboard_manager`, **transferência de usuário entre empresas**
+  (corrigido nesta seção — pertence ao S6, não está fora do M1-F),
+  revogação de sessão.
+- **S7**: seletor global de empresa (`selectedCompanyId` como estado de
+  UI), sem início nesta etapa.
