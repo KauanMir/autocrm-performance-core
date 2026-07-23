@@ -28,6 +28,14 @@ vi.mock('@/lib/store', () => ({ useStore: () => ({}) }));
 
 vi.mock('@/components/podiums/Podiums', () => ({ PLACE: {} }));
 
+// Stub — este arquivo testa visibilidade de aba/guard, nunca o conteúdo da
+// listagem de convites (isso é tests/components/invites/InviteList.test.tsx
+// e tests/screens/ScreenAjustesInvites.test.tsx). Sem o stub, InviteList
+// chamaria useInvites/useCompanies reais e exigiria QueryClientProvider.
+vi.mock('@/components/invites/InviteList', () => ({
+  InviteList: () => <div data-testid="invite-list-stub" />,
+}));
+
 vi.mock('@/lib/services', () => ({
   LeadService: { getAll: () => [] },
   VisitService: { getAll: () => [] },
