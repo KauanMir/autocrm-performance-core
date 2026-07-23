@@ -1498,3 +1498,107 @@ Nenhuma migration, nenhuma alteração de RLS, nenhuma RPC, nenhum código de
 aplicação, nenhuma variável de ambiente, nenhum segredo, nenhum comando do
 Supabase CLI, nenhum Docker, nenhum commit e nenhum push foram executados
 nesta etapa.
+
+---
+
+## 21. Estado de implementação — S4 (fechamento oficial, pós-implementação)
+
+> Adendo pós-implementação, registrado no fechamento do estágio S4
+> (M1-F S4-F4). O texto acima (§0–§20) é o design original, preservado sem
+> alteração — nenhum requisito histórico foi reescrito para parecer que a
+> implementação sempre foi idêntica ao plano. Esta seção registra o que foi
+> de fato implementado, testado e publicado para a linha **S4** da tabela
+> de §16.
+
+### 21.1 Status
+
+**S4 concluído** em 2026-07-23. `origin/main` em
+`3ed936772a9dcdabb85b1106326166eca37d2b5a`. Auditoria completa (código,
+testes, contratos, segurança) não encontrou lacuna bloqueante — ver
+relatório de fechamento M1-F S4-F4 para o detalhamento requisito a
+requisito.
+
+### 21.2 Principais capacidades entregues
+
+- **Criação de convite**: Super Admin convida qualquer papel em qualquer
+  empresa; Manager convida somente `seller` da própria
+  `activeMembership.companyId`. Prevenção de duplicidade (índices únicos
+  parciais), rate limit por ator e por e-mail+escopo, auditoria completa,
+  envio de e-mail real via Supabase Auth Admin API com fallback automático
+  para magic link quando o e-mail já possui conta (sem revelar a
+  diferença ao chamador).
+- **Listagem administrativa real**: Super Admin em escopo de plataforma,
+  Manager restrito à própria membership ativa (nunca `profiles.company_id`
+  legado), Seller sem nenhum acesso. Whitelist de colunas por GRANT
+  (`token_hash` nunca legível por `authenticated`, mesmo em linha
+  visível por RLS).
+- **Reenvio**: invalida o convite anterior (`superseded`), nunca expõe
+  token/link à UI, somente via Route Handler server-side.
+- **Cancelamento**: somente via RPC `cancel_invite`, histórico preservado,
+  nunca exclusão física.
+- **Aceite público**: validação de token sem autenticação prévia,
+  autenticação via `verifyOtp` em cliente Supabase temporário, definição de
+  senha, criação transacional de `profiles`/`company_memberships`/`sellers`,
+  transferência de sessão ao cliente principal (com estado terminal
+  dedicado `activated_but_login_failed` quando a transferência falha após
+  a conta já ter sido provisionada).
+- **Auditoria administrativa** (`audit_log`) para toda transição real de
+  convite, nunca grava segredo.
+- **Rate limiting em três camadas**: criação/reenvio (por ator e por
+  e-mail+escopo, com validação de autorização *antes* da reserva de cota —
+  correção aplicada em S4-A2B.1), validação de token (por IP e por token),
+  aceite (por ator e por convite).
+
+### 21.3 Subestágios de implementação (decomposição interna do S4 oficial)
+
+Os nomes abaixo são divisão de trabalho usada durante a implementação —
+**não são novos estágios oficiais**; todos pertencem à linha **S4** da
+tabela de §16.
+
+| Subestágio | Função |
+|---|---|
+| S4-A1 | Schema `invites`/`audit_log`, RLS de leitura própria/plataforma |
+| S4-A2A | RPCs `create_invite`/`resend_invite`/`cancel_invite` |
+| S4-A2A.1 | `delivery_status`, rate limit bruto, auditoria de sucesso movida para a finalização de delivery (evita gravar `invite_sent` antes do e-mail sair de fato) |
+| S4-A2B / S4-A2B.1 | Route Handler de criação (`POST /api/platform/invites`); correção de vulnerabilidade — autorização passa a ser revalidada *antes* de reservar cota de rate limit |
+| S4-C1 | `validate_invite_token`/`accept_invite`, rate limit de validação e de aceite |
+| S4-C2A / S4-C2B | Fluxo público de aceite (fragmento de URL, sessão temporária, senha, transferência de sessão) |
+| S4-C2C | Leitura do próprio profile pelo usuário autenticado (suporte ao login pós-aceite) |
+| S4-F1 | Leitura da própria membership pelo frontend; grants de coluna de `invites` (hardening do SELECT amplo de S4-A1 para 10 colunas nomeadas) |
+| S4-F2 | Modal de criação de convite (frontend administrativo) |
+| S4-F3 | Listagem real, reenvio e cancelamento (frontend administrativo) |
+| S4-F4 | Este fechamento — auditoria final, reconciliação de status, documentação |
+
+### 21.4 Testes finais
+
+TypeScript: **1010/1010** (62 arquivos, incluindo ~330 testes específicos
+de convites entre hooks/componentes/API routes/server). SQL: **1245/1245**
+(30 arquivos `no_plan()`, 8 deles específicos de S4 — schema, RPCs de
+ciclo de vida, delivery/rate limit, rate limit autorizado, aceite, grants
+de coluna). Build: verde. Nenhuma migration nova nesta etapa (S4-F4 é
+auditoria e documentação, não implementação).
+
+### 21.5 Deploy
+
+Nenhuma migration do S4 foi aplicada ao Supabase remoto. Deploy remoto
+permanece reservado ao **S9** (§16) — fora do escopo de qualquer
+subestágio de S4, sem exceção.
+
+### 21.6 Próximo estágio oficial
+
+**S5** (gestão de usuários — edição de função/e-mail, `update_membership_role`).
+**S7** (seletor de empresa) continua sendo pré-requisito estrutural do
+**S8** (retomada do M1-E E4, §2.3/§16) — nenhum dos dois foi iniciado
+nesta etapa.
+
+### 21.7 Pendências não bloqueantes
+
+| Item | Classificação |
+|---|---|
+| `profiles_update_admin`, edição de nome/e-mail, mudança de papel | S5 |
+| Suspensão/reativação de membership, transferência entre empresas | S6 |
+| Seletor global de empresa (`selectedCompanyId` como estado de UI) | S7 |
+| RCAR como empresa demonstrativa persistente | operação futura |
+| Deploy remoto, SMTP remoto de produção | S9 |
+| Retenção/limpeza de `invite_rate_limit_events`/`invite_activation_rate_limit_events` | operação futura — sem política definida, não bloqueia S4 |
+| 2FA obrigatório para Super Admin | S6 para o mecanismo; S9 para exigi-lo no rollout real |
