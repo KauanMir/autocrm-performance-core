@@ -1,10 +1,15 @@
-// lib/invites/repository.ts — acesso remoto de leitura administrativa de
-// convites (M1-F S4-F1). SOMENTE o caminho aprovado nesta etapa: SELECT em
+// lib/invites/repository.ts — acesso remoto de leitura E cancelamento
+// administrativo de convites (M1-F S4-F1/S4-F3). Leitura: SELECT em
 // public.invites, protegido por RLS (invites_select_own_or_platform) E por
 // GRANT de coluna (20260722100100_m1f_s4f1_02_invites_column_grants.sql —
 // nunca token_hash/email_normalized/accepted_profile_id/updated_at).
-// Nenhum INSERT/UPDATE/DELETE, nenhum service_role, nenhuma criação/
-// reenvio/cancelamento nesta etapa (S4-F2/S4-F3).
+// Cancelamento (M1-F S4-F3): exclusivamente via RPC cancel_invite() —
+// SECURITY DEFINER, EXECUTE concedido a authenticated (m1f_s4a2a), revalida
+// auth.uid()/ator/empresa/invited_by_profile_id internamente. Nunca UPDATE
+// direto na tabela, nunca service_role. Criação (POST /api/platform/
+// invites) e reenvio (POST /api/platform/invites/[id]/resend) ficam em
+// arquivos próprios (createInviteRequest.ts/resendInviteRequest.ts) por
+// exigirem o Route Handler/Admin API — este arquivo é só PostgREST/RPC.
 import { supabase } from '@/lib/supabase/client';
 import type { Database } from '@/lib/supabase/database.types';
 import { AdminInviteError } from '@/lib/invites/errors';
@@ -58,4 +63,49 @@ export async function fetchInvites(scope: AdminInviteScope): Promise<AdminInvite
   }
 
   return (data ?? []) as unknown as AdminInviteListItem[];
+}
+
+// M1-F S4-F3 — resultado discriminado e fechado, nunca a resposta bruta do
+// PostgREST/RPC. `code` é o subconjunto de códigos de domínio que
+// cancel_invite() pode devolver (invite_not_found/invite_not_actionable) —
+// nunca importado de lib/server/* (esta função nunca passa pelo Route
+// Handler, é RPC direta via PostgREST).
+export type CancelInviteResult =
+  | { outcome: 'ok'; inviteId: string; status: string }
+  | { outcome: 'domain_error'; code: string }
+  | { outcome: 'error' };
+
+// Único caminho de cancelamento: RPC cancel_invite(p_invite_id) —
+// SECURITY DEFINER, EXECUTE concedido a authenticated, ator sempre
+// auth.uid() nativo dentro da função (nunca um parâmetro vindo do
+// cliente). Nunca UPDATE direto em public.invites (sem GRANT de escrita
+// para authenticated, ver testes 22/29), nunca service_role.
+export async function cancelInviteRpc(inviteId: string): Promise<CancelInviteResult> {
+  const { data, error } = await supabase.rpc('cancel_invite', { p_invite_id: inviteId });
+
+  if (error) {
+    return { outcome: 'error' };
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (
+    !row
+    || typeof row !== 'object'
+    || typeof (row as { success?: unknown }).success !== 'boolean'
+    || typeof (row as { code?: unknown }).code !== 'string'
+  ) {
+    return { outcome: 'error' };
+  }
+
+  const typed = row as { success: boolean; code: string; invite_id: string | null; status: string | null };
+
+  if (!typed.success) {
+    return { outcome: 'domain_error', code: typed.code };
+  }
+
+  if (typeof typed.invite_id !== 'string' || typeof typed.status !== 'string') {
+    return { outcome: 'error' };
+  }
+
+  return { outcome: 'ok', inviteId: typed.invite_id, status: typed.status };
 }
