@@ -6,14 +6,17 @@ import {
   isRemoteLeadsEnabled,
   isRemoteStagesEnabled,
   isPlatformAdminEnabled,
+  isActiveUsersEnabled,
   REMOTE_LEADS_DEV_OVERRIDE_KEY,
   REMOTE_STAGES_DEV_OVERRIDE_KEY,
   PLATFORM_ADMIN_DEV_OVERRIDE_KEY,
+  ACTIVE_USERS_DEV_OVERRIDE_KEY,
 } from '@/lib/flags';
 
 const ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_STAGES';
 const LEADS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_LEADS';
 const PLATFORM_ADMIN_ENV_KEY = 'NEXT_PUBLIC_FF_PLATFORM_ADMIN';
+const ACTIVE_USERS_ENV_KEY = 'NEXT_PUBLIC_FF_ACTIVE_USERS';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -45,6 +48,15 @@ function setPlatformAdminEnv(nodeEnv: string, flagValue?: string) {
     vi.stubEnv(PLATFORM_ADMIN_ENV_KEY, undefined as unknown as string);
   } else {
     vi.stubEnv(PLATFORM_ADMIN_ENV_KEY, flagValue);
+  }
+}
+
+function setActiveUsersEnv(nodeEnv: string, flagValue?: string) {
+  vi.stubEnv('NODE_ENV', nodeEnv);
+  if (flagValue === undefined) {
+    vi.stubEnv(ACTIVE_USERS_ENV_KEY, undefined as unknown as string);
+  } else {
+    vi.stubEnv(ACTIVE_USERS_ENV_KEY, flagValue);
   }
 }
 
@@ -426,6 +438,158 @@ describe('isolamento entre as flags de stages e de leads', () => {
     window.localStorage.setItem(REMOTE_STAGES_DEV_OVERRIDE_KEY, 'true');
     expect(isRemoteStagesEnabled()).toBe(true);
     expect(isRemoteLeadsEnabled()).toBe(false);
+  });
+});
+
+// ── M1-F S5-D — isActiveUsersEnabled (mesmo contrato, chave/env próprias) ──
+
+describe('isActiveUsersEnabled — valor do ambiente', () => {
+  it('variável ausente ⇒ false (OFF por padrão)', () => {
+    setActiveUsersEnv('production');
+    expect(isActiveUsersEnabled()).toBe(false);
+  });
+
+  it('"false" ⇒ false', () => {
+    setActiveUsersEnv('production', 'false');
+    expect(isActiveUsersEnabled()).toBe(false);
+  });
+
+  it('"true" ⇒ true', () => {
+    setActiveUsersEnv('production', 'true');
+    expect(isActiveUsersEnabled()).toBe(true);
+  });
+
+  it('valores inválidos ⇒ false', () => {
+    for (const invalid of ['1', 'yes', 'on', '', 'enabled']) {
+      setActiveUsersEnv('production', invalid);
+      expect(isActiveUsersEnabled()).toBe(false);
+    }
+  });
+
+  it('comparação é estrita e case-sensitive ("TRUE"/"True" não ativam)', () => {
+    for (const invalid of ['TRUE', 'True', ' true', 'true ']) {
+      setActiveUsersEnv('production', invalid);
+      expect(isActiveUsersEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('isActiveUsersEnabled — development (override via localStorage)', () => {
+  it('env false + override "true" ⇒ true', () => {
+    setActiveUsersEnv('development', 'false');
+    window.localStorage.setItem(ACTIVE_USERS_DEV_OVERRIDE_KEY, 'true');
+    expect(isActiveUsersEnabled()).toBe(true);
+  });
+
+  it('env true + override "false" ⇒ false', () => {
+    setActiveUsersEnv('development', 'true');
+    window.localStorage.setItem(ACTIVE_USERS_DEV_OVERRIDE_KEY, 'false');
+    expect(isActiveUsersEnabled()).toBe(false);
+  });
+
+  it('override inválido ⇒ usa o env', () => {
+    setActiveUsersEnv('development', 'true');
+    window.localStorage.setItem(ACTIVE_USERS_DEV_OVERRIDE_KEY, 'yes');
+    expect(isActiveUsersEnabled()).toBe(true);
+
+    setActiveUsersEnv('development', 'false');
+    window.localStorage.setItem(ACTIVE_USERS_DEV_OVERRIDE_KEY, '1');
+    expect(isActiveUsersEnabled()).toBe(false);
+  });
+
+  it('override ausente ⇒ usa o env', () => {
+    setActiveUsersEnv('development', 'true');
+    expect(isActiveUsersEnabled()).toBe(true);
+
+    setActiveUsersEnv('development', 'false');
+    expect(isActiveUsersEnabled()).toBe(false);
+  });
+
+  it('localStorage lançando erro ⇒ usa o env sem propagar', () => {
+    setActiveUsersEnv('development', 'true');
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    expect(isActiveUsersEnabled()).toBe(true);
+
+    setActiveUsersEnv('development', 'false');
+    expect(isActiveUsersEnabled()).toBe(false);
+  });
+});
+
+describe('isActiveUsersEnabled — production (localStorage ignorado)', () => {
+  it('env true ⇒ true', () => {
+    setActiveUsersEnv('production', 'true');
+    expect(isActiveUsersEnabled()).toBe(true);
+  });
+
+  it('env false ⇒ false', () => {
+    setActiveUsersEnv('production', 'false');
+    expect(isActiveUsersEnabled()).toBe(false);
+  });
+
+  it('override "true" com env false ⇒ continua false', () => {
+    setActiveUsersEnv('production', 'false');
+    window.localStorage.setItem(ACTIVE_USERS_DEV_OVERRIDE_KEY, 'true');
+    expect(isActiveUsersEnabled()).toBe(false);
+  });
+
+  it('override "false" com env true ⇒ continua true', () => {
+    setActiveUsersEnv('production', 'true');
+    window.localStorage.setItem(ACTIVE_USERS_DEV_OVERRIDE_KEY, 'false');
+    expect(isActiveUsersEnabled()).toBe(true);
+  });
+
+  it('localStorage.getItem NUNCA é chamado em produção (spy)', () => {
+    setActiveUsersEnv('production', 'true');
+    const spy = vi.spyOn(Storage.prototype, 'getItem');
+    isActiveUsersEnabled();
+    setActiveUsersEnv('production', 'false');
+    isActiveUsersEnabled();
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('isActiveUsersEnabled — ambiente sem window (SSR)', () => {
+  it('sem window ⇒ usa o env sem lançar erro', () => {
+    setActiveUsersEnv('development', 'true');
+    vi.stubGlobal('window', undefined);
+    expect(isActiveUsersEnabled()).toBe(true);
+
+    setActiveUsersEnv('development', 'false');
+    expect(isActiveUsersEnabled()).toBe(false);
+  });
+});
+
+describe('isolamento da flag de usuários ativos em relação às demais', () => {
+  it('a chave de override é distinta das outras três', () => {
+    expect(ACTIVE_USERS_DEV_OVERRIDE_KEY).toBe('autocrm_ff_active_users');
+    expect(ACTIVE_USERS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_STAGES_DEV_OVERRIDE_KEY);
+    expect(ACTIVE_USERS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_LEADS_DEV_OVERRIDE_KEY);
+    expect(ACTIVE_USERS_DEV_OVERRIDE_KEY).not.toBe(PLATFORM_ADMIN_DEV_OVERRIDE_KEY);
+  });
+
+  it('env/override de usuários ativos não afeta as demais flags (e vice-versa)', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(ENV_KEY, 'true');
+    vi.stubEnv(LEADS_ENV_KEY, 'true');
+    vi.stubEnv(PLATFORM_ADMIN_ENV_KEY, 'true');
+    vi.stubEnv(ACTIVE_USERS_ENV_KEY, 'false');
+    window.localStorage.setItem(ACTIVE_USERS_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteStagesEnabled()).toBe(true);
+    expect(isRemoteLeadsEnabled()).toBe(true);
+    expect(isPlatformAdminEnabled()).toBe(true);
+    expect(isActiveUsersEnabled()).toBe(true);
+
+    window.localStorage.clear();
+    vi.stubEnv(ENV_KEY, 'false');
+    vi.stubEnv(LEADS_ENV_KEY, 'false');
+    vi.stubEnv(PLATFORM_ADMIN_ENV_KEY, 'false');
+    vi.stubEnv(ACTIVE_USERS_ENV_KEY, 'true');
+    expect(isRemoteStagesEnabled()).toBe(false);
+    expect(isRemoteLeadsEnabled()).toBe(false);
+    expect(isPlatformAdminEnabled()).toBe(false);
+    expect(isActiveUsersEnabled()).toBe(true);
   });
 });
 
