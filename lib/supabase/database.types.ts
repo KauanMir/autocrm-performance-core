@@ -149,6 +149,7 @@ export type Database = {
           invited_at: string | null
           is_active: boolean
           joined_at: string | null
+          lifecycle_status: Database["public"]["Enums"]["membership_lifecycle_status"]
           profile_id: string
           role: Database["public"]["Enums"]["company_role"]
           updated_at: string
@@ -160,6 +161,7 @@ export type Database = {
           invited_at?: string | null
           is_active?: boolean
           joined_at?: string | null
+          lifecycle_status?: Database["public"]["Enums"]["membership_lifecycle_status"]
           profile_id: string
           role: Database["public"]["Enums"]["company_role"]
           updated_at?: string
@@ -171,6 +173,7 @@ export type Database = {
           invited_at?: string | null
           is_active?: boolean
           joined_at?: string | null
+          lifecycle_status?: Database["public"]["Enums"]["membership_lifecycle_status"]
           profile_id?: string
           role?: Database["public"]["Enums"]["company_role"]
           updated_at?: string
@@ -1068,6 +1071,19 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      reactivate_membership: {
+        Args: { p_membership_id: string; p_note?: string }
+        Returns: {
+          company_id: string
+          company_role: Database["public"]["Enums"]["company_role"]
+          is_active: boolean
+          lifecycle_status: Database["public"]["Enums"]["membership_lifecycle_status"]
+          membership_id: string
+          profile_id: string
+          seller_active: boolean
+          seller_id: string
+        }[]
+      }
       reorder_pipeline_stages: {
         Args: { p_ordered_ids: string[] }
         Returns: {
@@ -1146,6 +1162,19 @@ export type Database = {
           allowed: boolean
           code: string
           retry_after_seconds: number
+        }[]
+      }
+      suspend_membership: {
+        Args: { p_membership_id: string; p_note: string }
+        Returns: {
+          company_id: string
+          company_role: Database["public"]["Enums"]["company_role"]
+          is_active: boolean
+          lifecycle_status: Database["public"]["Enums"]["membership_lifecycle_status"]
+          membership_id: string
+          profile_id: string
+          seller_active: boolean
+          seller_id: string
         }[]
       }
       unarchive_lead: {
@@ -1284,6 +1313,7 @@ export type Database = {
         | "visit_result_no_interest"
       lead_temperature: "hot" | "warm" | "cold"
       lead_urgency: "red" | "amber" | "green"
+      membership_lifecycle_status: "active" | "suspended" | "offboarded"
       platform_role: "super_admin"
       user_role: "admin" | "manager" | "seller"
     }
@@ -1450,6 +1480,7 @@ export const Constants = {
       ],
       lead_temperature: ["hot", "warm", "cold"],
       lead_urgency: ["red", "amber", "green"],
+      membership_lifecycle_status: ["active", "suspended", "offboarded"],
       platform_role: ["super_admin"],
       user_role: ["admin", "manager", "seller"],
     },
