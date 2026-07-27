@@ -69,13 +69,13 @@ select is(public.current_membership_role(), 'manager'::public.company_role, 'cur
 reset role;
 
 -- membership inativa -> current_membership_company_id/role retornam null
-update public.company_memberships set is_active = false where profile_id = 'a1000000-0000-0000-0000-000000000002';
+update public.company_memberships set is_active = false, lifecycle_status = 'suspended' where profile_id = 'a1000000-0000-0000-0000-000000000002';
 select set_config('request.jwt.claims', '{"sub":"a1000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
 set local role authenticated;
 select is(public.current_membership_company_id(), null::uuid, 'current_membership_company_id: null quando a unica membership esta inativa');
 select is(public.current_membership_role(), null::public.company_role, 'current_membership_role: null quando a unica membership esta inativa');
 reset role;
-update public.company_memberships set is_active = true where profile_id = 'a1000000-0000-0000-0000-000000000002';
+update public.company_memberships set is_active = true, lifecycle_status = 'active' where profile_id = 'a1000000-0000-0000-0000-000000000002';
 
 -- Super Admin nao recebe empresa implicita (nunca tem membership)
 select set_config('request.jwt.claims', '{"sub":"a9000000-0000-0000-0000-000000000001","role":"authenticated"}', true);

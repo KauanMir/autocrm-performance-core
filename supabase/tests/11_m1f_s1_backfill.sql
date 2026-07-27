@@ -54,9 +54,10 @@ begin
     end case;
 
     insert into public.company_memberships
-      (company_id, profile_id, role, is_active, invited_at, joined_at)
+      (company_id, profile_id, role, is_active, lifecycle_status, invited_at, joined_at)
     values
-      (v_profile.company_id, v_profile.id, v_role, v_profile.is_active, null, v_profile.created_at)
+      (v_profile.company_id, v_profile.id, v_role, v_profile.is_active,
+       (case when v_profile.is_active then 'active' else 'suspended' end)::public.membership_lifecycle_status, null, v_profile.created_at)
     on conflict (company_id, profile_id) do nothing;
   end loop;
 end $$;
@@ -104,9 +105,10 @@ begin
       when 'seller' then v_role := 'seller';
     end case;
     insert into public.company_memberships
-      (company_id, profile_id, role, is_active, invited_at, joined_at)
+      (company_id, profile_id, role, is_active, lifecycle_status, invited_at, joined_at)
     values
-      (v_profile.company_id, v_profile.id, v_role, v_profile.is_active, null, v_profile.created_at)
+      (v_profile.company_id, v_profile.id, v_role, v_profile.is_active,
+       (case when v_profile.is_active then 'active' else 'suspended' end)::public.membership_lifecycle_status, null, v_profile.created_at)
     on conflict (company_id, profile_id) do nothing;
   end loop;
 end $$;
@@ -183,9 +185,10 @@ begin
       when 'seller' then v_role := 'seller';
     end case;
     insert into public.company_memberships
-      (company_id, profile_id, role, is_active, invited_at, joined_at)
+      (company_id, profile_id, role, is_active, lifecycle_status, invited_at, joined_at)
     values
-      (v_profile.company_id, v_profile.id, v_role, v_profile.is_active, null, v_profile.created_at)
+      (v_profile.company_id, v_profile.id, v_role, v_profile.is_active,
+       (case when v_profile.is_active then 'active' else 'suspended' end)::public.membership_lifecycle_status, null, v_profile.created_at)
     on conflict (company_id, profile_id) do nothing;
   end loop;
 end $$;
@@ -226,9 +229,10 @@ begin
       when 'seller' then v_role := 'seller';
     end case;
     insert into public.company_memberships
-      (company_id, profile_id, role, is_active, invited_at, joined_at)
+      (company_id, profile_id, role, is_active, lifecycle_status, invited_at, joined_at)
     values
-      (v_profile.company_id, v_profile.id, v_role, v_profile.is_active, null, v_profile.created_at)
+      (v_profile.company_id, v_profile.id, v_role, v_profile.is_active,
+       (case when v_profile.is_active then 'active' else 'suspended' end)::public.membership_lifecycle_status, null, v_profile.created_at)
     on conflict (company_id, profile_id) do nothing;
   end loop;
 end $$;

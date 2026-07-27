@@ -218,6 +218,13 @@ select is(
 -- coluna que commit_profile_email_update escreve é profiles.email
 -- (contrato fechado, S5-E1-A). get_auth_email_update_state NÃO entra nesta
 -- lista — não referencia platform_role (só auth.users.email).
+--
+-- ATUALIZAÇÃO (M1-F S6-B): suspend_membership/reactivate_membership
+-- consultam platform_role do ator (is_platform_super_admin(), para decidir
+-- se a regra "Manager nunca age sobre Manager" se aplica) e do alvo
+-- (bloquear outro Super Admin como alvo, §24.9/§24.10 do design). Nenhuma
+-- das duas jamais escreve platform_role — só company_memberships.
+-- lifecycle_status/is_active e, quando aplicável, sellers.is_active.
 select is(
   (select count(*)::int
      from pg_proc p
@@ -230,7 +237,8 @@ select is(
                              'complete_invite_resend_delivery', 'complete_invite_delivery',
                              'reserve_create_invite_rate_limit', 'reserve_resend_invite_rate_limit',
                              'accept_invite', 'update_profile_name', 'update_membership_role',
-                             'get_profile_email_update_state', 'commit_profile_email_update')
+                             'get_profile_email_update_state', 'commit_profile_email_update',
+                             'suspend_membership', 'reactivate_membership')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
 -- Reforço específico do S2: is_platform_super_admin() referencia

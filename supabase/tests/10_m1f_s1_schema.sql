@@ -27,7 +27,7 @@ select is(
 -- ── company_memberships: existe, colunas exatas, tipos, nulabilidade ────
 select has_table('public'::name, 'company_memberships'::name);
 select columns_are('public'::name, 'company_memberships'::name, array[
-  'id','company_id','profile_id','role','is_active','invited_at','joined_at','created_at','updated_at'
+  'id','company_id','profile_id','role','is_active','lifecycle_status','invited_at','joined_at','created_at','updated_at'
 ]);
 select col_type_is('public'::name, 'company_memberships'::name, 'id'::name, 'uuid');
 select col_type_is('public'::name, 'company_memberships'::name, 'company_id'::name, 'uuid');

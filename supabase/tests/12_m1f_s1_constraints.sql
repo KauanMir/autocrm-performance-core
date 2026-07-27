@@ -58,8 +58,8 @@ select throws_ok($$insert into public.company_memberships (company_id, profile_i
 -- (para o TRIGGER nao disparar antes), mas company_id diferente e
 -- is_active=false (para nao violar a unique parcial de membership ativa) —
 -- isola a checagem exatamente na FK (company_id, membership_id).
-insert into public.company_memberships (company_id, profile_id, role, is_active) values
-  ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'e0000000-0000-0000-0000-000000000001', 'seller', false);
+insert into public.company_memberships (company_id, profile_id, role, is_active, lifecycle_status) values
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'e0000000-0000-0000-0000-000000000001', 'seller', false, 'suspended');
 select throws_ok(
   format($$update public.sellers set membership_id = %L where id = 'sConstraint1'$$,
     (select id from public.company_memberships
@@ -148,7 +148,7 @@ select lives_ok(
 -- mesmo, o seller não é apagado, a membership não é apagada — só
 -- is_active muda.
 select lives_ok(
-  $$update public.company_memberships set is_active = false
+  $$update public.company_memberships set is_active = false, lifecycle_status = 'suspended'
     where company_id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'
       and profile_id = 'e0000000-0000-0000-0000-000000000001' and role = 'seller'$$,
   'is_active pode ser desativado mesmo com seller vinculado (nao e uma das tres invariantes protegidas)');
@@ -164,7 +164,7 @@ select ok(
 select ok(
   (select true from public.profiles where id = 'e0000000-0000-0000-0000-000000000001'),
   'desativar a membership NAO apaga a autoria/profile (linha continua existindo)');
-update public.company_memberships set is_active = true
+update public.company_memberships set is_active = true, lifecycle_status = 'active'
   where company_id = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee'
     and profile_id = 'e0000000-0000-0000-0000-000000000001' and role = 'seller';
 

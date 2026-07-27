@@ -511,7 +511,7 @@ reset role;
 -- (simula um estado histórico pré-existente que create_invite não viu
 -- porque não existia no momento da criação do convite)
 insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa930000-0000-0000-0000-000000000003', 'fa100000-0000-0000-0000-000000000001', 'Inativo Mesma', 'g6.inativomesma@test.local', 'manager', true);
-insert into public.company_memberships (company_id, profile_id, role, is_active) values ('fa100000-0000-0000-0000-000000000001', 'fa930000-0000-0000-0000-000000000003', 'manager', false);
+insert into public.company_memberships (company_id, profile_id, role, is_active, lifecycle_status) values ('fa100000-0000-0000-0000-000000000001', 'fa930000-0000-0000-0000-000000000003', 'manager', false, 'suspended');
 set local role authenticated;
 select pg_temp.as_user('fa930000-0000-0000-0000-000000000003');
 select ok(
@@ -730,8 +730,8 @@ insert into public.profiles (id, company_id, name, email, role, is_active) value
 -- batem exatamente com a linha sellers abaixo) — identificada depois por
 -- subselect (profile_id, company_id, role) é única por
 -- company_memberships_company_id_profile_id_key, não precisa de RETURNING.
-insert into public.company_memberships (company_id, profile_id, role, is_active)
-values ('fa100000-0000-0000-0000-000000000001', 'fa960000-0000-0000-0000-000000000003', 'seller', false);
+insert into public.company_memberships (company_id, profile_id, role, is_active, lifecycle_status)
+values ('fa100000-0000-0000-0000-000000000001', 'fa960000-0000-0000-0000-000000000003', 'seller', false, 'suspended');
 insert into public.sellers (id, company_id, membership_id, profile_id, name, first_name, is_active)
 values (
   gen_random_uuid()::text,
@@ -857,7 +857,7 @@ select is(
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa950000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'g6.historicoinativosuper@test.local', now(), now(), now());
 insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa950000-0000-0000-0000-000000000004', 'fa100000-0000-0000-0000-000000000001', 'Historico Inativo Super', 'g6.historicoinativosuper@test.local', 'seller', true);
-insert into public.company_memberships (company_id, profile_id, role, is_active) values ('fa100000-0000-0000-0000-000000000001', 'fa950000-0000-0000-0000-000000000004', 'seller', false);
+insert into public.company_memberships (company_id, profile_id, role, is_active, lifecycle_status) values ('fa100000-0000-0000-0000-000000000001', 'fa950000-0000-0000-0000-000000000004', 'seller', false, 'suspended');
 set local role service_role;
 select public.create_invite('fa900000-0000-0000-0000-000000000003', null, 'g6.historicoinativosuper@test.local', 'Historico Inativo Super Invite', 'super_admin', repeat('43', 32));
 select public.complete_invite_delivery('fa900000-0000-0000-0000-000000000003', (select id from public.invites where token_hash = repeat('43', 32)), true, null);

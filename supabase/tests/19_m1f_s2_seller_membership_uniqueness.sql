@@ -145,7 +145,7 @@ delete from public.sellers where id in ('s19CatchupDup1', 's19CatchupDup2');
 
 -- ── 6. desativar membership nao remove o seller (nunca DELETE, so
 --    is_active muda — mesmo principio de nao-destrutividade do §6.3) ────
-update public.company_memberships set is_active = false where id = 'd1c00000-0000-0000-0000-000000000001';
+update public.company_memberships set is_active = false, lifecycle_status = 'suspended' where id = 'd1c00000-0000-0000-0000-000000000001';
 select is(
   (select count(*)::int from public.sellers where membership_id = 'd1c00000-0000-0000-0000-000000000001'),
   1, 'desativar a membership nao remove o seller (linha continua existindo)');

@@ -64,13 +64,13 @@ update public.profiles set platform_role = 'super_admin' where id in
 -- verdade e, para estas RPCs, é indistinguível de um Manager legítimo —
 -- por isso este fixture isola exatamente o caso "só a coluna legada, sem
 -- membership real", que é o caso que deve ser negado.
-insert into public.company_memberships (company_id, profile_id, role, is_active) values
-  ('d1000000-0000-0000-0000-000000000001', 'd9000000-0000-0000-0000-000000000001', 'manager', true),
-  ('d2000000-0000-0000-0000-000000000002', 'd9000000-0000-0000-0000-000000000002', 'manager', true),
-  ('d1000000-0000-0000-0000-000000000001', 'd9000000-0000-0000-0000-000000000003', 'seller',  true),
-  ('d1000000-0000-0000-0000-000000000001', 'd9000000-0000-0000-0000-000000000007', 'seller',  false),
-  ('d2000000-0000-0000-0000-000000000002', 'd9000000-0000-0000-0000-000000000008', 'seller',  true),
-  ('d1000000-0000-0000-0000-000000000001', 'd9000000-0000-0000-0000-000000000010', 'manager', true);
+insert into public.company_memberships (company_id, profile_id, role, is_active, lifecycle_status) values
+  ('d1000000-0000-0000-0000-000000000001', 'd9000000-0000-0000-0000-000000000001', 'manager', true,  'active'),
+  ('d2000000-0000-0000-0000-000000000002', 'd9000000-0000-0000-0000-000000000002', 'manager', true,  'active'),
+  ('d1000000-0000-0000-0000-000000000001', 'd9000000-0000-0000-0000-000000000003', 'seller',  true,  'active'),
+  ('d1000000-0000-0000-0000-000000000001', 'd9000000-0000-0000-0000-000000000007', 'seller',  false, 'suspended'),
+  ('d2000000-0000-0000-0000-000000000002', 'd9000000-0000-0000-0000-000000000008', 'seller',  true,  'active'),
+  ('d1000000-0000-0000-0000-000000000001', 'd9000000-0000-0000-0000-000000000010', 'manager', true,  'active');
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- ACL — nenhuma função pode depender de "service_role ignora GRANT"
@@ -697,7 +697,7 @@ select is((select status from public.invites where token_hash = repeat('1e', 32)
 
 -- Manager inativo (membership desativada) não cancela mais, mesmo sendo o
 -- autor original
-update public.company_memberships set is_active = false
+update public.company_memberships set is_active = false, lifecycle_status = 'suspended'
  where profile_id = 'd9000000-0000-0000-0000-000000000010' and company_id = 'd1000000-0000-0000-0000-000000000001';
 select set_config('request.jwt.claims', '{"sub":"d9000000-0000-0000-0000-000000000010","role":"authenticated"}', true);
 set local role authenticated;

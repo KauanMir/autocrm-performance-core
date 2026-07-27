@@ -51,13 +51,13 @@ insert into public.profiles (id, company_id, name, email, role, is_active) value
 
 update public.profiles set platform_role = 'super_admin' where id = 'cc900000-0000-0000-0000-000000000003';
 
-insert into public.company_memberships (company_id, profile_id, role, is_active) values
-  ('cc100000-0000-0000-0000-000000000001', 'cc900000-0000-0000-0000-000000000001', 'manager', true),
-  ('cc200000-0000-0000-0000-000000000002', 'cc900000-0000-0000-0000-000000000002', 'manager', true),
-  ('cc100000-0000-0000-0000-000000000001', 'cc900000-0000-0000-0000-000000000004', 'seller',  true),
-  ('cc100000-0000-0000-0000-000000000001', 'cc900000-0000-0000-0000-000000000005', 'manager', false),
-  ('cc300000-0000-0000-0000-000000000003', 'cc900000-0000-0000-0000-000000000008', 'manager', true),
-  ('cc400000-0000-0000-0000-000000000004', 'cc900000-0000-0000-0000-000000000009', 'manager', true);
+insert into public.company_memberships (company_id, profile_id, role, is_active, lifecycle_status) values
+  ('cc100000-0000-0000-0000-000000000001', 'cc900000-0000-0000-0000-000000000001', 'manager', true,  'active'),
+  ('cc200000-0000-0000-0000-000000000002', 'cc900000-0000-0000-0000-000000000002', 'manager', true,  'active'),
+  ('cc100000-0000-0000-0000-000000000001', 'cc900000-0000-0000-0000-000000000004', 'seller',  true,  'active'),
+  ('cc100000-0000-0000-0000-000000000001', 'cc900000-0000-0000-0000-000000000005', 'manager', false, 'suspended'),
+  ('cc300000-0000-0000-0000-000000000003', 'cc900000-0000-0000-0000-000000000008', 'manager', true,  'active'),
+  ('cc400000-0000-0000-0000-000000000004', 'cc900000-0000-0000-0000-000000000009', 'manager', true,  'active');
 -- cc900000-...-06 (ADMIN legado) recebe ZERO company_memberships de propósito.
 
 -- Conveniência exclusiva deste teste (dentro da transação, rollback):
