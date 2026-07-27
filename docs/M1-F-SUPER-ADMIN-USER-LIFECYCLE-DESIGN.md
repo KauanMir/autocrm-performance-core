@@ -2018,3 +2018,553 @@ para uma etapa futura e separada de deploy.
 - Nenhuma operação remota (migration, SQL, alteração de usuário) foi
   executada durante esta auditoria de fechamento (S5-F) — toda validação
   foi local.
+
+---
+
+## 24. Decisões congeladas do S6 — ciclo empresarial
+
+> Registrado em M1-F S6-D0 (congelamento inicial) e consolidado/publicado
+> em M1-F S6-D1 (esta revisão). Reconcilia e corrige formalmente a
+> proposta de divisão apresentada em M1-F S6-A0 (auditoria factual,
+> aprovada) à luz de decisões humanas explícitas tomadas em S6-D0/S6-D1.
+> Nenhum código, migration, RPC, Route Handler, frontend ou teste foi
+> criado ou alterado nesta seção em nenhuma das duas revisões — é
+> documentação de decisão, não implementação. §0–§23 não foram alterados.
+> Nenhuma operação remota foi executada em nenhuma das etapas que
+> produziram esta seção. **Nenhuma migration do S6 existe no repositório
+> — todo nome de coluna/enum/RPC citado abaixo é contrato acordado para
+> implementação futura, não código já escrito.**
+
+### 24.1 Estado oficial no momento deste registro
+
+Branch `main`, HEAD local e `origin/main` no momento da consolidação
+(S6-D1, antes do commit desta seção):
+
+```
+7a97f18f32fe0c9d8f92be78c5d45790bac1f7e3
+```
+
+Working tree, no momento da consolidação, continha somente
+`docs/M1-F-SUPER-ADMIN-USER-LIFECYCLE-DESIGN.md` modificado (seção §24
+criada em S6-D0, ainda sem commit). S6 sem nenhuma linha de implementação.
+S7 e S8 não iniciados. M1-E E4 pausado (aguardando S8, §23.11).
+
+### 24.2 Estado da membership: `active` / `suspended` / `offboarded`
+
+**Decisão**: `company_memberships.is_active` (boolean) sozinho **não é
+suficiente** para o S6 — um `false` não diz se o vínculo está suspenso
+(temporário, reversível) ou desligado (encerramento, sujeito a regras de
+retorno diferentes, §24.5). O S6 precisa de um terceiro estado explícito.
+
+**Menor solução segura**: uma nova coluna
+`company_memberships.lifecycle_status`, enum novo
+`membership_lifecycle_status` (`'active' | 'suspended' | 'offboarded'`),
+seguindo a mesma convenção já usada para `company_status`/`company_role`/
+`platform_role` (enum, nunca `text` livre para um conjunto fechado de
+estados). Não criada nesta etapa — é decisão de schema para o S6-B.
+
+- **Default**: `'active'` — espelha o default atual de `is_active` (`true`).
+- **Compatibilidade com `is_active` (regra temporária até o S8)**:
+  `is_active` **permanece a única coluna que os helpers/RLS/índice atuais
+  consomem** (`can_access_company`, `current_membership_company_id`,
+  `current_membership_role`, `company_memberships_profile_single_active_uidx`)
+  — nenhum desses objetos muda no S6. `lifecycle_status` é aditiva. A
+  consistência entre as duas é garantida por um `CHECK CONSTRAINT` (não por
+  disciplina de aplicação): `check ((lifecycle_status = 'active') = is_active)`.
+  Toda RPC nova do S6 escreve as duas colunas na mesma instrução — o
+  `CHECK` faz o Postgres rejeitar qualquer gravação que as deixe
+  divergentes, mesmo por erro de programação futuro. Preferido a uma
+  coluna gerada (`GENERATED ALWAYS AS`) porque não exige recriar a coluna
+  `is_active` existente (evita reescrever o índice parcial e os grants já
+  auditados) — menor blast radius de migration.
+- **Migração dos registros atuais**: hoje toda `company_memberships` real
+  tem `is_active=true` (nenhuma suspensão de produção existe — os únicos
+  `is_active=false` observados são toggles de fixture/teste, confirmado no
+  S6-A0). Backfill trivial e seguro: `lifecycle_status='active'` para 100%
+  das linhas existentes no momento da migration do S6-B.
+- **Invariantes entre `status` e `is_active`**: só o `CHECK` acima —
+  nenhuma outra regra nova. `lifecycle_status='suspended'` **sempre**
+  implica `is_active=false`; `lifecycle_status='offboarded'` **sempre**
+  implica `is_active=false`; `lifecycle_status='active'` **sempre** implica
+  `is_active=true`. Não existe combinação onde `is_active=true` e
+  `lifecycle_status` seja `suspended`/`offboarded`, nem o inverso.
+- **Impacto nos helpers atuais**: zero. Nenhum helper de S1–S5 lê
+  `lifecycle_status` — continuam lendo `is_active`, comportamento
+  bit-a-bit idêntico ao de hoje.
+- **Impacto no índice único de membership ativa**
+  (`company_memberships_profile_single_active_uidx`, parcial sobre
+  `is_active`): zero mudança de definição — como `is_active` continua
+  sendo a fonte que o índice observa, e o `CHECK` garante que só
+  `lifecycle_status='active'` produz `is_active=true`, a regra "no máximo
+  1 membership ativa por profile" continua válida automaticamente para
+  qualquer combinação dos três estados.
+- **Reativação**: `suspended → active` é permitida (sujeita ao índice
+  único — não pode haver outra membership `active` do mesmo profile no
+  momento). `offboarded → active` **não** é uma transição do mesmo
+  contrato — ver §24.5.
+- **Transferência**: consome `lifecycle_status` na origem
+  (`offboarded`, §24.6) e cria/reaproveita `active` no destino — nunca
+  reescreve `company_id` da linha antiga (trigger
+  `company_memberships_check_mutation` já proíbe isso, imutabilidade
+  preservada).
+- **Listagem futura**: `lifecycle_status` é exatamente o campo que uma
+  RPC administrativa de leitura de inativos (§24.12) filtraria/agruparia —
+  `is_active` sozinho nunca permitiria distinguir "suspenso" de
+  "desligado" numa lista.
+
+Nenhuma migration foi criada nesta etapa. Este é o modelo recomendado para
+implementação no S6-B.
+
+### 24.3 Permissões por ator — congelado
+
+**Super Admin** pode, sobre `company_memberships` de qualquer empresa:
+suspender Manager e Seller empresariais; reativar Manager e Seller
+empresariais; desligar Manager e Seller empresariais; transferir usuários
+entre empresas (§24.7). Não pode, por essas funções: alterar outro Super
+Admin; alterar `platform_role`; agir sobre a própria membership (nenhuma
+autossuspensão/autodesligamento/autotransferência por este contrato);
+desativar globalmente uma conta da plataforma (`profiles.is_active` —
+contrato diferente, §24.8).
+
+**Manager** pode, somente na própria empresa
+(`current_membership_company_id()`): suspender Seller; reativar Seller;
+desligar Seller. Não pode: agir sobre outro Manager (nenhuma suspensão,
+reativação, desligamento ou transferência de um Manager por um Manager —
+mesma fronteira já aplicada em `EditUserModal`/`ActiveUserList` desde o
+S5, onde um Manager já enxerga outro Manager como linha somente-leitura);
+transferir (ação exclusiva de Super Admin); alterar `platform_role`; agir
+fora da própria empresa.
+
+**Seller**: nenhuma ação administrativa do S6 — mesma fronteira já
+vigente desde o S5 (Seller não acessa `ActiveUserList`).
+
+O backend (RPC `SECURITY DEFINER` + `require_company_access`/
+`is_platform_super_admin`) é a proteção real em todos os casos — a
+visibilidade de botões no frontend (S6-F) é defesa em profundidade,
+nunca a única barreira, mesmo princípio já reconfirmado em §23.3 para o
+S5.
+
+### 24.4 Suspensão — congelado
+
+- Ator autorizado: conforme §24.3 (Super Admin sobre Manager/Seller de
+  qualquer empresa; Manager sobre Seller da própria empresa).
+- Temporária e reversível; afeta **somente** a membership empresarial-alvo
+  (`lifecycle_status: active → suspended`, `is_active → false` na mesma
+  instrução).
+- Não desativa `profiles.is_active` (conta continua existindo e podendo
+  logar — só perde acesso comercial daquela empresa via `can_access_company`,
+  já pronta para isso desde S2/S11).
+- Não altera `platform_role` — suspensão empresarial nunca toca a coluna
+  de plataforma.
+- Preserva a linha de `company_memberships`, a linha de `sellers`
+  vinculada, e todo histórico de leads/tarefas/negociações/propostas/
+  vendas — nenhum `DELETE` em nenhum ponto.
+- Se a membership suspensa é de um `seller` vinculado: `sellers.is_active`
+  é gravado `false` **na mesma transação** (sincronização ainda
+  inexistente hoje, §24.13) — vendedor para de receber novas atribuições,
+  mas seu `sellers.id` e histórico não mudam.
+- Último `manager` ativo da empresa é protegido — suspender a última
+  membership `role='manager'` ativa nunca é permitido (mesma regra do
+  §24.6, aplicada aqui pela mesma guarda `last_manager_requires_successor`
+  estendida à transição de `lifecycle_status`).
+- Super Admin como **alvo** de uma ação empresarial de suspensão é
+  rejeitado — não é este contrato que gerencia Super Admin (§24.10).
+- Nenhuma revogação ou banimento global de Auth — ver §24.8.
+- Motivo administrativo **obrigatório** — §24.12.
+- RLS (`can_access_company`) e helpers empresariais continuam sendo a
+  proteção imediata e suficiente; nenhuma camada nova de enforcement é
+  necessária para a suspensão em si fazer efeito.
+
+**Transição**: `active → suspended`.
+
+### 24.5 Reativação — congelado
+
+- Ator autorizado: o mesmo par de §24.3 (Super Admin globalmente; Manager
+  só sobre Seller da própria empresa).
+- **Transição**: `suspended → active` (nunca `offboarded → active` por
+  este mesmo contrato — §24.6). Reversão simétrica de §24.4:
+  `lifecycle_status`, `is_active` e `sellers.is_active` (quando aplicável)
+  voltam na mesma transação.
+- Sujeita ao índice único de membership ativa — se o profile já tiver
+  outra membership `active` no momento (cenário hoje impossível dado que
+  a constraint de 1-ativa já está em vigor, mas relevante se essa
+  constraint for relaxada no futuro), a reativação é negada.
+- Motivo administrativo **opcional** — §24.12.
+
+### 24.6 Desligamento (offboarding) — congelado
+
+**Contratos mantidos separados**: `offboard_seller` e `offboard_manager`
+permanecem dois contratos distintos — decisão fechada, sem contrato
+único genérico `offboard_membership` nesta etapa. Motivo: os dois
+protegem invariantes operacionalmente diferentes e não-sobreponíveis —
+`offboard_seller` reatribui registros comerciais abertos (leads, tarefas,
+negociações, visitas) a um sucessor opcional; `offboard_manager` só
+protege a existência de outro Manager ativo na empresa, sem nenhum dado
+comercial para mover. Contratos estreitos reduzem ambiguidade de
+interpretação em cada RPC; unificá-los custaria uma RPC com ramificação
+interna por `role`, sem reduzir a complexidade real.
+
+Regras comuns às duas RPCs:
+
+- Encerra o vínculo empresarial (`lifecycle_status: active|suspended →
+  offboarded`, `is_active → false`).
+- Não apaga `profiles`, não apaga `company_memberships`, não apaga
+  `sellers`, não apaga histórico nenhum — mesmo princípio de "nunca
+  exclusão física" já vigente desde M1-C.
+- `sellers.is_active` sincronizado para `false` na mesma transação, quando
+  aplicável — novas atribuições impedidas.
+- Ações históricas (`created_by_profile_id`, `actor_profile_id`,
+  `seller_id` em leads/timeline/deals/sales) continuam exibindo o autor/
+  vendedor original — cadeia de identidade (`leads.seller_id → sellers →
+  company_memberships → profiles`) nunca é rompida por um desligamento.
+- `platform_role` nunca é alterado por este contrato.
+- Nenhum `DELETE` em nenhum ponto.
+- Motivo administrativo **obrigatório** — §24.12.
+
+**Último Manager — regra congelada** (aplica-se igualmente a §24.4
+suspensão, a este desligamento, e à saída da origem em §24.7
+transferência): o último Manager ativo de uma empresa nunca é suspenso,
+nunca é desligado e nunca é transferido para fora da empresa por essas
+RPCs. A operação exige que já exista **outro** Manager ativo na mesma
+empresa **antes** da chamada — nunca promove um sucessor automaticamente
+na mesma operação (promover um Seller a Manager continua sendo uma ação
+prévia e separada, já descrita em §12 do documento base). O código de
+erro reutilizado é `last_manager_requires_successor` — o mesmo já
+implementado e testado por `update_membership_role` (S5-C) para troca de
+papel, sem necessidade de um código novo.
+
+**`offboarded` volta a `active`? Decisão: não por `reactivate_membership`.**
+Uma reativação **implícita/silenciosa** de um desligamento é
+deliberadamente **rejeitada** — desligamento é uma decisão administrativa
+de maior gravidade (mesma categoria de "conta comprometida"/"saída
+definitiva" já descrita em §10.2 para `deactivated`), e tratar
+`offboarded → active` pelo mesmo botão/contrato de "reativar suspensão"
+esconderia essa gravidade do ator e do log de auditoria. Uma pessoa que
+volta a trabalhar numa empresa depois de desligada deve passar por um
+**contrato explícito e distinto** — na prática, o fluxo de convite já
+existente (`create_invite`/`accept_invite`), que cria uma nova avaliação
+de papel/aceite, não um simples "desfazer" do desligamento anterior. Isso
+é consistente com §24.7: a mesma máquina de estados que rejeita "desligar
+e simplesmente reativar" é a que sustenta "transferir é sair + entrar de
+forma atômica e auditada", nunca um atalho que perde o rastro da decisão
+administrativa.
+
+### 24.7 Transferência entre empresas — correção formal do S6-A0
+
+**Correção**: o relatório do S6-A0 recomendou tratar transferência como
+fora do escopo de uma RPC dedicada do S6, compondo-a como
+`offboard_*` + convite. Essa recomendação foi **revogada em S6-D0 e
+permanece revogada** — o próprio §22.11 deste documento já registrava,
+antes mesmo do S6-A0, que "transferência de usuário entre empresas...
+pertence ao S6, não está fora do M1-F". O S6-A0 deveria ter lido essa
+decisão prévia como vinculante e não a revisitou; esta seção formaliza a
+correção definitivamente. **Transferência entre empresas permanece
+dentro do S6.**
+
+Nome congelado da RPC: **`transfer_membership`**
+(`p_source_membership_id, p_target_company_id, p_target_role,
+p_successor_id | null, p_note`).
+
+Contrato conceitual congelado:
+
+- Ator: **somente Super Admin** (`is_platform_super_admin()`) — nunca
+  Manager, mesmo o da empresa de origem (§24.3).
+- Sucessor opcional para reatribuição de leads/tarefas na origem (mesmo
+  parâmetro de `offboard_seller`/`offboard_manager`, reaproveitado) —
+  sujeito à mesma regra de último Manager de §24.6 quando a origem
+  perderia seu último Manager ativo.
+- **Ordem determinística de locks**: as duas empresas (origem e destino)
+  são bloqueadas em ordem determinística (ex.: `company_id` ascendente),
+  não na ordem em que aparecem nos parâmetros — evita deadlock entre duas
+  transferências concorrentes envolvendo o mesmo par de empresas em
+  direções opostas. Mesmo espírito do "ordered locks (empresa→membership→
+  profile→seller)" já usado no backend de e-mail (S5-E1-A).
+- Valida último `manager` na origem antes de prosseguir (§24.6) — a saída
+  da origem tem exatamente o mesmo efeito de um desligamento sobre a
+  empresa de origem.
+- A membership de origem **nunca tem `company_id` alterado** — trigger
+  `company_memberships_check_mutation` já proíbe isso estruturalmente, e
+  esta decisão reforça que a transferência nunca deve tentar contorná-lo.
+  A membership de origem é preservada como registro histórico e marcada
+  `lifecycle_status='offboarded'`.
+- No destino: cria uma **nova** linha de `company_memberships`
+  (`lifecycle_status='active'`) ou reaproveita uma linha histórica já
+  existente para o mesmo `(company_id, profile_id)` — mesmo padrão de
+  reaproveitamento já implementado no ciclo `manager ↔ seller` do S5-C
+  (§23.5: "cadastro histórico reaproveitado... religado e reativado;
+  novo cadastro criado somente quando nunca existiu"). **Reutilizar uma
+  membership histórica que hoje está `offboarded` no destino é permitido
+  exclusivamente dentro deste contrato de transferência** — não é uma
+  brecha para `reactivate_membership` reviver um desligamento por outra
+  via; é o próprio `transfer_membership`, com sua própria autorização
+  (Super Admin) e sua própria auditoria, decidindo explicitamente trazer
+  a pessoa de volta àquela empresa como parte da operação de
+  transferência, nunca silenciosamente.
+- Índice único de membership ativa continua garantindo no máximo uma
+  membership `active` por profile — a transferência só é válida se a
+  origem sai de `active` **antes ou na mesma instrução** em que o destino
+  entra em `active` (mesma transação, sem janela intermediária observável
+  de fora).
+- **Nenhuma etapa por convite** — `transfer_membership` é atômica e
+  autossuficiente; não compõe com `create_invite`/`accept_invite` (essa
+  composição foi a recomendação do S6-A0, já revogada acima).
+- Nunca usa `DELETE`.
+- `sellers` da origem é preservado intacto (histórico de leads/vendas
+  daquela empresa não muda de dono). No destino, cria ou reaproveita um
+  `sellers` **daquele profile especificamente** — nunca "sequestra" um
+  `sellers` que pertence a outro profile, mesmo que aparentemente livre.
+- Auditoria: **uma linha** por chamada (`membership_transferred`, §24.13),
+  com `before_data`/`after_data` carregando os identificadores de origem
+  e destino (`company_id` de cada lado, `membership_id` de cada lado) —
+  suficiente para reconstruir o evento sem precisar de linhas coordenadas
+  separadas. A auditoria registra explicitamente que o desligamento da
+  origem ocorreu **por transferência**, não por um `offboard_*` comum
+  (distinção feita pelo próprio `action='membership_transferred'`, não
+  por um estado de `lifecycle_status` adicional).
+- Motivo administrativo **obrigatório** — §24.12.
+- Tudo em uma única transação — falha em qualquer etapa reverte a
+  operação inteira (mesmo padrão de `offboard_seller`).
+
+**Nenhum estado `lifecycle_status` adicional (`'transferred'`) é criado —
+decisão fechada.** Os identificadores de origem/destino já registrados em
+`audit_log` e a própria existência de uma nova membership `active` no
+destino para o mesmo `profile_id` já reconstroem completamente "esta
+membership foi encerrada porque a pessoa foi transferida" sem precisar de
+um quarto valor na máquina de `lifecycle_status`. `offboarded` já é
+semanticamente correto: do ponto de vista da empresa de origem, o
+vínculo de fato terminou.
+
+Não implementado nesta etapa.
+
+### 24.8 Sessões — congelado
+
+**Suspensão empresarial**:
+- Não usar `ban_duration` (API real do Supabase Auth Admin, confirmada no
+  S6-A0).
+- Não tentar `admin.signOut(jwt)` — exigiria o JWT do usuário-alvo, que o
+  servidor não possui.
+- Não revogar globalmente a conta.
+- Não desativa `profiles.is_active` — suspensão/desligamento/transferência
+  empresarial nunca tocam a conta como um todo, só a membership-alvo.
+- O bloqueio de acesso empresarial é feito pelo banco (`can_access_company`
+  já nega no instante em que `is_active=false`/`lifecycle_status`
+  mudam) — nenhuma ação adicional de Auth é necessária para a suspensão
+  ter efeito real.
+- O frontend deve limpar cache e recarregar identidade quando perceber
+  perda de acesso (mesma infraestrutura de geração de cache do M1-D,
+  §24.9 trata o gatilho de sessão).
+
+**Desligamento empresarial**: mesma regra — não banir automaticamente a
+conta inteira, não desativar `profiles.is_active`. A pessoa pode, no
+futuro, pertencer a outra empresa (inclusive via transferência, §24.7);
+banir a conta Auth encerraria essa possibilidade sem necessidade.
+
+**Transferência**: não revogar globalmente a conta, não desativar
+`profiles.is_active`; invalidar dados/cache da empresa anterior (mesma
+infraestrutura de geração de cache); o backend passa a autorizar somente
+o novo vínculo assim que a transação da transferência é commitada —
+`can_access_company` já reflete isso automaticamente, sem código de
+sessão adicional.
+
+**Desativação global de profile** (`profiles.is_active=false`): é um
+contrato **diferente**, fora do escopo de qualquer uma das três operações
+acima. Pode, no futuro, justificar bloqueio de Auth (`ban_duration`/
+`deleteUser`) — mas isso não pertence às operações comuns de membership e
+**não é implementado nesta etapa** nem decidido em detalhe aqui.
+
+### 24.9 `AuthService.restoreSession()` — achado registrado, não corrigido
+
+Achado do S6-A0 reafirmado: `AuthService.restoreSession()`
+(`lib/services.ts`) não executa `signOut()` quando o carregamento do
+profile falha, ao contrário de `login()`, que já faz isso. Classificado
+como **hardening separado do S6** — não é uma correção deste estágio nem
+bloqueia o início do S6-B.
+
+Definição para quando essa correção for feita (fora desta etapa):
+- Limpar a sessão (`signOut()`) quando o `profile` não existir ou
+  estiver **globalmente** inativo (`profiles.is_active=false`) — mesmo
+  critério que já dispara em `login()`.
+- **Não** encerrar a sessão apenas porque uma membership específica foi
+  suspensa (`lifecycle_status='suspended'`) — a conta continua válida,
+  só o acesso comercial daquela empresa é que cai; encerrar a sessão
+  inteira seria mais agressivo do que a decisão de suspensão pretende.
+- Limpar o cache empresarial (query cache/generation) quando não houver
+  `activeMembership` — independentemente do motivo (suspenso, desligado
+  ou nunca teve membership).
+- Preservar o comportamento atual de Super Admin sem `activeMembership`
+  (`activeMembership: null` é esperado e válido para Super Admin — não
+  deve disparar nenhuma lógica de "sessão inválida").
+
+O momento exato de implementar essa correção (dentro do S6-E ou como
+hardening totalmente independente da numeração do S6) é um detalhe de
+sequenciamento de implementação, não uma decisão que bloqueia o início do
+S6-B. Nenhuma alteração de código foi feita nesta etapa.
+
+### 24.10 Super Admin fora do ciclo empresarial — congelado
+
+- As funções empresariais do S6 (suspensão, reativação, desligamento,
+  transferência) **nunca alteram `platform_role`**.
+- Super Admin não é suspenso nem desligado **da plataforma** por essas
+  funções — elas operam exclusivamente sobre `company_memberships`.
+- Se um Super Admin possuir uma `company_memberships` (cenário hoje
+  incomum, mas estruturalmente possível), ações empresariais do S6 sobre
+  essa membership específica são **rejeitadas inicialmente** — mesmo
+  padrão já usado em `update_membership_role` (S5-C), que já nega
+  qualquer alteração de role/estado quando o alvo é Super Admin.
+- Eventual gestão de Super Admin (promoção, remoção, proteção de último
+  Super Admin) pertence a uma **superfície global separada**, fora do S6
+  empresarial.
+- **`last_super_admin_cannot_be_removed` não é criado no S6 empresarial**
+  — nem como RPC, nem como trigger, nem como guarda dentro de
+  `suspend_membership`/`offboard_seller`/`offboard_manager`/
+  `transfer_membership`. Isso corrige a proposta de divisão do S6-A0, que
+  havia incluído essa guarda como uma sub-etapa do S6 (S6-C) — não há
+  nenhuma sub-etapa dedicada a isso na divisão final (§24.15).
+
+### 24.11 MFA fora de escopo — congelado
+
+- MFA permanece inteiramente fora do S6 (reafirma S6-A0).
+- Nenhuma tela de enrollment existe hoje no frontend.
+- Nenhuma remoção administrativa de fator (`admin.mfa.deleteFactor`) será
+  implementada nesta etapa nem em nenhuma sub-etapa do S6.
+- MFA deverá ter uma etapa própria e futura, fora da numeração atual do
+  S6 (S9+ ou dedicada, a decidir quando houver requisito real).
+- Nenhuma decisão de suspensão, desligamento ou transferência depende de
+  MFA nem deve referenciá-lo — os dois assuntos não se misturam em
+  nenhum contrato do S6.
+
+### 24.12 Motivo administrativo — congelado
+
+| Operação | Motivo (`p_note`/`reason`) |
+|---|---|
+| Suspensão (`suspend_membership`) | **Obrigatório** |
+| Desligamento (`offboard_seller`/`offboard_manager`) | **Obrigatório** |
+| Transferência (`transfer_membership`) | **Obrigatório** |
+| Reativação (`reactivate_membership`) | Opcional |
+
+Regras para a implementação futura (não decididas em detalhe numérico
+nesta etapa, mas o formato é congelado):
+- `trim` antes de qualquer validação/gravação;
+- limite mínimo e máximo de tamanho **definidos na implementação** (S6-B/
+  S6-C/S6-D) — não é uma decisão bloqueante para começar, é um detalhe de
+  migration;
+- nunca conter segredos, tokens ou senha (mesmo princípio já vigente para
+  todo `audit_log`, §14.1 do documento base);
+- armazenado **somente** em `audit_log.reason` — nunca em
+  `company_memberships` ou qualquer outra tabela operacional;
+- **nunca usado como autorização** — o motivo é texto livre informativo
+  para auditoria, jamais uma condição lida por RLS/helper/RPC para decidir
+  se a operação é permitida.
+
+### 24.13 Contratos futuros (nomes congelados)
+
+- `suspend_membership(p_membership_id, p_note)` — nome e assinatura
+  congelados.
+- `reactivate_membership(p_membership_id, p_note)` — nome e assinatura
+  congelados.
+- `offboard_seller(p_seller_membership_id, p_successor_seller_id | null,
+  p_note)` / `offboard_manager(p_manager_membership_id,
+  p_successor_profile_id | null, p_note)` — **mantidos separados**,
+  decisão fechada em §24.6.
+- `transfer_membership(p_source_membership_id, p_target_company_id,
+  p_target_role, p_successor_id | null, p_note)` — nome e assinatura
+  congelados em §24.7.
+
+**Nunca criar**: `update_user_status` genérico; `PATCH` arbitrário; corpo
+JSON de campos livres; `DELETE` em qualquer uma dessas tabelas; alteração
+dinâmica de coluna por nome; `offboard_membership` genérico (decisão
+fechada, §24.6). `revoke_user_sessions` **não é criado** para suspensão
+comum (§24.8 já resolve isso via `can_access_company`, sem precisar de
+revogação ativa).
+
+### 24.14 Leitura administrativa de memberships não ativas (listagem futura) — congelado
+
+`list_company_users` (S5-A2) retorna **somente** membros ativos hoje e
+**não é ampliado nem tem seu contrato quebrado** por esta decisão — o
+filtro de lifecycle não entra nessa RPC.
+
+**Decisão fechada: opção B — RPC separada** dedicada ao ciclo empresarial
+(nome a definir na implementação, ex.: `list_company_memberships_by_lifecycle`).
+Uma RPC separada preserva o contrato já testado e publicado de
+`list_company_users` intacto (nenhum risco de regressão na tela "Usuários
+ativos" já em produção-código), e uma tela de ciclo de vida
+(suspensos/desligados) é conceitualmente uma superfície diferente, não
+uma variação de filtro da mesma lista.
+
+Requisitos congelados para essa RPC nova, sem implementar agora:
+- assinatura clara, com paginação server-side (mesmo padrão de cursor já
+  usado por `list_company_users`, §23.2);
+- aceita filtro de `lifecycle_status` (`suspended`, `offboarded`, ou
+  ambos);
+- não quebra o contrato atual de `list_company_users`;
+- não retorna dados sensíveis além do já exposto hoje (sem e-mail
+  completo além do que já é exposto, sem dados de sessão/Auth);
+- isolamento empresarial preservado (mesmo `can_access_company`/
+  `require_company_access` de sempre).
+
+**Escopo por ator, congelado**:
+- **Super Admin**: visualiza Managers e Sellers inativos
+  (`suspended`/`offboarded`) globalmente; pode filtrar por empresa.
+- **Manager**: visualiza **somente** Sellers suspensos ou desligados da
+  própria empresa — **não** visualiza Managers inativos por essa
+  superfície (mesma fronteira de §24.3: Manager nunca enxerga outro
+  Manager além do que já vê hoje em `list_company_users`).
+
+Não implementado nesta etapa.
+
+### 24.15 Divisão final do S6 (oficial)
+
+Divisão oficial revisada e consolidada — substitui integralmente a
+proposta do S6-A0 (que incluía uma sub-etapa dedicada a "último Super
+Admin", removida por §24.10, e tratava transferência como fora de uma RPC
+dedicada, corrigido por §24.7):
+
+| Sub-etapa | Escopo | Decisão humana pendente antes de iniciar? |
+|---|---|---|
+| **S6-A** | Auditoria inicial (M1-F S6-A0) | Concluída |
+| **S6-D0/S6-D1** | Congelamento e publicação das decisões do ciclo empresarial (esta seção) | Concluída — é a etapa atual |
+| **S6-B** | `lifecycle_status`; compatibilidade com `is_active`; `suspend_membership`; `reactivate_membership`; sincronização de `sellers.is_active`; guarda do último Manager; testes SQL; tipos gerados | **Não** — desbloqueada nesta etapa; modelo de schema (§24.2), permissões (§24.3) e nomes dos contratos (§24.13) já congelados |
+| **S6-C** | `offboard_seller`; `offboard_manager`; sucessor; reatribuição operacional; auditoria; testes SQL; tipos | **Não** — contratos separados já congelados (§24.6/§24.13) |
+| **S6-D** | `transfer_membership`; origem e destino; reutilização histórica; Seller no destino; concorrência; testes SQL; tipos | **Não** — contrato, nome e ausência de estado `'transferred'` já congelados (§24.7/§24.13) |
+| **S6-E** | Leitura administrativa de suspensos/desligados; hardening de `restoreSession`; cache e identidade; repositories e hooks | **Não** — opção B de listagem já congelada (§24.14); timing exato da correção de `restoreSession` (§24.9) é detalhe de implementação, não decisão bloqueante |
+| **S6-F** | Interface; ações; modais; filtros; flag própria; testes TypeScript | **Não** — segue direto até push, depois que S6-B–S6-E estiverem implementadas |
+| **S6-G** | Auditoria integrada; documentação; fechamento (mesmo padrão de S5-F) | **Não** — é fechamento factual, não decisão nova |
+
+**MFA permanece inteiramente fora do S6** (§24.11). **Gestão global de
+Super Admin permanece fora do S6** (§24.10) — nenhuma sub-etapa a
+referencia.
+
+### 24.16 Decisões pendentes — estado final
+
+Todas as decisões anteriormente listadas como pendentes em S6-D0 foram
+resolvidas e congeladas nesta revisão (S6-D1):
+
+1. ~~Nome final de `lifecycle_status`/enum~~ — congelado em §24.2
+   (`company_memberships.lifecycle_status`, enum
+   `membership_lifecycle_status`).
+2. ~~`offboard_seller`/`offboard_manager` separados vs. contrato único~~
+   — congelado em §24.6: **mantidos separados**.
+3. ~~Nome final de `transfer_membership` e estado `'transferred'`~~ —
+   congelado em §24.7: nome fixado, nenhum estado adicional.
+4. ~~Opção A vs. B para leitura de inativos, e escopo do Manager~~ —
+   congelado em §24.14: **opção B**, Manager só vê Sellers inativos.
+5. ~~Timing da correção de `restoreSession`~~ — classificado em §24.9
+   como detalhe de sequenciamento de implementação, não decisão
+   bloqueante.
+
+**Nenhuma decisão humana bloqueante resta para iniciar o S6-B.** Os
+únicos itens em aberto são detalhes de implementação (nomes finais de
+RPCs auxiliares não citadas explicitamente aqui, limites numéricos de
+`p_note`, nome exato da RPC de listagem de inativos) — nenhum deles muda
+o modelo de schema, as permissões ou os contratos já congelados neste
+documento, e todos ficam a critério de quem implementar cada sub-etapa.
+
+### 24.17 Confirmações finais
+
+Nenhuma implementação do S6 foi iniciada em nenhuma sub-etapa, em
+nenhuma das duas revisões (S6-D0, S6-D1). Nenhuma migration do S6 existe
+no repositório. Nenhuma operação remota (migration, SQL, alteração de
+usuário, Auth) foi executada durante o congelamento e a consolidação
+destas decisões — toda esta seção é documentação de decisão, escrita e
+revisada localmente. **O S6-B está desbloqueado** — pode ser iniciado sem
+nenhuma decisão humana pendente de aprovação.
