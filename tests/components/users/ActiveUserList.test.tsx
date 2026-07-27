@@ -15,6 +15,7 @@ const m = vi.hoisted(() => ({
   useCompanyUsers: vi.fn(),
   useCompanies: vi.fn(),
   editModalProps: { current: null as any },
+  changeEmailModalProps: { current: null as any },
 }));
 
 vi.mock('@/lib/hooks/useCompanyUsers', () => ({ useCompanyUsers: m.useCompanyUsers }));
@@ -24,6 +25,13 @@ vi.mock('@/components/users/EditUserModal', () => ({
   EditUserModal: (props: any) => {
     m.editModalProps.current = props;
     return <div data-testid="edit-user-modal-stub">modal aberto</div>;
+  },
+}));
+
+vi.mock('@/components/users/ChangeUserEmailModal', () => ({
+  ChangeUserEmailModal: (props: any) => {
+    m.changeEmailModalProps.current = props;
+    return <div data-testid="change-email-modal-stub">modal de e-mail aberto</div>;
   },
 }));
 
@@ -76,6 +84,7 @@ beforeEach(() => {
   m.useCompanyUsers.mockReturnValue(usersResult());
   m.useCompanies.mockReturnValue(companiesResult());
   m.editModalProps.current = null;
+  m.changeEmailModalProps.current = null;
   vi.useFakeTimers();
 });
 
@@ -308,5 +317,100 @@ describe('ActiveUserList — integração com o modal de edição', () => {
     expect(m.editModalProps.current).toBeTruthy();
     m.editModalProps.current.onClose();
     expect(document.activeElement).toBe(editBtn);
+  });
+});
+
+// ── M1-F S5-E1-B — ação "Alterar e-mail" (separada de nome/papel) ──────────
+
+describe('ActiveUserList — rollout de "Alterar e-mail"', () => {
+  it('userEmailEditEnabled omitido (default false): nenhuma ação de e-mail, mesmo para Super Admin', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row()], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} />);
+    expect(screen.queryByText('Alterar e-mail')).toBeNull();
+  });
+
+  it('userEmailEditEnabled=false explícito: nenhuma ação de e-mail', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row()], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} userEmailEditEnabled={false} />);
+    expect(screen.queryByText('Alterar e-mail')).toBeNull();
+  });
+
+  it('userEmailEditEnabled=true + Super Admin: ação disponível', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row()], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} userEmailEditEnabled />);
+    expect(screen.getByText('Alterar e-mail')).toBeInTheDocument();
+  });
+
+  it('userEmailEditEnabled=true + Manager: ação NUNCA aparece (edição de e-mail é exclusiva de Super Admin)', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'seller' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-2" actor={MANAGER} userEmailEditEnabled />);
+    expect(screen.queryByText('Alterar e-mail')).toBeNull();
+  });
+});
+
+describe('ActiveUserList — matriz de atores para "Alterar e-mail"', () => {
+  it('Super Admin vê a ação para Manager', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'manager' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} userEmailEditEnabled />);
+    expect(screen.getByText('Alterar e-mail')).toBeInTheDocument();
+  });
+
+  it('Super Admin vê a ação para Seller', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'seller' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} userEmailEditEnabled />);
+    expect(screen.getByText('Alterar e-mail')).toBeInTheDocument();
+  });
+
+  it('Super Admin NUNCA vê a ação na própria linha (autoalteração bloqueada na UI, em profundidade)', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ profile_id: 'super-admin-1' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="super-admin-1" actor={SUPER_ADMIN} userEmailEditEnabled />);
+    expect(screen.queryByText('Alterar e-mail')).toBeNull();
+    // "Editar" (nome) continua disponível para o próprio ator.
+    expect(screen.getByText('Editar')).toBeInTheDocument();
+  });
+
+  it('Manager vendo Seller (nome editável): mesmo assim nunca vê "Alterar e-mail"', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'seller' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-2" actor={MANAGER} userEmailEditEnabled />);
+    expect(screen.getByText('Editar')).toBeInTheDocument();
+    expect(screen.queryByText('Alterar e-mail')).toBeNull();
+  });
+
+  it('não mistura a ação de e-mail com a de nome/papel: os dois botões existem lado a lado, nunca substituem um ao outro', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'seller' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} userEmailEditEnabled />);
+    expect(screen.getByText('Editar')).toBeInTheDocument();
+    expect(screen.getByText('Alterar e-mail')).toBeInTheDocument();
+  });
+});
+
+describe('ActiveUserList — integração com o modal de e-mail', () => {
+  it('clicar "Alterar e-mail" abre ChangeUserEmailModal com o usuário correto, nunca junto do EditUserModal', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'seller' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} userEmailEditEnabled />);
+    fireEvent.click(screen.getByText('Alterar e-mail'));
+    expect(m.changeEmailModalProps.current).toBeTruthy();
+    expect(m.changeEmailModalProps.current.user.profile_id).toBe('profile-1');
+    expect(m.editModalProps.current).toBeNull();
+    expect(screen.queryByTestId('edit-user-modal-stub')).toBeNull();
+  });
+
+  it('fechar o modal de e-mail devolve o foco ao botão que o abriu', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'seller' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} userEmailEditEnabled />);
+    const emailBtn = screen.getByText('Alterar e-mail').closest('button') as HTMLButtonElement;
+    emailBtn.focus();
+    fireEvent.click(emailBtn);
+    expect(m.changeEmailModalProps.current).toBeTruthy();
+    m.changeEmailModalProps.current.onClose();
+    expect(document.activeElement).toBe(emailBtn);
+  });
+
+  it('abrir "Editar" nunca monta o modal de e-mail junto', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'seller' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} userEmailEditEnabled />);
+    fireEvent.click(screen.getByText('Editar'));
+    expect(m.editModalProps.current).toBeTruthy();
+    expect(m.changeEmailModalProps.current).toBeNull();
   });
 });
