@@ -13,7 +13,7 @@ import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages
 import { InviteList } from '@/components/invites/InviteList';
 import { ActiveUserList } from '@/components/users/ActiveUserList';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
-import { isActiveUsersEnabled } from '@/lib/flags';
+import { isActiveUsersEnabled, isUserEmailEditEnabled } from '@/lib/flags';
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
 // missing from this map is what made VisitRow crash (M0-J audit, M0-K1 fix).
@@ -449,6 +449,12 @@ export function ScreenAjustes({ go }: any) {
   // deploy real das migrations, sem tocar em invitesAccess/InviteList (que
   // continuam exatamente como antes, sem regressão).
   const activeUsersEnabled = isActiveUsersEnabled() && invitesAccess;
+  // M1-F S5-E1-B: ação "Alterar e-mail" — exige AMBAS as flags de rollout
+  // (NEXT_PUBLIC_FF_ACTIVE_USERS E NEXT_PUBLIC_FF_USER_EMAIL_EDIT) além da
+  // capability já exigida por activeUsersEnabled. isSuperAdmin/self são
+  // decididos linha a linha dentro de ActiveUserList (rowCapabilities) —
+  // aqui só a combinação das duas flags, nunca autorização.
+  const userEmailEditEnabled = activeUsersEnabled && isUserEmailEditEnabled();
   const allowedTabs: string[] = fullSettingsAccess
     ? ['Empresa', 'Usuários', 'Etapas']
     : [
@@ -554,7 +560,7 @@ export function ScreenAjustes({ go }: any) {
       {activeTab === 'Usuários' && currentUser && (
         <>
           {activeUsersEnabled && (
-            <ActiveUserList userId={currentUser.id} actor={inviteActor} />
+            <ActiveUserList userId={currentUser.id} actor={inviteActor} userEmailEditEnabled={userEmailEditEnabled} />
           )}
           <InviteList userId={currentUser.id} actor={inviteActor} />
         </>

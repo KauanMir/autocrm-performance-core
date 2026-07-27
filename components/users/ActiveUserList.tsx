@@ -26,6 +26,7 @@ import { useCompanies } from '@/lib/hooks/useCompanies';
 import type { PlatformCompanyRow } from '@/lib/companies/repository';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { EditUserModal } from '@/components/users/EditUserModal';
+import { ChangeUserEmailModal } from '@/components/users/ChangeUserEmailModal';
 
 const ROLE_LABEL: Record<CompanyUserRow['company_role'], string> = {
   manager: 'Manager',
@@ -42,20 +43,38 @@ const SEARCH_DEBOUNCE_MS = 300;
 type RowCapabilities = {
   canEditName: boolean;
   canEditRole: boolean;
+  // M1-F S5-E1-B: só verdadeira quando a flag NEXT_PUBLIC_FF_USER_EMAIL_EDIT
+  // está ligada, o ator é Super Admin e o alvo não é o próprio ator — nunca
+  // Manager (decisão de experiência congelada: ação SEPARADA de nome/papel,
+  // nunca no mesmo EditUserModal). O backend (Route Handler S5-E1-A)
+  // continua sendo a proteção real; isto é só a decisão visual.
+  canEditEmail: boolean;
   readOnly: boolean;
 };
 
-// Única fonte de decisão de capability por linha — nunca duplicada no
-// modal. Manager nunca chega a canEditRole=true (troca de papel é
-// exclusiva de Super Admin, §22.2); Super Admin nunca edita o próprio
-// papel (self_role_change_forbidden reforçado em profundidade).
-function rowCapabilities(row: CompanyUserRow, actorProfileId: string, isSuperAdmin: boolean): RowCapabilities {
+// Única fonte de decisão de capability por linha — nunca duplicada nos
+// modais. Manager nunca chega a canEditRole=true (troca de papel é
+// exclusiva de Super Admin, §22.2) nem a canEditEmail=true (edição de
+// e-mail também é exclusiva de Super Admin, §22.7/S5-E0); Super Admin nunca
+// edita o próprio papel nem o próprio e-mail (bloqueio reforçado em
+// profundidade — o backend já recusaria os dois).
+function rowCapabilities(
+  row: CompanyUserRow,
+  actorProfileId: string,
+  isSuperAdmin: boolean,
+  userEmailEditEnabled: boolean,
+): RowCapabilities {
   const isSelf = row.profile_id === actorProfileId;
   if (isSuperAdmin) {
-    return { canEditName: true, canEditRole: !isSelf, readOnly: false };
+    return {
+      canEditName: true,
+      canEditRole: !isSelf,
+      canEditEmail: userEmailEditEnabled && !isSelf,
+      readOnly: false,
+    };
   }
   const isSeller = row.company_role === 'seller';
-  return { canEditName: isSeller, canEditRole: false, readOnly: !isSeller };
+  return { canEditName: isSeller, canEditRole: false, canEditEmail: false, readOnly: !isSeller };
 }
 
 export type ActiveUserListProps = {
@@ -65,9 +84,14 @@ export type ActiveUserListProps = {
   // componente nesse caso). Mesmo tipo de InviteList/InviteUserModal —
   // super_admin (escopo global) ou manager (escopo da própria empresa).
   actor: CreateInviteActor | null;
+  // M1-F S5-E1-B: isUserEmailEditEnabled() resolvido pelo chamador
+  // (ScreenAjustes) — combinado aqui com isSuperAdmin/self em
+  // rowCapabilities(). Default false: nenhum teste/consumidor pré-existente
+  // deste componente precisa saber da nova ação para continuar válido.
+  userEmailEditEnabled?: boolean;
 };
 
-export function ActiveUserList({ userId, actor }: ActiveUserListProps) {
+export function ActiveUserList({ userId, actor, userEmailEditEnabled = false }: ActiveUserListProps) {
   const isSuperAdmin = actor?.kind === 'super_admin';
 
   const [searchInput, setSearchInput] = useState('');
@@ -75,6 +99,7 @@ export function ActiveUserList({ userId, actor }: ActiveUserListProps) {
   const [roleFilter, setRoleFilter] = useState<CompanyUserRoleFilter>(null);
   const [companyFilter, setCompanyFilter] = useState<string | null>(null);
   const [editing, setEditing] = useState<CompanyUserRow | null>(null);
+  const [editingEmail, setEditingEmail] = useState<CompanyUserRow | null>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -118,6 +143,19 @@ export function ActiveUserList({ userId, actor }: ActiveUserListProps) {
 
   const closeEdit = () => {
     setEditing(null);
+    lastFocusedRef.current?.focus();
+  };
+
+  // M1-F S5-E1-B: ação SEPARADA de nome/papel (decisão de experiência
+  // congelada) — estado próprio, modal próprio, nunca compartilha o
+  // formulário de EditUserModal.
+  const openEditEmail = (row: CompanyUserRow, trigger: HTMLElement | null) => {
+    lastFocusedRef.current = trigger;
+    setEditingEmail(row);
+  };
+
+  const closeEditEmail = () => {
+    setEditingEmail(null);
     lastFocusedRef.current?.focus();
   };
 
@@ -190,7 +228,9 @@ export function ActiveUserList({ userId, actor }: ActiveUserListProps) {
                 row={row}
                 userId={userId}
                 isSuperAdmin={isSuperAdmin}
+                userEmailEditEnabled={userEmailEditEnabled}
                 onEdit={(trigger) => openEdit(row, trigger)}
+                onEditEmail={(trigger) => openEditEmail(row, trigger)}
               />
             ))}
           </div>
@@ -219,22 +259,32 @@ export function ActiveUserList({ userId, actor }: ActiveUserListProps) {
         <EditUserModal
           userId={userId}
           user={editing}
-          canEditName={rowCapabilities(editing, userId, isSuperAdmin).canEditName}
-          canEditRole={rowCapabilities(editing, userId, isSuperAdmin).canEditRole}
+          canEditName={rowCapabilities(editing, userId, isSuperAdmin, userEmailEditEnabled).canEditName}
+          canEditRole={rowCapabilities(editing, userId, isSuperAdmin, userEmailEditEnabled).canEditRole}
           onClose={closeEdit}
+        />
+      )}
+
+      {editingEmail && (
+        <ChangeUserEmailModal
+          userId={userId}
+          user={editingEmail}
+          onClose={closeEditEmail}
         />
       )}
     </>
   );
 }
 
-function UserRow({ row, userId, isSuperAdmin, onEdit }: {
+function UserRow({ row, userId, isSuperAdmin, userEmailEditEnabled, onEdit, onEditEmail }: {
   row: CompanyUserRow;
   userId: string;
   isSuperAdmin: boolean;
+  userEmailEditEnabled: boolean;
   onEdit: (trigger: HTMLElement | null) => void;
+  onEditEmail: (trigger: HTMLElement | null) => void;
 }) {
-  const caps = rowCapabilities(row, userId, isSuperAdmin);
+  const caps = rowCapabilities(row, userId, isSuperAdmin, userEmailEditEnabled);
   return (
     <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border-2)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -252,10 +302,20 @@ function UserRow({ row, userId, isSuperAdmin, onEdit }: {
           {caps.readOnly ? (
             <span style={{ fontSize: 12, color: 'var(--t-400)' }}>Somente leitura</span>
           ) : (
-            <LBtn size="sm" kind="ghost" icon="edit" aria-label={`Editar ${row.name}`}
-              onClick={() => onEdit(document.activeElement as HTMLElement | null)}>
-              Editar
-            </LBtn>
+            <>
+              {(caps.canEditName || caps.canEditRole) && (
+                <LBtn size="sm" kind="ghost" icon="edit" aria-label={`Editar ${row.name}`}
+                  onClick={() => onEdit(document.activeElement as HTMLElement | null)}>
+                  Editar
+                </LBtn>
+              )}
+              {caps.canEditEmail && (
+                <LBtn size="sm" kind="ghost" icon="send" aria-label={`Alterar e-mail de ${row.name}`}
+                  onClick={() => onEditEmail(document.activeElement as HTMLElement | null)}>
+                  Alterar e-mail
+                </LBtn>
+              )}
+            </>
           )}
         </div>
       </div>
