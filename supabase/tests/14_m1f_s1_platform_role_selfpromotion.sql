@@ -230,8 +230,20 @@ select is(
 -- platform_role pelo mesmo motivo — is_platform_super_admin() (ator) e
 -- bloqueio de alvo/sucessor com platform_role='super_admin'. Nenhuma das
 -- duas escreve platform_role — só company_memberships.lifecycle_status/
--- is_active, sellers.is_active e leads.seller_id/updated_by_profile_id
--- (offboard_seller apenas, reatribuição operacional, §11).
+-- is_active, sellers.is_active e leads.seller_id (offboard_seller
+-- apenas, reatribuição operacional, §11 — updated_by_profile_id NUNCA é
+-- escrito por nenhuma das duas: leads_updated_by_fk, M1-E, é uma FK
+-- composta contra profiles.company_id, sempre NULL para Super Admin;
+-- comentário corrigido em S6-D, achado já resolvido no código desde
+-- S6-C).
+--
+-- ATUALIZAÇÃO (M1-F S6-D): transfer_membership consulta platform_role
+-- pelo mesmo motivo — is_platform_super_admin() (ator, único autorizado)
+-- e bloqueio de alvo/sucessor com platform_role='super_admin'. Nunca
+-- escreve platform_role — só company_memberships.lifecycle_status/
+-- is_active (origem e destino), sellers.is_active/membership_id (origem
+-- e destino) e leads.seller_id (mesma decisão do S6-C: nunca
+-- updated_by_profile_id).
 select is(
   (select count(*)::int
      from pg_proc p
@@ -246,7 +258,7 @@ select is(
                              'accept_invite', 'update_profile_name', 'update_membership_role',
                              'get_profile_email_update_state', 'commit_profile_email_update',
                              'suspend_membership', 'reactivate_membership',
-                             'offboard_seller', 'offboard_manager')
+                             'offboard_seller', 'offboard_manager', 'transfer_membership')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
 -- Reforço específico do S2: is_platform_super_admin() referencia
