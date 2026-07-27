@@ -1,16 +1,27 @@
 // lib/flags.ts — feature flags dos módulos remotos (M1-D stages, M1-E leads,
-// M1-F platform admin).
+// M1-F platform admin, M1-F S5-D usuários ativos).
 //
 // OFF por padrão. A ativação real acontece somente via variável de ambiente
 // (NEXT_PUBLIC_FF_REMOTE_STAGES / NEXT_PUBLIC_FF_REMOTE_LEADS /
-// NEXT_PUBLIC_FF_PLATFORM_ADMIN) depois da validação de cada módulo — nenhum
-// commit liga flag por padrão.
+// NEXT_PUBLIC_FF_PLATFORM_ADMIN / NEXT_PUBLIC_FF_ACTIVE_USERS) depois da
+// validação de cada módulo — nenhum commit liga flag por padrão.
+//
+// M1-F S5-D: NEXT_PUBLIC_FF_ACTIVE_USERS existe porque as migrations
+// list_company_users/update_profile_name/update_membership_role (S5-A2/S5-B/
+// S5-C) ainda não foram aplicadas no banco remoto no momento em que este
+// frontend é escrito — a flag mantém a seção "Usuários ativos" desligada em
+// produção até o deploy real das migrations, sem exigir um segundo mecanismo
+// de rollout (reaproveita exatamente o mesmo contrato de isRemoteStagesEnabled/
+// isPlatformAdminEnabled). Diferente de canManageInvites (capability), esta
+// flag não decide QUEM pode ver a seção — só SE ela existe no bundle;
+// autorização real continua nas RPCs.
 //
 // Override de desenvolvimento: localStorage['autocrm_ff_remote_stages'] /
-// localStorage['autocrm_ff_remote_leads'] / localStorage['autocrm_ff_platform_admin'],
-// reconhecido EXCLUSIVAMENTE quando NODE_ENV === 'development'. Em produção o
-// localStorage nunca é consultado — nenhum usuário ativa flag pelo navegador.
-// As flags não são reativas: mudar o override exige recarregar a página.
+// localStorage['autocrm_ff_remote_leads'] / localStorage['autocrm_ff_platform_admin'] /
+// localStorage['autocrm_ff_active_users'], reconhecido EXCLUSIVAMENTE quando
+// NODE_ENV === 'development'. Em produção o localStorage nunca é consultado —
+// nenhum usuário ativa flag pelo navegador. As flags não são reativas: mudar
+// o override exige recarregar a página.
 //
 // Nenhum estado React, nenhum hook, nenhum log — funções puras de leitura.
 // A flag controla exclusivamente a exposição da UI (rollout) — nunca é
@@ -20,6 +31,7 @@
 export const REMOTE_STAGES_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_stages';
 export const REMOTE_LEADS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_leads';
 export const PLATFORM_ADMIN_DEV_OVERRIDE_KEY = 'autocrm_ff_platform_admin';
+export const ACTIVE_USERS_DEV_OVERRIDE_KEY = 'autocrm_ff_active_users';
 
 // Somente as strings exatas 'true'/'false' são reconhecidas (case-sensitive);
 // qualquer outro valor (1, yes, on, TRUE, vazio…) é tratado como inválido.
@@ -65,4 +77,8 @@ export function isRemoteLeadsEnabled(): boolean {
 
 export function isPlatformAdminEnabled(): boolean {
   return resolveFlag(process.env.NEXT_PUBLIC_FF_PLATFORM_ADMIN, PLATFORM_ADMIN_DEV_OVERRIDE_KEY);
+}
+
+export function isActiveUsersEnabled(): boolean {
+  return resolveFlag(process.env.NEXT_PUBLIC_FF_ACTIVE_USERS, ACTIVE_USERS_DEV_OVERRIDE_KEY);
 }
