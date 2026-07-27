@@ -980,6 +980,26 @@ export type Database = {
         Returns: boolean
       }
       is_platform_super_admin: { Args: never; Returns: boolean }
+      list_company_users: {
+        Args: {
+          p_company_id?: string
+          p_cursor_created_at?: string
+          p_cursor_membership_id?: string
+          p_limit?: number
+          p_role?: Database["public"]["Enums"]["company_role"]
+          p_search?: string
+        }
+        Returns: {
+          company_id: string
+          company_name: string
+          company_role: Database["public"]["Enums"]["company_role"]
+          created_at: string
+          email: string
+          membership_id: string
+          name: string
+          profile_id: string
+        }[]
+      }
       move_lead_to_stage: {
         Args: {
           p_expected_version?: number
@@ -1168,6 +1188,27 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      update_membership_role: {
+        Args: {
+          p_company_id: string
+          p_membership_id: string
+          p_role: Database["public"]["Enums"]["company_role"]
+        }
+        Returns: {
+          company_id: string
+          company_role: Database["public"]["Enums"]["company_role"]
+          membership_id: string
+          profile_id: string
+        }[]
+      }
+      update_profile_name: {
+        Args: { p_name: string; p_target_profile_id: string }
+        Returns: {
+          name: string
+          profile_id: string
+          updated_at: string
+        }[]
       }
       validate_invite_token: {
         Args: { p_token_hash: string }
