@@ -210,6 +210,14 @@ select is(
 -- platform_role e modifica exclusivamente o papel empresarial, a ponte
 -- temporária profiles.role e o vínculo operacional de sellers necessário à
 -- troca de papel.
+--
+-- ATUALIZAÇÃO (M1-F S5-E1-A): get_profile_email_update_state (leitura
+-- estreita, service_role) e commit_profile_email_update (escrita estreita,
+-- authenticated) consultam platform_role do ator (exigir Super Admin) e do
+-- alvo (bloquear outro Super Admin) — nunca escrevem essa coluna. A única
+-- coluna que commit_profile_email_update escreve é profiles.email
+-- (contrato fechado, S5-E1-A). get_auth_email_update_state NÃO entra nesta
+-- lista — não referencia platform_role (só auth.users.email).
 select is(
   (select count(*)::int
      from pg_proc p
@@ -221,7 +229,8 @@ select is(
                              'create_invite', 'resend_invite', 'cancel_invite',
                              'complete_invite_resend_delivery', 'complete_invite_delivery',
                              'reserve_create_invite_rate_limit', 'reserve_resend_invite_rate_limit',
-                             'accept_invite', 'update_profile_name', 'update_membership_role')
+                             'accept_invite', 'update_profile_name', 'update_membership_role',
+                             'get_profile_email_update_state', 'commit_profile_email_update')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
 -- Reforço específico do S2: is_platform_super_admin() referencia
