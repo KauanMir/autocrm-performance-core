@@ -11,7 +11,9 @@ import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useR
 import type { PipelineStage } from '@/lib/pipeline/adapter';
 import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites } from '@/lib/capabilities';
 import { InviteList } from '@/components/invites/InviteList';
+import { ActiveUserList } from '@/components/users/ActiveUserList';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
+import { isActiveUsersEnabled } from '@/lib/flags';
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
 // missing from this map is what made VisitRow crash (M0-J audit, M0-K1 fix).
@@ -438,6 +440,15 @@ export function ScreenAjustes({ go }: any) {
       ? { kind: 'manager', companyId: currentUser.activeMembership.companyId }
       : null;
   const stageSettingsAccess = pipeline.remoteStagesEnabled && canAccessStageSettings(currentUser);
+  // M1-F S5-D: seção "Usuários ativos" — mesma capability de InviteList
+  // (invitesAccess), combinada aqui com a flag de rollout PRÓPRIA desta
+  // seção (NEXT_PUBLIC_FF_ACTIVE_USERS). As RPCs que ela consome
+  // (list_company_users/update_profile_name/update_membership_role) ainda
+  // não foram aplicadas no banco remoto no momento em que este código é
+  // escrito — a flag mantém a seção fora do bundle ativo em produção até o
+  // deploy real das migrations, sem tocar em invitesAccess/InviteList (que
+  // continuam exatamente como antes, sem regressão).
+  const activeUsersEnabled = isActiveUsersEnabled() && invitesAccess;
   const allowedTabs: string[] = fullSettingsAccess
     ? ['Empresa', 'Usuários', 'Etapas']
     : [
@@ -531,14 +542,22 @@ export function ScreenAjustes({ go }: any) {
           </div>
         </LCard>
       )}
-      {/* M1-F S4-F3: lista real, substitui a lista mock do S4-F1/S4-F2.
-          InviteList é seu próprio guard (retorna null com actor=null) e
-          possui seu próprio botão Convidar/modal internamente — nenhuma
-          duplicação de estado aqui. currentUser garantido não-nulo neste
-          ponto (activeTab só chega a 'Usuários' com invitesAccess ou
+      {/* M1-F S5-D: "Usuários ativos" (nova) sempre ACIMA de "Convites"
+          (InviteList), nunca misturados na mesma tabela (§22.9 do design).
+          ActiveUserList só renderiza sob a flag de rollout (RPCs ainda não
+          aplicadas remotamente) — em produção sem a flag, o bloco inteiro
+          fica fora, e InviteList continua idêntico ao S4-F3 (sem
+          regressão). Ambos são seu próprio guard (retornam null com
+          actor=null) — currentUser garantido não-nulo neste ponto
+          (activeTab só chega a 'Usuários' com invitesAccess ou
           fullSettingsAccess true, ambos exigindo currentUser). */}
       {activeTab === 'Usuários' && currentUser && (
-        <InviteList userId={currentUser.id} actor={inviteActor} />
+        <>
+          {activeUsersEnabled && (
+            <ActiveUserList userId={currentUser.id} actor={inviteActor} />
+          )}
+          <InviteList userId={currentUser.id} actor={inviteActor} />
+        </>
       )}
       {activeTab === 'Etapas' && (
         <LCard style={{ maxWidth: 520 }}>
