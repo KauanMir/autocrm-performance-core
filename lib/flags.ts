@@ -1,10 +1,18 @@
 // lib/flags.ts — feature flags dos módulos remotos (M1-D stages, M1-E leads,
-// M1-F platform admin, M1-F S5-D usuários ativos).
+// M1-F platform admin, M1-F S5-D usuários ativos, M1-F S5-E1 edição de e-mail).
 //
 // OFF por padrão. A ativação real acontece somente via variável de ambiente
 // (NEXT_PUBLIC_FF_REMOTE_STAGES / NEXT_PUBLIC_FF_REMOTE_LEADS /
-// NEXT_PUBLIC_FF_PLATFORM_ADMIN / NEXT_PUBLIC_FF_ACTIVE_USERS) depois da
-// validação de cada módulo — nenhum commit liga flag por padrão.
+// NEXT_PUBLIC_FF_PLATFORM_ADMIN / NEXT_PUBLIC_FF_ACTIVE_USERS /
+// NEXT_PUBLIC_FF_USER_EMAIL_EDIT) depois da validação de cada módulo —
+// nenhum commit liga flag por padrão.
+//
+// M1-F S5-E1: NEXT_PUBLIC_FF_USER_EMAIL_EDIT é uma flag SEPARADA de
+// NEXT_PUBLIC_FF_ACTIVE_USERS (decisão congelada do S5-E0 §18/§15) — a
+// edição de e-mail tem risco/impacto diferente (afeta login) e uma
+// superfície de backend própria (Route Handler + Auth Admin API), então
+// precisa poder ser ativada independentemente da listagem de usuários já
+// publicada. Nenhuma UI consome esta flag ainda (S5-E1-A é só backend).
 //
 // M1-F S5-D: NEXT_PUBLIC_FF_ACTIVE_USERS existe porque as migrations
 // list_company_users/update_profile_name/update_membership_role (S5-A2/S5-B/
@@ -32,6 +40,7 @@ export const REMOTE_STAGES_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_stages';
 export const REMOTE_LEADS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_leads';
 export const PLATFORM_ADMIN_DEV_OVERRIDE_KEY = 'autocrm_ff_platform_admin';
 export const ACTIVE_USERS_DEV_OVERRIDE_KEY = 'autocrm_ff_active_users';
+export const USER_EMAIL_EDIT_DEV_OVERRIDE_KEY = 'autocrm_ff_user_email_edit';
 
 // Somente as strings exatas 'true'/'false' são reconhecidas (case-sensitive);
 // qualquer outro valor (1, yes, on, TRUE, vazio…) é tratado como inválido.
@@ -81,4 +90,8 @@ export function isPlatformAdminEnabled(): boolean {
 
 export function isActiveUsersEnabled(): boolean {
   return resolveFlag(process.env.NEXT_PUBLIC_FF_ACTIVE_USERS, ACTIVE_USERS_DEV_OVERRIDE_KEY);
+}
+
+export function isUserEmailEditEnabled(): boolean {
+  return resolveFlag(process.env.NEXT_PUBLIC_FF_USER_EMAIL_EDIT, USER_EMAIL_EDIT_DEV_OVERRIDE_KEY);
 }
