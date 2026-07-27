@@ -1071,6 +1071,41 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      offboard_manager: {
+        Args: {
+          p_manager_membership_id: string
+          p_note: string
+          p_successor_profile_id: string
+        }
+        Returns: {
+          company_id: string
+          company_role: Database["public"]["Enums"]["company_role"]
+          is_active: boolean
+          lifecycle_status: Database["public"]["Enums"]["membership_lifecycle_status"]
+          membership_id: string
+          profile_id: string
+          successor_profile_id: string
+        }[]
+      }
+      offboard_seller: {
+        Args: {
+          p_note: string
+          p_seller_membership_id: string
+          p_successor_seller_id: string
+        }
+        Returns: {
+          company_id: string
+          company_role: Database["public"]["Enums"]["company_role"]
+          is_active: boolean
+          leads_reassigned: number
+          lifecycle_status: Database["public"]["Enums"]["membership_lifecycle_status"]
+          membership_id: string
+          profile_id: string
+          seller_active: boolean
+          seller_id: string
+          successor_seller_id: string
+        }[]
+      }
       reactivate_membership: {
         Args: { p_membership_id: string; p_note?: string }
         Returns: {
