@@ -1212,6 +1212,26 @@ export type Database = {
           seller_id: string
         }[]
       }
+      transfer_membership: {
+        Args: {
+          p_note: string
+          p_source_membership_id: string
+          p_successor_id: string
+          p_target_company_id: string
+          p_target_role: Database["public"]["Enums"]["company_role"]
+        }
+        Returns: {
+          destination_company_id: string
+          destination_membership_id: string
+          destination_role: Database["public"]["Enums"]["company_role"]
+          destination_seller_id: string
+          leads_reassigned: number
+          profile_id: string
+          source_company_id: string
+          source_membership_id: string
+          source_seller_id: string
+        }[]
+      }
       unarchive_lead: {
         Args: { p_expected_version: number; p_lead_id: string }
         Returns: {
