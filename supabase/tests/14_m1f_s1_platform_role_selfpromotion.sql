@@ -225,6 +225,13 @@ select is(
 -- (bloquear outro Super Admin como alvo, §24.9/§24.10 do design). Nenhuma
 -- das duas jamais escreve platform_role — só company_memberships.
 -- lifecycle_status/is_active e, quando aplicável, sellers.is_active.
+--
+-- ATUALIZAÇÃO (M1-F S6-C): offboard_seller/offboard_manager consultam
+-- platform_role pelo mesmo motivo — is_platform_super_admin() (ator) e
+-- bloqueio de alvo/sucessor com platform_role='super_admin'. Nenhuma das
+-- duas escreve platform_role — só company_memberships.lifecycle_status/
+-- is_active, sellers.is_active e leads.seller_id/updated_by_profile_id
+-- (offboard_seller apenas, reatribuição operacional, §11).
 select is(
   (select count(*)::int
      from pg_proc p
@@ -238,7 +245,8 @@ select is(
                              'reserve_create_invite_rate_limit', 'reserve_resend_invite_rate_limit',
                              'accept_invite', 'update_profile_name', 'update_membership_role',
                              'get_profile_email_update_state', 'commit_profile_email_update',
-                             'suspend_membership', 'reactivate_membership')
+                             'suspend_membership', 'reactivate_membership',
+                             'offboard_seller', 'offboard_manager')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
 -- Reforço específico do S2: is_platform_super_admin() referencia
