@@ -1801,3 +1801,220 @@ são novos estágios do roadmap de §16.
   revogação de sessão.
 - **S7**: seletor global de empresa (`selectedCompanyId` como estado de
   UI), sem início nesta etapa.
+
+## 23. Fechamento do S5 — Gestão de Usuários Ativos
+
+> Registrado no fechamento oficial do S5 (M1-F S5-F, auditoria integrada de
+> encerramento). Esta seção é um registro factual do que está **implementado
+> e publicado no código-fonte** — não implica ativação em produção. As
+> migrations deste estágio ainda não foram aplicadas ao banco remoto (§23.7)
+> e as duas feature flags que protegem o frontend continuam desligadas por
+> padrão em todo ambiente (§23.6). §0–§22 não foram alterados nesta seção.
+
+### 23.1 Estado oficial
+
+S5 (Gestão de Usuários Ativos) está **concluído no código-fonte**, publicado
+em `origin/main`, HEAD oficial:
+
+```
+49ca55c8633922505d923d469992cb96539305c6
+```
+
+### 23.2 Entregas por subetapa (S5-A a S5-E1-B)
+
+| Subetapa | Contrato/entrega | Situação |
+|---|---|---|
+| S5-A1 | Remoção de `profiles_update_admin` como superfície de escrita; nenhum `UPDATE` direto em `profiles` reaberto ao navegador; defesa por grants/RLS revalidada | Implementado, publicado |
+| S5-A2 | `list_company_users` — listagem segura, escopo por ator (Super Admin global / Manager própria empresa), busca normalizada, filtro por papel/empresa, paginação por cursor (`created_at`+`membership_id`, sem `has_more`/total) | Implementado, publicado |
+| S5-B | `update_profile_name` — edição estreita de `profiles.name`, autorização por ator (self/Super Admin/Manager sobre Seller), auditoria, idempotência sem escrita/auditoria quando já é o valor final | Implementado, publicado |
+| S5-C | `update_membership_role` — troca `seller ↔ manager` exclusiva de Super Admin, guarda do último Manager, preservação de `sellers.id`/histórico, sincronização temporária de `profiles.role` (nunca produz `admin`) | Implementado, publicado |
+| S5-D | Frontend "Usuários ativos" (`ActiveUserList`/`EditUserModal`) — busca, filtros, paginação, edição de nome/papel, `InviteList` preservado sem regressão, flag `NEXT_PUBLIC_FF_ACTIVE_USERS` | Implementado, publicado |
+| S5-E0 | Auditoria técnica do fluxo de e-mail — versão real da Admin API auditada empiricamente, estratégia de consistência definida, achado crítico documentado (`updateUserById` não classifica conflito de e-mail de forma confiável) | Concluída (somente pesquisa, sem código) |
+| S5-E1-A | Backend seguro de e-mail — `get_auth_email_update_state`/`get_profile_email_update_state` (leitura estreita, `service_role`)/`commit_profile_email_update` (compare-and-set, `authenticated`) + Route Handler `POST /api/admin/users/[profileId]/email`, sequência Auth→profiles com compensação, auditoria sem e-mail completo, flag `NEXT_PUBLIC_FF_USER_EMAIL_EDIT` | Implementado, publicado |
+| S5-E1-B | Frontend separado de alteração de e-mail (`ChangeUserEmailModal`) — ação própria (nunca no mesmo formulário de nome/papel), confirmação obrigatória, mensagens sanitizadas, integração com a lista, ambas as flags exigidas | Implementado, publicado |
+
+Nenhuma entrega oficial do S5 (design §16/§22.10) está faltando.
+
+### 23.3 Matriz final de atores (confirmada na implementação real)
+
+**Super Admin** — pode: listar Managers e Sellers globalmente
+(`list_company_users`, escopo `platform`); filtrar por empresa (filtro
+visual, nunca autorização); editar nome de qualquer usuário empresarial;
+alterar papel `seller ↔ manager`; alterar e-mail de outro usuário
+empresarial (`NEXT_PUBLIC_FF_USER_EMAIL_EDIT` habilitada). Não pode, por
+este estágio: alterar o próprio papel; alterar o próprio e-mail por este
+fluxo; alterar outro Super Admin (nome, papel ou e-mail); alterar
+`platform_role`; suspender, transferir, excluir ou revogar sessões
+(S6).
+
+**Manager** — pode: listar Managers (somente leitura) e Sellers (edição de
+nome) da própria empresa; editar o próprio nome (`update_profile_name`,
+ramo `self`, disponível a qualquer ator ativo). Não pode: alterar qualquer
+papel; alterar e-mail (nem o próprio, nem de terceiros, por este fluxo);
+editar outro Manager; agir fora da própria empresa.
+
+**Seller** — não acessa a interface administrativa de gestão de usuários
+(`ActiveUserList`); pode editar o próprio nome pelo contrato de backend
+(`update_profile_name` permite `self` para qualquer profile ativo,
+independente de papel) — sem superfície de UI dedicada a isso nesta etapa.
+
+Confirmado por leitura direta das três RPCs e do Route Handler, e reforçado
+pelos testes SQL 30–34 e pelos testes TypeScript do S5-D/S5-E1-B: o backend
+é a proteção real em todos os casos — a visibilidade de botões na UI é
+defesa em profundidade, nunca a única barreira.
+
+### 23.4 Invariantes de segurança (reconfirmadas)
+
+- Nenhuma autorização por `selectedCompanyId` (conceito não existe em
+  código — reservado ao S7).
+- Nenhuma autorização por `profiles.company_id` ou `profiles.role` legado.
+- `company_memberships.role` é a única autoridade de papel empresarial;
+  `platform_role` é a única autoridade de plataforma.
+- Nenhum `SELECT`/`UPDATE` direto ampliado em `profiles` a partir do
+  navegador — toda leitura/escrita passa por RPC `SECURITY DEFINER`
+  estreita.
+- Nenhuma leitura de `auth.users` a partir do frontend; nenhuma
+  `service_role` no navegador.
+- Nenhuma RPC genérica, nenhum `PATCH` genérico, nenhuma alteração
+  arbitrária de campo — cada contrato altera exatamente as colunas que seu
+  nome descreve.
+- Nenhum e-mail completo, senha, token ou dado de sessão em `audit_log` —
+  o evento `user_email_updated` carrega somente `{"changed": false}` /
+  `{"changed": true}`.
+
+### 23.5 Ciclo Seller ↔ Manager e alteração de e-mail
+
+Ciclo `seller → manager`: cadastro de `sellers` preservado (nunca
+`DELETE`), `sellers.id` preservado, histórico de leads/tarefas/negociações
+preservado (referência direta a `sellers.id`), seller desvinculado
+(`membership_id = null`) e inativado (`is_active = false`), nenhuma nova
+atribuição possível como Seller enquanto nesse estado, `profiles.role`
+sincronizado. Ciclo `manager → seller`: cadastro histórico reaproveitado
+por `(company_id, profile_id)` quando existe, religado e reativado; novo
+cadastro criado somente quando nunca existiu; nenhuma duplicação
+silenciosa (`seller_state_conflict` em qualquer ambiguidade). Proteções:
+último Manager, autoalteração, outro Super Admin, conflito de cadastro —
+todas com rollback integral (transação única) e auditoria única (nunca
+parcial).
+
+Alteração de e-mail: exclusiva de Super Admin, nunca o próprio e-mail,
+nunca outro Super Admin; e-mail em `profiles` e em `auth.users`
+pré-validados e comparados antes de qualquer escrita (divergência
+pré-existente bloqueia com `user_email_state_conflict`, nunca reconcilia
+silenciosamente); conflito do novo e-mail verificado dos dois lados antes
+de tocar o Auth; sequência obrigatória Auth primeiro, `profiles` depois;
+compensação (reversão do Auth) quando `profiles` falha; falha da própria
+compensação vira `email_compensation_failed` com alerta operacional
+sanitizado; `email_confirm=true`; nenhuma sessão revogada (fora de escopo,
+pertence ao S6); modal de e-mail (`ChangeUserEmailModal`) permanece
+estrutural e visualmente separado de `EditUserModal` (nome/papel) — nunca
+compartilham formulário, sequência de salvamento ou confirmação.
+
+### 23.6 Feature flags
+
+`NEXT_PUBLIC_FF_ACTIVE_USERS` — padrão `false`; controla a existência da
+seção "Usuários ativos" no bundle. `NEXT_PUBLIC_FF_USER_EMAIL_EDIT` —
+padrão `false`; separada da flag principal; a ação "Alterar e-mail" exige
+**ambas** habilitadas (`activeUsersEnabled && isUserEmailEditEnabled()`)
+além de Super Admin. Nenhuma das duas foi ativada em nenhum arquivo
+versionado nem em configuração remota nesta etapa. Com as flags
+desligadas, nenhuma RPC de S5-A2/S5-B/S5-C é chamada e nenhuma requisição
+chega ao Route Handler de e-mail; a aba "Usuários" continua funcional
+apenas com `InviteList` (convites), exatamente como antes do S5-D — sem
+regressão confirmada pelos testes de `ScreenAjustesInvites`.
+
+### 23.7 Migrations do S5 ainda não aplicadas no banco remoto
+
+Nenhuma migration abaixo foi aplicada remotamente. Ordem de aplicação =
+ordem de criação (nome do arquivo, timestamp crescente):
+
+| # | Migration | Finalidade | Depende de |
+|---|---|---|---|
+| 1 | `20260723150000_m1f_s5a1_profiles_hardening.sql` | Remove/neutraliza superfície de escrita legada em `profiles` | S1–S4 (já teoricamente aplicadas antes do S5, também pendentes se o remoto nunca recebeu M1-F) |
+| 2 | `20260723160000_m1f_s5a2_list_company_users.sql` | RPC `list_company_users` | #1 |
+| 3 | `20260723170000_m1f_s5b_update_profile_name.sql` | RPC `update_profile_name` | #1, #2 (mesmo padrão de helpers) |
+| 4 | `20260723180000_m1f_s5c_update_membership_role.sql` | RPC `update_membership_role` | #1–#3 |
+| 5 | `20260727120000_m1f_s5e1a_email_update_backend.sql` | `get_auth_email_update_state` / `get_profile_email_update_state` / `commit_profile_email_update` | #1–#4 (reaproveita `can_access_company`/padrão de auditoria) |
+
+Estas 5 migrations do S5 fazem parte de uma cadeia maior: **todo o M1-F**
+(S1 a S5, 27 arquivos de migration no total, ver `supabase/migrations/`)
+ainda não foi confirmado como aplicado no banco remoto — o escopo desta
+auditoria (S5-F) cobre apenas a parte do S5, mas a ordem de aplicação real
+precisa necessariamente incluir as migrations de S1–S4 antes das 5 acima,
+já que elas dependem de `company_memberships`, `is_platform_super_admin()`
+e demais helpers criados nessas etapas anteriores. O código de frontend
+(`ActiveUserList`, `ChangeUserEmailModal`) permanece protegido pelas duas
+feature flags (§23.6) enquanto essas migrations não existirem no ambiente
+remoto — nenhuma RPC nova é alcançável em produção até o deploy real.
+
+### 23.8 Plano de rollout futuro (documentado, não executado)
+
+1. Confirmar backup e janela de mudança combinada com o time.
+2. Confirmar que o commit oficial (`49ca55c8633922505d923d469992cb96539305c6`
+   ou posterior) é o que será promovido ao remoto.
+3. Aplicar as migrations do M1-F na ordem correta (S1→S5, ver §23.7).
+4. Executar verificações de catálogo e grants no remoto (mesmo espírito dos
+   testes SQL 10–34: nenhuma função inesperada, grants exatamente como
+   esperado).
+5. Testar login e convites existentes no remoto antes de tocar em qualquer
+   flag nova.
+6. Testar as RPCs de listagem/nome/papel (`list_company_users`/
+   `update_profile_name`/`update_membership_role`) diretamente, com um
+   usuário de controle, flags ainda desligadas.
+7. Testar o backend de e-mail (`get_auth_email_update_state`/
+   `get_profile_email_update_state`/`commit_profile_email_update`/Route
+   Handler) com um usuário sintético controlado, flags ainda desligadas.
+8. Ativar `NEXT_PUBLIC_FF_ACTIVE_USERS` em produção.
+9. Realizar smoke test da seção "Usuários ativos" (listagem, busca,
+   filtros, edição de nome/papel) com um Super Admin real.
+10. Somente depois, ativar `NEXT_PUBLIC_FF_USER_EMAIL_EDIT`.
+11. Realizar smoke test específico de alteração de e-mail (idempotência,
+    conflito, compensação) com um usuário de controle.
+12. Manter e documentar o plano de rollback das duas flags (reverter a
+    variável de ambiente é suficiente — nenhuma migration precisa ser
+    revertida para desativar a UI).
+
+Nenhum passo deste plano foi executado nesta etapa (S5-F) — é documentação
+para uma etapa futura e separada de deploy.
+
+### 23.9 Totais finais de validação local (S5-F)
+
+- Migrations aplicadas localmente: 27 (todas as migrations do repositório,
+  incluindo as 5 do S5).
+- SQL: 35 arquivos, **1539/1539** asserções (`supabase test db`).
+- TypeScript: 76 arquivos, **1273/1273** testes (`npm run test:run`).
+- Build: verde (`npm run build`), 8/8 páginas geradas, rota
+  `/api/admin/users/[profileId]/email` presente.
+- E2E de navegador: **não executado** — não existe infraestrutura E2E
+  neste repositório (nenhuma foi criada nesta etapa); o fechamento se
+  apoia na suíte de testes existente (SQL + TypeScript) e nos testes de
+  integração local já realizados durante S5-E0/S5-E1-A (usuários Auth
+  sintéticos, limpos ao final, nunca em ambiente remoto).
+- Módulos legados M0 (tarefas, visitas, negociações, propostas, vendas):
+  sem cobertura de teste automatizado dedicada nesta suíte — não fazem
+  parte do escopo do M1-F e não foram tocados por nenhuma etapa do S5;
+  nenhuma afirmação de regressão é feita sobre eles além de "não
+  modificados".
+
+### 23.10 Riscos residuais
+
+- O achado empírico do S5-E0 sobre `identities[].identity_data.email`
+  (pode ficar temporariamente desatualizado logo após `updateUserById`,
+  convergindo numa leitura subsequente) continua válido como ponto de
+  atenção para quando o rollout real acontecer contra o Auth de produção.
+- Nenhuma migration do M1-F (S1–S5) foi confirmada como aplicada no
+  ambiente remoto — o estado real do banco remoto em relação a essas 27
+  migrations não foi verificado nesta etapa (fora de escopo: nenhuma
+  operação remota foi executada).
+
+### 23.11 Fronteiras reafirmadas
+
+- **S6 e S7 não foram iniciados** — nenhuma suspensão, reativação,
+  transferência entre empresas, revogação de sessão ou seletor global de
+  empresa existe em código.
+- **M1-E E4 continua pausado**, aguardando o S8 (migração das RLS legadas
+  de `leads`/`sellers` para os helpers novos, que também remove a ponte
+  temporária `profiles.role` descrita em §22.3).
+- Nenhuma operação remota (migration, SQL, alteração de usuário) foi
+  executada durante esta auditoria de fechamento (S5-F) — toda validação
+  foi local.
