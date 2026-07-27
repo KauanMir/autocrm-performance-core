@@ -850,6 +850,18 @@ export type Database = {
           status: Database["public"]["Enums"]["lead_duplicate_status"]
         }[]
       }
+      commit_profile_email_update: {
+        Args: {
+          p_expected_email: string
+          p_new_email: string
+          p_target_profile_id: string
+        }
+        Returns: {
+          email: string
+          profile_id: string
+          updated_at: string
+        }[]
+      }
       complete_invite_delivery: {
         Args: {
           p_actor_profile_id: string
@@ -973,6 +985,26 @@ export type Database = {
       current_profile_seller_id_for_company: {
         Args: { p_target_company_id: string }
         Returns: string
+      }
+      get_auth_email_update_state: {
+        Args: { p_new_email: string; p_target_user_id: string }
+        Returns: {
+          current_email: string
+          new_email_in_use: boolean
+        }[]
+      }
+      get_profile_email_update_state: {
+        Args: { p_new_email: string; p_target_profile_id: string }
+        Returns: {
+          company_id: string
+          company_status: Database["public"]["Enums"]["company_status"]
+          current_email: string
+          membership_is_active: boolean
+          new_email_in_use: boolean
+          platform_role: Database["public"]["Enums"]["platform_role"]
+          profile_exists: boolean
+          profile_is_active: boolean
+        }[]
       }
       is_manager_or_admin: { Args: never; Returns: boolean }
       is_manager_or_platform: {
