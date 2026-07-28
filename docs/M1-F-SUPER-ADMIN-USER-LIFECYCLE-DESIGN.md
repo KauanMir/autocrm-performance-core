@@ -3061,3 +3061,253 @@ alterado. Nenhuma operação remota (migration, SQL, Auth, alteração de
 usuário) foi executada. **O S7-B está desbloqueado** — pode ser
 iniciado sem nenhuma decisão humana pendente de aprovação além do que
 já está congelado nesta seção.
+
+## 27. Fechamento do S7 — filtro contextual de empresa
+
+Esta seção registra o fechamento factual do S7 (§26 → implementação),
+mesmo padrão de §23 (fechamento do S5) e §25 (fechamento do S6).
+Nenhuma decisão nova é tomada aqui — só o estado real do código-fonte,
+auditado diretamente (não por memória de sessão anterior) em
+2026-07-28, antes de qualquer commit desta etapa. Esta etapa (S7-D) não
+cria funcionalidade nenhuma — só audita, valida e documenta.
+
+**HEAD oficial imediatamente antes desta etapa (S7-D)**:
+`bdcfefeb194564bb3c6bbf1334ed4fa19779f485` — publicado em
+`origin/main`, working tree limpa, zero ahead/behind, confirmado
+idêntico entre local e remoto.
+
+### 27.1 Entregas — S7-A0 até S7-C
+
+Todas **implementadas no código-fonte e publicadas no GitHub**:
+
+- **S7-A0** (auditoria, sem commit de código): levantamento factual de
+  todos os padrões de "qual empresa" no código — achado central
+  registrado em §26.1 (nenhum `selectedCompanyId` em runtime).
+- **S7-A1** (`82e31d4` — `docs(m1-f): freeze contextual company filter
+  decisions`): congelamento das 14 decisões de arquitetura (§26.1 a
+  §26.14), zero código.
+- **S7-B**:
+  - `eee12d0` (`feat(admin): add contextual company filter state`, 3
+    arquivos, 107 inserções): criação de `lib/hooks/
+    useCompanyScopeFilter.ts` e da flag `NEXT_PUBLIC_FF_COMPANY_
+    SELECTOR` (`lib/flags.ts` + `.env.local.example`).
+  - `e0e14cc` (`fix(query): derive pipeline company from active
+    membership`): os dois consumidores legados de `currentUser.
+    companyId` em `ScreensBiz.tsx` (`usePipelineStages`,
+    `useReorderStages`) trocados para `activeMembership?.companyId ??
+    null`, sem fallback ao campo legado.
+  - `37e0a64` (`test(admin): cover contextual company filter state`, 7
+    arquivos, 550 inserções/16 remoções): cobertura de testes do hook
+    e das duas correções de pipeline, incluindo o ajuste pontual e
+    direcionado de fixtures em `ScreenAjustesStages.test.tsx`,
+    `remoteStagesReorder.test.tsx` e `stagePermissionsFlow.test.tsx`
+    (divergências resolvidas por decisão humana explícita, nunca por
+    decisão unilateral).
+  - Nenhuma interface visual ampla foi criada no S7-B, conforme
+    congelado em §26.12.
+- **S7-C**:
+  - `5c5695a` (`feat(admin): add contextual company selector
+    interface`, 4 arquivos, 368 inserções): componente visual
+    `CompanyScopeFilter` (dropdown acessível, busca, teclado).
+  - `42242ae` (`feat(admin): apply company scope to user surfaces`, 7
+    arquivos, 107 inserções/56 remoções): divisão em
+    `UsersTabSection`/`LegacyUsersTabContent`/
+    `ContextualUsersTabContent`, wiring de `externalCompanyFilterId`
+    em `ActiveUserList`/`InactiveUserList`/`InviteList`, extensão de
+    `adminInviteQueryKeys.list`/`fetchInvites`/`useInvites` para aceitar
+    `companyFilterId` opcional (narrowing-only, sem RPC nova).
+  - `bdcfefe` (`test(admin): cover contextual company selector
+    interface`, 9 arquivos, 726 inserções): cobertura completa da
+    interface nova, incluindo a correção arquitetural mandatória de
+    separar o roteador (`UsersTabSection`, sem hooks) dos dois
+    conteúdos (`LegacyUsersTabContent`/`ContextualUsersTabContent`,
+    cada um com seu próprio conjunto consistente de hooks) para
+    resolver o conflito com as Rules of Hooks identificado durante a
+    própria etapa.
+
+Nenhuma entrega oficial do S7 (§26.12) está ausente. Nenhum commit do
+S7 toca `supabase/` (migration, SQL, seed) — confirmado por grep em
+todo o intervalo `82e31d4^..bdcfefe`: zero ocorrência.
+
+### 27.2 Matriz de atores × flag
+
+| Ator | Flag desligada | Flag ligada |
+|---|---|---|
+| Super Admin | `LegacyUsersTabContent` — comportamento idêntico ao pré-S7 | `ContextualUsersTabContent` — seletor visível, filtro compartilhado |
+| Manager | `LegacyUsersTabContent` — nunca vê o seletor | `LegacyUsersTabContent` — nunca vê o seletor, mesmo com a flag ligada |
+| Seller | Sem acesso à aba Usuários (inalterado desde S5) | Sem acesso à aba Usuários (inalterado desde S5) |
+| `actor` nulo | `LegacyUsersTabContent` | `LegacyUsersTabContent` (mesmo padrão de "sem capability") |
+
+Confirmado por `UsersTabSection.tsx`: a escolha do caminho depende
+exclusivamente de `isCompanySelectorEnabled() && actor?.kind ===
+'super_admin'` — nenhuma outra combinação monta o caminho contextual.
+
+### 27.3 `InviteList` — confirmação de segurança
+
+`fetchInvites` aplica `.eq('company_id', companyFilterId)` somente
+quando `scope.kind !== 'company'` (ou seja, escopo de plataforma) e
+`companyFilterId` é truthy — a política `invites_select_own_or_
+platform` já concede ao Super Admin leitura irrestrita de convites
+independente de empresa, então esse filtro só **estreita** um conjunto
+já autorizado, nunca amplia. Nenhuma RPC nova foi criada; nenhuma
+alteração de backend foi necessária. `useInvites` só passa
+`companyFilterId` adiante quando `scope?.kind === 'platform'` —
+Manager (`scope.kind === 'company'`) nunca é afetado pelo parâmetro.
+
+### 27.4 Acessibilidade do componente visual
+
+`CompanyScopeFilter` segue o padrão ARIA combobox/listbox:
+`aria-haspopup="listbox"`, `aria-expanded`, `aria-controls`,
+`role="listbox"`/`role="option"`, `aria-selected`. Nome acessível do
+botão combina rótulo estático ("Empresa") e valor dinâmico via dois
+ids em `aria-labelledby` (`company-scope-filter-label
+company-scope-filter-value`). Teclado: `Escape` fecha e devolve foco ao
+botão; `ArrowUp`/`ArrowDown` navegam; `Enter` confirma. Status de
+empresa (`implantação`/`ativa`/`suspensa`) sempre exibido como texto,
+nunca só por cor — confirmado por teste dedicado
+(`CompanyScopeFilter.test.tsx`).
+
+### 27.5 Estado e persistência — confirmação
+
+Nenhuma escrita em `localStorage`/`sessionStorage` — confirmado por
+teste que espiona `Storage.prototype.setItem` e verifica zero chamadas
+após seleção. `useCompanyScopeFilter` reseta `companyFilterId` para
+`null` na troca de `userId`/`actor?.kind`; um segundo efeito limpa a
+seleção se a empresa selecionada sair da lista de `companies`
+carregada (removida/cancelada/inacessível). Nenhum valor entra em
+query string, segmento de rota ou hash — nenhuma rota foi alterada
+nesta etapa.
+
+### 27.6 Pipeline e dependência `activeMembership` — confirmação
+
+`ScreensBiz.tsx` (`usePipelineStages`/`useReorderStages`) usa
+exclusivamente `currentUser?.activeMembership?.companyId ?? null`, sem
+fallback ao `companyId` legado — confirmado por leitura direta do
+código nesta etapa. `companyFilterId` do S7 **nunca** é lido por essas
+duas chamadas — pipeline permanece fora do escopo visual do filtro
+contextual, exatamente como congelado em §26.10. `lib/services.ts:364`
+(ponte legada de leads) permanece intocado, fronteira do S8 preservada.
+
+### 27.7 Superfícies fora de escopo — confirmação
+
+Confirmado por grep de `useCompanyScopeFilter`/`CompanyScopeFilter`/
+`externalCompanyFilterId` em todo o código-fonte: nenhuma ocorrência
+fora de `lib/hooks/useCompanyScopeFilter.ts`,
+`components/users/*`, `components/invites/InviteList.tsx`,
+`lib/invites/*` e seus testes correspondentes. Leads, Pipeline,
+Dashboard, Relatórios, Tarefas, Visitas, Negociações, Propostas,
+Vendas e Empresas permanecem sem qualquer referência ao filtro
+contextual — nenhuma dessas telas foi tocada nesta etapa nem nas
+anteriores do S7.
+
+### 27.8 Feature flag — estado real
+
+| Flag | Default | Depende de | Controla |
+|---|---|---|---|
+| `NEXT_PUBLIC_FF_COMPANY_SELECTOR` | `false` | — (só tem efeito para `actor.kind === 'super_admin'`) | Seletor visual de empresa na aba Usuários (S7) |
+
+Confirmado por grep em todo o repositório: nenhum arquivo versionado
+define essa flag como `true`. `.env.local.example` documenta
+`NEXT_PUBLIC_FF_COMPANY_SELECTOR=false`. Com a flag desligada, a aba
+Usuários preserva o comportamento anterior ao S7 byte a byte — nenhum
+hook novo é montado (`LegacyUsersTabContent` não importa
+`useCompanyScopeFilter`/`useCompanies`), confirmado pelos 98 arquivos/
+1598 testes TypeScript desta etapa, incluindo os 5 arquivos
+`ScreenAjustes*.test.tsx` que renderizam sem `QueryClientProvider`.
+
+### 27.9 Migrations ainda não aplicadas remotamente
+
+Nenhuma migration M1-F (S1 até S6-E2, 32 migrations locais no total)
+foi confirmada aplicada no Supabase remoto em nenhum momento desta
+linha do tempo — o S7 não adicionou nenhuma migration nova (zero
+alteração em `supabase/`). Toda a interface do S7 está **implementada
+no código, publicada no GitHub, protegida por flag — banco remoto
+pendente**. Nenhuma operação remota de banco foi executada durante o
+S7-D.
+
+### 27.10 Totais finais das suítes e build
+
+Validação local desta etapa (S7-D), stack Docker local reiniciado:
+
+- Migrations locais: 32.
+- SQL (pgTAP): 39 arquivos, 1998/1998 — `Result: PASS`.
+- TypeScript (vitest): 98 arquivos, 1598/1598.
+- Build (`next build`): compilação limpa, 8/8 páginas geradas.
+
+Nenhuma divergência em relação aos números esperados registrados no
+início desta etapa. **E2E não foi executado** — não existe
+infraestrutura de E2E (Playwright/Cypress ou similar) neste
+repositório; a suíte de integração existente
+(`tests/integration/*.test.tsx`) cobre fluxos compostos via Testing
+Library, não navegador real — mesma limitação já registrada em §25.9,
+sem mudança nesta etapa.
+
+### 27.11 Riscos residuais
+
+- Nenhuma migration M1-F aplicada remotamente — todo o S7 (e o M1-F
+  inteiro) depende de um deploy real futuro para operar em produção.
+- O filtro contextual cobre hoje somente usuários ativos, usuários
+  inativos e convites (escopo de plataforma) — não cobre nenhuma outra
+  tela, por decisão consciente (§26.2), não por lacuna técnica.
+- Persistência de conveniência (ex.: "última empresa vista") continua
+  deliberadamente fora de escopo (§26.5) — pode ser reconsiderada em
+  etapa própria, nunca como autorização.
+- A UI de ciclo de vida continua sem poder detectar sozinha "alvo é
+  outro Super Admin" — limitação estrutural herdada, já registrada em
+  §25.10, inalterada pelo S7.
+
+### 27.12 Plano de rollout futuro
+
+Nenhum destes passos foi executado nesta etapa — é só o roteiro para
+quando o deploy remoto real acontecer, complementando os planos já
+registrados em §23.8 e §25.11 com os passos específicos do S7:
+
+1. Backup e definição de janela de manutenção (mesma janela do plano
+   já registrado em §25.11, se ainda não executado).
+2. Confirmar o estado remoto real das migrations M1-F (nenhuma
+   aplicada, segundo todo o histórico desta linha do tempo).
+3. Aplicar as 32 migrations locais em ordem, sem pular nenhuma.
+4. Executar os passos 1 a 17 do plano de rollout do S6 (§25.11) antes
+   de qualquer ativação específica do S7 — o filtro contextual só faz
+   sentido com o ciclo de vida de membership já ativo em produção.
+5. Testar a aba Usuários manualmente contra o remoto com a flag
+   `NEXT_PUBLIC_FF_COMPANY_SELECTOR` ainda desligada (confirmar
+   ausência de regressão antes de ativar).
+6. Ativar `NEXT_PUBLIC_FF_COMPANY_SELECTOR` em ambiente controlado
+   (staging, se existir, ou produção com janela de observação).
+7. Smoke test do seletor com um Super Admin de teste: visão global,
+   seleção de empresa, troca de empresa, limpeza ao trocar de usuário.
+8. Confirmar visualmente que Manager nunca vê o seletor, mesmo com a
+   flag ligada.
+9. Confirmar que usuários ativos, usuários inativos e convites
+   respondem à mesma seleção de empresa de forma consistente.
+10. Confirmar que o pipeline (`usePipelineStages`/`useReorderStages`)
+    permanece indiferente ao filtro contextual em produção.
+11. Manter rollback imediato da flag disponível durante toda a janela
+    de observação pós-ativação.
+
+### 27.13 Estado dos módulos vizinhos
+
+- **S8** não foi iniciado — nenhum arquivo, nenhuma decisão além da
+  fronteira já registrada em §26.13 (remoção de `profiles.company_id`/
+  `profiles.role`/bridge legada de leads continua sendo trabalho do
+  S8, não tocado pelo S7).
+- **M1-E E4** (create/edit remotos de leads) continua pausado, sem
+  alteração nesta etapa.
+- **Nenhuma operação remota** (migration, SQL, Auth, alteração de
+  usuário) foi executada durante o S7-D — toda a validação desta etapa
+  rodou exclusivamente no stack Docker local.
+
+### 27.14 Confirmações finais
+
+Flag-off preserva o comportamento legado byte a byte (§27.8); wiring
+flag-on correto e restrito a Super Admin (§27.2); `InviteList` seguro,
+sem RPC nova, narrowing-only (§27.3); acessibilidade confirmada
+(§27.4); nenhuma persistência indevida (§27.5); pipeline continua
+dependente exclusivamente de `activeMembership`, nunca do filtro
+contextual (§27.6); nenhuma superfície fora de escopo foi afetada
+(§27.7); feature flag desligada em todo arquivo versionado (§27.8).
+
+**O S7 está oficialmente encerrado no código-fonte e publicado no
+GitHub.** Nenhuma sub-etapa está ativa em produção — a flag permanece
+desligada e nenhuma migration M1-F foi aplicada remotamente.
