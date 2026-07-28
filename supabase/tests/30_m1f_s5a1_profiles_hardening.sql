@@ -39,10 +39,19 @@ select is(
     where schemaname = 'public' and tablename = 'profiles' and policyname = 'profiles_select_own'),
   1, 'profiles_select_own permanece');
 
+-- M1-F S8-C1-A: profiles_select_company foi removida
+-- (20260728140000_m1f_s8c1a_close_profile_seller_access.sql) — zero
+-- consumidor client-side (list_company_users/list_inactive_company_users
+-- ja resolvem toda leitura administrativa multi-perfil, design §22.5).
 select is(
   (select count(*)::int from pg_policies
     where schemaname = 'public' and tablename = 'profiles' and policyname = 'profiles_select_company'),
-  1, 'profiles_select_company permanece');
+  0, 'profiles_select_company nao existe mais (S8-C1-A)');
+
+select is(
+  (select count(*)::int from pg_policies
+    where schemaname = 'public' and tablename = 'profiles' and cmd = 'SELECT'),
+  1, 'profiles_select_own e a UNICA policy de SELECT restante em public.profiles');
 
 -- ══════════════════════════════════════════════════════════════════════
 -- 2. PRIVILEGIOS DE TABELA — zero escrita/DDL para anon/authenticated/PUBLIC

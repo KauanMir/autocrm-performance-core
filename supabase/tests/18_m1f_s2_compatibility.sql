@@ -68,11 +68,16 @@ select is(
 -- legado, não tinha whitelist própria e estava estruturalmente inalcançável
 -- por ausência de GRANT UPDATE, ver 20260723150000_m1f_s5a1_...). Cobertura
 -- completa do hardening (policy ausente, zero grant de escrita/DDL, SELECT
--- preservado) está em 30_m1f_s5a1_profiles_hardening.sql; aqui só
--- confirmamos que a contagem de policies de leitura não regrediu.
+-- preservado) está em 30_m1f_s5a1_profiles_hardening.sql.
+-- ATUALIZAÇÃO (M1-F S8-C1-A, aprovada explicitamente): profiles_select_company
+-- também foi removida — zero consumidor client-side (list_company_users/
+-- list_inactive_company_users já resolvem toda leitura administrativa
+-- multi-perfil, design §22.5). Cobertura completa está em
+-- 39_m1f_s8c1a_profiles_sellers_access.sql; aqui só confirmamos que a
+-- contagem de policies não regrediu por acidente.
 select is(
   (select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'profiles'),
-  2, 'policies de profiles: 2 restantes (select_own, select_company) — update_admin removida no S5-A1');
+  1, 'policies de profiles: somente profiles_select_own permanece (update_admin removida no S5-A1, select_company removida no S8-C1-A)');
 -- ATUALIZAÇÃO (M1-F S4-F1, aprovada explicitamente): o S2 fechava
 -- company_memberships por completo (0 policies). O S4-F1 introduziu o
 -- primeiro consumidor real (leitura da própria membership pelo frontend)

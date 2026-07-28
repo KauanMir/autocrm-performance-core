@@ -1,10 +1,17 @@
 -- M1-F S4-C2C hotfix — GRANT SELECT em public.profiles para authenticated
 -- (20260721150000_m1f_s4c2c_login_profile_read.sql). Prova que o gap de
 -- login pré-existente foi fechado SEM enfraquecer isolamento: anon
--- continua bloqueado, authenticated só lê o que profiles_select_own/
--- profiles_select_company já permitiam, nenhuma coluna extra
--- (created_at/updated_at) foi exposta, e nenhum INSERT/UPDATE/DELETE foi
--- concedido a ninguém por esta migration.
+-- continua bloqueado, nenhuma coluna extra (created_at/updated_at) foi
+-- exposta, e nenhum INSERT/UPDATE/DELETE foi concedido a ninguém por esta
+-- migration.
+--
+-- M1-F S8-C1-A: profiles_select_company foi removida
+-- (20260728140000_m1f_s8c1a_close_profile_seller_access.sql) — zero
+-- consumidor client-side confirmado em auditoria (S8-C1-A0); a listagem
+-- administrativa multi-perfil já é resolvida inteiramente por
+-- list_company_users/list_inactive_company_users (RPCs SECURITY DEFINER).
+-- authenticated agora só lê o que profiles_select_own permite: a própria
+-- linha, nunca a de um colega, nem para Manager/Super Admin.
 begin;
 create extension if not exists pgtap;
 select * from no_plan();
@@ -25,13 +32,15 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'fb100000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 's4c2c-login-manager-a@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'fb100000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 's4c2c-login-seller-a@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'fb100000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 's4c2c-login-manager-b@test.local', now(), now(), now()),
-  ('00000000-0000-0000-0000-000000000000', 'fb100000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 's4c2c-login-superadmin@test.local', now(), now(), now());
+  ('00000000-0000-0000-0000-000000000000', 'fb100000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 's4c2c-login-superadmin@test.local', now(), now(), now()),
+  ('00000000-0000-0000-0000-000000000000', 'fb100000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 's4c2c-login-inactive@test.local', now(), now(), now());
 
 insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
   ('fb100000-0000-0000-0000-000000000001', 'fb000000-0000-0000-0000-000000000001', 'Manager A', 's4c2c-login-manager-a@test.local', 'manager', true, null),
   ('fb100000-0000-0000-0000-000000000002', 'fb000000-0000-0000-0000-000000000001', 'Seller A', 's4c2c-login-seller-a@test.local', 'seller', true, null),
   ('fb100000-0000-0000-0000-000000000003', 'fb000000-0000-0000-0000-000000000002', 'Manager B', 's4c2c-login-manager-b@test.local', 'manager', true, null),
-  ('fb100000-0000-0000-0000-000000000004', null, 'Super Admin Login', 's4c2c-login-superadmin@test.local', 'seller', true, 'super_admin');
+  ('fb100000-0000-0000-0000-000000000004', null, 'Super Admin Login', 's4c2c-login-superadmin@test.local', 'seller', true, 'super_admin'),
+  ('fb100000-0000-0000-0000-000000000005', 'fb000000-0000-0000-0000-000000000001', 'Inativo Global', 's4c2c-login-inactive@test.local', 'seller', false, null);
 
 -- ══════════════════════════════════════════════════════════════════════
 -- GRANTS: exatamente o esperado, nada a mais
@@ -112,25 +121,44 @@ select is(
   1, 'Super Admin consegue ler o proprio profile mesmo com company_id null');
 reset role;
 
--- ── Manager A vê os profiles da PRÓPRIA empresa (profiles_select_company
---    + is_manager_or_admin()) — Manager A e Seller A, nunca Manager B ───
+-- ── M1-F S8-C1-A: Manager A NÃO lê diretamente outro profile da própria
+--    empresa (profiles_select_company removida) — só a própria linha,
+--    mesmo filtrando por company_id ou tentando o id do colega direto ───
 set local role authenticated;
 select pg_temp.as_user('fb100000-0000-0000-0000-000000000001');
 select is(
   (select count(*)::int from public.profiles where company_id = 'fb000000-0000-0000-0000-000000000001'),
-  2, 'Manager A ve os 2 profiles da propria empresa (ele mesmo + Seller A)');
+  1, 'Manager A ve so a propria linha, mesmo filtrando pela propria empresa (Seller A nao aparece)');
+select is(
+  (select count(*)::int from public.profiles where id = 'fb100000-0000-0000-0000-000000000002'),
+  0, 'Manager A NAO consegue ler o Seller A (mesma empresa) por id direto — leitura de terceiros e so via RPC');
 select is(
   (select count(*)::int from public.profiles where id = 'fb100000-0000-0000-0000-000000000003'),
-  0, 'Manager A NAO consegue ler o Manager B (empresa diferente) mesmo tentando por id direto');
+  0, 'Manager A NAO consegue ler o Manager B (empresa diferente) por id direto');
 reset role;
 
--- ── Seller A (não é manager/admin) NÃO enxerga o resto da empresa, só a
---    si mesmo — profiles_select_company exige is_manager_or_admin() ─────
+-- ── Seller A NÃO lê outro profile — nem o do Manager A da mesma empresa ──
 set local role authenticated;
 select pg_temp.as_user('fb100000-0000-0000-0000-000000000002');
 select is(
   (select count(*)::int from public.profiles where company_id = 'fb000000-0000-0000-0000-000000000001'),
-  1, 'Seller A ve so a propria linha na empresa, nunca a do Manager A (nao e manager/admin)');
+  1, 'Seller A ve so a propria linha na empresa, nunca a do Manager A');
+select is(
+  (select count(*)::int from public.profiles where id = 'fb100000-0000-0000-0000-000000000001'),
+  0, 'Seller A NAO consegue ler o Manager A por id direto');
+reset role;
+
+-- ── M1-F S8-C1-A: Super Admin NÃO recebe SELECT direto amplo em profiles
+--    — le a propria linha (ja provado acima), mas nao a de terceiros,
+--    mesmo sem company_id proprio para "isolar" ─────────────────────────
+set local role authenticated;
+select pg_temp.as_user('fb100000-0000-0000-0000-000000000004');
+select is(
+  (select count(*)::int from public.profiles where id = 'fb100000-0000-0000-0000-000000000001'),
+  0, 'Super Admin NAO consegue ler o Manager A por id direto (sem SELECT amplo em profiles)');
+select is(
+  (select count(*)::int from public.profiles),
+  1, 'Super Admin, sem filtro, ve so a propria linha (nenhuma policy de leitura ampla restante)');
 reset role;
 
 -- ── isolamento entre empresas: Manager B nunca lê nada da empresa A ──────
@@ -141,7 +169,20 @@ select is(
   0, 'Manager B nao consegue ler nenhum profile da empresa A (isolamento entre empresas)');
 select is(
   (select count(*)::int from public.profiles),
-  1, 'Manager B, sem filtro, ve so a propria linha (RLS filtra o resto de outra empresa)');
+  1, 'Manager B, sem filtro, ve so a propria linha (RLS filtra o resto, inclusive de outra empresa)');
+reset role;
+
+-- ── profile globalmente inativo: profiles_select_own nao filtra por
+--    is_active (nunca filtrou — a checagem de seguranca real e no app,
+--    AuthService._loadProfile/restoreSession, que rejeita is_active=false
+--    e encerra a sessao Auth, S6-E). Esta migration NAO altera esse
+--    comportamento — prova que a remocao de profiles_select_company nao
+--    mexeu na unica policy que protege o login ────────────────────────────
+set local role authenticated;
+select pg_temp.as_user('fb100000-0000-0000-0000-000000000005');
+select is(
+  (select count(*)::int from public.profiles where id = 'fb100000-0000-0000-0000-000000000005'),
+  1, 'profile globalmente inativo ainda le a propria linha via profiles_select_own (guarda real e no app, inalterada aqui)');
 reset role;
 
 -- ── anon: tentativa real de leitura falha (nao so ausencia no catalogo) ──

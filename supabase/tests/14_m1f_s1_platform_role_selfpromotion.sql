@@ -128,23 +128,38 @@ select is(
   null::public.platform_role, 'platform_role do seller continua null');
 reset role;
 
--- ── anon (sem sessão): proteção ainda mais forte que a de manager/seller —
---    anon nunca recebeu EXECUTE nos helpers de RLS (current_profile_role()
---    etc., revogado de anon desde m1c_01) — a própria avaliação da USING
---    clause falha com "permission denied for function", não uma simples
---    filtragem silenciosa. Achado confirmado empiricamente (a primeira
---    tentativa desta auditoria esperava lives_ok e falhou porque a
---    realidade é mais restritiva, não menos) ─────────────────────────────
+-- ── anon (sem sessão): proteção ainda mais forte que a de manager/seller.
+--    ATUALIZAÇÃO (M1-F S8-C1-A, aprovada explicitamente): o mecanismo
+--    descrito originalmente aqui ("permission denied for function", via
+--    avaliação da USING clause de profiles_select_company chamando
+--    current_profile_company_id(), helper sem EXECUTE para anon desde
+--    m1c_01) deixou de existir — profiles_select_company foi removida
+--    (S8-C1-A, zero consumidor client-side). A única policy restante,
+--    profiles_select_own (id = auth.uid()), é uma comparação direta, sem
+--    chamada de função — para anon (sem auth.uid() válido) isso significa
+--    simplesmente ZERO linhas visíveis, sem exceção nenhuma. A garantia
+--    real e histórica não muda: anon não consegue alterar platform_role,
+--    a tentativa alcança zero linhas, e o valor do alvo permanece
+--    inalterado — só o mecanismo observável mudou (de exceção para
+--    "zero linhas afetadas"), confirmado empiricamente nesta correção.
 set local role anon;
-select throws_ok(
-  $$update public.profiles set platform_role = 'super_admin' where id = '11111111-1111-1111-1111-111111111111'$$,
-  '42501', null, 'anon: nem consegue avaliar a policy (sem EXECUTE nos helpers de RLS) — negado antes de qualquer filtragem');
+-- WITH contendo um data-modifying statement precisa estar no nivel mais
+-- alto da query (restricao do Postgres) — nao pode ser aninhado dentro de
+-- uma subquery escalar passada como argumento de is(). Por isso o UPDATE
+-- roda como CTE de topo, e is() recebe só a contagem final.
+with changed as (
+  update public.profiles
+  set platform_role = 'super_admin'
+  where id = '11111111-1111-1111-1111-111111111111'
+  returning 1
+)
+select is(
+  (select count(*)::int from changed),
+  0, 'anon: tentativa de autopromocao nao alcanca nenhuma linha (zero rows affected)');
 reset role;
--- Verificação como postgres (não como anon): mesmo o SELECT de
--- verificação falharia como anon com o mesmo "permission denied for
--- function" — anon não tem EXECUTE em nenhum helper usado por NENHUMA
--- policy de profiles, nem a de SELECT. Achado idêntico ao de cima,
--- confirmado empiricamente.
+-- Verificação como postgres (não como anon): confirma que o valor
+-- permanece null mesmo depois da tentativa acima — a mesma prova real de
+-- sempre, agora por ausência de linha afetada em vez de por exceção.
 select is(
   (select platform_role from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
   null::public.platform_role, 'platform_role do alvo continua null apos a tentativa de anon');
