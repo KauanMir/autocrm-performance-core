@@ -3708,3 +3708,114 @@ HEAD imediatamente antes desta seção: `938cb267a7f5b7b72148a8dea0774a75d296d0b
 restante desta etapa (migration, testes, validação, commits, push)
 segue após o registro desta seção. S8-C1-B e S8-C2 não iniciados.
 M1-E E4 continua pausado até o fechamento formal do S8.
+
+## 30. Implementação do S8-C1-B — Pipeline e reordenação
+
+Esta seção registra a implementação das decisões humanas aprovadas
+sobre `pipeline_stages`/`reorder_pipeline_stages` (auditoria S8-C1-A0,
+§28/§29). §0–§29 não foram alterados.
+
+### 30.1 Decisões que esta implementação executa
+
+Todas já aprovadas antes desta etapa, registradas aqui para o registro
+factual desta seção: Super Admin não opera Pipeline de empresas
+clientes nesta fase; `reorder_pipeline_stages` continua sem
+`p_company_id`; Super Admin nunca recebe empresa implícita, primeira
+empresa disponível, filtro contextual ou empresa artificial; Pipeline
+exige contexto empresarial real derivado de membership ativa; o filtro
+contextual do S7 continua restrito à aba Usuários; as policies **não
+usam isoladamente** `can_access_company(company_id)` nem
+`is_manager_or_platform(company_id)` (ambos autorizam Super Admin) — o
+acesso combina `current_membership_company_id()`/
+`current_membership_role() = 'manager'` (contexto real de membership,
+nunca de plataforma) com `can_access_company(company_id)` (situação
+operacional real da empresa: existe, não cancelada/suspensa).
+
+### 30.2 Matriz de SELECT — `stages_select`
+
+```sql
+company_id = public.current_membership_company_id()
+and public.can_access_company(company_id)
+```
+
+`current_membership_company_id()` já retorna `null` para Super Admin
+(nunca tem membership, por design) — a cláusula nunca é satisfeita
+para ele, independente de `can_access_company` também retornar `true`
+para Super Admin em outros contextos. Manager/Seller ativos leem as
+etapas da própria empresa; nenhum dos dois lê de outra empresa; sem
+membership ativa, nenhuma leitura; membership suspensa/desligada
+(`current_membership_company_id()` já filtra por `is_active`), nenhuma
+leitura; empresa suspensa/cancelada (`can_access_company` já nega),
+nenhuma leitura mesmo com membership ativa.
+
+### 30.3 Matriz de INSERT/UPDATE — `stages_insert`/`stages_update`
+
+```sql
+company_id = public.current_membership_company_id()
+and public.current_membership_role() = 'manager'
+and public.can_access_company(company_id)
+```
+
+Só Manager ativo da própria empresa operacional cria/atualiza etapas.
+Seller ativo: `current_membership_role() = 'manager'` já nega. Super
+Admin: `current_membership_company_id()` já é `null`, nunca satisfaz a
+igualdade. Sem membership: mesma negação. Empresa não operacional:
+`can_access_company` nega mesmo com membership Manager ativa. Grants
+de coluna preservados sem alteração (`INSERT` só nas colunas de
+negócio; `UPDATE` só `name`/`is_terminal`; `company_id`/`sort_order`
+fora de qualquer grant de escrita direta — transferência de etapa
+entre empresas continua estruturalmente impossível pelo cliente).
+
+### 30.4 Contrato final de `reorder_pipeline_stages`
+
+Assinatura preservada integralmente: `reorder_pipeline_stages(p_ordered_ids
+uuid[]) returns setof public.pipeline_stages`. Nenhum `p_company_id` —
+decisão confirmada, não revisitada. Resolução da empresa trocada de
+`current_profile_company_id()` (legado) para
+`current_membership_company_id()`; autorização trocada de
+`is_manager_or_admin()` (legado) para `current_membership_role() =
+'manager'` combinado com `can_access_company(v_company_id)` — nunca
+`is_manager_or_platform`, que autorizaria Super Admin. Preservados sem
+alteração: locks determinísticos (`ORDER BY id FOR UPDATE`), validação
+de array (não nulo, não vazio, unidimensional), validação de
+permutação completa (`v_matching = v_total`, sem duplicatas, sem
+etapa de outra empresa), atomicidade (transação única da função),
+`SECURITY DEFINER`/`search_path=''`, grants (`REVOKE ALL` +
+`GRANT EXECUTE` só para `authenticated`).
+
+**Matriz**: Manager ativo de empresa operacional — permitido; Seller
+ativo — negado (`current_membership_role()` ≠ `'manager'`); Super
+Admin — negado por ausência de contexto empresarial
+(`current_membership_company_id()` é sempre `null` para ele, nunca por
+`is_manager_or_platform` que o autorizaria); sem membership — negado;
+membership suspensa/desligada — negado (`current_membership_company_id()`
+já filtra `is_active`); empresa não operacional — negado mesmo com
+membership Manager ativa.
+
+### 30.5 Mensagens de erro
+
+`getReorderStagesErrorMessage()` (`lib/hooks/useReorderStages.ts`)
+continua reconhecendo os mesmos fragmentos, sem nenhuma alteração de
+TypeScript: `message.includes('forbidden')` →
+"Você não tem permissão para reordenar as etapas."; `message.includes('no
+active profile')` → "Sua sessão não possui um perfil ativo.". As
+mensagens internas da função (`'forbidden: manager/admin only'` e
+`'no active profile for current user'`) são preservadas literalmente —
+nenhuma reformulação foi necessária para expressar a nova autorização,
+já que os mesmos fragmentos continuam descrevendo corretamente os dois
+casos (ausência de papel Manager habilitado; ausência de contexto
+empresarial ativo).
+
+### 30.6 Escopo e preservação
+
+Nenhuma tabela, coluna, índice, constraint ou dado alterado. Nenhuma
+RPC de leads tocada. `public.profiles`/`public.sellers` permanecem
+exatamente como o S8-C1-A deixou. Os 4 helpers legados
+(`current_profile_company_id`, `current_profile_role`,
+`current_profile_seller_id`, `is_manager_or_admin`) permanecem
+fisicamente no catálogo — nenhum removido. Nenhuma migration antiga
+modificada — migration nova, puramente aditiva
+(`CREATE OR REPLACE`/`DROP POLICY`+`CREATE POLICY`). Nenhuma operação
+remota executada. Implementação protegida por suíte pgTAP dedicada
+(`40_m1f_s8c1b_pipeline_access.sql`) cobrindo catálogo, as quatro
+matrizes de ator, dados cruzados e atomicidade.
