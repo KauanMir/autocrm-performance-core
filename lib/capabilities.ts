@@ -67,3 +67,84 @@ export function canManageInvites(user: InviteCapabilityUser): boolean {
   if (user?.platformRole === 'super_admin') return true;
   return user?.activeMembership?.role === 'manager';
 }
+
+// M1-F S6-F — ciclo de vida empresarial de usuários (suspender/reativar/
+// desligar/transferir). Ator resolvido pelo chamador (nunca lido de
+// AuthService aqui, mesmo padrão do restante deste arquivo): Super Admin
+// (profileId apenas, nenhuma empresa — atua sobre qualquer empresa) ou
+// Manager (profileId + companyId da própria membership ativa).
+export type MembershipLifecycleActor =
+  | { kind: 'super_admin'; profileId: string }
+  | { kind: 'manager'; profileId: string; companyId: string };
+
+// Linha-alvo: exatamente os campos que list_company_users/
+// list_inactive_company_users devolvem, nunca o Row inteiro de
+// company_memberships (nenhum dos dois expõe platform_role do alvo — a RPC
+// é a autoridade real contra "alvo é outro Super Admin", ver nota abaixo).
+export type MembershipLifecycleTargetRow = {
+  profileId: string;
+  companyId: string;
+  companyRole: 'manager' | 'seller';
+  lifecycleStatus: 'active' | 'suspended' | 'offboarded';
+};
+
+export type MembershipLifecycleCapabilities = {
+  canSuspend: boolean;
+  canReactivate: boolean;
+  canOffboard: boolean;
+  canTransfer: boolean;
+};
+
+const NO_MEMBERSHIP_LIFECYCLE_CAPABILITIES: MembershipLifecycleCapabilities = {
+  canSuspend: false,
+  canReactivate: false,
+  canOffboard: false,
+  canTransfer: false,
+};
+
+// Única fonte de decisão — nunca duplicada em ActiveUserList/InactiveUserList
+// ou em qualquer modal (§ decisão S6-F "Centralizar em capabilities").
+// Matriz exata (spec S6-F §4):
+//   Super Admin  | ativo:     Suspender, Desligar, Transferir
+//                | suspenso:  Reativar, Desligar, Transferir
+//                | desligado: somente leitura
+//   Manager      | Seller ativo da própria empresa:    Suspender, Desligar
+//                | Seller suspenso da própria empresa:  Reativar, Desligar
+//                | nunca: Manager sobre Manager, transferência, fora da
+//                  empresa, sobre a própria membership
+//
+// "Ação sobre Super Admin" não é decidível aqui por falta de sinal
+// (platform_role do alvo nunca é devolvido pelas RPCs de listagem, ver tipo
+// acima) — defesa em profundidade real fica com o backend (as cinco RPCs já
+// recusam com 'forbidden' quando o alvo é Super Admin), exatamente o mesmo
+// raciocínio já documentado para EditUserModal/rowCapabilities.
+export function membershipLifecycleCapabilities(
+  row: MembershipLifecycleTargetRow,
+  actor: MembershipLifecycleActor | null,
+): MembershipLifecycleCapabilities {
+  if (!actor) return NO_MEMBERSHIP_LIFECYCLE_CAPABILITIES;
+  if (row.profileId === actor.profileId) return NO_MEMBERSHIP_LIFECYCLE_CAPABILITIES;
+
+  if (actor.kind === 'super_admin') {
+    if (row.lifecycleStatus === 'active') {
+      return { canSuspend: true, canReactivate: false, canOffboard: true, canTransfer: true };
+    }
+    if (row.lifecycleStatus === 'suspended') {
+      return { canSuspend: false, canReactivate: true, canOffboard: true, canTransfer: true };
+    }
+    return NO_MEMBERSHIP_LIFECYCLE_CAPABILITIES;
+  }
+
+  // Manager: só Seller da própria empresa — nunca outro Manager, nunca fora
+  // da empresa, nunca transferência.
+  if (row.companyRole !== 'seller' || row.companyId !== actor.companyId) {
+    return NO_MEMBERSHIP_LIFECYCLE_CAPABILITIES;
+  }
+  if (row.lifecycleStatus === 'active') {
+    return { canSuspend: true, canReactivate: false, canOffboard: true, canTransfer: false };
+  }
+  if (row.lifecycleStatus === 'suspended') {
+    return { canSuspend: false, canReactivate: true, canOffboard: true, canTransfer: false };
+  }
+  return NO_MEMBERSHIP_LIFECYCLE_CAPABILITIES;
+}

@@ -14,6 +14,17 @@
 // precisa poder ser ativada independentemente da listagem de usuários já
 // publicada. Nenhuma UI consome esta flag ainda (S5-E1-A é só backend).
 //
+// M1-F S6-F: NEXT_PUBLIC_FF_USER_LIFECYCLE é uma flag SEPARADA de
+// NEXT_PUBLIC_FF_ACTIVE_USERS, mas só tem efeito quando ACTIVE_USERS também
+// está ligada (a interface de ciclo de vida — suspender/reativar/desligar/
+// transferir — é uma extensão da seção "Usuários ativos"; sem a listagem
+// base habilitada, não há linha nenhuma para anexar uma ação). As RPCs que
+// ela consome (suspend_membership/reactivate_membership/offboard_seller/
+// offboard_manager/transfer_membership, S6-B/S6-C/S6-D/S6-E2) ainda não
+// foram aplicadas no banco remoto no momento em que este frontend é escrito
+// — mesmo motivo de rollout das flags anteriores. Nenhuma flag é ativada por
+// esta etapa.
+//
 // M1-F S5-D: NEXT_PUBLIC_FF_ACTIVE_USERS existe porque as migrations
 // list_company_users/update_profile_name/update_membership_role (S5-A2/S5-B/
 // S5-C) ainda não foram aplicadas no banco remoto no momento em que este
@@ -41,6 +52,7 @@ export const REMOTE_LEADS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_leads';
 export const PLATFORM_ADMIN_DEV_OVERRIDE_KEY = 'autocrm_ff_platform_admin';
 export const ACTIVE_USERS_DEV_OVERRIDE_KEY = 'autocrm_ff_active_users';
 export const USER_EMAIL_EDIT_DEV_OVERRIDE_KEY = 'autocrm_ff_user_email_edit';
+export const USER_LIFECYCLE_DEV_OVERRIDE_KEY = 'autocrm_ff_user_lifecycle';
 
 // Somente as strings exatas 'true'/'false' são reconhecidas (case-sensitive);
 // qualquer outro valor (1, yes, on, TRUE, vazio…) é tratado como inválido.
@@ -94,4 +106,11 @@ export function isActiveUsersEnabled(): boolean {
 
 export function isUserEmailEditEnabled(): boolean {
   return resolveFlag(process.env.NEXT_PUBLIC_FF_USER_EMAIL_EDIT, USER_EMAIL_EDIT_DEV_OVERRIDE_KEY);
+}
+
+// M1-F S6-F: só o valor bruto da própria flag — a combinação com
+// isActiveUsersEnabled() é decisão do chamador (ScreensBiz), mesmo padrão já
+// usado por userEmailEditEnabled.
+export function isUserLifecycleEnabled(): boolean {
+  return resolveFlag(process.env.NEXT_PUBLIC_FF_USER_LIFECYCLE, USER_LIFECYCLE_DEV_OVERRIDE_KEY);
 }
