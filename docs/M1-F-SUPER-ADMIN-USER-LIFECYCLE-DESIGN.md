@@ -3311,3 +3311,286 @@ contextual (§27.6); nenhuma superfície fora de escopo foi afetada
 **O S7 está oficialmente encerrado no código-fonte e publicado no
 GitHub.** Nenhuma sub-etapa está ativa em produção — a flag permanece
 desligada e nenhuma migration M1-F foi aplicada remotamente.
+
+## 28. Decisões congeladas do S8 — remoção das dependências legadas
+
+Esta seção congela as decisões de arquitetura e a divisão final do S8
+(remoção das dependências de empresa/papel/seller do modelo legado),
+com base na auditoria factual do S8-A0 (2026-07-28, leitura direta do
+código-fonte, não memória de sessão anterior). **Nenhuma implementação
+foi iniciada nesta etapa (S8-A1)** — só decisão e documentação. §0–§27
+não foram alterados.
+
+### 28.1 Estado oficial no momento deste registro
+
+Branch `main`, HEAD local, `origin/main` e remoto, no momento da
+consolidação (S8-A1, antes do commit desta seção):
+
+```
+e9ced828e321443b3b6fe08082be4f7f292b0842
+```
+
+Working tree limpa; zero ahead/behind; nenhum arquivo alterado além
+desta seção. S8-A0 (auditoria) concluído sem nenhuma alteração de
+código. S8-B em diante não iniciado. M1-E E4 continua pausado.
+
+### 28.2 Objetivo real do S8 — escopo e não-escopo
+
+**Escopo**: eliminar o uso de `profiles.company_id`, `profiles.role`,
+`User.companyId` e `User.role` como fontes de autorização ou contexto
+empresarial remoto — tanto no banco (RLS/RPCs) quanto no cliente
+(capabilities, bridge de leads).
+
+**Não-escopo**: o S8 **não** migra integralmente Tarefas, Visitas,
+Negociações, Propostas ou Vendas para o Postgres. Confirmado pelo
+S8-A0: nenhuma dessas tabelas existe hoje (só `public.leads` e
+`public.lead_timeline_entries` são reais); migrá-las é projeto de
+persistência próprio, fora do M1-F. O S8 documenta e isola a
+dependência desses módulos em relação ao modelo legado (§28.6/§28.7),
+mas não os desacopla nem os migra.
+
+### 28.3 Capabilities da interface — escopo obrigatório
+
+Achado do S8-A0 (não presumido em nenhuma etapa anterior): três
+funções de `lib/capabilities.ts` ainda decidem visibilidade de
+superfícies reais usando exclusivamente `User.role` legado —
+`canAccessFullSettings`, `canAccessStageSettings`,
+`canReorderPipelineStages` (consumidas em `ScreensBiz.tsx` e
+`App.tsx`, controlando a seção "Ajustes", a aba "Etapas" e a permissão
+de reordenar o pipeline). **Estas três entram no escopo obrigatório do
+S8** — não poderão continuar decidindo acesso exclusivamente por
+`User.role`.
+
+Fonte futura congelada:
+
+- **Super Admin**: `platformRole` / `actor.kind` (mesmo padrão já usado
+  por `canAccessPlatformAdmin`/`canManageInvites`, S3-B/S4-F1).
+- **Manager e Seller**: `activeMembership.role` e a existência de
+  `activeMembership` ativa (mesmo padrão já usado por
+  `canManageInvites`/`membershipLifecycleCapabilities`, S4-F1/S6-F).
+
+Regras esperadas, congeladas para a subetapa que implementar isso
+(S8-B1):
+
+- Super Admin acessa Ajustes conforme a matriz global já vigente para
+  outras superfícies administrativas.
+- Manager com `activeMembership` ativa acessa as superfícies
+  empresariais permitidas (Ajustes/Etapas/reorder).
+- Seller nunca recebe permissões administrativas.
+- Usuário sem `activeMembership` ativa (incluindo Super Admin sem
+  membership, por design) não recebe acesso empresarial por essa via.
+- `User.role` legado **nunca** concede acesso isoladamente, uma vez
+  migrado.
+
+Esta migração é uma subetapa própria (S8-B1) **antes** da remoção de
+`User.role` do tipo cliente — não pode acontecer depois, pois
+`capabilities.ts` é o único consumidor real restante de `User.role`
+fora dos módulos locais (§28.6/§28.7).
+
+### 28.4 Ordem da migração — congelada
+
+1. Migrar capabilities e consumidores visuais (S8-B1).
+2. Migrar cliente/bridge remoto de Leads (S8-B2).
+3. Migrar RLS e RPCs do banco, em subetapas (S8-C1, S8-C2).
+4. Remover leituras e sincronizações legadas (S8-D).
+5. Remover fisicamente colunas/helpers somente após zero consumidores
+   confirmados por auditoria (S8-E).
+6. Fechar o S8 (S8-F).
+7. Somente depois, retomar M1-E E4.
+
+**Nenhuma coluna será removida antes que todos os consumidores runtime
+identificados no S8-A0 (RLS de 5 tabelas, 1 RPC de reorder, 9 RPCs de
+leads, 3 capabilities, `_loadProfile`, `_remoteLeadSnapshotOrThrow`,
+`SellerService`, os 5 `_filtered*` de `lib/services.ts`) tenham sido
+eliminados ou expressamente aceitos como bridge temporária
+documentada.**
+
+### 28.5 Tipo de identidade do cliente — decisão congelada
+
+A identidade futura do `User` será baseada em campos explícitos e
+sempre presentes, mesmo quando `null` (nunca `undefined` por omissão
+estrutural):
+
+```ts
+platformRole: 'super_admin' | null;
+activeMembership: { companyId: string; role: 'manager' | 'seller' } | null;
+```
+
+Durante a compatibilidade (S8-B/S8-C/S8-D):
+
+- `User.companyId` permanece temporariamente no tipo.
+- `User.role` permanece temporariamente no tipo.
+- Nenhum dos dois será apenas tornado opcional e esquecido — ambos
+  serão marcados explicitamente como legados/depreciados (comentário
+  no próprio tipo, mesmo padrão já usado para `LegacyUserRef` em
+  `lib/data.ts`).
+- Serão removidos do tipo somente quando zero consumidores runtime
+  existirem (confirmado por auditoria dedicada, mesmo grep desta
+  auditoria repetido no S8-E).
+
+**Não remover campos do tipo cliente na primeira subetapa (S8-B1).**
+
+Fixtures futuras de teste deverão informar explicitamente
+`platformRole` e `activeMembership` (mesmo quando `null`), para evitar
+usuários fictícios estruturalmente impossíveis (ex.: Manager sem
+nenhuma membership ativa, Super Admin com `activeMembership` não-nulo)
+— mesma disciplina já aplicada às fixtures corrigidas no S7-B.
+
+### 28.6 `sellerId` — fronteira própria
+
+Fronteira diferente e mais lenta que `companyId`/`role`, congelada
+nesta etapa:
+
+**No backend remoto**: autorização e resolução de Seller deverão parar
+de depender de `profiles.seller_id` — usar `company_memberships` e
+`current_profile_seller_id_for_company()` (já existente desde
+`20260720110100_m1f_s2_02_company_access_helpers.sql`) ou contrato
+equivalente. Isso se aplica às 9 RPCs de leads (S8-C2), que hoje leem
+`v_profile.seller_id` diretamente.
+
+**No cliente local**: `User.sellerId` poderá permanecer temporariamente,
+somente como bridge para os módulos locais/mock (§28.7) — nunca como
+autorização empresarial. Deve ser documentado explicitamente como
+compatibilidade M0 no próprio tipo, quando essa marcação for aplicada
+(S8-B/S8-D).
+
+**Não remover fisicamente `profiles.seller_id`** enquanto
+`SellerService`, `Home`, Tasks, Visits, Deals, Sales ou outros módulos
+locais ainda precisarem dessa ligação (confirmado no S8-A0:
+`SellerService.getCurrentSeller()` resolve `getStore().sellers` via
+`u.sellerId`; os cinco `_filtered*` de `lib/services.ts` filtram por
+`u.role === 'seller' && u.sellerId`). A remoção completa de `sellerId`
+fica condicionada à migração desses módulos locais para persistência
+real, ou à criação de uma bridge substituta segura — nenhuma das duas
+coisas é objetivo do S8.
+
+### 28.7 Módulos locais — fora do escopo de migração integral
+
+Congelado: o S8 **não tentará desacoplar integralmente**
+`TaskService`, `VisitService`, `DealService`, `SaleService`,
+`SellerService` ou `StoreAdapter` apenas para permitir a remoção
+imediata de `sellerId`. Motivo: esses módulos ainda não existem no
+PostgreSQL (confirmado no S8-A0 e já registrado em §25.4), não possuem
+RLS, não possuem tenant empresarial real — refatorá-los agora
+produziria trabalho temporário descartado quando migrarem de fato para
+persistência real, em projeto próprio fora do M1-F. O S8 pode
+documentar e isolar essa dependência (§28.6), mas não migra esses
+módulos.
+
+### 28.8 Frontend e cliente
+
+**S8-B1 — identidade e capabilities**: migrar
+`canAccessFullSettings`/`canAccessStageSettings`/
+`canReorderPipelineStages` para `platformRole`/`actor.kind`
+(Super Admin) e `activeMembership.role`/existência de membership ativa
+(Manager/Seller); migrar os consumidores em `App.tsx` e
+`ScreensBiz.tsx`; atualizar fixtures/testes afetados (estimativa do
+S8-A0: 5–8 arquivos, mesma ordem de grandeza das divergências já
+resolvidas no S7-B). Nenhuma migration.
+
+**S8-B2 — bridge cliente de Leads**: migrar
+`_remoteLeadSnapshotOrThrow` (`lib/services.ts:364`) de `user.companyId`
+para `activeMembership.companyId`; revisar a montagem real de
+`startLeadsRemoteBridge` (confirmado no S8-A0: ainda não montado em
+`App.tsx`, único consumidor hoje é o próprio teste do bridge); não
+alterar módulos locais; não remover ainda o carregamento dos campos
+legados em `_loadProfile` se outros consumidores (capabilities,
+`_filtered*`, `SellerService`) ainda permanecerem lendo-os.
+
+### 28.9 Banco — divisão segura
+
+Nenhuma migration única e gigante. Dividido em duas subetapas:
+
+**S8-C1 — Profiles, Sellers e Pipeline**: migrar as policies de
+`profiles` (`profiles_select_own`/`profiles_select_company`), de
+`sellers` (`sellers_select_own`/`sellers_select_company`/
+`sellers_insert_admin`/`sellers_update_admin`), de `pipeline_stages`
+(`stages_select`/`stages_insert`/`stages_update`) e a RPC
+`reorder_pipeline_stages`, todas para os 7 helpers novos de
+`20260720110100_m1f_s2_02_company_access_helpers.sql`
+(`can_access_company`/`is_manager_or_platform`/
+`current_membership_company_id`/`current_membership_role`); preservar
+comportamento real observável; testes pgTAP dedicados.
+
+**S8-C2 — Leads**: migrar `leads` (`leads_select`) e
+`lead_timeline_entries` (`lead_timeline_select`), e as 9 RPCs de
+`20260719202010_m1e_03_lead_rpcs.sql` (`create_lead`, `update_lead`,
+`move_lead`, `assign_lead_seller`, `archive_lead`, `unarchive_lead`,
+`add_timeline_entry`, `apply_lead_event`, e a leitura controlada) —
+substituindo a leitura direta de `profiles.company_id`/`role`/
+`seller_id` por `company_memberships`/`can_access_company()`/
+`current_profile_seller_id_for_company()`; testes pgTAP completos.
+
+Cada uma das duas exigirá auditoria e decisão humana antes da
+implementação — não serão tratadas como uma única tarefa
+audit→implement→test→commit→push, dado o volume e a criticidade de
+autorização real envolvida (mesmo padrão de cautela já aplicado nas
+etapas anteriores desta sessão).
+
+### 28.10 Remoção das pontes
+
+S8-D deverá: parar `_loadProfile` de utilizar `company_id`/`role` para
+fins de autorização (a leitura em si pode continuar existindo enquanto
+popular campos ainda presentes no tipo, marcados como legados);
+remover os consumidores restantes de `User.companyId`/`User.role` que
+não sejam os módulos locais explicitamente isentos (§28.7); remover a
+sincronização temporária de `profiles.role` em `update_membership_role`
+(ponte do S5-C, §22.3); atualizar tipos e testes; manter as colunas
+físicas enquanto a auditoria ainda apontar qualquer consumidor. Não
+remover `sellerId` se os módulos locais ainda dependerem dele.
+
+### 28.11 Remoção física
+
+S8-E poderá remover `profiles.company_id`, `profiles.role`,
+`current_profile_company_id()`, `current_profile_role()`,
+`is_manager_or_admin()` e helpers equivalentes sem consumidores,
+somente após: grep dedicado (mesmo padrão desta auditoria S8-A0);
+catálogo de dependências confirmado vazio; RLS/RPCs migradas (S8-C1/
+S8-C2); cliente migrado (S8-B/S8-D); SQL 100% verde; TypeScript 100%
+verde; build verde.
+
+`profiles.seller_id` só será removido se a auditoria final confirmar
+zero consumidores. Caso os módulos locais ainda dependam dele,
+permanecerá temporariamente, será documentado como risco residual fora
+da autorização desta remoção, e **não bloqueará** o encerramento do
+restante do S8.
+
+### 28.12 M1-E E4 — pausado até o fechamento formal do S8
+
+Congelado: **M1-E E4 continuará pausado durante todo o S8**, mesmo que
+o S8-C2 remova o bloqueio técnico das RPCs de leads antes do fim das
+demais subetapas. O E4 só será retomado depois do fechamento formal do
+S8 (S8-F). Motivo: evitar desenvolvimento paralelo sobre uma identidade
+em transição; garantir contratos estáveis antes de construir
+`useCreateLead`/`useUpdateLead` sobre eles; reduzir risco de
+regressão; manter uma única linha arquitetural ativa por vez — mesmo
+princípio já aplicado em todas as fronteiras S5/S6/S7 anteriores deste
+documento.
+
+### 28.13 Divisão final do S8
+
+| Sub-etapa | Escopo | Situação |
+|---|---|---|
+| **S8-A0** | Auditoria factual das dependências legadas | Concluída |
+| **S8-A1** | Congelamento das decisões de remoção (esta seção) | Concluída — é a etapa atual |
+| **S8-B1** | Identidade e capabilities do frontend (`canAccessFullSettings`/`canAccessStageSettings`/`canReorderPipelineStages`, consumidores em `App.tsx`/`ScreensBiz.tsx`, fixtures/testes) | Desbloqueada após esta seção |
+| **S8-B2** | Cliente e bridge de Leads (`_remoteLeadSnapshotOrThrow`, montagem de `startLeadsRemoteBridge`) | Segue após S8-B1 |
+| **S8-C1** | RLS de Profiles, Sellers e Pipeline + `reorder_pipeline_stages` | Segue após S8-B2, com decisão humana própria |
+| **S8-C2** | RLS e RPCs de Leads (as 9 RPCs de `m1e_03_lead_rpcs.sql`) | Segue após S8-C1, com decisão humana própria |
+| **S8-D** | Remoção dos consumidores e pontes de `companyId`/`role` (`_loadProfile`, sincronização de `update_membership_role`) | Segue após S8-C2 |
+| **S8-E** | Remoção física segura de colunas/helpers; `sellerId` condicionado à ausência de dependência dos módulos locais | Segue após S8-D, com auditoria dedicada |
+| **S8-F** | Auditoria integrada, documentação, fechamento, desbloqueio formal do M1-E E4 | Encerra o S8 |
+
+**Depois desta seção (S8-A1), não resta decisão humana bloqueante para
+iniciar o S8-B1.**
+
+### 28.14 Confirmações finais
+
+Nenhuma implementação do S8 foi iniciada em nenhuma sub-etapa até aqui
+(S8-A0 é auditoria, S8-A1 é esta documentação). Nenhum arquivo de
+código, migration, RPC, hook, componente ou teste foi criado ou
+alterado. Nenhuma operação remota (migration, SQL, Auth, alteração de
+usuário) foi executada. **O S8-B1 está desbloqueado** — pode ser
+iniciado sem nenhuma decisão humana pendente de aprovação além do que
+já está congelado nesta seção. **M1-E E4 continua pausado** até o
+fechamento formal do S8 (§28.12).
