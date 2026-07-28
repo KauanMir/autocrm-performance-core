@@ -409,9 +409,18 @@ export function ScreenAjustes({ go }: any) {
   // (lib/capabilities) combinadas com a flag AQUI, na camada de UI.
   // Boolean(currentUser) significa "profile ativo resolvido" (AuthService
   // rejeita inativos).
+  //
+  // M1-F S7-B: companyId vem exclusivamente de activeMembership.companyId —
+  // nunca do legado currentUser.companyId (profiles.company_id), que não
+  // reflete suspensão/transferência de membership (mesma classe de bug já
+  // corrigida em useQueryCacheIdentity no S6-E). Sem fallback deliberado:
+  // Manager/Seller usam a empresa da própria membership ativa; Super Admin
+  // sem membership recebe null (nunca ganha acesso ao pipeline por meio do
+  // filtro contextual de empresa — esse filtro é só da aba de Usuários,
+  // §26.2/§26.10, e nunca autoriza pipeline).
   const pipeline = usePipelineStages({
     userId: currentUser?.id ?? null,
-    companyId: currentUser?.companyId ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
     userIsActive: Boolean(currentUser),
     localStageNames: PipelineService.getStages(),
   });
@@ -476,8 +485,10 @@ export function ScreenAjustes({ go }: any) {
   // Permissão efetiva do reorder REMOTO fornecida ao hook: capability +
   // flag/área de Etapas. (remoteReady e isPending são reavaliados no handler.)
   const canReorderRemote = stageSettingsAccess && canReorderPipelineStages(currentUser);
+  // M1-F S7-B: mesma correção de companyId do usePipelineStages acima —
+  // activeMembership.companyId, sem fallback para o legado currentUser.companyId.
   const reorder = useReorderStages({
-    companyId: currentUser?.companyId ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
     canReorder: canReorderRemote,
   });
 
