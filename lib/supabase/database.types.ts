@@ -1115,7 +1115,7 @@ export type Database = {
         Args: {
           p_note: string
           p_seller_membership_id: string
-          p_successor_seller_id: string
+          p_successor_membership_id: string
         }
         Returns: {
           company_id: string
