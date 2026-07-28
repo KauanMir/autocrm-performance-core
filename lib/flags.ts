@@ -54,6 +54,7 @@ export const ACTIVE_USERS_DEV_OVERRIDE_KEY = 'autocrm_ff_active_users';
 export const USER_EMAIL_EDIT_DEV_OVERRIDE_KEY = 'autocrm_ff_user_email_edit';
 export const USER_LIFECYCLE_DEV_OVERRIDE_KEY = 'autocrm_ff_user_lifecycle';
 export const COMPANY_SELECTOR_DEV_OVERRIDE_KEY = 'autocrm_ff_company_selector';
+export const SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY = 'autocrm_ff_super_admin_commercial_read';
 
 // Somente as strings exatas 'true'/'false' são reconhecidas (case-sensitive);
 // qualquer outro valor (1, yes, on, TRUE, vazio…) é tratado como inválido.
@@ -125,4 +126,22 @@ export function isUserLifecycleEnabled(): boolean {
 // superfície contextual aprovada (aba de Usuários) existe no bundle.
 export function isCompanySelectorEnabled(): boolean {
   return resolveFlag(process.env.NEXT_PUBLIC_FF_COMPANY_SELECTOR, COMPANY_SELECTOR_DEV_OVERRIDE_KEY);
+}
+
+// M1-F S8-C2-B2 — leitura comercial do Super Admin (Clientes/Andamento reais,
+// via as 4 RPCs estreitas do S8-C2-B1: list_commercial_companies/
+// list_platform_leads_for_company/list_platform_lead_timeline/
+// list_pipeline_stages_for_company). Só o valor bruto da própria flag — QUEM
+// consome (canAccessCommercialWorkspace + platformRole==='super_admin') e
+// QUAL superfície é montada (PlatformCommercialClientsView/PipelineView vs.
+// as telas locais de Manager/Seller, inalteradas) são decisões do chamador
+// (ScreensOps.tsx/App.tsx), nunca desta função. Independente de todas as
+// outras flags — Manager/Seller nunca dependem dela (§S8-C2-A1/§31).
+// NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_WRITE (mutations) é uma etapa futura,
+// ainda não criada, e dependerá desta (READ) quando existir.
+export function isSuperAdminCommercialReadEnabled(): boolean {
+  return resolveFlag(
+    process.env.NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_READ,
+    SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY,
+  );
 }

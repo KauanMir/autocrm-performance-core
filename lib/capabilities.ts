@@ -82,6 +82,28 @@ export function canManageInvites(user: InviteCapabilityUser): boolean {
   return user?.activeMembership?.role === 'manager';
 }
 
+// M1-F S8-C2-B2 — workspace comercial (Clientes/Andamento): capability
+// PRÓPRIA, nunca uma leitura de User.role legado (achado 2 do S8-C2-A1: hoje
+// NAV_ROLES[user.role] decide sozinho, o que já vaza 'clientes'/'andamento'
+// para Super Admin via o valor legado de compatibilidade em profiles.role).
+// Autoriza:
+//   - platformRole==='super_admin' — QUALQUER empresa, mas SEMPRE explícita
+//     (o contexto comercial resolve qual; esta função nunca sabe disso).
+//     A combinação com NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_READ é decisão
+//     do chamador (App.tsx), nunca desta função (mesmo padrão de
+//     canAccessStageSettings/isRemoteStagesEnabled);
+//   - OU membership ATIVA de Manager/Seller — nunca profiles.role legado
+//     sozinho, mesmo raciocínio de canManageInvites.
+// Sem identidade, sem platformRole/activeMembership (auth sem profile) ou
+// anon: false pelo mesmo optional chaining.
+export type CommercialWorkspaceCapabilityUser = Pick<User, 'platformRole' | 'activeMembership'> | null | undefined;
+
+export function canAccessCommercialWorkspace(user: CommercialWorkspaceCapabilityUser): boolean {
+  if (user?.platformRole === 'super_admin') return true;
+  const role = user?.activeMembership?.role;
+  return role === 'manager' || role === 'seller';
+}
+
 // M1-F S6-F — ciclo de vida empresarial de usuários (suspender/reativar/
 // desligar/transferir). Ator resolvido pelo chamador (nunca lido de
 // AuthService aqui, mesmo padrão do restante deste arquivo): Super Admin
