@@ -2568,3 +2568,289 @@ usuário, Auth) foi executada durante o congelamento e a consolidação
 destas decisões — toda esta seção é documentação de decisão, escrita e
 revisada localmente. **O S6-B está desbloqueado** — pode ser iniciado sem
 nenhuma decisão humana pendente de aprovação.
+
+## 25. Fechamento do S6 — ciclo empresarial de usuários
+
+Esta seção registra o fechamento factual do S6 (§24 → implementação),
+mesmo padrão de §23 (fechamento do S5). Nenhuma decisão nova é tomada
+aqui — só o estado real do código-fonte, auditado diretamente (não por
+memória de sessão anterior) em 2026-07-28, antes de qualquer commit
+desta etapa.
+
+**HEAD oficial imediatamente antes desta etapa (S6-G)**:
+`8e5887607a7e74bc853100563a339d504a1d9ab6` — publicado em
+`origin/main`, working tree limpa, zero ahead/behind.
+
+### 25.1 Entregas — S6-A até S6-F (incluindo S6-E2)
+
+Todas **implementadas no código-fonte e publicadas no GitHub**:
+
+- **S6-A / S6-D0 / S6-D1**: auditoria inicial e decisões congeladas
+  desta seção (§24) — modelo `active`/`suspended`/`offboarded`, matriz
+  de permissões, contratos de suspensão/reativação/desligamento/
+  transferência, MFA e gestão global de Super Admin fora de escopo.
+- **S6-B** (`20260727130000_m1f_s6b_membership_lifecycle.sql`): enum
+  `membership_lifecycle_status`, coluna `company_memberships.
+  lifecycle_status`, `suspend_membership`/`reactivate_membership`,
+  sincronização de `sellers.is_active`, guarda do último Manager ativo.
+  `suspend_membership` sobre membership já `offboarded` é rejeitado
+  explicitamente (`membership_lifecycle_conflict`), nunca silencioso —
+  o único caminho idempotente é `suspended` → `suspended`.
+  `reactivate_membership` rejeita `offboarded` pelo mesmo código, na
+  direção espelhada.
+- **S6-C** (`20260728100000_m1f_s6c_membership_offboarding.sql`):
+  `offboard_seller`/`offboard_manager`. Leads abertos (`archived_at is
+  null`) do Seller desligado são reatribuídos ao sucessor na mesma
+  transação; leads arquivados nunca são tocados (fora do filtro do
+  `UPDATE`). `offboard_manager` não reatribui nenhum dado operacional
+  (nenhuma tabela referencia Manager como "dono" de forma análoga a
+  `leads.seller_id`).
+- **S6-D** (`20260728110000_m1f_s6d_membership_transfer.sql`):
+  `transfer_membership`, transação única (`begin`/`commit`, sem
+  commit parcial). Origem nunca apagada — sempre transicionada para
+  `offboarded`. Destino: nova `company_memberships` criada, ou uma
+  linha `offboarded` histórica reaproveitada (nunca uma `suspended`,
+  tratada como `transfer_state_conflict`). Seller no destino criado ou
+  reaproveitado quando o papel final é `seller`. Guarda do último
+  Manager também se aplica à origem.
+- **S6-E** (`20260728120000_m1f_s6e_inactive_listing.sql` +
+  `lib/inactiveUsers/*` + `lib/hooks/useInactiveCompanyUsers.ts`):
+  `list_inactive_company_users` (rejeita explicitamente
+  `p_lifecycle='active'` com `invalid_lifecycle`).
+  `AuthService.restoreSession()` endurecido: profile inexistente ou
+  globalmente inativo agora encerram a sessão Auth (`signOut()`) —
+  antes só ocorria em `login()`. `useQueryCacheIdentity`/`App.tsx`
+  passaram a derivar `companyId`/`membershipRole` de
+  `activeMembership`, nunca do `profiles.company_id` legado.
+- **S6-E2** (`20260728130000_m1f_s6e2_offboard_seller_successor_
+  hardening.sql`): assinatura antiga `offboard_seller(uuid, text,
+  text)` removida por `DROP FUNCTION` explícito; nova assinatura
+  `offboard_seller(p_seller_membership_id uuid,
+  p_successor_membership_id uuid, p_note text)`. `sellers.id`/
+  `seller_id` (text) nunca é parâmetro de entrada em nenhuma RPC do
+  S6 — só aparece nas colunas de retorno (`seller_id`,
+  `successor_seller_id`), informativo, nunca autorização. Sucessor é
+  resolvido internamente via `sellers.membership_id =
+  p_successor_membership_id`. `successor_required` é levantado quando
+  o Seller alvo tem leads abertos e nenhum sucessor foi informado —
+  sem leads abertos, sucessor continua opcional (comportamento
+  idêntico ao S6-C original).
+- **S6-F** (retomada da interface, commits `350785c`..`22af110`,
+  testes em `8e58876`): `InactiveUserList` (lista de suspensos/
+  desligados, busca, filtros de papel/status/empresa, paginação),
+  ações Suspender/Reativar/Desligar/Transferir centralizadas em
+  `MembershipLifecycleActions` a partir de
+  `membershipLifecycleCapabilities()` (`lib/capabilities.ts`), cinco
+  modais dedicados com confirmação explícita, cinco hooks
+  (`useSuspendMembership`/`useReactivateMembership`/
+  `useOffboardSeller`/`useOffboardManager`/`useTransferMembership`)
+  seguindo o molde de invalidação de cache já estabelecido em S5-D/S6-E,
+  flag própria `NEXT_PUBLIC_FF_USER_LIFECYCLE` (só tem efeito combinada
+  com `NEXT_PUBLIC_FF_ACTIVE_USERS`). Nenhuma RPC de listagem nova foi
+  criada para resolver o bloqueio de sucessor identificado na primeira
+  tentativa de S6-F — a correção real foi o hardening do contrato de
+  `offboard_seller` no S6-E2, e todos os seletores de sucessor
+  reaproveitam `list_company_users` (já publicada em S5-A2), nunca
+  SELECT direto em `sellers`, nunca o store legado local de Sellers.
+
+Nenhuma entrega oficial do S6 (§24.15) está ausente.
+
+### 25.2 Lifecycle final e matriz de atores
+
+Estado final: `active` / `suspended` / `offboarded`, com
+`(lifecycle_status = 'active') = is_active` garantido por CHECK
+(`company_memberships_lifecycle_is_active_ck`, S6-B) — nunca por
+disciplina de aplicação. `suspended` é reversível (`active` ↔
+`suspended`); `offboarded` é definitivo, nunca revertido por
+`reactivate_membership`.
+
+| Ator | Alvo `active` | Alvo `suspended` | Alvo `offboarded` |
+|---|---|---|---|
+| Super Admin | Suspender, Desligar, Transferir | Reativar, Desligar, Transferir | Somente leitura |
+| Manager (só Seller da própria empresa) | Suspender, Desligar | Reativar, Desligar | Somente leitura |
+| Manager sobre outro Manager | Nunca | Nunca | Nunca |
+| Seller | Nenhuma ação administrativa | Nenhuma ação administrativa | Nenhuma ação administrativa |
+
+Nenhum ator (incluindo Super Admin) age sobre a própria membership ou
+sobre outro Super Admin — reforçado em profundidade na UI
+(`membershipLifecycleCapabilities`), com o backend (as cinco RPCs) como
+autoridade real: as RPCs de listagem (`list_company_users`/
+`list_inactive_company_users`) nunca devolvem `platform_role` do alvo,
+então a UI não pode detectar "alvo é Super Admin" sozinha — a proteção
+real contra esse caso específico é inteiramente do backend
+(`forbidden`), não da interface.
+
+### 25.3 Sucessores e preservação de histórico
+
+- `offboard_seller`: sucessor = `p_successor_membership_id` (uuid de
+  `company_memberships`). Obrigatório somente quando o alvo tem leads
+  abertos (`successor_required` quando ausente nesse caso).
+- `offboard_manager`: sucessor = `p_successor_profile_id` (uuid de
+  `profiles`) — precisa já ser Manager ativo da mesma empresa; nunca
+  promovido implicitamente. Obrigatório somente quando o alvo é o
+  último Manager ativo (`last_manager_requires_successor`).
+- `transfer_membership`: sucessor = `p_successor_id` (uuid de
+  `profiles`), sempre da empresa de **origem**, com o mesmo papel do
+  alvo — resolvido internamente pela RPC. Obrigatório quando a origem é
+  o último Manager ativo, ou quando o Seller de origem tem leads
+  abertos.
+- Em nenhum dos três contratos `sellers.id`/`seller_id` (text) é
+  parâmetro de entrada.
+- Preservação de histórico: nenhuma linha de `company_memberships`,
+  `sellers` ou `leads` é apagada por nenhuma das cinco RPCs (confirmado
+  por grep de `delete from` nas quatro migrations do S6 — zero
+  ocorrência). `sellers.membership_id`/`profile_id` são preservados
+  após desligamento (`is_active=false`, nunca desvinculados). Leads
+  arquivados nunca mudam de dono; leads abertos são reatribuídos só
+  quando há sucessor.
+
+### 25.4 Módulos ainda não persistidos no Postgres
+
+Confirmado por leitura de todas as migrations (`grep -i "create
+table"`): as únicas tabelas comerciais/operacionais reais no Postgres
+são `public.leads` e `public.lead_timeline_entries`. **Não existem**
+tabelas `tasks`, `visits`, `deals`, `sales` ou `proposals` — os módulos
+correspondentes (`TaskService`, `VisitService`, `DealService`,
+`SaleService` em `lib/services.ts`) continuam sendo estado em memória
+local (`StoreAdapter`), nunca sincronizado com o Supabase.
+
+Por isso, o S6 (offboarding e transferência) reatribui exclusivamente
+`public.leads` — a única tabela real cujo "dono" (`seller_id`) precisa
+de reatribuição quando um Seller é desligado ou transferido. Nenhuma
+tabela nova, coluna ou RPC placeholder foi criada para simular
+reatribuição desses módulos ainda não migrados. Quando
+tarefas/visitas/negociações/propostas/vendas forem migradas ao
+Postgres (fora do escopo do M1-F), os contratos de `offboard_seller`/
+`offboard_manager`/`transfer_membership` precisarão ser estendidos para
+cobri-los — isso é trabalho futuro explícito, não uma lacuna do que já
+foi entregue sobre os dados que hoje realmente existem no banco.
+
+### 25.5 `restoreSession` e cache
+
+- Profile inexistente **ou** globalmente inativo (`profiles.is_active
+  = false`) → `restoreSession()` chama `supabase.auth.signOut()`,
+  nunca deixa uma sessão Auth órfã (`lib/services.ts`, hardening do
+  S6-E — antes essa checagem só existia em `login()`).
+- Membership suspensa ou desligada **não** encerra a conta Auth — o
+  usuário continua autenticado, só perde `activeMembership` (e,
+  portanto, acesso empresarial). Um usuário sem membership ativa
+  (incluindo Super Admin, que nunca tem uma) é um estado normal e
+  estável, nunca tratado como sessão inválida.
+- `useQueryCacheIdentity` deriva `companyId`/`membershipRole` de
+  `activeMembership`, não de `profiles.company_id` legado — troca de
+  empresa (via `transfer_membership`), papel (seller↔manager) ou
+  perda/ganho de membership ativa aciona `resetQueryCache`, descartando
+  os dados da empresa anterior. `logout()` continua limpando o cache
+  pelo caminho já existente (`AuthCacheBoundary`).
+
+### 25.6 Interface (S6-F)
+
+Aba "Usuários" na ordem congelada: Usuários ativos → Usuários
+suspensos e desligados → Convites. `InactiveUserList` só renderiza sob
+`NEXT_PUBLIC_FF_USER_LIFECYCLE` combinada com
+`NEXT_PUBLIC_FF_ACTIVE_USERS`; as ações de ciclo de vida em
+`ActiveUserList` usam o mesmo par de flags via o prop aditivo
+`lifecycleEnabled` (default `false`, zero regressão sobre o S5-D já
+publicado).
+
+### 25.7 Feature flags — estado real
+
+| Flag | Default | Depende de | Controla |
+|---|---|---|---|
+| `NEXT_PUBLIC_FF_ACTIVE_USERS` | `false` | — | Listagem/edição de usuários ativos (S5-D) |
+| `NEXT_PUBLIC_FF_USER_EMAIL_EDIT` | `false` | `ACTIVE_USERS` | Edição administrativa de e-mail (S5-E1) |
+| `NEXT_PUBLIC_FF_USER_LIFECYCLE` | `false` | `ACTIVE_USERS` | Suspender/reativar/desligar/transferir + listagem de inativos (S6) |
+
+Nenhuma das três está ativada em nenhum arquivo versionado. Com as três
+desligadas, nenhum contrato novo do S6/S5-E1 é chamado e o comportamento
+de Convites permanece idêntico ao já publicado — confirmado pela
+suíte de testes existente (`tests/screens/ScreenAjustes*.test.tsx`).
+
+### 25.8 Migrations ainda não aplicadas remotamente
+
+Nenhuma migration M1-F (S1 até S6-E2, 32 migrations locais no total)
+foi confirmada aplicada no Supabase remoto em nenhum momento desta
+linha do tempo. Toda a interface do S6-F está **implementada no
+código, publicada no GitHub, protegida por flag — banco remoto
+pendente**. Nenhuma operação remota de banco foi executada durante o
+S6-G.
+
+### 25.9 Totais finais das suítes e build
+
+Validação local desta etapa (S6-G), Docker reiniciado, sem reaproveitar
+estado de sessão anterior:
+
+- Migrations locais: 32.
+- SQL (pgTAP): 39 arquivos, 1998/1998 — `Result: PASS`.
+- TypeScript (vitest): 93 arquivos, 1497/1497.
+- Build (`next build`): compilação limpa, 8/8 páginas geradas.
+
+**E2E não foi executado** — não existe infraestrutura de E2E
+(Playwright/Cypress ou similar) neste repositório; a suíte de
+integração existente (`tests/integration/*.test.tsx`) cobre fluxos
+compostos via Testing Library, não navegador real. Isso continua
+verdadeiro nesta etapa — nenhuma cobertura de banco/E2E é inventada
+para além do que existe de fato.
+
+### 25.10 Riscos residuais
+
+- Nenhuma migration M1-F aplicada remotamente — todo o S6 (e o M1-F
+  inteiro) depende de um deploy real futuro para operar em produção.
+- `tasks`/`visits`/`deals`/`sales`/`proposals` continuam sem
+  persistência real — qualquer desligamento/transferência de usuário
+  hoje não afeta esses módulos (correto, pois eles não existem no
+  banco), mas isso deixa de ser verdade no dia em que forem migrados,
+  e os contratos precisarão ser revisitados nesse momento.
+- `.env.local.example` não documentava `NEXT_PUBLIC_FF_ACTIVE_USERS`/
+  `NEXT_PUBLIC_FF_USER_EMAIL_EDIT`/`NEXT_PUBLIC_FF_USER_LIFECYCLE`
+  antes desta etapa — corrigido nesta mesma etapa (S6-G).
+- A UI de ciclo de vida não pode detectar sozinha "alvo é outro Super
+  Admin" (as RPCs de listagem não devolvem `platform_role` do alvo) —
+  a proteção real contra essa ação continua sendo exclusivamente do
+  backend, não uma lacuna nova, mas uma limitação estrutural herdada
+  do design já aprovado em §22.5 (lista de usuários nunca expõe
+  `platform_role`).
+
+### 25.11 Plano de rollout futuro
+
+Nenhum destes passos foi executado nesta etapa — é só o roteiro para
+quando o deploy remoto real acontecer, complementando o plano de 12
+passos já registrado em §23.8 com os passos específicos do S6:
+
+1. Backup e definição de janela de manutenção.
+2. Confirmar o estado remoto real das migrations M1-F (nenhuma
+   aplicada, segundo todo o histórico desta linha do tempo).
+3. Aplicar as 32 migrations locais em ordem, sem pular nenhuma.
+4. Validar catálogo de funções, grants e RLS no ambiente remoto pós-
+   aplicação (mesma checklist já usada nas auditorias locais).
+5. Testar login e convites (fluxo já em produção, não deve regredir).
+6. Testar a listagem de usuários ativos manualmente contra o remoto.
+7. Testar alteração de nome, papel e e-mail manualmente.
+8. Ativar `NEXT_PUBLIC_FF_ACTIVE_USERS`.
+9. Smoke test da seção "Usuários ativos" em produção.
+10. Ativar `NEXT_PUBLIC_FF_USER_EMAIL_EDIT`.
+11. Smoke test da alteração de e-mail em produção.
+12. Ativar `NEXT_PUBLIC_FF_USER_LIFECYCLE`.
+13. Testar suspensão em produção (empresa/usuário de teste controlado).
+14. Testar reativação em produção.
+15. Testar desligamento de Seller com sucessor controlado (empresa de
+    teste, nunca dados reais de cliente).
+16. Testar transferência entre duas empresas de teste controladas.
+17. Manter rollback imediato das três flags disponível durante toda a
+    janela de observação pós-ativação.
+
+### 25.12 Estado dos módulos vizinhos
+
+- **S7** (seletor global de empresa) e **S8** não foram iniciados —
+  nenhum arquivo, nenhuma decisão além da fronteira já registrada em
+  §22.11.
+- **M1-E E4** (create/edit remotos de leads) continua pausado, sem
+  alteração nesta etapa.
+- **Nenhuma operação remota** (migration, SQL, Auth, alteração de
+  usuário) foi executada durante o S6-G — toda a validação desta etapa
+  rodou exclusivamente no stack Docker local.
+
+**O S6 está oficialmente encerrado no código-fonte e publicado no
+GitHub.** Nenhuma sub-etapa está ativa em produção — todas as flags
+permanecem desligadas e nenhuma migration M1-F foi aplicada
+remotamente.
