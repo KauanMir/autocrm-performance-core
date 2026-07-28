@@ -534,3 +534,42 @@ describe('ActiveUserList — integração com os modais de ciclo de vida', () =>
     expect(m.changeEmailModalProps.current).toBeNull();
   });
 });
+
+// ── M1-F S7-C — externalCompanyFilterId (filtro contextual compartilhado) ──
+
+describe('ActiveUserList — externalCompanyFilterId (S7-C)', () => {
+  it('omitido: comportamento antigo — filtro interno de empresa aparece, scope usa o estado local (null por padrão)', () => {
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} />);
+    expect(screen.getByLabelText('Filtrar por empresa')).toBeInTheDocument();
+    expect(m.useCompanyUsers).toHaveBeenLastCalledWith(expect.objectContaining({
+      scope: { kind: 'platform', companyId: null },
+    }));
+  });
+
+  it('definido (mesmo null): filtro interno de empresa some, scope usa o valor externo', () => {
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} externalCompanyFilterId={null} />);
+    expect(screen.queryByLabelText('Filtrar por empresa')).toBeNull();
+    expect(m.useCompanyUsers).toHaveBeenLastCalledWith(expect.objectContaining({
+      scope: { kind: 'platform', companyId: null },
+    }));
+  });
+
+  it('definido como empresa específica: scope reflete o valor externo', () => {
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} externalCompanyFilterId="company-a" />);
+    expect(m.useCompanyUsers).toHaveBeenLastCalledWith(expect.objectContaining({
+      scope: { kind: 'platform', companyId: 'company-a' },
+    }));
+  });
+
+  it('controlado externamente: useCompanies interno é desativado (nunca duplica a busca de empresas)', () => {
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} externalCompanyFilterId="company-a" />);
+    expect(m.useCompanies).toHaveBeenLastCalledWith(expect.objectContaining({ authorized: false }));
+  });
+
+  it('Manager: externalCompanyFilterId nunca aparece (escopo sempre company, próprio actor.companyId)', () => {
+    render(<ActiveUserList userId="user-2" actor={MANAGER} externalCompanyFilterId="company-b" />);
+    expect(m.useCompanyUsers).toHaveBeenLastCalledWith(expect.objectContaining({
+      scope: { kind: 'company', companyId: 'company-a' },
+    }));
+  });
+});

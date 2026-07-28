@@ -273,3 +273,42 @@ describe('InactiveUserList — integração com os modais corretos por ação', 
     expect(document.activeElement).toBe(reactivateBtn);
   });
 });
+
+// ── M1-F S7-C — externalCompanyFilterId (filtro contextual compartilhado) ──
+
+describe('InactiveUserList — externalCompanyFilterId (S7-C)', () => {
+  it('omitido: comportamento antigo — filtro interno de empresa aparece, scope usa o estado local (null por padrão)', () => {
+    render(<InactiveUserList userId="admin-1" actor={SUPER_ADMIN} />);
+    expect(screen.getByLabelText('Filtrar por empresa')).toBeInTheDocument();
+    expect(m.useInactiveCompanyUsers).toHaveBeenLastCalledWith(expect.objectContaining({
+      scope: { kind: 'platform', companyId: null },
+    }));
+  });
+
+  it('definido (mesmo null): filtro interno de empresa some, scope usa o valor externo', () => {
+    render(<InactiveUserList userId="admin-1" actor={SUPER_ADMIN} externalCompanyFilterId={null} />);
+    expect(screen.queryByLabelText('Filtrar por empresa')).toBeNull();
+    expect(m.useInactiveCompanyUsers).toHaveBeenLastCalledWith(expect.objectContaining({
+      scope: { kind: 'platform', companyId: null },
+    }));
+  });
+
+  it('definido como empresa específica: scope reflete o valor externo', () => {
+    render(<InactiveUserList userId="admin-1" actor={SUPER_ADMIN} externalCompanyFilterId="company-a" />);
+    expect(m.useInactiveCompanyUsers).toHaveBeenLastCalledWith(expect.objectContaining({
+      scope: { kind: 'platform', companyId: 'company-a' },
+    }));
+  });
+
+  it('controlado externamente: useCompanies interno é desativado (nunca duplica a busca de empresas)', () => {
+    render(<InactiveUserList userId="admin-1" actor={SUPER_ADMIN} externalCompanyFilterId="company-a" />);
+    expect(m.useCompanies).toHaveBeenLastCalledWith(expect.objectContaining({ authorized: false }));
+  });
+
+  it('Manager: externalCompanyFilterId nunca aparece (escopo sempre company, próprio actor.companyId)', () => {
+    render(<InactiveUserList userId="manager-1" actor={MANAGER} externalCompanyFilterId="company-b" />);
+    expect(m.useInactiveCompanyUsers).toHaveBeenLastCalledWith(expect.objectContaining({
+      scope: { kind: 'company', companyId: 'company-a' },
+    }));
+  });
+});

@@ -419,3 +419,30 @@ describe('InviteList — segurança', () => {
     expect(document.body.innerHTML).not.toContain('access-token-x');
   });
 });
+
+// ── M1-F S7-C — externalCompanyFilterId (filtro contextual compartilhado) ──
+
+describe('InviteList — externalCompanyFilterId (S7-C)', () => {
+  it('omitido: useInvites recebe companyFilterId=undefined (comportamento antigo preservado)', () => {
+    render(<InviteList userId="user-1" actor={SUPER_ADMIN} />);
+    expect(m.useInvites).toHaveBeenCalledWith(expect.objectContaining({ companyFilterId: undefined }));
+  });
+
+  it('definido como null: useInvites recebe companyFilterId=null (visão global explícita)', () => {
+    render(<InviteList userId="user-1" actor={SUPER_ADMIN} externalCompanyFilterId={null} />);
+    expect(m.useInvites).toHaveBeenCalledWith(expect.objectContaining({ companyFilterId: null }));
+  });
+
+  it('definido como empresa específica: useInvites recebe o mesmo companyFilterId', () => {
+    render(<InviteList userId="user-1" actor={SUPER_ADMIN} externalCompanyFilterId="company-a" />);
+    expect(m.useInvites).toHaveBeenCalledWith(expect.objectContaining({ companyFilterId: 'company-a' }));
+  });
+
+  it('Manager: externalCompanyFilterId é repassado ao hook, mas o escopo continua company (o hook ignora o filtro nesse escopo)', () => {
+    render(<InviteList userId="user-2" actor={MANAGER} externalCompanyFilterId="company-b" />);
+    expect(m.useInvites).toHaveBeenCalledWith(expect.objectContaining({
+      scope: { kind: 'company', companyId: 'company-a' },
+      companyFilterId: 'company-b',
+    }));
+  });
+});

@@ -84,3 +84,44 @@ describe('adminInviteQueryKeys — entradas inválidas', () => {
     }
   });
 });
+
+// ── M1-F S7-C — companyFilterId (3º parâmetro opcional de .list()) ─────────
+
+describe('adminInviteQueryKeys — companyFilterId (S7-C)', () => {
+  it('omitido: key idêntica à de antes do S7-C (compatibilidade total)', () => {
+    expect(adminInviteQueryKeys.list('user-1', { kind: 'platform' })).toEqual([
+      'admin-invites', 'user-1', 'platform',
+    ]);
+  });
+
+  it('null: acrescenta o segmento estável "all"', () => {
+    expect(adminInviteQueryKeys.list('user-1', { kind: 'platform' }, null)).toEqual([
+      'admin-invites', 'user-1', 'platform', 'all',
+    ]);
+  });
+
+  it('empresa específica: acrescenta o companyId', () => {
+    expect(adminInviteQueryKeys.list('user-1', { kind: 'platform' }, 'company-a')).toEqual([
+      'admin-invites', 'user-1', 'platform', 'company-a',
+    ]);
+  });
+
+  it('escopo company: companyFilterId é ignorado, mesmo se informado', () => {
+    expect(adminInviteQueryKeys.list('user-1', { kind: 'company', companyId: 'company-a' }, 'company-b')).toEqual([
+      'admin-invites', 'user-1', 'company', 'company-a',
+    ]);
+  });
+
+  it('omitido / null / empresa A / empresa B nunca colidem entre si', () => {
+    const omitted = adminInviteQueryKeys.list('user-1', { kind: 'platform' });
+    const global = adminInviteQueryKeys.list('user-1', { kind: 'platform' }, null);
+    const companyA = adminInviteQueryKeys.list('user-1', { kind: 'platform' }, 'company-a');
+    const companyB = adminInviteQueryKeys.list('user-1', { kind: 'platform' }, 'company-b');
+    const all = [omitted, global, companyA, companyB];
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        expect(all[i]).not.toEqual(all[j]);
+      }
+    }
+  });
+});

@@ -254,3 +254,88 @@ describe('useInvites — isolamento por identidade e por escopo (cache partition
     expect(result.current.queryKey).toEqual(adminInviteQueryKeys.list('user-a', { kind: 'company', companyId: 'company-b' }));
   });
 });
+
+// ── M1-F S7-C — companyFilterId (filtro contextual, só escopo platform) ────
+
+describe('useInvites — companyFilterId (S7-C)', () => {
+  beforeEach(() => {
+    mocks.from.mockReset();
+  });
+
+  it('omitido (undefined): comportamento antigo preservado — nenhum .eq, key sem 4º segmento', async () => {
+    const { eq } = mockInvitesResponse({ data: [inviteRow()], error: null });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(
+      () => useInvites({ userId: 'user-1', authorized: true, scope: { kind: 'platform' } }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.hasData).toBe(true));
+    expect(eq).not.toHaveBeenCalled();
+    expect(result.current.queryKey).toEqual(['admin-invites', 'user-1', 'platform']);
+  });
+
+  it('null (visão global explícita): nenhum .eq, key com segmento "all"', async () => {
+    const { eq } = mockInvitesResponse({ data: [inviteRow()], error: null });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(
+      () => useInvites({ userId: 'user-1', authorized: true, scope: { kind: 'platform' }, companyFilterId: null }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.hasData).toBe(true));
+    expect(eq).not.toHaveBeenCalled();
+    expect(result.current.queryKey).toEqual(['admin-invites', 'user-1', 'platform', 'all']);
+  });
+
+  it('empresa específica: aplica .eq("company_id", companyFilterId) na própria consulta, key com o id', async () => {
+    const { eq } = mockInvitesResponse({ data: [inviteRow()], error: null });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(
+      () => useInvites({ userId: 'user-1', authorized: true, scope: { kind: 'platform' }, companyFilterId: 'company-a' }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.hasData).toBe(true));
+    expect(eq).toHaveBeenCalledWith('company_id', 'company-a');
+    expect(result.current.queryKey).toEqual(['admin-invites', 'user-1', 'platform', 'company-a']);
+  });
+
+  it('escopo company (Manager): companyFilterId é ignorado, mesmo se informado por engano', async () => {
+    const { eq } = mockInvitesResponse({ data: [inviteRow()], error: null });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(
+      () => useInvites({
+        userId: 'user-1', authorized: true,
+        scope: { kind: 'company', companyId: 'company-a' },
+        companyFilterId: 'company-b',
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.hasData).toBe(true));
+    // Só o companyId do escopo (Manager) é usado — nunca companyFilterId.
+    expect(eq).toHaveBeenCalledWith('company_id', 'company-a');
+    expect(eq).not.toHaveBeenCalledWith('company_id', 'company-b');
+    expect(result.current.queryKey).toEqual(['admin-invites', 'user-1', 'company', 'company-a']);
+  });
+
+  it('troca de empresa (mesmo usuário, escopo platform) produz keys distintas: undefined / null / A / B nunca colidem', () => {
+    mockInvitesResponse({ data: [], error: null });
+    const { wrapper } = createWrapper();
+    const { result, rerender } = renderHook(
+      ({ companyFilterId }: { companyFilterId?: string | null }) =>
+        useInvites({ userId: 'user-1', authorized: true, scope: { kind: 'platform' }, companyFilterId }),
+      { wrapper, initialProps: { companyFilterId: undefined as string | null | undefined } },
+    );
+    const keyUndefined = result.current.queryKey;
+
+    rerender({ companyFilterId: null });
+    const keyNull = result.current.queryKey;
+    expect(keyNull).not.toEqual(keyUndefined);
+
+    rerender({ companyFilterId: 'company-a' });
+    const keyA = result.current.queryKey;
+    expect(keyA).not.toEqual(keyNull);
+
+    rerender({ companyFilterId: 'company-b' });
+    const keyB = result.current.queryKey;
+    expect(keyB).not.toEqual(keyA);
+  });
+});
