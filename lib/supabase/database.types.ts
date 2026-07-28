@@ -1035,6 +1035,30 @@ export type Database = {
           profile_id: string
         }[]
       }
+      list_inactive_company_users: {
+        Args: {
+          p_company_id?: string
+          p_cursor_membership_id?: string
+          p_cursor_updated_at?: string
+          p_lifecycle?: Database["public"]["Enums"]["membership_lifecycle_status"]
+          p_limit?: number
+          p_role?: Database["public"]["Enums"]["company_role"]
+          p_search?: string
+        }
+        Returns: {
+          company_id: string
+          company_name: string
+          company_role: Database["public"]["Enums"]["company_role"]
+          created_at: string
+          email: string
+          is_active: boolean
+          lifecycle_status: Database["public"]["Enums"]["membership_lifecycle_status"]
+          membership_id: string
+          name: string
+          profile_id: string
+          updated_at: string
+        }[]
+      }
       move_lead_to_stage: {
         Args: {
           p_expected_version?: number
