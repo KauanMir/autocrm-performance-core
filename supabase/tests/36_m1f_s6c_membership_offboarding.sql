@@ -6,6 +6,17 @@
 -- invariantes (nenhum DELETE, profiles.is_active/platform_role/
 -- auth.users intocados) e integração com o restante do S6. Fixtures
 -- sintéticas @test.local, transação com rollback.
+--
+-- ATUALIZADO (M1-F S6-E2, 20260728130000_...): offboard_seller trocou
+-- p_successor_seller_id (text, sellers.id) por p_successor_membership_id
+-- (uuid, company_memberships.id) — decisão humana explícita, motivada pela
+-- ausência de fonte remota segura de sellers.id para o frontend (auditoria
+-- da etapa pausada S6-F). Toda chamada de offboard_seller neste arquivo que
+-- antes passava um seller_id text literal ('s6c-a1' etc.) agora passa o
+-- membership_id uuid correspondente. Sucessor também deixou de ser SEMPRE
+-- opcional: quando o alvo tem leads abertos, sucessor NULL agora levanta
+-- successor_required (novidade coberta na seção 5B). offboard_manager não
+-- muda.
 begin;
 create extension if not exists pgtap;
 select * from no_plan();
@@ -49,7 +60,8 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', '6c010000-0000-0000-0000-000000000024', 'authenticated', 'authenticated', 's6c-seller-successor-suspenso@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', '6c010000-0000-0000-0000-000000000031', 'authenticated', 'authenticated', 's6c-manager-solo@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', '6c010000-0000-0000-0000-000000000032', 'authenticated', 'authenticated', 's6c-seller-empresa-cancelada@test.local', now(), now(), now()),
-  ('00000000-0000-0000-0000-000000000000', '6c010000-0000-0000-0000-000000000033', 'authenticated', 'authenticated', 's6c-superadmin-alvo-manager@test.local', now(), now(), now());
+  ('00000000-0000-0000-0000-000000000000', '6c010000-0000-0000-0000-000000000033', 'authenticated', 'authenticated', 's6c-superadmin-alvo-manager@test.local', now(), now(), now()),
+  ('00000000-0000-0000-0000-000000000000', '6c010000-0000-0000-0000-000000000034', 'authenticated', 'authenticated', 's6c-seller-a4-com-lead@test.local', now(), now(), now());
 
 insert into public.profiles (id, name, email, role, is_active, platform_role) values
   ('6c010000-0000-0000-0000-000000000001', 'S6C Super Admin', 's6c-superadmin@test.local', 'seller', true, 'super_admin'),
@@ -71,7 +83,8 @@ insert into public.profiles (id, name, email, role, is_active, platform_role) va
   ('6c010000-0000-0000-0000-000000000024', 'S6C Seller Successor Suspenso', 's6c-seller-successor-suspenso@test.local', 'seller', true, null),
   ('6c010000-0000-0000-0000-000000000031', 'S6C Manager Solo', 's6c-manager-solo@test.local', 'manager', true, null),
   ('6c010000-0000-0000-0000-000000000032', 'S6C Seller Empresa Cancelada', 's6c-seller-empresa-cancelada@test.local', 'seller', true, null),
-  ('6c010000-0000-0000-0000-000000000033', 'S6C Super Admin Alvo Manager', 's6c-superadmin-alvo-manager@test.local', 'seller', true, 'super_admin');
+  ('6c010000-0000-0000-0000-000000000033', 'S6C Super Admin Alvo Manager', 's6c-superadmin-alvo-manager@test.local', 'seller', true, 'super_admin'),
+  ('6c010000-0000-0000-0000-000000000034', 'S6C Seller A4 Com Lead', 's6c-seller-a4-com-lead@test.local', 'seller', true, null);
 -- 6c010000-...-000021 (auth user sem profile) deliberadamente sem linha em profiles
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status, created_at) values
@@ -93,7 +106,8 @@ insert into public.company_memberships (id, company_id, profile_id, role, is_act
   ('6c030000-0000-0000-0000-000000000024', '6c020000-0000-0000-0000-000000000001', '6c010000-0000-0000-0000-000000000024', 'seller',  false, 'suspended', now()), -- sucessor suspenso (invalido)
   ('6c030000-0000-0000-0000-000000000031', '6c020000-0000-0000-0000-000000000006', '6c010000-0000-0000-0000-000000000031', 'manager', true,  'active',    now()), -- Manager Solo (empresa dedicada, ultimo manager)
   ('6c030000-0000-0000-0000-000000000032', '6c020000-0000-0000-0000-000000000003', '6c010000-0000-0000-0000-000000000032', 'seller',  true,  'active',    now()), -- empresa cancelada
-  ('6c030000-0000-0000-0000-000000000033', '6c020000-0000-0000-0000-000000000001', '6c010000-0000-0000-0000-000000000033', 'manager', true,  'active',    now()); -- Super Admin com membership real de MANAGER (alvo proibido, dedicado ao offboard_manager)
+  ('6c030000-0000-0000-0000-000000000033', '6c020000-0000-0000-0000-000000000001', '6c010000-0000-0000-0000-000000000033', 'manager', true,  'active',    now()), -- Super Admin com membership real de MANAGER (alvo proibido, dedicado ao offboard_manager)
+  ('6c030000-0000-0000-0000-000000000034', '6c020000-0000-0000-0000-000000000001', '6c010000-0000-0000-0000-000000000034', 'seller',  true,  'active',    now()); -- Seller A4, COM lead aberto (dedicado a successor_required, S6-E2)
 
 insert into public.sellers (id, company_id, membership_id, profile_id, name, first_name, is_active) values
   ('s6c-a1', '6c020000-0000-0000-0000-000000000001', '6c030000-0000-0000-0000-000000000002', '6c010000-0000-0000-0000-000000000003', 'S6C Seller A1', 'S6C', true),
@@ -102,7 +116,8 @@ insert into public.sellers (id, company_id, membership_id, profile_id, name, fir
   ('s6c-suspenso', '6c020000-0000-0000-0000-000000000001', '6c030000-0000-0000-0000-000000000013', '6c010000-0000-0000-0000-000000000013', 'S6C Seller Suspenso', 'S6C', false),
   ('s6c-offboarded', '6c020000-0000-0000-0000-000000000001', '6c030000-0000-0000-0000-000000000017', '6c010000-0000-0000-0000-000000000017', 'S6C Seller Offboarded', 'S6C', false),
   ('s6c-cat', '6c020000-0000-0000-0000-000000000001', '6c030000-0000-0000-0000-000000000022', '6c010000-0000-0000-0000-000000000022', 'S6C Seller Catalogo', 'S6C', true),
-  ('s6c-succ-suspenso', '6c020000-0000-0000-0000-000000000001', '6c030000-0000-0000-0000-000000000024', '6c010000-0000-0000-0000-000000000024', 'S6C Seller Successor Suspenso', 'S6C', false);
+  ('s6c-succ-suspenso', '6c020000-0000-0000-0000-000000000001', '6c030000-0000-0000-0000-000000000024', '6c010000-0000-0000-0000-000000000024', 'S6C Seller Successor Suspenso', 'S6C', false),
+  ('s6c-a4', '6c020000-0000-0000-0000-000000000001', '6c030000-0000-0000-0000-000000000034', '6c010000-0000-0000-0000-000000000034', 'S6C Seller A4 Com Lead', 'S6C', true);
 
 -- pipeline_stages mínimo (necessário para o FK composta leads(company_id, stage_id))
 insert into public.pipeline_stages (id, company_id, code, name, sort_order)
@@ -113,6 +128,10 @@ insert into public.leads (id, company_id, name, phone, car, stage_id, seller_id,
   ('6c040000-0000-0000-0000-000000000001', '6c020000-0000-0000-0000-000000000001', 'Cliente Aberto 1', '(11) 90000-0001', 'Carro 1', '6c050000-0000-0000-0000-000000000001', 's6c-a1', null),
   ('6c040000-0000-0000-0000-000000000002', '6c020000-0000-0000-0000-000000000001', 'Cliente Aberto 2', '(11) 90000-0002', 'Carro 2', '6c050000-0000-0000-0000-000000000001', 's6c-a1', null),
   ('6c040000-0000-0000-0000-000000000003', '6c020000-0000-0000-0000-000000000001', 'Cliente Arquivado', '(11) 90000-0003', 'Carro 3', '6c050000-0000-0000-0000-000000000001', 's6c-a1', now());
+
+-- lead aberto de Seller A4 — dedicado ao teste de successor_required (S6-E2)
+insert into public.leads (id, company_id, name, phone, car, stage_id, seller_id, archived_at) values
+  ('6c040000-0000-0000-0000-000000000004', '6c020000-0000-0000-0000-000000000001', 'Cliente A4 Aberto', '(11) 90000-0004', 'Carro 4', '6c050000-0000-0000-0000-000000000001', 's6c-a4', null);
 
 -- ══════════════════════════════════════════════════════════════════════
 -- 1. SCHEMA/CATÁLOGO
@@ -126,13 +145,13 @@ select is(
   1, 'offboard_manager existe exatamente uma vez (sem overload)');
 
 select is(
-  (select p.prosecdef from pg_proc p where p.oid = 'public.offboard_seller(uuid,text,text)'::regprocedure),
+  (select p.prosecdef from pg_proc p where p.oid = 'public.offboard_seller(uuid,uuid,text)'::regprocedure),
   true, 'offboard_seller: SECURITY DEFINER');
 select is(
-  (select pg_get_userbyid(p.proowner) from pg_proc p where p.oid = 'public.offboard_seller(uuid,text,text)'::regprocedure),
+  (select pg_get_userbyid(p.proowner) from pg_proc p where p.oid = 'public.offboard_seller(uuid,uuid,text)'::regprocedure),
   'postgres', 'offboard_seller: owner postgres');
 select is(
-  (select p.proconfig from pg_proc p where p.oid = 'public.offboard_seller(uuid,text,text)'::regprocedure),
+  (select p.proconfig from pg_proc p where p.oid = 'public.offboard_seller(uuid,uuid,text)'::regprocedure),
   array['search_path=""'], 'offboard_seller: search_path fixo');
 select is(
   (select count(*)::int from information_schema.routine_privileges
@@ -319,27 +338,32 @@ select pg_temp.as_user('6c010000-0000-0000-0000-000000000001');
 
 -- próprio alvo como sucessor
 select throws_ok(
-  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', 's6c-a1', 'sucessor e o proprio alvo')$$,
+  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', '6c030000-0000-0000-0000-000000000002', 'sucessor e o proprio alvo')$$,
   'P0001', 'successor_invalid', 'offboard_seller: sucessor = proprio alvo -> successor_invalid');
 
--- sucessor de outra empresa
+-- sucessor de outra empresa (membership 007 = Seller B1, empresa B)
 select throws_ok(
-  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', 's6c-b1', 'sucessor de outra empresa')$$,
+  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', '6c030000-0000-0000-0000-000000000007', 'sucessor de outra empresa')$$,
   'P0001', 'successor_invalid', 'offboard_seller: sucessor de outra empresa -> successor_invalid');
 
--- sucessor suspenso
+-- sucessor suspenso (membership 024)
 select throws_ok(
-  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', 's6c-succ-suspenso', 'sucessor suspenso')$$,
+  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', '6c030000-0000-0000-0000-000000000024', 'sucessor suspenso')$$,
   'P0001', 'successor_invalid', 'offboard_seller: sucessor suspenso -> successor_invalid');
 
--- sucessor offboarded
+-- sucessor offboarded (membership 017)
 select throws_ok(
-  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', 's6c-offboarded', 'sucessor ja desligado')$$,
+  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', '6c030000-0000-0000-0000-000000000017', 'sucessor ja desligado')$$,
   'P0001', 'successor_invalid', 'offboard_seller: sucessor ja desligado -> successor_invalid');
 
--- sucessor inexistente
+-- sucessor com role manager (membership 020 = Manager A2 da mesma empresa)
 select throws_ok(
-  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', 's6c-nao-existe', 'sucessor inexistente')$$,
+  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', '6c030000-0000-0000-0000-000000000020', 'sucessor e manager, nao seller')$$,
+  'P0001', 'successor_invalid', 'offboard_seller: sucessor com role manager -> successor_invalid (S6-E2)');
+
+-- sucessor inexistente (uuid valido, nenhuma membership real)
+select throws_ok(
+  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', 'ffffffff-ffff-ffff-ffff-ffffffffffff', 'sucessor inexistente')$$,
   'P0001', 'successor_invalid', 'offboard_seller: sucessor inexistente -> successor_invalid');
 reset role;
 
@@ -354,13 +378,49 @@ select is(
   's6c-a1', 'offboard_seller: nenhum lead foi reatribuido por tentativas com sucessor invalido');
 
 -- ══════════════════════════════════════════════════════════════════════
+-- 5B. SUCESSOR OBRIGATÓRIO QUANDO HÁ LEADS ABERTOS (S6-E2, novo)
+-- ══════════════════════════════════════════════════════════════════════
+
+set local role authenticated;
+select pg_temp.as_user('6c010000-0000-0000-0000-000000000001');
+
+-- Seller A4 tem 1 lead aberto (fixture dedicada) — sucessor NULL falha
+select throws_ok(
+  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000034', null, 'tentativa sem sucessor, com lead aberto')$$,
+  'P0001', 'successor_required', 'offboard_seller: alvo com lead aberto e sucessor NULL -> successor_required (S6-E2)');
+reset role;
+select is(
+  (select lifecycle_status from public.company_memberships where id = '6c030000-0000-0000-0000-000000000034'),
+  'active'::public.membership_lifecycle_status, 'offboard_seller: Seller A4 permanece active apos successor_required');
+select is(
+  (select count(*)::int from public.audit_log where entity_id = '6c030000-0000-0000-0000-000000000034'),
+  0, 'offboard_seller: nenhuma auditoria para a tentativa que exigiu sucessor');
+select is(
+  (select seller_id from public.leads where id = '6c040000-0000-0000-0000-000000000004'),
+  's6c-a4', 'offboard_seller: lead de Seller A4 permanece com ele apos successor_required');
+
+-- mesmo Seller A4, agora com sucessor válido (Seller A3, membership 004): sucesso
+set local role authenticated;
+select pg_temp.as_user('6c010000-0000-0000-0000-000000000001');
+select lives_ok(
+  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000034', '6c030000-0000-0000-0000-000000000004', 'Seller A4 saiu, lead para Seller A3')$$,
+  'offboard_seller: Seller A4 desligado com sucessor valido, apos successor_required anterior');
+reset role;
+select is(
+  (select lifecycle_status from public.company_memberships where id = '6c030000-0000-0000-0000-000000000034'),
+  'offboarded'::public.membership_lifecycle_status, 'offboard_seller: Seller A4: active -> offboarded');
+select is(
+  (select seller_id from public.leads where id = '6c040000-0000-0000-0000-000000000004'),
+  's6c-a3', 'offboard_seller: lead de Seller A4 reatribuido ao sucessor apos segunda tentativa');
+
+-- ══════════════════════════════════════════════════════════════════════
 -- 6. OFFBOARD_SELLER — ciclo completo com sucessor válido
 -- ══════════════════════════════════════════════════════════════════════
 
 set local role authenticated;
 select pg_temp.as_user('6c010000-0000-0000-0000-000000000001');
 select lives_ok(
-  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', 's6c-a3', 'Seller A1 saiu da empresa, leads para Seller A3')$$,
+  $$select * from public.offboard_seller('6c030000-0000-0000-0000-000000000002', '6c030000-0000-0000-0000-000000000004', 'Seller A1 saiu da empresa, leads para Seller A3')$$,
   'Seller A1 desligado com sucessor valido');
 reset role;
 
@@ -700,13 +760,13 @@ select is(
 -- nenhum DELETE em nenhum ponto
 select is(
   (select count(*)::int from public.company_memberships where id::text like '6c030000-%'),
-  19, 'nenhuma linha de company_memberships desapareceu (19 fixtures)');
+  20, 'nenhuma linha de company_memberships desapareceu (20 fixtures, S6-E2 adicionou 034)');
 select is(
   (select count(*)::int from public.sellers where id like 's6c-%'),
-  7, 'nenhuma linha de sellers desapareceu (7 fixtures)');
+  8, 'nenhuma linha de sellers desapareceu (8 fixtures, S6-E2 adicionou s6c-a4)');
 select is(
   (select count(*)::int from public.leads where id::text like '6c040000-%'),
-  3, 'nenhum lead desapareceu (3 fixtures)');
+  4, 'nenhum lead desapareceu (4 fixtures, S6-E2 adicionou o lead de A4)');
 
 -- nenhum Manager histórico de seller (não existe neste arquivo, mas
 -- confirma que nenhum profile/platform_role foi tocado indevidamente)
