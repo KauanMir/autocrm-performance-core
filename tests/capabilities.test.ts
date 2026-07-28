@@ -5,6 +5,7 @@ import {
   canAccessStageSettings,
   canReorderPipelineStages,
   canManageInvites,
+  canAccessCommercialWorkspace,
   membershipLifecycleCapabilities,
   type MembershipLifecycleActor,
   type MembershipLifecycleTargetRow,
@@ -44,6 +45,38 @@ describe('canAccessStageSettings — M1-F S8-B1', () => {
     const legacyManager = { role: 'manager', platformRole: null, activeMembership: null } as const;
     expect(canAccessStageSettings(legacyAdmin)).toBe(false);
     expect(canAccessStageSettings(legacyManager)).toBe(false);
+  });
+});
+
+describe('canAccessCommercialWorkspace — M1-F S8-C2-B2', () => {
+  it('Super Admin acessa o workspace comercial, mesmo sem membership', () => {
+    expect(canAccessCommercialWorkspace(superAdmin)).toBe(true);
+  });
+  it('Manager com membership ATIVA acessa o workspace comercial', () => {
+    expect(canAccessCommercialWorkspace(activeManager)).toBe(true);
+  });
+  it('Seller com membership ATIVA acessa o workspace comercial', () => {
+    expect(canAccessCommercialWorkspace(activeSeller)).toBe(true);
+  });
+  it('sem membership e sem platformRole: não acessa', () => {
+    expect(canAccessCommercialWorkspace(managerNoMembership)).toBe(false);
+  });
+  it('usuário null/undefined: não acessa', () => {
+    expect(canAccessCommercialWorkspace(null)).toBe(false);
+    expect(canAccessCommercialWorkspace(undefined)).toBe(false);
+  });
+  it('role legado "admin"/"manager"/"seller" isolado (sem platformRole/activeMembership) NUNCA concede acesso — a capability nem lê o campo', () => {
+    const legacyAdmin = { role: 'admin', platformRole: null, activeMembership: null } as const;
+    const legacyManager = { role: 'manager', platformRole: null, activeMembership: null } as const;
+    const legacySeller = { role: 'seller', platformRole: null, activeMembership: null } as const;
+    expect(canAccessCommercialWorkspace(legacyAdmin)).toBe(false);
+    expect(canAccessCommercialWorkspace(legacyManager)).toBe(false);
+    expect(canAccessCommercialWorkspace(legacySeller)).toBe(false);
+  });
+  it('a decisão nunca depende de nenhuma feature flag — combinação é sempre do chamador', () => {
+    // A própria assinatura não aceita flag alguma; este teste documenta a
+    // garantia por ausência de parâmetro (nada a "ligar/desligar" aqui).
+    expect(canAccessCommercialWorkspace.length).toBe(1);
   });
 });
 

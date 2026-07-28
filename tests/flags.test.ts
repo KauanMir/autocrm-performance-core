@@ -10,6 +10,7 @@ import {
   isUserEmailEditEnabled,
   isUserLifecycleEnabled,
   isCompanySelectorEnabled,
+  isSuperAdminCommercialReadEnabled,
   REMOTE_LEADS_DEV_OVERRIDE_KEY,
   REMOTE_STAGES_DEV_OVERRIDE_KEY,
   PLATFORM_ADMIN_DEV_OVERRIDE_KEY,
@@ -17,6 +18,7 @@ import {
   USER_EMAIL_EDIT_DEV_OVERRIDE_KEY,
   USER_LIFECYCLE_DEV_OVERRIDE_KEY,
   COMPANY_SELECTOR_DEV_OVERRIDE_KEY,
+  SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY,
 } from '@/lib/flags';
 
 const ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_STAGES';
@@ -93,6 +95,16 @@ function setCompanySelectorEnv(nodeEnv: string, flagValue?: string) {
     vi.stubEnv(COMPANY_SELECTOR_ENV_KEY, undefined as unknown as string);
   } else {
     vi.stubEnv(COMPANY_SELECTOR_ENV_KEY, flagValue);
+  }
+}
+
+const SUPER_ADMIN_COMMERCIAL_READ_ENV_KEY = 'NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_READ';
+function setSuperAdminCommercialReadEnv(nodeEnv: string, flagValue?: string) {
+  vi.stubEnv('NODE_ENV', nodeEnv);
+  if (flagValue === undefined) {
+    vi.stubEnv(SUPER_ADMIN_COMMERCIAL_READ_ENV_KEY, undefined as unknown as string);
+  } else {
+    vi.stubEnv(SUPER_ADMIN_COMMERCIAL_READ_ENV_KEY, flagValue);
   }
 }
 
@@ -1091,5 +1103,95 @@ describe('isolamento da flag de filtro de empresa em relação às demais', () =
     vi.stubEnv(COMPANY_SELECTOR_ENV_KEY, 'true');
     expect(isActiveUsersEnabled()).toBe(false);
     expect(isCompanySelectorEnabled()).toBe(true);
+  });
+});
+
+// M1-F S8-C2-B2 — leitura comercial do Super Admin.
+describe('isSuperAdminCommercialReadEnabled — valor do ambiente', () => {
+  it('variável ausente ⇒ false (OFF por padrão)', () => {
+    setSuperAdminCommercialReadEnv('production');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(false);
+  });
+
+  it('"false" ⇒ false', () => {
+    setSuperAdminCommercialReadEnv('production', 'false');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(false);
+  });
+
+  it('"true" ⇒ true', () => {
+    setSuperAdminCommercialReadEnv('production', 'true');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(true);
+  });
+
+  it('valores inválidos ⇒ false', () => {
+    for (const invalid of ['1', 'yes', 'on', '', 'enabled']) {
+      setSuperAdminCommercialReadEnv('production', invalid);
+      expect(isSuperAdminCommercialReadEnabled()).toBe(false);
+    }
+  });
+
+  it('comparação é estrita e case-sensitive ("TRUE"/"True" não ativam)', () => {
+    for (const invalid of ['TRUE', 'True', ' true', 'true ']) {
+      setSuperAdminCommercialReadEnv('production', invalid);
+      expect(isSuperAdminCommercialReadEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('isSuperAdminCommercialReadEnabled — development (override via localStorage)', () => {
+  it('env false + override "true" ⇒ true', () => {
+    setSuperAdminCommercialReadEnv('development', 'false');
+    window.localStorage.setItem(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY, 'true');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(true);
+  });
+
+  it('env true + override "false" ⇒ false', () => {
+    setSuperAdminCommercialReadEnv('development', 'true');
+    window.localStorage.setItem(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY, 'false');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(false);
+  });
+
+  it('override ausente ⇒ usa o env', () => {
+    setSuperAdminCommercialReadEnv('development', 'true');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(true);
+
+    setSuperAdminCommercialReadEnv('development', 'false');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(false);
+  });
+});
+
+describe('isSuperAdminCommercialReadEnabled — production (localStorage ignorado)', () => {
+  it('override "true" com env false ⇒ continua false', () => {
+    setSuperAdminCommercialReadEnv('production', 'false');
+    window.localStorage.setItem(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY, 'true');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(false);
+  });
+});
+
+describe('isolamento da flag comercial do Super Admin em relação às demais', () => {
+  it('a chave de override é distinta de todas as outras', () => {
+    expect(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY).toBe('autocrm_ff_super_admin_commercial_read');
+    expect(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY).not.toBe(COMPANY_SELECTOR_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY).not.toBe(REMOTE_STAGES_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY).not.toBe(REMOTE_LEADS_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY).not.toBe(PLATFORM_ADMIN_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY).not.toBe(ACTIVE_USERS_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY).not.toBe(USER_EMAIL_EDIT_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY).not.toBe(USER_LIFECYCLE_DEV_OVERRIDE_KEY);
+  });
+
+  it('env/override da flag comercial nunca afeta as demais flags (e vice-versa)', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(ACTIVE_USERS_ENV_KEY, 'true');
+    vi.stubEnv(SUPER_ADMIN_COMMERCIAL_READ_ENV_KEY, 'false');
+    window.localStorage.setItem(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY, 'true');
+    expect(isActiveUsersEnabled()).toBe(true);
+    expect(isSuperAdminCommercialReadEnabled()).toBe(true);
+
+    window.localStorage.clear();
+    vi.stubEnv(ACTIVE_USERS_ENV_KEY, 'false');
+    vi.stubEnv(SUPER_ADMIN_COMMERCIAL_READ_ENV_KEY, 'true');
+    expect(isActiveUsersEnabled()).toBe(false);
+    expect(isSuperAdminCommercialReadEnabled()).toBe(true);
   });
 });

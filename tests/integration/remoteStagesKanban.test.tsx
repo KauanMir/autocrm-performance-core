@@ -87,7 +87,13 @@ beforeEach(() => {
   m.flag.current = false;
   m.localNames.current = LOCAL_NAMES;
   m.leads.current = [lead('l1', 'Carlos Andrade', 'Novo'), lead('l2', 'Juliana Prado', 'Qualificado')];
-  m.user.current = { id: 'user-1', companyId: 'company-a', role: 'admin', sellerId: null, name: 'Admin', email: 'a@a.com' };
+  // M1-F S8-C2-B2: companyId do pipeline agora vem exclusivamente de
+  // activeMembership.companyId (achado 1 do S8-C2-A1) — companyId legado
+  // sozinho não basta mais para queryEnabled=true em ScreenAndamentoLegacy.
+  m.user.current = {
+    id: 'user-1', companyId: 'company-a', role: 'admin', sellerId: null, name: 'Admin', email: 'a@a.com',
+    activeMembership: { companyId: 'company-a', role: 'manager' },
+  };
 });
 
 describe('integração Kanban — flag OFF (caminho local intacto)', () => {
@@ -200,7 +206,10 @@ describe('integração Kanban — flag ON, outros estados', () => {
     await waitFor(() => expect(screen.getByTestId('kanban-grid')).toBeInTheDocument());
     a.unmount();
 
-    m.user.current = { ...m.user.current, id: 'user-2', companyId: 'company-b' };
+    m.user.current = {
+      ...m.user.current, id: 'user-2', companyId: 'company-b',
+      activeMembership: { companyId: 'company-b', role: 'manager' },
+    };
     mockQuery({ data: [], error: null });
     renderWithQueryClient(<ScreenAndamento go={() => {}} />, shared);
     await waitFor(() => expect(screen.getByTestId('kanban-state-empty')).toBeInTheDocument());

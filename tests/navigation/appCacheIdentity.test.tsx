@@ -4,6 +4,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { User } from '@/lib/data';
 
 beforeEach(() => {
@@ -78,10 +79,22 @@ function lastIdentity() {
   return calls[calls.length - 1][0];
 }
 
+// M1-F S8-C2-B2: App agora monta CommercialCompanyProvider (useQueryClient())
+// para todo usuário autenticado — precisa de um QueryClientProvider ancestor,
+// mesmo padrão já usado em tests/navigation/platformAdminAccess.test.tsx.
+function renderApp() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>,
+  );
+}
+
 describe('App → useQueryCacheIdentity', () => {
   it('usuário null fornece identidade vazia; usuário autenticado fornece id/companyId/isActive', async () => {
     m.restoredUser.current = null;
-    render(<App />);
+    renderApp();
     // Ainda no gate de loading, o App já chamou o hook com identidade vazia.
     expect(lastIdentity()).toEqual({
       userId: null, platformRole: null, companyId: null, membershipRole: null, hasActiveMembership: false, isActive: false,
@@ -106,7 +119,7 @@ describe('App → useQueryCacheIdentity', () => {
   it('troca de usuário atualiza os valores fornecidos (flag OFF não interfere)', async () => {
     const admin = user('admin', 'user-admin', 'company-a');
     m.restoredUser.current = admin;
-    render(<App />);
+    renderApp();
     await waitFor(() =>
       expect(lastIdentity()).toEqual({
         userId: 'user-admin', platformRole: null, companyId: 'company-a', membershipRole: 'manager', hasActiveMembership: true, isActive: true,
