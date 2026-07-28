@@ -3594,3 +3594,117 @@ usuário) foi executada. **O S8-B1 está desbloqueado** — pode ser
 iniciado sem nenhuma decisão humana pendente de aprovação além do que
 já está congelado nesta seção. **M1-E E4 continua pausado** até o
 fechamento formal do S8 (§28.12).
+
+## 29. Decisões do S8-C1 — Profiles, Sellers e Pipeline
+
+Esta seção congela as decisões humanas aprovadas sobre a auditoria
+S8-C1-A0 (leitura direta de código-fonte, 2026-07-28) e delimita o
+que o S8-C1-A implementa nesta etapa versus o que fica para o futuro
+S8-C1-B. §0–§28 não foram alterados.
+
+### 29.1 Auditoria S8-C1-A0 — achados confirmados
+
+- **`profiles_select_company`** (`company_id = current_profile_company_id()
+  and is_manager_or_admin()`) não tem nenhum consumidor runtime
+  conhecido: grep de todo o repositório (fora de testes) mostra
+  exatamente um único acesso client-side a `public.profiles` —
+  `lib/services.ts::_loadProfile`, filtrado por `id = auth.uid()` (usa
+  só `profiles_select_own`). A listagem administrativa multi-perfil já
+  é inteiramente resolvida por `list_company_users`/
+  `list_inactive_company_users` (RPCs `SECURITY DEFINER`, S5-A2/S6-E).
+- **Exposição desnecessária confirmada**: a `GRANT SELECT` de
+  `public.profiles` para `authenticated` (migration
+  `20260721150000_m1f_s4c2c_login_profile_read.sql`) cobre `role`,
+  `seller_id` e `platform_role` — três colunas que `list_company_users`
+  deliberadamente **não** repassa ao chamador (design §22.5). Enquanto
+  `profiles_select_company` existisse, qualquer Manager podia obter
+  essas três colunas de colegas da própria empresa via REST direto,
+  contornando a omissão intencional da RPC. `profiles_select_own`
+  continua expondo essas mesmas colunas, mas só da própria linha —
+  nunca de terceiros — o que é o comportamento pretendido.
+- **`profiles_select_own` preservada integralmente** — único consumidor
+  real, sem qualquer achado de risco.
+- **As quatro policies legadas de `public.sellers`**
+  (`sellers_select_own`, `sellers_select_company`,
+  `sellers_insert_admin`, `sellers_update_admin`) são **estruturalmente
+  inalcançáveis desde a criação (M1-B)**: `public.sellers` nunca
+  recebeu nenhum `GRANT` (SELECT/INSERT/UPDATE/DELETE) para
+  `authenticated`/`anon` em nenhuma migration — fato já registrado no
+  próprio histórico do repositório (comentário da migration
+  `20260721150000_m1f_s4c2c_login_profile_read.sql`: *"public.sellers
+  ... NÃO recebe nada nesta migration: nenhum código client-side
+  consulta essas tabelas via PostgREST hoje"*). Confirmado por grep de
+  todo o código de aplicação: zero `.from('sellers')` em qualquer
+  lugar fora de testes SQL. Todo dado de Seller flui exclusivamente por
+  RPCs `SECURITY DEFINER` (`list_company_users`,
+  `list_inactive_company_users`, `current_profile_seller_id_for_company`,
+  e internamente nas RPCs de leads).
+
+### 29.2 Decisão — remover `profiles_select_company`
+
+**Aprovado**: `DROP POLICY profiles_select_company`. Nenhuma policy
+substituta é criada — a leitura e administração de terceiros
+continuam exclusivamente pelas RPCs estreitas já publicadas
+(`list_company_users`, `list_inactive_company_users`, RPCs de ciclo de
+vida). `profiles_select_own` permanece sem nenhuma alteração de
+expressão.
+
+### 29.3 Decisão — remover as quatro policies legadas de `sellers`
+
+**Aprovado**: `DROP POLICY` de `sellers_select_own`,
+`sellers_select_company`, `sellers_insert_admin`,
+`sellers_update_admin`. **Nenhuma policy nova é criada em substituição
+nesta etapa** — nem com os helpers legados, nem com os helpers novos
+do M1-F. `public.sellers` permanece com RLS habilitada e **zero
+policy** (mesma postura de dupla negação já usada e comprovada em
+`public.company_memberships` desde o S1: RLS habilitada + zero
+grant + zero policy = negado duas vezes). **Nenhum GRANT novo é
+concedido em `public.sellers`** para `authenticated`/`anon` — a
+exposição permanece exatamente a mesma de hoje (nenhuma). Se um
+consumidor real de leitura/escrita direta de `sellers` for aprovado no
+futuro, a migration que introduzir o GRANT deve introduzir a policy
+correta na mesma etapa — não antes.
+
+### 29.4 Pipeline separado para o S8-C1-B — decisão congelada
+
+**Super Admin não deve ler, editar ou reordenar pipeline de empresas
+clientes nesta fase.** Motivo (auditoria S8-C1-A0, §8/§9): a interface
+já deriva `companyId` exclusivamente de `activeMembership.companyId`
+para pipeline desde o S7-B, sem exceção para Super Admin; o filtro
+contextual de empresa do S7 nunca entra em Pipeline/Leads (§26.2,
+§26.10, §27.6, reafirmado aqui); não existe hoje nenhuma UI que peça
+"qual empresa" para operações de pipeline; e o S8 existe para remover
+dependências legadas, não para construir uma capacidade nova de Super
+Admin sobre dados operacionais de clientes.
+
+**Regra adicional para o S8-C1-B, não implementada nesta etapa**: as
+futuras policies de `pipeline_stages`/`reorder_pipeline_stages` **não
+devem usar isoladamente** `can_access_company(company_id)` nem
+`is_manager_or_platform(company_id)` como autorização suficiente —
+ambos os helpers autorizam Super Admin (por design, corretamente, para
+os casos em que Super Admin precisa de acesso de plataforma). A
+autorização de Pipeline deve exigir **contexto empresarial real por
+membership ativa**, excluindo Super Admin da via de autorização
+mesmo quando esses helpers retornariam `true` para ele. O desenho
+exato dessa regra (nova composição de helpers, ou checagem adicional
+explícita de `current_membership_company_id() is not null`) fica para
+a auditoria/decisão do S8-C1-B — **não decidido nem implementado
+aqui**.
+
+### 29.5 Escopo desta etapa (S8-C1-A)
+
+Implementa exclusivamente: migration aditiva removendo as cinco
+policies acima (1 de `profiles` + 4 de `sellers`); atualização
+coordenada dos dois testes SQL que afirmavam a existência/comportamento
+de `profiles_select_company`; um teste SQL novo dedicado ao estado
+resultante. Nenhuma migration antiga é modificada; nenhuma coluna,
+constraint, índice, trigger, RPC ou helper é alterado ou removido;
+nenhum grant novo é concedido; nenhuma operação remota é executada.
+
+### 29.6 Estado no momento deste registro
+
+HEAD imediatamente antes desta seção: `938cb267a7f5b7b72148a8dea0774a75d296d0b7`.
+**S8-C1-A ainda em implementação no restante desta tarefa** — o
+restante desta etapa (migration, testes, validação, commits, push)
+segue após o registro desta seção. S8-C1-B e S8-C2 não iniciados.
+M1-E E4 continua pausado até o fechamento formal do S8.
