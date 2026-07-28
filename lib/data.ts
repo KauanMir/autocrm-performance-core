@@ -31,8 +31,24 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  /** @deprecated M1-F S8-A0/S8-B1: legado (`profiles.role`). Nenhuma
+   * autorização nova pode ler este campo — capabilities de Ajustes/Etapas/
+   * reorder já migraram para `platformRole`/`activeMembership.role`
+   * (S8-B1); consumidores restantes são compatibilidade M0 (filtros locais
+   * de Tasks/Visits/Deals/Sales em `lib/services.ts`). Permanece no tipo
+   * até zero consumidor runtime restar (§28.5/§28.10 do design). */
   role: 'admin' | 'manager' | 'seller';
+  /** @deprecated M1-F S8-A0: legado (`profiles.seller_id`). Só serve hoje
+   * como bridge para o store local/mock de Sellers (`SellerService`,
+   * compatibilidade M0) — nunca autorização empresarial. Fronteira própria,
+   * condicionada à migração desses módulos locais (§28.6 do design). */
   sellerId: string | null;
+  /** @deprecated M1-F S8-A0: legado (`profiles.company_id`). Nenhuma
+   * autorização ou contexto empresarial novo pode ler este campo —
+   * pipeline já usa exclusivamente `activeMembership.companyId` desde
+   * S7-B, sem fallback. Consumidor restante: bridge de leads remotos
+   * (`lib/services.ts`, migração prevista para S8-B2). Permanece no tipo
+   * até zero consumidor runtime restar (§28.5/§28.10 do design). */
   companyId: string | null;
   // M1-F S3-B: platform_role da profile (independente de `role`/`companyId`
   // — um Super Admin não tem empresa). Opcional (não `| null` obrigatório)

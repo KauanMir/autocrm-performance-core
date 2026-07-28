@@ -5,23 +5,37 @@
 // continua em RLS, grants e na RPC.
 import type { User } from '@/lib/data';
 
-export type CapabilityUser = Pick<User, 'role'> | null | undefined;
+// M1-F S8-B1: migrado de User.role (legado) para platformRole/
+// activeMembership — mesma identidade já usada por canManageInvites/
+// canAccessPlatformAdmin desde S3-B/S4-F1. `role` nunca é lido por nenhuma
+// das três funções abaixo a partir desta etapa.
+export type CapabilityUser = Pick<User, 'platformRole' | 'activeMembership'> | null | undefined;
 
-// Ajustes completos (Empresa/Usuários/Etapas): só admin.
+function isActiveManager(user: CapabilityUser): boolean {
+  return user?.activeMembership?.role === 'manager';
+}
+
+// Ajustes completos (Empresa/Usuários/Etapas): exclusivo de Super Admin.
+// Manager (mesmo com membership ativa) nunca recebe esta superfície — só
+// Usuários (canManageInvites) e Etapas (canAccessStageSettings), nunca
+// Empresa (decisão congelada em §28.3 do design).
 export function canAccessFullSettings(user: CapabilityUser): boolean {
-  return user?.role === 'admin';
+  return user?.platformRole === 'super_admin';
 }
 
-// Área de Etapas: admin e manager. (A UI ainda exige a flag remota ON para o
-// manager — ver a regra de acesso efetivo na navegação.)
+// Área de Etapas: Super Admin (sempre) ou Manager com membership ATIVA. (A
+// UI ainda exige a flag remota ON para a superfície remota — ver a regra de
+// acesso efetivo na navegação.) Manager sem membership ativa e qualquer
+// role legado isolado nunca autorizam por si só.
 export function canAccessStageSettings(user: CapabilityUser): boolean {
-  return user?.role === 'admin' || user?.role === 'manager';
+  return user?.platformRole === 'super_admin' || isActiveManager(user);
 }
 
-// Reordenar etapas do pipeline: admin e manager. Espelha a policy/RPC do
-// banco (is_manager_or_admin) — mas quem decide de verdade é o servidor.
+// Reordenar etapas do pipeline: mesma matriz de canAccessStageSettings —
+// nunca companyId como autorização (companyId é só o escopo passado ao
+// hook, resolvido separadamente de activeMembership.companyId).
 export function canReorderPipelineStages(user: CapabilityUser): boolean {
-  return user?.role === 'admin' || user?.role === 'manager';
+  return user?.platformRole === 'super_admin' || isActiveManager(user);
 }
 
 // M1-F S3-B — área administrativa de empresas da KAPA: só Super Admin de
