@@ -4195,3 +4195,163 @@ operação remota executada.
 
 **O S8-C2-B2 está desbloqueado.** **M1-E E4 continua pausado** até o
 fechamento formal do S8 (S8-F).
+
+## 33. Implementação do S8-C2-B2 — frontend de leitura comercial
+
+Esta seção registra a implementação (não mais planejamento) do
+frontend de leitura comercial do Super Admin. §0–§32 não foram
+alterados.
+
+### 33.1 Divergência de arquitetura encontrada e decisão humana
+
+Auditoria do frontend real (obrigatória antes de qualquer código)
+encontrou uma divergência não prevista nos achados do S8-C2-A1:
+`ScreenClientes`/`ScreenAndamento` (`components/screens/ScreensOps.tsx`)
+e `FlowVerCliente` (`components/flows/FlowsShared.tsx`) são
+integralmente acoplados ao modelo local M0 (`LeadService`/
+`StoreAdapter`, tipo `Lead` com `urgency`/`timeline` em formato
+próprio) — nenhum deles consome a infraestrutura remota de Leads (nem
+as RPCs do M1-E, nem as 4 novas do S8-C2-B1). A ponte remota do M1-E
+(`lib/leads/bridge.ts`, E3) também nunca foi montada no `App`, e é
+estruturalmente incompatível com Super Admin (exige
+`activeMembership.companyId`, que ele nunca tem). Adaptar os quatro
+retornos reais para o formato mock exigiria inventar `urgency`/
+`health`/vendedor/etapa para dados que nunca tiveram esse conceito do
+lado do Super Admin.
+
+Decisão humana (registrada, não revisitável sem nova decisão): **nova
+superfície própria, somente leitura, para o Super Admin** — nenhum
+adaptador de formato, nenhuma alteração em `LeadService`/
+`StoreAdapter`/`LeadCard`/`PipeCard`/`FlowVerCliente`. As telas mock de
+Manager/Seller permanecem 100% intocadas; a superfície platform é uma
+árvore de componentes nova, montada por um switch explícito dentro de
+`ScreenClientes`/`ScreenAndamento`, nunca simultaneamente com a
+legada.
+
+### 33.2 Feature flag
+
+`NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_READ` (`lib/flags.ts`,
+`isSuperAdminCommercialReadEnabled()`), OFF por padrão, mesmo contrato
+de `resolveFlag`/override de desenvolvimento
+(`autocrm_ff_super_admin_commercial_read`) das flags existentes.
+Independente de todas as outras — Manager/Seller nunca a consultam.
+`NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_WRITE` continua não existindo
+(etapa futura).
+
+### 33.3 Capability
+
+`canAccessCommercialWorkspace(user)` (`lib/capabilities.ts`) — Super
+Admin sempre `true` (a combinação com a flag é do chamador, mesmo
+padrão de `canAccessStageSettings`); Manager/Seller `true` somente com
+`activeMembership.role` correspondente; sem identidade/membership,
+`false`. `User.role` legado nunca é lido.
+
+### 33.4 Contexto comercial estreito
+
+`CommercialCompanyProvider`/`useCommercialCompanyContext`
+(`lib/commercial/CommercialCompanyContext.tsx`) — `selectedCompanyId:
+string | null`, sem localStorage/sessionStorage/cookie/URL/Zustand.
+Montado **uma única vez** em `components/App.tsx`, envolvendo toda a
+área autenticada (acima da troca de tela) — a seleção sobrevive à
+navegação entre Clientes/Andamento. Reset automático quando
+`identityKey` (currentUser.id) muda (login/logout/troca de usuário).
+Na troca de empresa, cancela (`queryClient.cancelQueries`) as queries
+platform (`leads`/`pipeline-stages`) da empresa **anterior** — nunca
+`resetQueryCache()` global; a correção contra "resposta tardia
+cruzando empresa" nunca depende disso (garantida pela partição de
+query keys em si).
+
+### 33.5 Data layer (companies/leads/timeline/stages)
+
+`lib/commercial/repository.ts` chama exclusivamente as 4 RPCs do
+S8-C2-B1 (`list_commercial_companies`/`list_platform_leads_for_company`/
+`list_platform_lead_timeline`/`list_pipeline_stages_for_company`) via
+`supabase.rpc` — nenhum SELECT direto, nenhuma leitura de `sellers`
+(sem policy alguma desde o S8-C1-A, sem RPC própria nesta etapa).
+Hooks dedicados (`lib/hooks/useCommercialCompanies.ts`,
+`usePlatformLeads.ts`, `usePlatformLeadTimeline.ts`,
+`usePlatformPipelineStages.ts`), mesmo contrato `enabled`/Rules-of-Hooks
+dos hooks existentes (`useCompanies`/`useLeads`/`usePipelineStages`).
+Query keys (`lib/commercial/queryKeys.ts`) com segmento `'platform'`,
+isoladas do caminho RLS de Manager/Seller:
+
+```
+['platform-commercial', userId, 'companies']
+['company', companyId, 'leads', 'platform', 'active']
+['company', companyId, 'leads', 'platform', 'archived']
+['company', companyId, 'leads', 'platform', 'timeline', leadId]
+['company', companyId, 'pipeline-stages', 'platform']
+```
+
+Vendedor: `lib/commercial/leadDisplay.ts` nunca resolve nome — apenas
+"Sem vendedor"/"Vendedor atribuído" a partir de `seller_id` (nenhuma
+fonte segura existe nesta etapa; documentado como limitação
+conhecida, não bloqueante). Etapa: `stage_id` fora do índice recebido
+mostra "Etapa indisponível", nunca desaparece silenciosamente.
+
+### 33.6 Componentes platform (somente leitura)
+
+`components/commercial/`: `CommercialCompanySelector` (dropdown
+controlado, inclui as 4 empresas de status, nunca uma opção "todas");
+`CommercialWorkspaceHeader` (selector + selo "somente leitura",
+compartilhado pelas duas telas); `PlatformCommercialClientsView`
+("Clientes"); `PlatformCommercialPipelineView` ("Em progresso",
+colunas por etapa real, cards sem `draggable`/sem handler de drag,
+nunca chama `reorder_pipeline_stages`); `PlatformLeadDetails` (detalhe
++ timeline via `usePlatformLeadTimeline`, nenhum callback de
+mutation). Nenhum deles importa `LeadService`/`StoreAdapter`/o tipo
+`Lead` mock.
+
+### 33.7 Switch de superfície e correção do achado 1
+
+`ScreensOps.tsx`: os corpos antigos de `ScreenClientes`/
+`ScreenAndamento` foram renomeados para `ScreenClientesLegacy`/
+`ScreenAndamentoLegacy` (sem nenhuma alteração funcional/visual, exceto
+a correção abaixo) e `ScreenClientes`/`ScreenAndamento` passaram a ser
+componentes-roteador **sem hooks próprios** (Rules of Hooks — mesmo
+molde do `UsersTabSection` do S7-C): `platformRole==='super_admin' &&
+isSuperAdminCommercialReadEnabled()` monta a view platform; qualquer
+outro caso monta o corpo legado, intocado. Quando a view platform está
+montada, `LeadService`/`StoreAdapter`/a ponte remota single-tenant
+nunca são acionados (o componente legado simplesmente não é
+instanciado).
+
+Achado 1 do S8-C2-A1 corrigido dentro de `ScreenAndamentoLegacy`:
+`usePipelineStages` agora recebe `companyId:
+currentUser?.activeMembership?.companyId ?? null`, nunca mais
+`currentUser?.companyId` (legado). `lib/commercial/resolveCompanyId.ts`
+(`resolveCommercialCompanyId`) formaliza a regra geral (Super Admin →
+`selectedCompanyId`; Manager/Seller → `activeMembership.companyId`;
+nunca fallback cruzado) — usada como referência/testada isoladamente.
+
+### 33.8 Navegação (achado 2 corrigido)
+
+`components/App.tsx::allowedNavIds`: os ids `'clientes'`/`'andamento'`
+são removidos de `base` quando o ator é Super Admin (nunca mais
+herdados de `NAV_ROLES[user.role]` legado, que hoje resolve para
+`'admin'`) e só devolvidos via `canAccessCommercialWorkspace(user) &&
+isSuperAdminCommercialReadEnabled()`. Manager/Seller continuam
+recebendo os dois ids exatamente como sempre, via `base` — nenhuma
+mudança de comportamento, nenhuma dependência da flag nova.
+`CommercialCompanyProvider` é montado no mesmo componente, envolvendo
+`<Rail>`/`<main>`/`<TweaksPanel>`/`<FlowLayer>`.
+
+### 33.9 Validação local
+
+Revalidação SQL pura (nenhum arquivo `supabase/` tocado nesta etapa):
+36 migrations, SQL 42 arquivos/2154 testes, idêntico ao S8-C2-B1.
+TypeScript: 116 arquivos, **1699/1699** (1607 + 92 novos: flag,
+capability, resolver, leadDisplay, query keys, repository, contexto,
+os 4 hooks, navegação, switch de superfície). Build verde, 8/8
+páginas.
+
+### 33.10 Escopo preservado
+
+Nenhuma migration, RLS, RPC ou `database.types.ts` alterados. Nenhuma
+das 9 RPCs de mutation de leads tocada. `S8-C1-B`
+(`pipeline_stages`)/`S8-C1-A` (`profiles`/`sellers`) permanecem
+exatamente como publicados. Nenhuma mutação implementada nesta etapa
+(sem `audit_log`, sem flag WRITE). Nenhuma operação remota executada.
+
+**O S8-C2-C1/C2 e o S8-D permanecem não iniciados. M1-E E4 continua
+pausado** até o fechamento formal do S8 (S8-F).
