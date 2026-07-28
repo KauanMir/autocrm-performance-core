@@ -247,6 +247,14 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
   });
 
   it('admin flag ON: abas completas e reorder remoto permitido (canReorder=true no hook)', () => {
+    // M1-F S7-B: fixture desatualizado — este admin representa um usuário
+    // empresarial real com membership ativa (a asserção já espera
+    // companyId: 'company-a', vindo agora de activeMembership, nunca do
+    // legado). Alteração pontual só neste teste, nunca no fixture-base
+    // compartilhado (decisão humana explícita) — outros testes deste
+    // arquivo representam propositalmente um ator SEM membership ativa e
+    // não devem herdar este campo.
+    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-a', role: 'manager' } };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
     openEtapas();
     expect(screen.getByText('Empresa')).toBeInTheDocument();
@@ -413,5 +421,79 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     view.rerender(<ScreenAjustes go={() => {}} />);
     expect(screen.getByText('Usuários')).toBeInTheDocument();
     expect(screen.queryByText('Empresa')).toBeNull();
+  });
+});
+
+// ── F. M1-F S7-B — companyId do pipeline/reorder deriva EXCLUSIVAMENTE de
+//    activeMembership (correção dos dois consumidores legados) ─────────────
+// usePipelineStages/useReorderStages são chamados incondicionalmente no topo
+// do componente (Rules of Hooks) — não é preciso navegar para a aba Etapas
+// para inspecionar os argumentos recebidos.
+
+describe('ScreenAjustes — M1-F S7-B: companyId deriva de activeMembership, nunca do legado', () => {
+  it('activeMembership presente: os dois hooks recebem companyId da membership, mesmo com companyId legado DIFERENTE', () => {
+    m.user.current = {
+      ...m.user.current,
+      companyId: 'company-legacy-stale',
+      activeMembership: { companyId: 'company-real', role: 'manager' },
+    };
+    render(<ScreenAjustes go={() => {}} />);
+    expect(m.usePipelineStages).toHaveBeenLastCalledWith(
+      expect.objectContaining({ companyId: 'company-real' }),
+    );
+    expect(m.useReorderStages).toHaveBeenLastCalledWith(
+      expect.objectContaining({ companyId: 'company-real' }),
+    );
+  });
+
+  it('activeMembership ausente (null): companyId é null — o legado currentUser.companyId NUNCA é usado como fallback', () => {
+    m.user.current = {
+      ...m.user.current,
+      companyId: 'company-legacy-stale',
+      activeMembership: null,
+    };
+    render(<ScreenAjustes go={() => {}} />);
+    expect(m.usePipelineStages).toHaveBeenLastCalledWith(
+      expect.objectContaining({ companyId: null }),
+    );
+    expect(m.useReorderStages).toHaveBeenLastCalledWith(
+      expect.objectContaining({ companyId: null }),
+    );
+  });
+
+  it('Super Admin sem activeMembership: companyId é null (nunca ganha empresa via legado)', () => {
+    m.user.current = {
+      ...m.user.current,
+      role: 'seller',
+      companyId: 'company-legacy-stale',
+      platformRole: 'super_admin',
+      activeMembership: null,
+    };
+    render(<ScreenAjustes go={() => {}} />);
+    expect(m.usePipelineStages).toHaveBeenLastCalledWith(
+      expect.objectContaining({ companyId: null }),
+    );
+    expect(m.useReorderStages).toHaveBeenLastCalledWith(
+      expect.objectContaining({ companyId: null }),
+    );
+  });
+
+  it('mudança de membership de empresa A para empresa B (transferência) atualiza os dois hooks', () => {
+    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-a', role: 'manager' } };
+    const view = render(<ScreenAjustes go={() => {}} />);
+    expect(m.usePipelineStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: 'company-a' }));
+    expect(m.useReorderStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: 'company-a' }));
+
+    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-b', role: 'manager' } };
+    view.rerender(<ScreenAjustes go={() => {}} />);
+    expect(m.usePipelineStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: 'company-b' }));
+    expect(m.useReorderStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: 'company-b' }));
+  });
+
+  it('membership suspensa/desligada (activeMembership null) não fornece empresa ativa, mesmo com companyId legado presente', () => {
+    m.user.current = { ...m.user.current, activeMembership: null };
+    render(<ScreenAjustes go={() => {}} />);
+    expect(m.usePipelineStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: null }));
+    expect(m.useReorderStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: null }));
   });
 });

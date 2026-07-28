@@ -113,6 +113,17 @@ function user(role: User['role'], id = `u-${role}`): User {
   return { id, name: role, email: `${role}@a.com`, role, sellerId: null, companyId: 'company-a' };
 }
 
+// M1-F S7-B — helper DIRECIONADO (não altera o `user()` genérico, usado por
+// cenários que testam propositalmente ausência de acesso empresarial). Só
+// para os testes que exercitam o reorder REMOTO de verdade (RPC real): esse
+// caminho agora depende de activeMembership.companyId em ScreensBiz.tsx —
+// sem fallback para o companyId legado. Mapeamento idêntico ao backfill
+// real do M1-F S1 (admin/manager -> membership role 'manager').
+function userWithActiveMembership(role: User['role'], companyId = 'company-a', id = `u-${role}`): User {
+  const membershipRole: 'manager' | 'seller' = role === 'seller' ? 'seller' : 'manager';
+  return { ...user(role, id), activeMembership: { companyId, role: membershipRole } };
+}
+
 async function renderApp(initial: User | null) {
   m.restoredUser.current = initial;
   const queryClient = createTestQueryClient();
@@ -181,7 +192,7 @@ describe('fluxo de permissões — acesso por role e flag', () => {
   it('admin + flag ON: Ajustes completo e reorder remoto real por UUIDs via RPC', async () => {
     m.flag.current = true;
     mockSelect();
-    await renderApp(user('admin'));
+    await renderApp(userWithActiveMembership('admin'));
     fireEvent.click(navAjustes()!);
     expect(screen.getByRole('button', { name: 'Empresa' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Etapas' }));
@@ -203,18 +214,31 @@ describe('fluxo de permissões — acesso por role e flag', () => {
     expect(m.from).not.toHaveBeenCalled();
   });
 
-  it('manager + flag ON: somente a aba Etapas com reorder remoto; nenhuma outra configuração montada', async () => {
+  it('manager com membership ativa + flag ON: vê Usuários e Etapas (nunca Empresa); reorder remoto funciona ao navegar explicitamente para Etapas', async () => {
+    // M1-F S7-B: um Manager com activeMembership real (companyId vindo dela,
+    // nunca do legado currentUser.companyId) também vê a aba Usuários, por
+    // canManageInvites (§4-F1) — "somente Etapas" deixou de ser verdade
+    // assim que o pipeline passou a depender de uma membership real (o
+    // cenário antigo só existia via o consumo legado que este S7-B remove
+    // de propósito). A aba padrão pode não ser Etapas — por isso a
+    // navegação para Etapas agora é EXPLÍCITA.
     m.flag.current = true;
     mockSelect();
-    await renderApp(user('manager'));
-    await openAjustesRemote();
+    await renderApp(userWithActiveMembership('manager'));
+    fireEvent.click(navAjustes()!);
 
-    // Só Etapas: nem chips nem conteúdo de Empresa/Usuários.
+    // Matriz real de abas: Usuários e Etapas presentes; Empresa nunca
+    // (exclusiva de admin/fullSettingsAccess) — "Equipe" (título de
+    // InviteList) agora aparece legitimamente dentro de Usuários, então
+    // deixou de ser um proxy válido de "nenhum conteúdo administrativo".
+    expect(screen.getByRole('button', { name: 'Usuários' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Etapas' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Empresa' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Usuários' })).toBeNull();
     expect(screen.queryByText('Dados da loja')).toBeNull();
-    expect(screen.queryByText('Equipe')).toBeNull();
+
+    // Navegação explícita — Etapas não é presumida como aba padrão.
+    fireEvent.click(screen.getByRole('button', { name: 'Etapas' }));
+    await waitFor(() => expect(screen.getByTestId('stage-row-new')).toBeInTheDocument());
 
     dragTo('stage-row-new', 'stage-row-closing');
     await waitFor(() => expect(m.rpc).toHaveBeenCalledTimes(1));
@@ -245,7 +269,7 @@ describe('fluxo de permissões — acesso por role e flag', () => {
 });
 
 describe('fluxo de permissões — troca de usuário com Ajustes aberto', () => {
-  it('admin → manager com flag ON: a tela passa a mostrar somente Etapas', async () => {
+  it('admin → manager com flag ON: aba administrativa some; Manager com membership ativa vê Usuários/Etapas conforme a matriz real', async () => {
     m.flag.current = true;
     mockSelect();
     await renderApp(user('admin'));
@@ -253,12 +277,24 @@ describe('fluxo de permissões — troca de usuário com Ajustes aberto', () => 
     // Admin cai na aba default 'Empresa' com o conteúdo administrativo.
     expect(screen.getByText('Dados da loja')).toBeInTheDocument();
 
-    switchUser(user('manager'));
-    // Manager mantém a tela, mas o conteúdo administrativo desaparece.
-    await waitFor(() => expect(screen.getByTestId('stage-row-new')).toBeInTheDocument());
+    // M1-F S7-B: transição para Manager com activeMembership real (nunca só
+    // o role legado) — companyId coerente com a empresa de origem.
+    switchUser(userWithActiveMembership('manager'));
+
+    // Empresa nunca aparece para Manager. Usuários aparece por
+    // canManageInvites (membership ativa real, §4-F1) — "somente Etapas"
+    // deixou de ser verdade; não presumimos qual das duas é a aba padrão.
     expect(screen.queryByText('Dados da loja')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Empresa' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Usuários' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Usuários' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Etapas' })).toBeInTheDocument();
+
+    // Navegação explícita para Etapas confirma carregamento remoto e reorder.
+    fireEvent.click(screen.getByRole('button', { name: 'Etapas' }));
+    await waitFor(() => expect(screen.getByTestId('stage-row-new')).toBeInTheDocument());
+    dragTo('stage-row-new', 'stage-row-closing');
+    await waitFor(() => expect(m.rpc).toHaveBeenCalledTimes(1));
+    expect(m.reorderLocal).not.toHaveBeenCalled();
   });
 
   it('admin → manager com flag OFF: Ajustes removido e navegação volta para home', async () => {
@@ -276,14 +312,25 @@ describe('fluxo de permissões — troca de usuário com Ajustes aberto', () => 
   it('manager → seller com flag ON: conteúdo desmontado e handlers antigos inertes', async () => {
     m.flag.current = true;
     mockSelect();
-    await renderApp(user('manager'));
-    await openAjustesRemote();
+    // M1-F S7-B: Manager com membership ativa real (companyId da
+    // membership, nunca do legado). Etapas pode não ser a aba padrão (ver
+    // teste da matriz de abas acima) — navegação explícita antes de
+    // exercitar pipeline/reorder.
+    await renderApp(userWithActiveMembership('manager'));
+    fireEvent.click(navAjustes()!);
+    fireEvent.click(screen.getByRole('button', { name: 'Etapas' }));
+    await waitFor(() => expect(screen.getByTestId('stage-row-new')).toBeInTheDocument());
 
     // Guarda referências das linhas ANTES da troca.
     const oldRow = screen.getByTestId('stage-row-new');
     const oldTarget = screen.getByTestId('stage-row-closing');
 
-    switchUser(user('seller'));
+    // Transição para Seller — mesma empresa (permanência), papel muda para
+    // seller em activeMembership (nunca só o role legado). Seller nunca tem
+    // acesso a Ajustes/Etapas, independente de possuir membership real —
+    // preserva o objetivo original do teste (perda de acesso ao trocar de
+    // papel), sem inventar ausência de membership onde não é o cenário.
+    switchUser(userWithActiveMembership('seller'));
     expect(screen.queryByTestId('stage-row-new')).toBeNull();
     expect(navAjustes()).toBeNull();
     expect(screen.getByTestId('screen-home')).toBeInTheDocument();

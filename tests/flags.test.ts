@@ -9,12 +9,14 @@ import {
   isActiveUsersEnabled,
   isUserEmailEditEnabled,
   isUserLifecycleEnabled,
+  isCompanySelectorEnabled,
   REMOTE_LEADS_DEV_OVERRIDE_KEY,
   REMOTE_STAGES_DEV_OVERRIDE_KEY,
   PLATFORM_ADMIN_DEV_OVERRIDE_KEY,
   ACTIVE_USERS_DEV_OVERRIDE_KEY,
   USER_EMAIL_EDIT_DEV_OVERRIDE_KEY,
   USER_LIFECYCLE_DEV_OVERRIDE_KEY,
+  COMPANY_SELECTOR_DEV_OVERRIDE_KEY,
 } from '@/lib/flags';
 
 const ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_STAGES';
@@ -23,6 +25,7 @@ const PLATFORM_ADMIN_ENV_KEY = 'NEXT_PUBLIC_FF_PLATFORM_ADMIN';
 const ACTIVE_USERS_ENV_KEY = 'NEXT_PUBLIC_FF_ACTIVE_USERS';
 const USER_EMAIL_EDIT_ENV_KEY = 'NEXT_PUBLIC_FF_USER_EMAIL_EDIT';
 const USER_LIFECYCLE_ENV_KEY = 'NEXT_PUBLIC_FF_USER_LIFECYCLE';
+const COMPANY_SELECTOR_ENV_KEY = 'NEXT_PUBLIC_FF_COMPANY_SELECTOR';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -81,6 +84,15 @@ function setUserLifecycleEnv(nodeEnv: string, flagValue?: string) {
     vi.stubEnv(USER_LIFECYCLE_ENV_KEY, undefined as unknown as string);
   } else {
     vi.stubEnv(USER_LIFECYCLE_ENV_KEY, flagValue);
+  }
+}
+
+function setCompanySelectorEnv(nodeEnv: string, flagValue?: string) {
+  vi.stubEnv('NODE_ENV', nodeEnv);
+  if (flagValue === undefined) {
+    vi.stubEnv(COMPANY_SELECTOR_ENV_KEY, undefined as unknown as string);
+  } else {
+    vi.stubEnv(COMPANY_SELECTOR_ENV_KEY, flagValue);
   }
 }
 
@@ -932,5 +944,152 @@ describe('isolamento da flag de ciclo de vida em relação às demais (incl. ACT
     vi.stubEnv(USER_LIFECYCLE_ENV_KEY, 'true');
     expect(isActiveUsersEnabled()).toBe(false);
     expect(isUserLifecycleEnabled()).toBe(true);
+  });
+});
+
+// ── M1-F S7 — isCompanySelectorEnabled (mesmo contrato, chave/env próprias) ─
+
+describe('isCompanySelectorEnabled — valor do ambiente', () => {
+  it('variável ausente ⇒ false (OFF por padrão)', () => {
+    setCompanySelectorEnv('production');
+    expect(isCompanySelectorEnabled()).toBe(false);
+  });
+
+  it('"false" ⇒ false', () => {
+    setCompanySelectorEnv('production', 'false');
+    expect(isCompanySelectorEnabled()).toBe(false);
+  });
+
+  it('"true" ⇒ true', () => {
+    setCompanySelectorEnv('production', 'true');
+    expect(isCompanySelectorEnabled()).toBe(true);
+  });
+
+  it('valores inválidos ⇒ false', () => {
+    for (const invalid of ['1', 'yes', 'on', '', 'enabled']) {
+      setCompanySelectorEnv('production', invalid);
+      expect(isCompanySelectorEnabled()).toBe(false);
+    }
+  });
+
+  it('comparação é estrita e case-sensitive ("TRUE"/"True" não ativam)', () => {
+    for (const invalid of ['TRUE', 'True', ' true', 'true ']) {
+      setCompanySelectorEnv('production', invalid);
+      expect(isCompanySelectorEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('isCompanySelectorEnabled — development (override via localStorage)', () => {
+  it('env false + override "true" ⇒ true', () => {
+    setCompanySelectorEnv('development', 'false');
+    window.localStorage.setItem(COMPANY_SELECTOR_DEV_OVERRIDE_KEY, 'true');
+    expect(isCompanySelectorEnabled()).toBe(true);
+  });
+
+  it('env true + override "false" ⇒ false', () => {
+    setCompanySelectorEnv('development', 'true');
+    window.localStorage.setItem(COMPANY_SELECTOR_DEV_OVERRIDE_KEY, 'false');
+    expect(isCompanySelectorEnabled()).toBe(false);
+  });
+
+  it('override inválido ⇒ usa o env', () => {
+    setCompanySelectorEnv('development', 'true');
+    window.localStorage.setItem(COMPANY_SELECTOR_DEV_OVERRIDE_KEY, 'yes');
+    expect(isCompanySelectorEnabled()).toBe(true);
+
+    setCompanySelectorEnv('development', 'false');
+    window.localStorage.setItem(COMPANY_SELECTOR_DEV_OVERRIDE_KEY, '1');
+    expect(isCompanySelectorEnabled()).toBe(false);
+  });
+
+  it('override ausente ⇒ usa o env', () => {
+    setCompanySelectorEnv('development', 'true');
+    expect(isCompanySelectorEnabled()).toBe(true);
+
+    setCompanySelectorEnv('development', 'false');
+    expect(isCompanySelectorEnabled()).toBe(false);
+  });
+
+  it('localStorage lançando erro ⇒ usa o env sem propagar', () => {
+    setCompanySelectorEnv('development', 'true');
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    expect(isCompanySelectorEnabled()).toBe(true);
+
+    setCompanySelectorEnv('development', 'false');
+    expect(isCompanySelectorEnabled()).toBe(false);
+  });
+});
+
+describe('isCompanySelectorEnabled — production (localStorage ignorado)', () => {
+  it('env true ⇒ true', () => {
+    setCompanySelectorEnv('production', 'true');
+    expect(isCompanySelectorEnabled()).toBe(true);
+  });
+
+  it('env false ⇒ false', () => {
+    setCompanySelectorEnv('production', 'false');
+    expect(isCompanySelectorEnabled()).toBe(false);
+  });
+
+  it('override "true" com env false ⇒ continua false', () => {
+    setCompanySelectorEnv('production', 'false');
+    window.localStorage.setItem(COMPANY_SELECTOR_DEV_OVERRIDE_KEY, 'true');
+    expect(isCompanySelectorEnabled()).toBe(false);
+  });
+
+  it('override "false" com env true ⇒ continua true', () => {
+    setCompanySelectorEnv('production', 'true');
+    window.localStorage.setItem(COMPANY_SELECTOR_DEV_OVERRIDE_KEY, 'false');
+    expect(isCompanySelectorEnabled()).toBe(true);
+  });
+
+  it('localStorage.getItem NUNCA é chamado em produção (spy)', () => {
+    setCompanySelectorEnv('production', 'true');
+    const spy = vi.spyOn(Storage.prototype, 'getItem');
+    isCompanySelectorEnabled();
+    setCompanySelectorEnv('production', 'false');
+    isCompanySelectorEnabled();
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('isCompanySelectorEnabled — ambiente sem window (SSR)', () => {
+  it('sem window ⇒ usa o env sem lançar erro', () => {
+    setCompanySelectorEnv('development', 'true');
+    vi.stubGlobal('window', undefined);
+    expect(isCompanySelectorEnabled()).toBe(true);
+
+    setCompanySelectorEnv('development', 'false');
+    expect(isCompanySelectorEnabled()).toBe(false);
+  });
+});
+
+describe('isolamento da flag de filtro de empresa em relação às demais', () => {
+  it('a chave de override é distinta das outras seis', () => {
+    expect(COMPANY_SELECTOR_DEV_OVERRIDE_KEY).toBe('autocrm_ff_company_selector');
+    expect(COMPANY_SELECTOR_DEV_OVERRIDE_KEY).not.toBe(REMOTE_STAGES_DEV_OVERRIDE_KEY);
+    expect(COMPANY_SELECTOR_DEV_OVERRIDE_KEY).not.toBe(REMOTE_LEADS_DEV_OVERRIDE_KEY);
+    expect(COMPANY_SELECTOR_DEV_OVERRIDE_KEY).not.toBe(PLATFORM_ADMIN_DEV_OVERRIDE_KEY);
+    expect(COMPANY_SELECTOR_DEV_OVERRIDE_KEY).not.toBe(ACTIVE_USERS_DEV_OVERRIDE_KEY);
+    expect(COMPANY_SELECTOR_DEV_OVERRIDE_KEY).not.toBe(USER_EMAIL_EDIT_DEV_OVERRIDE_KEY);
+    expect(COMPANY_SELECTOR_DEV_OVERRIDE_KEY).not.toBe(USER_LIFECYCLE_DEV_OVERRIDE_KEY);
+  });
+
+  it('env/override do filtro de empresa nunca afeta as demais flags (e vice-versa)', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(ACTIVE_USERS_ENV_KEY, 'true');
+    vi.stubEnv(COMPANY_SELECTOR_ENV_KEY, 'false');
+    window.localStorage.setItem(COMPANY_SELECTOR_DEV_OVERRIDE_KEY, 'true');
+    expect(isActiveUsersEnabled()).toBe(true);
+    expect(isCompanySelectorEnabled()).toBe(true);
+
+    window.localStorage.clear();
+    vi.stubEnv(ACTIVE_USERS_ENV_KEY, 'false');
+    vi.stubEnv(COMPANY_SELECTOR_ENV_KEY, 'true');
+    expect(isActiveUsersEnabled()).toBe(false);
+    expect(isCompanySelectorEnabled()).toBe(true);
   });
 });

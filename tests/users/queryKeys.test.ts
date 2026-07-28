@@ -98,3 +98,21 @@ describe('companyUserQueryKeys — entradas inválidas', () => {
     }
   });
 });
+
+// ── M1-F S7-B — compatibilidade com o companyFilterId de useCompanyScopeFilter ─
+// companyFilterId (string | null) é atribuível direto a scope.companyId no
+// escopo 'platform' — visão global (null) e empresa A/B produzem keys
+// distintas, exatamente o contrato que o filtro contextual (S7) vai
+// consumir quando integrado (S7-C), sem exigir nenhum key builder novo.
+
+describe('companyUserQueryKeys — compatibilidade com companyFilterId (visão global vs. empresa A/B)', () => {
+  it('visão global (companyFilterId=null) e empresa A/B produzem keys distintas entre si', () => {
+    const global = companyUserQueryKeys.list('user-1', { kind: 'platform', companyId: null }, null, null);
+    const companyA = companyUserQueryKeys.list('user-1', { kind: 'platform', companyId: 'company-a' }, null, null);
+    const companyB = companyUserQueryKeys.list('user-1', { kind: 'platform', companyId: 'company-b' }, null, null);
+
+    expect(global).not.toEqual(companyA);
+    expect(companyA).not.toEqual(companyB);
+    expect(global).not.toEqual(companyB);
+  });
+});
