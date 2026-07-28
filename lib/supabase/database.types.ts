@@ -1015,6 +1015,14 @@ export type Database = {
         Returns: boolean
       }
       is_platform_super_admin: { Args: never; Returns: boolean }
+      list_commercial_companies: {
+        Args: never
+        Returns: {
+          id: string
+          name: string
+          status: Database["public"]["Enums"]["company_status"]
+        }[]
+      }
       list_company_users: {
         Args: {
           p_company_id?: string
@@ -1058,6 +1066,78 @@ export type Database = {
           profile_id: string
           updated_at: string
         }[]
+      }
+      list_pipeline_stages_for_company: {
+        Args: { p_company_id: string }
+        Returns: {
+          code: string
+          company_id: string
+          created_at: string
+          id: string
+          is_terminal: boolean
+          name: string
+          sort_order: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "pipeline_stages"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      list_platform_lead_timeline: {
+        Args: { p_company_id: string; p_lead_id: string }
+        Returns: {
+          actor_profile_id: string | null
+          color: string
+          company_id: string
+          created_at: string
+          detail: string | null
+          icon: string
+          id: string
+          label: string
+          lead_id: string
+          occurred_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "lead_timeline_entries"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      list_platform_leads_for_company: {
+        Args: { p_archived?: boolean; p_company_id: string }
+        Returns: {
+          alert_label: string | null
+          archived_at: string | null
+          car: string
+          company_id: string
+          created_at: string
+          created_by_profile_id: string | null
+          id: string
+          last_activity_label: string | null
+          name: string
+          payment_preference: string | null
+          phone: string
+          phone_digits: string | null
+          seller_id: string | null
+          source: string | null
+          stage_id: string
+          temperature: Database["public"]["Enums"]["lead_temperature"] | null
+          updated_at: string
+          updated_by_profile_id: string | null
+          urgency: Database["public"]["Enums"]["lead_urgency"]
+          value_amount: number | null
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "leads"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       move_lead_to_stage: {
         Args: {
@@ -1565,3 +1645,4 @@ export const Constants = {
     },
   },
 } as const
+
