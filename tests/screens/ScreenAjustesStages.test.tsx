@@ -112,6 +112,14 @@ beforeEach(() => {
 // ── A. Caminho local ─────────────────────────────────────────────────────
 
 describe('ScreenAjustes/Etapas — caminho local (flag OFF)', () => {
+  // M1-F S8-B1: canAccessFullSettings migrou de role='admin' (legado) para
+  // platformRole='super_admin' — estes testes cobrem o comportamento da
+  // aba Etapas em si (drag local), não a matriz de capabilities (isso é o
+  // bloco D), então representam o ator com acesso pleno via Super Admin.
+  beforeEach(() => {
+    m.user.current = { ...m.user.current, platformRole: 'super_admin' };
+  });
+
   it('usa a ordem local, reordena por NAMES via PipelineService e não chama a mutation', () => {
     openEtapas();
     expect(screen.getByTestId('stage-row-new')).toBeInTheDocument();
@@ -140,7 +148,10 @@ describe('ScreenAjustes/Etapas — caminho local (flag OFF)', () => {
 // ── B. Caminho remoto ────────────────────────────────────────────────────
 
 describe('ScreenAjustes/Etapas — caminho remoto (flag ON)', () => {
+  // M1-F S8-B1: mesma migração do bloco A — Super Admin representa o ator
+  // com acesso pleno de Etapas/reorder nestes testes de mecânica de drag.
   beforeEach(() => {
+    m.user.current = { ...m.user.current, platformRole: 'super_admin' };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
   });
 
@@ -196,7 +207,9 @@ describe('ScreenAjustes/Etapas — caminho remoto (flag ON)', () => {
   });
 
   it('seller: acesso negado, nenhuma linha de etapa e hook recebe canReorder=false', () => {
-    m.user.current = { ...m.user.current, role: 'seller' };
+    // platformRole explicitamente limpo — um Seller nunca é Super Admin
+    // (evita fixture estruturalmente impossível, §28.5 do design).
+    m.user.current = { ...m.user.current, role: 'seller', platformRole: null };
     const reorder = reorderResult();
     m.useReorderStages.mockReturnValue(reorder);
     render(<ScreenAjustes go={() => {}} />);
@@ -214,6 +227,11 @@ describe('ScreenAjustes/Etapas — caminho remoto (flag ON)', () => {
 // ── C. Estados remotos que bloqueiam reorder ─────────────────────────────
 
 describe('ScreenAjustes/Etapas — estados remotos bloqueiam reorder', () => {
+  // M1-F S8-B1: mesma migração dos blocos A/B.
+  beforeEach(() => {
+    m.user.current = { ...m.user.current, platformRole: 'super_admin' };
+  });
+
   const cases: Array<[string, Record<string, unknown>, string]> = [
     ['loading', { stages: [], isLoading: true, hasData: false }, 'Carregando etapas…'],
     ['error', { stages: [], isError: true, error: new Error('x'), hasData: false }, 'Não foi possível carregar as etapas.'],
@@ -236,7 +254,11 @@ describe('ScreenAjustes/Etapas — estados remotos bloqueiam reorder', () => {
 // ── D. Capabilities por role (commit 8) ──────────────────────────────────
 
 describe('ScreenAjustes — capabilities e abas permitidas', () => {
-  it('admin flag OFF: abas completas e Etapas local preservada', () => {
+  it('Super Admin flag OFF: abas completas e Etapas local preservada', () => {
+    // M1-F S8-B1: canAccessFullSettings migrou de role='admin' (legado) para
+    // platformRole='super_admin' — "abas completas" (Empresa/Usuários/
+    // Etapas) agora é superfície exclusiva de Super Admin.
+    m.user.current = { ...m.user.current, platformRole: 'super_admin' };
     render(<ScreenAjustes go={() => {}} />);
     expect(screen.getByText('Empresa')).toBeInTheDocument();
     expect(screen.getByText('Usuários')).toBeInTheDocument();
@@ -246,39 +268,50 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
     expect(screen.getByTestId('stage-row-qualified')).toHaveAttribute('draggable', 'true');
   });
 
-  it('admin flag ON: abas completas e reorder remoto permitido (canReorder=true no hook)', () => {
-    // M1-F S7-B: fixture desatualizado — este admin representa um usuário
-    // empresarial real com membership ativa (a asserção já espera
-    // companyId: 'company-a', vindo agora de activeMembership, nunca do
-    // legado). Alteração pontual só neste teste, nunca no fixture-base
-    // compartilhado (decisão humana explícita) — outros testes deste
-    // arquivo representam propositalmente um ator SEM membership ativa e
-    // não devem herdar este campo.
-    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-a', role: 'manager' } };
+  it('Super Admin flag ON: abas completas e reorder remoto permitido, mesmo sem membership (canReorder=true, companyId=null)', () => {
+    // M1-F S8-B1: Super Admin nunca tem activeMembership, por design — o
+    // pipeline nunca é autorizado por Super Admin sem membership real
+    // (§26.10/§27.6, inalterado por esta etapa): companyId chega null ao
+    // hook mesmo com canReorder=true. "Abas completas" é exclusivo de Super
+    // Admin agora — o teste equivalente para Manager real (que nunca vê
+    // Empresa) está logo abaixo.
+    m.user.current = { ...m.user.current, platformRole: 'super_admin', activeMembership: null };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
     openEtapas();
     expect(screen.getByText('Empresa')).toBeInTheDocument();
     expect(screen.getByTestId('stage-row-new')).toHaveAttribute('draggable', 'true');
     expect(m.useReorderStages).toHaveBeenCalledWith(
-      expect.objectContaining({ canReorder: true, companyId: 'company-a' }),
+      expect.objectContaining({ canReorder: true, companyId: null }),
     );
   });
 
-  it('manager flag ON: somente a aba Etapas, sem conteúdo administrativo montado', () => {
-    m.user.current = { ...m.user.current, role: 'manager' };
+  it('Manager com membership ATIVA, flag ON: Usuários e Etapas, nunca Empresa (superfície exclusiva de Super Admin)', () => {
+    // M1-F S8-B1: fixture desatualizado — manager real precisa de
+    // activeMembership (role legado isolado nunca concede nada). Consequência
+    // já estabelecida em S7-B/stagePermissionsFlow: um Manager com membership
+    // real legitimamente vê Usuários (canManageInvites) JUNTO com Etapas —
+    // "somente Etapas" deixou de ser um estado alcançável por um Manager real.
+    m.user.current = {
+      ...m.user.current,
+      role: 'manager',
+      activeMembership: { companyId: 'company-a', role: 'manager' },
+    };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
     const reorder = reorderResult();
     m.useReorderStages.mockReturnValue(reorder);
     render(<ScreenAjustes go={() => {}} />);
 
-    // Só o chip Etapas; nada de Empresa/Usuários nem seus conteúdos.
+    // Usuários E Etapas aparecem; Empresa nunca.
+    expect(screen.getByText('Usuários')).toBeInTheDocument();
     expect(screen.getByText('Etapas')).toBeInTheDocument();
     expect(screen.queryByText('Empresa')).toBeNull();
-    expect(screen.queryByText('Usuários')).toBeNull();
     expect(screen.queryByText('Dados da loja')).toBeNull();
-    expect(screen.queryByText('Equipe')).toBeNull();
 
-    // Aba Etapas já ativa por derivação síncrona (sem clique, sem flash).
+    // allowedTabs = [Usuários, Etapas] — activeTab cai para o primeiro item
+    // permitido (Usuários), nunca Etapas diretamente; navegação explícita
+    // necessária para inspecionar o drag (mesmo padrão já resolvido em
+    // stagePermissionsFlow.test.tsx no S7-B).
+    fireEvent.click(screen.getByText('Etapas'));
     expect(screen.getByTestId('stage-row-new')).toHaveAttribute('draggable', 'true');
     expect(m.useReorderStages).toHaveBeenCalledWith(
       expect.objectContaining({ canReorder: true }),
@@ -302,27 +335,49 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
     expect(m.reorderStagesLocal).not.toHaveBeenCalled();
   });
 
-  it('troca admin → manager: aba administrativa some imediatamente e manager cai em Etapas', () => {
+  it('troca Super Admin → Manager com membership ativa: aba administrativa (Empresa) some imediatamente, Manager cai em Usuários/Etapas', () => {
+    // M1-F S8-B1: fixture desatualizado — Super Admin via platformRole;
+    // Manager real precisa de activeMembership (role legado isolado não
+    // concede nada).
+    m.user.current = { ...m.user.current, platformRole: 'super_admin' };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
     const view = render(<ScreenAjustes go={() => {}} />);
-    // Admin na aba default 'Empresa'.
+    // Super Admin na aba default 'Empresa'.
     expect(screen.getByText('Dados da loja')).toBeInTheDocument();
 
-    m.user.current = { ...m.user.current, role: 'manager' };
+    m.user.current = {
+      ...m.user.current,
+      platformRole: null,
+      role: 'manager',
+      activeMembership: { companyId: 'company-a', role: 'manager' },
+    };
     view.rerender(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Dados da loja')).toBeNull();
-    expect(screen.getByTestId('stage-row-new')).toBeInTheDocument();
+    expect(screen.getByText('Usuários')).toBeInTheDocument();
+    expect(screen.getByText('Etapas')).toBeInTheDocument();
   });
 
-  it('troca manager → seller: todo o conteúdo some e nenhum handler antigo funciona', () => {
-    m.user.current = { ...m.user.current, role: 'manager' };
+  it('troca Manager (membership ativa) → Seller: todo o conteúdo some e nenhum handler antigo funciona', () => {
+    // M1-F S8-B1: fixture desatualizado — manager real precisa de
+    // activeMembership para o estado inicial ("tem acesso a Etapas") ser
+    // alcançável.
+    m.user.current = {
+      ...m.user.current,
+      role: 'manager',
+      activeMembership: { companyId: 'company-a', role: 'manager' },
+    };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
     const reorder = reorderResult();
     m.useReorderStages.mockReturnValue(reorder);
     const view = render(<ScreenAjustes go={() => {}} />);
+    fireEvent.click(screen.getByText('Etapas'));
     expect(screen.getByTestId('stage-row-new')).toBeInTheDocument();
 
-    m.user.current = { ...m.user.current, role: 'seller' };
+    m.user.current = {
+      ...m.user.current,
+      role: 'seller',
+      activeMembership: { companyId: 'company-a', role: 'seller' },
+    };
     view.rerender(<ScreenAjustes go={() => {}} />);
     expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
     expect(screen.queryByTestId('stage-row-new')).toBeNull();
@@ -374,7 +429,13 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
   });
 
-  it('Super Admin (platformRole=super_admin) vê Usuários, mesmo sem companyId/membership', () => {
+  it('Super Admin (platformRole=super_admin) vê Usuários — e, desde S8-B1, também Empresa/Etapas (fullSettingsAccess) — mesmo sem companyId/membership', () => {
+    // M1-F S8-B1: canAccessFullSettings migrou para platformRole —
+    // "abas completas" deixou de exigir role='admin' legado e passou a
+    // acompanhar exatamente o mesmo sinal que já autorizava Usuários aqui
+    // (canManageInvites via platformRole). Antes desta etapa, Super Admin
+    // via canManageInvites via platformRole via role legado — este era
+    // precisamente o gap que a migração fecha (§28.3 do design).
     m.user.current = {
       ...m.user.current,
       role: 'seller',
@@ -385,8 +446,8 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     render(<ScreenAjustes go={() => {}} />);
 
     expect(screen.getByText('Usuários')).toBeInTheDocument();
-    expect(screen.queryByText('Empresa')).toBeNull();
-    expect(screen.queryByText('Etapas')).toBeNull();
+    expect(screen.getByText('Empresa')).toBeInTheDocument();
+    expect(screen.getByText('Etapas')).toBeInTheDocument();
   });
 
   it('Seller (activeMembership.role=seller) nunca vê Usuários nem nenhum outro controle administrativo', () => {
@@ -403,8 +464,10 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
   });
 
-  it('admin (canAccessFullSettings) continua vendo Empresa+Usuários+Etapas juntos, sem depender de canManageInvites', () => {
-    m.user.current = { ...m.user.current, role: 'admin', activeMembership: null };
+  it('Super Admin (canAccessFullSettings) vê Empresa+Usuários+Etapas juntos', () => {
+    // M1-F S8-B1: fixture desatualizado — canAccessFullSettings migrou de
+    // role='admin' (legado) para platformRole='super_admin'.
+    m.user.current = { ...m.user.current, role: 'admin', platformRole: 'super_admin', activeMembership: null };
     render(<ScreenAjustes go={() => {}} />);
 
     expect(screen.getByText('Empresa')).toBeInTheDocument();

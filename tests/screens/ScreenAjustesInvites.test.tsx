@@ -111,11 +111,20 @@ describe('ScreenAjustes — quem vê a área Usuários (M1-F S4-F2/S4-F3)', () =
     expect(screen.queryByTestId('invite-list-stub')).toBeNull();
   });
 
-  it('admin legado (canAccessFullSettings) SEM Super Admin/membership de manager real: vê a aba, InviteList recebe actor=null (não renderiza nada por dentro)', () => {
+  it('M1-F S8-B1: role legado "admin" isolado (sem platformRole/activeMembership) não vê NENHUMA aba, nem Usuários — canAccessFullSettings migrou e não lê mais role', () => {
+    // Fixture desatualizado por construção: antes desta migração,
+    // canAccessFullSettings(role==='admin') bundlava a aba Usuários mesmo
+    // sem actor resolvível, forçando InviteList a receber actor=null como
+    // defesa em profundidade. Após S8-B1 esse estado intermediário é
+    // estruturalmente impossível — quem tem fullSettingsAccess é sempre
+    // platformRole==='super_admin', e esse ator SEMPRE resolve
+    // inviteActor={kind:'super_admin'} (nunca null). O cenário real
+    // remanescente é mais forte: role legado isolado agora fica sem
+    // nenhum acesso, nem a aba aparece.
     m.user.current = { id: 'u-admin', name: 'Admin', email: 'admin@test.local', role: 'admin', sellerId: null, companyId: 'company-a', platformRole: null, activeMembership: null };
     render(<ScreenAjustes go={() => {}} />);
-    fireEvent.click(screen.getByText('Usuários'));
-    expect(m.inviteListProps.current.actor).toBeNull();
+    expect(screen.queryByText('Usuários')).toBeNull();
+    expect(screen.queryByTestId('invite-list-stub')).toBeNull();
   });
 
   it('usuário nulo (sem sessão/inativo): nem a tela renderiza conteúdo autorizado', () => {

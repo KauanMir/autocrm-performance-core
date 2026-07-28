@@ -172,8 +172,10 @@ beforeEach(() => {
 });
 
 describe('fluxo de permissões — acesso por role e flag', () => {
-  it('admin + flag OFF: Ajustes completo (Empresa/Usuários/Etapas) e reorder local por names, sem RPC nem Supabase', async () => {
-    await renderApp(user('admin'));
+  it('Super Admin + flag OFF: Ajustes completo (Empresa/Usuários/Etapas) e reorder local por names, sem RPC nem Supabase', async () => {
+    // M1-F S8-B1: fixture desatualizado — canAccessFullSettings migrou de
+    // role='admin' (legado) para platformRole='super_admin'.
+    await renderApp({ ...user('admin'), platformRole: 'super_admin' });
     fireEvent.click(navAjustes()!);
 
     expect(screen.getByRole('button', { name: 'Empresa' })).toBeInTheDocument();
@@ -189,20 +191,25 @@ describe('fluxo de permissões — acesso por role e flag', () => {
     expect(m.from).not.toHaveBeenCalled();
   });
 
-  it('admin + flag ON: Ajustes completo e reorder remoto real por UUIDs via RPC', async () => {
+  it('Super Admin + flag ON: Ajustes completo (Empresa/Usuários/Etapas), mas pipeline sem empresa real (sem membership) — Etapas mostra "Sessão indisponível"', async () => {
+    // M1-F S8-B1: fixture desatualizado — canAccessFullSettings migrou para
+    // platformRole. Super Admin nunca tem activeMembership (design) — o
+    // pipeline real (usePipelineStages) desabilita a query sem companyId,
+    // mesma regra de sempre, nunca alterada por esta etapa (§28.3/proibição
+    // de tocar a lógica de empresa do pipeline). O reorder remoto REAL por
+    // UUIDs continua coberto pelo teste de Manager com membership ativa,
+    // logo abaixo — os dois papéis não podem mais coexistir num único ator.
     m.flag.current = true;
     mockSelect();
-    await renderApp(userWithActiveMembership('admin'));
+    const superAdmin: User = { ...user('seller'), companyId: null, platformRole: 'super_admin' };
+    await renderApp(superAdmin);
     fireEvent.click(navAjustes()!);
     expect(screen.getByRole('button', { name: 'Empresa' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Etapas' }));
-    await waitFor(() => expect(screen.getByTestId('stage-row-new')).toBeInTheDocument());
-
-    dragTo('stage-row-new', 'stage-row-negotiation');
-    await waitFor(() => expect(m.rpc).toHaveBeenCalledTimes(1));
-    expect(m.rpc.mock.calls[0][0]).toBe('reorder_pipeline_stages');
-    expect(m.rpc.mock.calls[0][1].p_ordered_ids.every((id: string) => id.startsWith('uuid-'))).toBe(true);
-    expect(m.reorderLocal).not.toHaveBeenCalled();
+    expect(screen.getByTestId('stages-remote-state'))
+      .toHaveTextContent('Sessão indisponível. Entre novamente para gerenciar as etapas.');
+    expect(m.rpc).not.toHaveBeenCalled();
+    expect(m.from).not.toHaveBeenCalled();
   });
 
   it('manager + flag OFF: sem Ajustes na navegação, sem reorder local e sem RPC', async () => {
@@ -269,12 +276,14 @@ describe('fluxo de permissões — acesso por role e flag', () => {
 });
 
 describe('fluxo de permissões — troca de usuário com Ajustes aberto', () => {
-  it('admin → manager com flag ON: aba administrativa some; Manager com membership ativa vê Usuários/Etapas conforme a matriz real', async () => {
+  it('Super Admin → manager com flag ON: aba administrativa (Empresa) some; Manager com membership ativa vê Usuários/Etapas conforme a matriz real', async () => {
+    // M1-F S8-B1: fixture desatualizado — canAccessFullSettings migrou para
+    // platformRole.
     m.flag.current = true;
     mockSelect();
-    await renderApp(user('admin'));
+    await renderApp({ ...user('admin'), platformRole: 'super_admin' });
     fireEvent.click(navAjustes()!);
-    // Admin cai na aba default 'Empresa' com o conteúdo administrativo.
+    // Super Admin cai na aba default 'Empresa' com o conteúdo administrativo.
     expect(screen.getByText('Dados da loja')).toBeInTheDocument();
 
     // M1-F S7-B: transição para Manager com activeMembership real (nunca só
@@ -297,8 +306,10 @@ describe('fluxo de permissões — troca de usuário com Ajustes aberto', () => 
     expect(m.reorderLocal).not.toHaveBeenCalled();
   });
 
-  it('admin → manager com flag OFF: Ajustes removido e navegação volta para home', async () => {
-    await renderApp(user('admin'));
+  it('Super Admin → manager com flag OFF: Ajustes removido e navegação volta para home', async () => {
+    // M1-F S8-B1: fixture desatualizado — canAccessFullSettings migrou para
+    // platformRole.
+    await renderApp({ ...user('admin'), platformRole: 'super_admin' });
     fireEvent.click(navAjustes()!);
     fireEvent.click(screen.getByRole('button', { name: 'Etapas' }));
     expect(screen.getByTestId('stage-row-new')).toBeInTheDocument();

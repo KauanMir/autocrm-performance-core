@@ -124,12 +124,22 @@ describe('menu Ajustes por role e flag', () => {
     expect(screen.queryByTestId('screen-ajustes')).toBeNull();
   });
 
-  it('manager vê Ajustes com flag ON', async () => {
+  it('manager com membership ATIVA vê Ajustes com flag ON', async () => {
+    // M1-F S8-B1: fixture desatualizado — canAccessStageSettings migrou de
+    // User.role para activeMembership.role/platformRole; um manager real
+    // sempre tem membership ativa (role legado isolado nunca concede nada).
     m.flag.current = true;
-    await renderApp(user('manager'));
+    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager' } };
+    await renderApp(managerAtivo);
     expect(screen.getByText('Ajustes')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Ajustes'));
     expect(screen.getByTestId('screen-ajustes')).toBeInTheDocument();
+  });
+
+  it('manager SEM membership ativa continua sem Ajustes, mesmo com flag ON (M1-F S8-B1: role legado isolado não concede acesso)', async () => {
+    m.flag.current = true;
+    await renderApp(user('manager'));
+    expect(screen.queryByText('Ajustes')).toBeNull();
   });
 
   it('seller não vê Ajustes com flag OFF nem ON', async () => {
@@ -186,22 +196,29 @@ describe('troca de usuário com tela Ajustes aberta', () => {
     expect(screen.queryByText('Ajustes')).toBeNull();
   });
 
-  it('admin → manager com flag ON: mantém somente o acesso permitido (Ajustes segue acessível)', async () => {
+  it('admin → manager com membership ATIVA, flag ON: mantém somente o acesso permitido (Ajustes segue acessível)', async () => {
+    // M1-F S8-B1: fixture desatualizado — manager real precisa de
+    // activeMembership (role legado isolado nunca concede nada).
     m.flag.current = true;
     await renderApp(user('admin'));
     fireEvent.click(screen.getByText('Ajustes'));
     expect(screen.getByTestId('screen-ajustes')).toBeInTheDocument();
 
-    switchUser(user('manager'));
+    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager' } };
+    switchUser(managerAtivo);
     // Manager com flag ON mantém a tela Ajustes (a restrição às abas internas
     // é responsabilidade da própria ScreenAjustes, testada à parte).
     expect(screen.getByText('Ajustes')).toBeInTheDocument();
     expect(screen.getByTestId('screen-ajustes')).toBeInTheDocument();
   });
 
-  it('manager → seller com flag ON: remove acesso a Ajustes', async () => {
+  it('manager com membership ATIVA → seller com flag ON: remove acesso a Ajustes', async () => {
+    // M1-F S8-B1: fixture desatualizado — manager real precisa de
+    // activeMembership para o cenário inicial ("Ajustes aberto") ser
+    // alcançável; a transição para seller continua removendo o acesso.
     m.flag.current = true;
-    await renderApp(user('manager'));
+    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager' } };
+    await renderApp(managerAtivo);
     fireEvent.click(screen.getByText('Ajustes'));
     expect(screen.getByTestId('screen-ajustes')).toBeInTheDocument();
 

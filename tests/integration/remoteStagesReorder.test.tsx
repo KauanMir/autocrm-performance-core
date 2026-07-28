@@ -273,7 +273,14 @@ describe('integração reorder — erros (flag ON)', () => {
 });
 
 describe('integração reorder — caminho local (flag OFF)', () => {
-  beforeEach(() => { m.flag.current = false; });
+  beforeEach(() => {
+    m.flag.current = false;
+    // M1-F S8-B1: com a flag de etapas remota desligada, stageSettingsAccess
+    // (Manager) nunca autoriza a aba — só fullSettingsAccess (Super Admin)
+    // bypassa a flag para preservar o fallback local de Etapas, mesma
+    // convenção já existente para "admin" legado antes desta migração.
+    m.user.current = { ...m.user.current, platformRole: 'super_admin' };
+  });
 
   it('reorder local envia NAMES ao PipelineService, mantém "Novo" fixado e nunca chama RPC/Supabase', async () => {
     await openEtapas();

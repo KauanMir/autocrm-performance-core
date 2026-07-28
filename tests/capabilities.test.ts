@@ -10,26 +10,52 @@ import {
   type MembershipLifecycleTargetRow,
 } from '@/lib/capabilities';
 
-const admin = { role: 'admin' } as const;
-const manager = { role: 'manager' } as const;
-const seller = { role: 'seller' } as const;
+// M1-F S8-B1: as três capabilities abaixo migraram de User.role (legado)
+// para platformRole/activeMembership — mesma identidade de canManageInvites.
+// Fixtures não incluem mais `role` (as funções nem o leem) — só os dois
+// campos que agora decidem: platformRole e activeMembership.
+const superAdmin = { platformRole: 'super_admin', activeMembership: null } as const;
+const activeManager = { platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' } } as const;
+const activeSeller = { platformRole: null, activeMembership: { companyId: 'company-a', role: 'seller' } } as const;
+const managerNoMembership = { platformRole: null, activeMembership: null } as const;
 
-describe('canAccessFullSettings', () => {
-  it('admin acessa full settings', () => expect(canAccessFullSettings(admin)).toBe(true));
-  it('manager não acessa full settings', () => expect(canAccessFullSettings(manager)).toBe(false));
-  it('seller não acessa full settings', () => expect(canAccessFullSettings(seller)).toBe(false));
+describe('canAccessFullSettings — M1-F S8-B1', () => {
+  it('Super Admin (platformRole=super_admin) acessa full settings, mesmo sem membership', () => {
+    expect(canAccessFullSettings(superAdmin)).toBe(true);
+  });
+  it('Manager com membership ATIVA não acessa full settings (superfície exclusiva de Super Admin)', () => {
+    expect(canAccessFullSettings(activeManager)).toBe(false);
+  });
+  it('Seller com membership ativa não acessa full settings', () => expect(canAccessFullSettings(activeSeller)).toBe(false));
+  it('sem membership e sem platformRole: não acessa full settings', () => expect(canAccessFullSettings(managerNoMembership)).toBe(false));
+  it('role legado "admin" isolado (sem platformRole/activeMembership) NUNCA concede acesso — a capability nem lê o campo', () => {
+    const legacyAdmin = { role: 'admin', platformRole: null, activeMembership: null } as const;
+    expect(canAccessFullSettings(legacyAdmin)).toBe(false);
+  });
 });
 
-describe('canAccessStageSettings', () => {
-  it('admin acessa stage settings', () => expect(canAccessStageSettings(admin)).toBe(true));
-  it('manager acessa stage settings', () => expect(canAccessStageSettings(manager)).toBe(true));
-  it('seller não acessa stage settings', () => expect(canAccessStageSettings(seller)).toBe(false));
+describe('canAccessStageSettings — M1-F S8-B1', () => {
+  it('Super Admin acessa stage settings, mesmo sem membership', () => expect(canAccessStageSettings(superAdmin)).toBe(true));
+  it('Manager com membership ATIVA acessa stage settings', () => expect(canAccessStageSettings(activeManager)).toBe(true));
+  it('Manager SEM membership ativa não acessa stage settings', () => expect(canAccessStageSettings(managerNoMembership)).toBe(false));
+  it('Seller com membership ativa não acessa stage settings', () => expect(canAccessStageSettings(activeSeller)).toBe(false));
+  it('role legado "admin"/"manager" isolado (sem activeMembership/platformRole) NUNCA concede acesso', () => {
+    const legacyAdmin = { role: 'admin', platformRole: null, activeMembership: null } as const;
+    const legacyManager = { role: 'manager', platformRole: null, activeMembership: null } as const;
+    expect(canAccessStageSettings(legacyAdmin)).toBe(false);
+    expect(canAccessStageSettings(legacyManager)).toBe(false);
+  });
 });
 
-describe('canReorderPipelineStages', () => {
-  it('admin pode reordenar', () => expect(canReorderPipelineStages(admin)).toBe(true));
-  it('manager pode reordenar', () => expect(canReorderPipelineStages(manager)).toBe(true));
-  it('seller não pode reordenar', () => expect(canReorderPipelineStages(seller)).toBe(false));
+describe('canReorderPipelineStages — M1-F S8-B1', () => {
+  it('Super Admin pode reordenar, mesmo sem membership', () => expect(canReorderPipelineStages(superAdmin)).toBe(true));
+  it('Manager com membership ATIVA pode reordenar', () => expect(canReorderPipelineStages(activeManager)).toBe(true));
+  it('Manager SEM membership ativa não pode reordenar', () => expect(canReorderPipelineStages(managerNoMembership)).toBe(false));
+  it('Seller com membership ativa não pode reordenar', () => expect(canReorderPipelineStages(activeSeller)).toBe(false));
+  it('companyId legado nunca é lido como autorização (a capability nem aceita o campo)', () => {
+    const withStaleCompanyId = { platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' } } as const;
+    expect(canReorderPipelineStages(withStaleCompanyId)).toBe(true); // autoridade real é activeMembership.role, nunca companyId
+  });
 });
 
 describe('canManageInvites — M1-F S4-F1', () => {
