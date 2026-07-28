@@ -5,6 +5,9 @@ import {
   canAccessStageSettings,
   canReorderPipelineStages,
   canManageInvites,
+  membershipLifecycleCapabilities,
+  type MembershipLifecycleActor,
+  type MembershipLifecycleTargetRow,
 } from '@/lib/capabilities';
 
 const admin = { role: 'admin' } as const;
@@ -69,6 +72,104 @@ describe('canManageInvites — M1-F S4-F1', () => {
     const user = Object.freeze({ platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' as const } });
     canManageInvites(user);
     expect(user).toEqual({ platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' } });
+  });
+});
+
+// ── M1-F S6-F — membershipLifecycleCapabilities (ciclo de vida empresarial) ─
+
+const SUPER_ADMIN: MembershipLifecycleActor = { kind: 'super_admin', profileId: 'admin-1' };
+const MANAGER: MembershipLifecycleActor = { kind: 'manager', profileId: 'manager-1', companyId: 'company-a' };
+
+function target(overrides: Partial<MembershipLifecycleTargetRow> = {}): MembershipLifecycleTargetRow {
+  return {
+    profileId: 'target-1',
+    companyId: 'company-a',
+    companyRole: 'seller',
+    lifecycleStatus: 'active',
+    ...overrides,
+  };
+}
+
+describe('membershipLifecycleCapabilities — ator null', () => {
+  it('actor null: nenhuma capability', () => {
+    expect(membershipLifecycleCapabilities(target(), null)).toEqual({
+      canSuspend: false, canReactivate: false, canOffboard: false, canTransfer: false,
+    });
+  });
+});
+
+describe('membershipLifecycleCapabilities — Super Admin', () => {
+  it('alvo ativo: Suspender/Desligar/Transferir, nunca Reativar', () => {
+    expect(membershipLifecycleCapabilities(target({ lifecycleStatus: 'active' }), SUPER_ADMIN)).toEqual({
+      canSuspend: true, canReactivate: false, canOffboard: true, canTransfer: true,
+    });
+  });
+
+  it('alvo suspenso: Reativar/Desligar/Transferir, nunca Suspender', () => {
+    expect(membershipLifecycleCapabilities(target({ lifecycleStatus: 'suspended' }), SUPER_ADMIN)).toEqual({
+      canSuspend: false, canReactivate: true, canOffboard: true, canTransfer: true,
+    });
+  });
+
+  it('alvo desligado: somente leitura (nenhuma ação)', () => {
+    expect(membershipLifecycleCapabilities(target({ lifecycleStatus: 'offboarded' }), SUPER_ADMIN)).toEqual({
+      canSuspend: false, canReactivate: false, canOffboard: false, canTransfer: false,
+    });
+  });
+
+  it('funciona igual para alvo Manager (Super Admin atua sobre qualquer papel/empresa)', () => {
+    expect(membershipLifecycleCapabilities(target({ companyRole: 'manager', companyId: 'outra-empresa', lifecycleStatus: 'active' }), SUPER_ADMIN)).toEqual({
+      canSuspend: true, canReactivate: false, canOffboard: true, canTransfer: true,
+    });
+  });
+
+  it('nunca sobre a própria membership (self)', () => {
+    expect(membershipLifecycleCapabilities(target({ profileId: 'admin-1' }), SUPER_ADMIN)).toEqual({
+      canSuspend: false, canReactivate: false, canOffboard: false, canTransfer: false,
+    });
+  });
+});
+
+describe('membershipLifecycleCapabilities — Manager', () => {
+  it('Seller ativo da própria empresa: Suspender/Desligar, nunca Reativar/Transferir', () => {
+    expect(membershipLifecycleCapabilities(target({ companyRole: 'seller', companyId: 'company-a', lifecycleStatus: 'active' }), MANAGER)).toEqual({
+      canSuspend: true, canReactivate: false, canOffboard: true, canTransfer: false,
+    });
+  });
+
+  it('Seller suspenso da própria empresa: Reativar/Desligar, nunca Suspender/Transferir', () => {
+    expect(membershipLifecycleCapabilities(target({ companyRole: 'seller', companyId: 'company-a', lifecycleStatus: 'suspended' }), MANAGER)).toEqual({
+      canSuspend: false, canReactivate: true, canOffboard: true, canTransfer: false,
+    });
+  });
+
+  it('Seller desligado: somente leitura', () => {
+    expect(membershipLifecycleCapabilities(target({ companyRole: 'seller', companyId: 'company-a', lifecycleStatus: 'offboarded' }), MANAGER)).toEqual({
+      canSuspend: false, canReactivate: false, canOffboard: false, canTransfer: false,
+    });
+  });
+
+  it('NUNCA sobre outro Manager (mesma empresa)', () => {
+    expect(membershipLifecycleCapabilities(target({ companyRole: 'manager', companyId: 'company-a', lifecycleStatus: 'active' }), MANAGER)).toEqual({
+      canSuspend: false, canReactivate: false, canOffboard: false, canTransfer: false,
+    });
+  });
+
+  it('NUNCA fora da própria empresa (mesmo Seller ativo)', () => {
+    expect(membershipLifecycleCapabilities(target({ companyRole: 'seller', companyId: 'outra-empresa', lifecycleStatus: 'active' }), MANAGER)).toEqual({
+      canSuspend: false, canReactivate: false, canOffboard: false, canTransfer: false,
+    });
+  });
+
+  it('NUNCA transferência, mesmo com todas as outras condições satisfeitas', () => {
+    const caps = membershipLifecycleCapabilities(target({ companyRole: 'seller', companyId: 'company-a', lifecycleStatus: 'active' }), MANAGER);
+    expect(caps.canTransfer).toBe(false);
+  });
+
+  it('NUNCA sobre a própria membership (self)', () => {
+    expect(membershipLifecycleCapabilities(target({ profileId: 'manager-1', companyRole: 'seller', companyId: 'company-a' }), MANAGER)).toEqual({
+      canSuspend: false, canReactivate: false, canOffboard: false, canTransfer: false,
+    });
   });
 });
 

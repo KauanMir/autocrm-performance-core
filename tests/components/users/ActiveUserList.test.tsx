@@ -16,6 +16,10 @@ const m = vi.hoisted(() => ({
   useCompanies: vi.fn(),
   editModalProps: { current: null as any },
   changeEmailModalProps: { current: null as any },
+  suspendModalProps: { current: null as any },
+  offboardSellerModalProps: { current: null as any },
+  offboardManagerModalProps: { current: null as any },
+  transferModalProps: { current: null as any },
 }));
 
 vi.mock('@/lib/hooks/useCompanyUsers', () => ({ useCompanyUsers: m.useCompanyUsers }));
@@ -33,6 +37,19 @@ vi.mock('@/components/users/ChangeUserEmailModal', () => ({
     m.changeEmailModalProps.current = props;
     return <div data-testid="change-email-modal-stub">modal de e-mail aberto</div>;
   },
+}));
+
+vi.mock('@/components/users/SuspendMembershipModal', () => ({
+  SuspendMembershipModal: (props: any) => { m.suspendModalProps.current = props; return <div data-testid="suspend-modal-stub" />; },
+}));
+vi.mock('@/components/users/OffboardSellerModal', () => ({
+  OffboardSellerModal: (props: any) => { m.offboardSellerModalProps.current = props; return <div data-testid="offboard-seller-modal-stub" />; },
+}));
+vi.mock('@/components/users/OffboardManagerModal', () => ({
+  OffboardManagerModal: (props: any) => { m.offboardManagerModalProps.current = props; return <div data-testid="offboard-manager-modal-stub" />; },
+}));
+vi.mock('@/components/users/TransferMembershipModal', () => ({
+  TransferMembershipModal: (props: any) => { m.transferModalProps.current = props; return <div data-testid="transfer-modal-stub" />; },
 }));
 
 import { ActiveUserList } from '@/components/users/ActiveUserList';
@@ -85,6 +102,10 @@ beforeEach(() => {
   m.useCompanies.mockReturnValue(companiesResult());
   m.editModalProps.current = null;
   m.changeEmailModalProps.current = null;
+  m.suspendModalProps.current = null;
+  m.offboardSellerModalProps.current = null;
+  m.offboardManagerModalProps.current = null;
+  m.transferModalProps.current = null;
   vi.useFakeTimers();
 });
 
@@ -411,6 +432,105 @@ describe('ActiveUserList — integração com o modal de e-mail', () => {
     render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} userEmailEditEnabled />);
     fireEvent.click(screen.getByText('Editar'));
     expect(m.editModalProps.current).toBeTruthy();
+    expect(m.changeEmailModalProps.current).toBeNull();
+  });
+});
+
+// ── M1-F S6-F — ações de ciclo de vida (Suspender/Desligar/Transferir) ─────
+
+describe('ActiveUserList — rollout de ciclo de vida', () => {
+  it('lifecycleEnabled omitido (default false): nenhuma ação de ciclo de vida, mesmo para Super Admin', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row()], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} />);
+    expect(screen.queryByText('Suspender')).toBeNull();
+    expect(screen.queryByText('Desligar')).toBeNull();
+    expect(screen.queryByText('Transferir')).toBeNull();
+  });
+
+  it('lifecycleEnabled=false explícito: nenhuma ação de ciclo de vida', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row()], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} lifecycleEnabled={false} />);
+    expect(screen.queryByText('Suspender')).toBeNull();
+  });
+
+  it('lifecycleEnabled=true + Super Admin: Suspender/Desligar/Transferir disponíveis', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row()], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} lifecycleEnabled />);
+    expect(screen.getByText('Suspender')).toBeInTheDocument();
+    expect(screen.getByText('Desligar')).toBeInTheDocument();
+    expect(screen.getByText('Transferir')).toBeInTheDocument();
+  });
+});
+
+describe('ActiveUserList — matriz de atores para ciclo de vida', () => {
+  it('Super Admin sobre Seller: Suspender/Desligar/Transferir', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'seller' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} lifecycleEnabled />);
+    expect(screen.getByText('Suspender')).toBeInTheDocument();
+    expect(screen.getByText('Transferir')).toBeInTheDocument();
+  });
+
+  it('Super Admin NUNCA vê ações de ciclo de vida na própria linha', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ profile_id: 'super-admin-1' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="super-admin-1" actor={SUPER_ADMIN} lifecycleEnabled />);
+    expect(screen.queryByText('Suspender')).toBeNull();
+    expect(screen.queryByText('Transferir')).toBeNull();
+    // "Editar" (nome) continua disponível para o próprio ator.
+    expect(screen.getByText('Editar')).toBeInTheDocument();
+  });
+
+  it('Manager sobre Seller da própria empresa: Suspender/Desligar, nunca Transferir', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'seller', company_id: 'company-a' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-2" actor={MANAGER} lifecycleEnabled />);
+    expect(screen.getByText('Suspender')).toBeInTheDocument();
+    expect(screen.getByText('Desligar')).toBeInTheDocument();
+    expect(screen.queryByText('Transferir')).toBeNull();
+  });
+
+  it('Manager sobre outro Manager: nenhuma ação de ciclo de vida (nunca Manager sobre Manager)', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'manager' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-2" actor={MANAGER} lifecycleEnabled />);
+    expect(screen.queryByText('Suspender')).toBeNull();
+    expect(screen.queryByText('Desligar')).toBeNull();
+  });
+});
+
+describe('ActiveUserList — integração com os modais de ciclo de vida', () => {
+  it('Suspender abre SuspendMembershipModal com o usuário correto', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row()], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} lifecycleEnabled />);
+    fireEvent.click(screen.getByText('Suspender'));
+    expect(m.suspendModalProps.current.user.membership_id).toBe('membership-1');
+  });
+
+  it('Desligar sobre Seller abre OffboardSellerModal, nunca OffboardManagerModal', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'seller' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} lifecycleEnabled />);
+    fireEvent.click(screen.getByText('Desligar'));
+    expect(m.offboardSellerModalProps.current).toBeTruthy();
+    expect(m.offboardManagerModalProps.current).toBeNull();
+  });
+
+  it('Desligar sobre Manager abre OffboardManagerModal, nunca OffboardSellerModal', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row({ company_role: 'manager' })], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} lifecycleEnabled />);
+    fireEvent.click(screen.getByText('Desligar'));
+    expect(m.offboardManagerModalProps.current).toBeTruthy();
+    expect(m.offboardSellerModalProps.current).toBeNull();
+  });
+
+  it('Transferir abre TransferMembershipModal', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row()], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} lifecycleEnabled />);
+    fireEvent.click(screen.getByText('Transferir'));
+    expect(m.transferModalProps.current).toBeTruthy();
+  });
+
+  it('nenhuma ação de ciclo de vida monta o modal de nome/papel ou de e-mail junto', () => {
+    m.useCompanyUsers.mockReturnValue(usersResult({ users: [row()], isEmpty: false, hasData: true }));
+    render(<ActiveUserList userId="user-1" actor={SUPER_ADMIN} lifecycleEnabled userEmailEditEnabled />);
+    fireEvent.click(screen.getByText('Suspender'));
+    expect(m.editModalProps.current).toBeNull();
     expect(m.changeEmailModalProps.current).toBeNull();
   });
 });

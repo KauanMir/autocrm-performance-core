@@ -8,11 +8,13 @@ import {
   isPlatformAdminEnabled,
   isActiveUsersEnabled,
   isUserEmailEditEnabled,
+  isUserLifecycleEnabled,
   REMOTE_LEADS_DEV_OVERRIDE_KEY,
   REMOTE_STAGES_DEV_OVERRIDE_KEY,
   PLATFORM_ADMIN_DEV_OVERRIDE_KEY,
   ACTIVE_USERS_DEV_OVERRIDE_KEY,
   USER_EMAIL_EDIT_DEV_OVERRIDE_KEY,
+  USER_LIFECYCLE_DEV_OVERRIDE_KEY,
 } from '@/lib/flags';
 
 const ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_STAGES';
@@ -20,6 +22,7 @@ const LEADS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_LEADS';
 const PLATFORM_ADMIN_ENV_KEY = 'NEXT_PUBLIC_FF_PLATFORM_ADMIN';
 const ACTIVE_USERS_ENV_KEY = 'NEXT_PUBLIC_FF_ACTIVE_USERS';
 const USER_EMAIL_EDIT_ENV_KEY = 'NEXT_PUBLIC_FF_USER_EMAIL_EDIT';
+const USER_LIFECYCLE_ENV_KEY = 'NEXT_PUBLIC_FF_USER_LIFECYCLE';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -69,6 +72,15 @@ function setUserEmailEditEnv(nodeEnv: string, flagValue?: string) {
     vi.stubEnv(USER_EMAIL_EDIT_ENV_KEY, undefined as unknown as string);
   } else {
     vi.stubEnv(USER_EMAIL_EDIT_ENV_KEY, flagValue);
+  }
+}
+
+function setUserLifecycleEnv(nodeEnv: string, flagValue?: string) {
+  vi.stubEnv('NODE_ENV', nodeEnv);
+  if (flagValue === undefined) {
+    vi.stubEnv(USER_LIFECYCLE_ENV_KEY, undefined as unknown as string);
+  } else {
+    vi.stubEnv(USER_LIFECYCLE_ENV_KEY, flagValue);
   }
 }
 
@@ -774,5 +786,151 @@ describe('isolamento da flag de edição de e-mail em relação às demais (incl
     vi.stubEnv(USER_EMAIL_EDIT_ENV_KEY, 'true');
     expect(isActiveUsersEnabled()).toBe(false);
     expect(isUserEmailEditEnabled()).toBe(true);
+  });
+});
+
+// ── M1-F S6-F — isUserLifecycleEnabled (mesmo contrato, chave/env próprias) ─
+
+describe('isUserLifecycleEnabled — valor do ambiente', () => {
+  it('variável ausente ⇒ false (OFF por padrão)', () => {
+    setUserLifecycleEnv('production');
+    expect(isUserLifecycleEnabled()).toBe(false);
+  });
+
+  it('"false" ⇒ false', () => {
+    setUserLifecycleEnv('production', 'false');
+    expect(isUserLifecycleEnabled()).toBe(false);
+  });
+
+  it('"true" ⇒ true', () => {
+    setUserLifecycleEnv('production', 'true');
+    expect(isUserLifecycleEnabled()).toBe(true);
+  });
+
+  it('valores inválidos ⇒ false', () => {
+    for (const invalid of ['1', 'yes', 'on', '', 'enabled']) {
+      setUserLifecycleEnv('production', invalid);
+      expect(isUserLifecycleEnabled()).toBe(false);
+    }
+  });
+
+  it('comparação é estrita e case-sensitive ("TRUE"/"True" não ativam)', () => {
+    for (const invalid of ['TRUE', 'True', ' true', 'true ']) {
+      setUserLifecycleEnv('production', invalid);
+      expect(isUserLifecycleEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('isUserLifecycleEnabled — development (override via localStorage)', () => {
+  it('env false + override "true" ⇒ true', () => {
+    setUserLifecycleEnv('development', 'false');
+    window.localStorage.setItem(USER_LIFECYCLE_DEV_OVERRIDE_KEY, 'true');
+    expect(isUserLifecycleEnabled()).toBe(true);
+  });
+
+  it('env true + override "false" ⇒ false', () => {
+    setUserLifecycleEnv('development', 'true');
+    window.localStorage.setItem(USER_LIFECYCLE_DEV_OVERRIDE_KEY, 'false');
+    expect(isUserLifecycleEnabled()).toBe(false);
+  });
+
+  it('override inválido ⇒ usa o env', () => {
+    setUserLifecycleEnv('development', 'true');
+    window.localStorage.setItem(USER_LIFECYCLE_DEV_OVERRIDE_KEY, 'yes');
+    expect(isUserLifecycleEnabled()).toBe(true);
+
+    setUserLifecycleEnv('development', 'false');
+    window.localStorage.setItem(USER_LIFECYCLE_DEV_OVERRIDE_KEY, '1');
+    expect(isUserLifecycleEnabled()).toBe(false);
+  });
+
+  it('override ausente ⇒ usa o env', () => {
+    setUserLifecycleEnv('development', 'true');
+    expect(isUserLifecycleEnabled()).toBe(true);
+
+    setUserLifecycleEnv('development', 'false');
+    expect(isUserLifecycleEnabled()).toBe(false);
+  });
+
+  it('localStorage lançando erro ⇒ usa o env sem propagar', () => {
+    setUserLifecycleEnv('development', 'true');
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    expect(isUserLifecycleEnabled()).toBe(true);
+
+    setUserLifecycleEnv('development', 'false');
+    expect(isUserLifecycleEnabled()).toBe(false);
+  });
+});
+
+describe('isUserLifecycleEnabled — production (localStorage ignorado)', () => {
+  it('env true ⇒ true', () => {
+    setUserLifecycleEnv('production', 'true');
+    expect(isUserLifecycleEnabled()).toBe(true);
+  });
+
+  it('env false ⇒ false', () => {
+    setUserLifecycleEnv('production', 'false');
+    expect(isUserLifecycleEnabled()).toBe(false);
+  });
+
+  it('override "true" com env false ⇒ continua false', () => {
+    setUserLifecycleEnv('production', 'false');
+    window.localStorage.setItem(USER_LIFECYCLE_DEV_OVERRIDE_KEY, 'true');
+    expect(isUserLifecycleEnabled()).toBe(false);
+  });
+
+  it('override "false" com env true ⇒ continua true', () => {
+    setUserLifecycleEnv('production', 'true');
+    window.localStorage.setItem(USER_LIFECYCLE_DEV_OVERRIDE_KEY, 'false');
+    expect(isUserLifecycleEnabled()).toBe(true);
+  });
+
+  it('localStorage.getItem NUNCA é chamado em produção (spy)', () => {
+    setUserLifecycleEnv('production', 'true');
+    const spy = vi.spyOn(Storage.prototype, 'getItem');
+    isUserLifecycleEnabled();
+    setUserLifecycleEnv('production', 'false');
+    isUserLifecycleEnabled();
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('isUserLifecycleEnabled — ambiente sem window (SSR)', () => {
+  it('sem window ⇒ usa o env sem lançar erro', () => {
+    setUserLifecycleEnv('development', 'true');
+    vi.stubGlobal('window', undefined);
+    expect(isUserLifecycleEnabled()).toBe(true);
+
+    setUserLifecycleEnv('development', 'false');
+    expect(isUserLifecycleEnabled()).toBe(false);
+  });
+});
+
+describe('isolamento da flag de ciclo de vida em relação às demais (incl. ACTIVE_USERS)', () => {
+  it('a chave de override é distinta das outras cinco', () => {
+    expect(USER_LIFECYCLE_DEV_OVERRIDE_KEY).toBe('autocrm_ff_user_lifecycle');
+    expect(USER_LIFECYCLE_DEV_OVERRIDE_KEY).not.toBe(REMOTE_STAGES_DEV_OVERRIDE_KEY);
+    expect(USER_LIFECYCLE_DEV_OVERRIDE_KEY).not.toBe(REMOTE_LEADS_DEV_OVERRIDE_KEY);
+    expect(USER_LIFECYCLE_DEV_OVERRIDE_KEY).not.toBe(PLATFORM_ADMIN_DEV_OVERRIDE_KEY);
+    expect(USER_LIFECYCLE_DEV_OVERRIDE_KEY).not.toBe(ACTIVE_USERS_DEV_OVERRIDE_KEY);
+    expect(USER_LIFECYCLE_DEV_OVERRIDE_KEY).not.toBe(USER_EMAIL_EDIT_DEV_OVERRIDE_KEY);
+  });
+
+  it('env/override de ciclo de vida NUNCA afeta ACTIVE_USERS (e vice-versa) — mesma decisão congelada de S5-E1: flags separadas', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(ACTIVE_USERS_ENV_KEY, 'true');
+    vi.stubEnv(USER_LIFECYCLE_ENV_KEY, 'false');
+    window.localStorage.setItem(USER_LIFECYCLE_DEV_OVERRIDE_KEY, 'true');
+    expect(isActiveUsersEnabled()).toBe(true);
+    expect(isUserLifecycleEnabled()).toBe(true);
+
+    window.localStorage.clear();
+    vi.stubEnv(ACTIVE_USERS_ENV_KEY, 'false');
+    vi.stubEnv(USER_LIFECYCLE_ENV_KEY, 'true');
+    expect(isActiveUsersEnabled()).toBe(false);
+    expect(isUserLifecycleEnabled()).toBe(true);
   });
 });
