@@ -53,6 +53,7 @@ export const PLATFORM_ADMIN_DEV_OVERRIDE_KEY = 'autocrm_ff_platform_admin';
 export const ACTIVE_USERS_DEV_OVERRIDE_KEY = 'autocrm_ff_active_users';
 export const USER_EMAIL_EDIT_DEV_OVERRIDE_KEY = 'autocrm_ff_user_email_edit';
 export const USER_LIFECYCLE_DEV_OVERRIDE_KEY = 'autocrm_ff_user_lifecycle';
+export const COMPANY_SELECTOR_DEV_OVERRIDE_KEY = 'autocrm_ff_company_selector';
 
 // Somente as strings exatas 'true'/'false' são reconhecidas (case-sensitive);
 // qualquer outro valor (1, yes, on, TRUE, vazio…) é tratado como inválido.
@@ -113,4 +114,15 @@ export function isUserEmailEditEnabled(): boolean {
 // usado por userEmailEditEnabled.
 export function isUserLifecycleEnabled(): boolean {
   return resolveFlag(process.env.NEXT_PUBLIC_FF_USER_LIFECYCLE, USER_LIFECYCLE_DEV_OVERRIDE_KEY);
+}
+
+// M1-F S7 — filtro contextual de empresa (decisão congelada em §26 do design
+// doc). Só o valor bruto da própria flag — "somente Super Admin" e "não ativa
+// telas sem suporte" são decisões de QUEM consome o filtro (o hook
+// useCompanyScopeFilter já devolve companyFilterId=null para qualquer ator
+// que não seja Super Admin, independente desta flag) e de QUAIS telas o
+// integram (S7-C), nunca desta função. A flag controla exclusivamente se a
+// superfície contextual aprovada (aba de Usuários) existe no bundle.
+export function isCompanySelectorEnabled(): boolean {
+  return resolveFlag(process.env.NEXT_PUBLIC_FF_COMPANY_SELECTOR, COMPANY_SELECTOR_DEV_OVERRIDE_KEY);
 }
