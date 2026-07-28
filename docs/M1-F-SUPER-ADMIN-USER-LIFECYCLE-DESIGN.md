@@ -2854,3 +2854,210 @@ passos já registrado em §23.8 com os passos específicos do S6:
 GitHub.** Nenhuma sub-etapa está ativa em produção — todas as flags
 permanecem desligadas e nenhuma migration M1-F foi aplicada
 remotamente.
+
+## 26. Decisões congeladas do S7 — filtro contextual de empresa
+
+Esta seção congela as decisões de arquitetura do S7 (seletor/filtro de
+empresa para Super Admin), com base na auditoria factual do S7-A0
+(2026-07-28, leitura direta do código-fonte, não memória de sessão
+anterior). Nenhuma implementação foi iniciada nesta etapa (S7-A1) —
+só decisão e documentação.
+
+### 26.1 Achado de partida (S7-A0)
+
+Confirmado por auditoria: **nenhuma forma de `selectedCompanyId` existe
+em runtime hoje** — o termo aparece somente no design conceitual
+pré-S1 (§7.5–§7.9, escrito antes de qualquer implementação do M1-F) e
+em testes/SQL que **afirmam sua ausência**. O único precedente real e
+testado é o filtro local `companyFilter` já existente em
+`ActiveUserList`/`InactiveUserList` — estado React não persistido,
+resetado a cada troca de identidade, enviado ao servidor só como
+`p_company_id` opcional que a RPC usa para **estreitar** (nunca
+ampliar) a visão já autorizada de um Super Admin, e **ignorado por
+completo** para Manager. Esta seção parte desse precedente, não do
+design conceitual de §7.5–§7.9 tomado ao pé da letra — a arquitetura
+real construída em S1–S6 (`company_memberships`, `activeMembership`,
+RLS por `can_access_company`/`is_platform_super_admin`) é mais recente
+e mais específica que aquele esboço.
+
+### 26.2 Localização — decisão congelada
+
+**O S7 não cria, nesta fase, um seletor no cabeçalho global do CRM.**
+O filtro é **contextual**: aparece somente em telas com contrato real
+e seguro de filtro por empresa. Primeira superfície: a aba de
+**Usuários** do Super Admin (usuários ativos, usuários
+suspensos/desligados, e convites **somente se** o contrato atual
+aceitar o filtro com segurança — a auditar em S7-B/S7-C, nunca
+presumido).
+
+**Nunca aparece em**: Leads, Pipeline, Dashboard, Relatórios, Tarefas,
+Visitas, Negociações, Propostas, Vendas, Empresas. Motivo: nenhuma
+dessas telas possui hoje suporte completo e seguro a uma visão
+contextual de Super Admin (Leads/Pipeline dependem de RLS ainda
+baseada em helpers legados de empresa única; Tarefas/Visitas/
+Negociações/Propostas/Vendas não são persistidas no Postgres, §25.4;
+Empresas já É a visão global, sem "o que filtrar por empresa";
+Dashboard/Relatórios não existem em forma Super-Admin-aware). Não criar
+a impressão de que a seleção altera toda a plataforma.
+
+### 26.3 Significado — decisão congelada
+
+A seleção de empresa é **somente**: filtro visual, preferência
+temporária da tela, parâmetro que estreita consultas já autorizadas.
+**Nunca representa**: login em uma empresa, troca de membership,
+`activeMembership`, autorização, impersonação, mudança de sessão,
+mudança de `platform_role`. Backend/RPCs/RLS continuam sendo a única
+proteção real — exatamente o mesmo princípio já provado pelo
+`companyFilter` existente (§26.1).
+
+Nomenclatura proibida (carrega semântica de identidade/sessão que este
+conceito não tem): `activeCompany`, `currentCompany`, `activeTenant`,
+`selectedMembership`. Nomenclatura preferida: `companyFilterId` /
+`companyScopeFilter` / `focusedCompanyId` — este último só se
+claramente documentado como visual, nunca como identidade.
+
+### 26.4 Visão global — decisão congelada
+
+Estado inicial do Super Admin: **"Todas as empresas"** (`null`). Sem
+seleção: usuários ativos e usuários inativos usam visão global;
+convites permanecem globais conforme o contrato real já existente
+(nenhuma mudança de contrato de convites nesta decisão). Manager e
+Seller **não possuem** essa opção, não possuem seletor, continuam
+usando exclusivamente `activeMembership` — nenhuma mudança em relação
+ao comportamento já auditado no S7-A0.
+
+### 26.5 Estado e persistência — decisão congelada
+
+O filtro vive **apenas em estado React da superfície correspondente**
+— mesmo modelo já comprovado por `companyFilter`. **Proibido nesta
+fase**: `localStorage`, `sessionStorage`, Zustand/`lib/store.ts`
+legado, cookie, banco, `profiles`, URL.
+
+Regras: valor inicial `null` = visão global; troca de usuário limpa o
+filtro; logout limpa o filtro; troca de tipo de ator (Super Admin ↔
+Manager) limpa o filtro; empresa removida da lista acessível limpa o
+filtro; empresa cancelada ou inacessível nunca permanece selecionada;
+nova sessão sempre começa em visão global; outra aba do navegador não
+herda automaticamente a seleção (mesmo princípio de isolamento por aba
+já previsto em §7.7, agora aplicado ao modelo real). Persistência
+futura (ex.: "última empresa vista" como conveniência visual) poderá
+ser reconsiderada em etapa própria — nunca como autorização.
+
+### 26.6 URL — decisão congelada
+
+O S7 **não** coloca `companyId` na query string, no segmento de rota
+ou no hash da URL. Motivos: nenhuma rota atual é escopada por empresa;
+não existe necessidade de link compartilhável por empresa hoje; evita
+aparência de contexto autorizado; reduz risco de enumeração e de
+estados obsoletos. Reavaliação futura só quando existir uma tela real
+que precise de link compartilhável por empresa — nesse momento o id na
+rota seria parâmetro de página, sempre revalidado por
+`can_access_company`, nunca ponteiro de sessão.
+
+### 26.7 Fonte das empresas — decisão congelada
+
+Exclusivamente `useCompanies`/`fetchAccessibleCompanies` (já auditado
+em S7-A0) — a RLS determina o retorno, sem filtro client-side algum. O
+filtro pode exibir ao Super Admin empresas em `implantação`, `ativa`,
+`suspensa`; `cancelada` nunca aparece, conforme o contrato real já
+confirmado. Exibir visualmente **nome e status** (o retorno já inclui
+`status`). Empresa visível não implica operacional para qualquer ação
+— as RPCs continuam validando cada operação (`company_not_operational`
+etc.), sem exceção.
+
+### 26.8 Cache — decisão congelada
+
+A preferência visual **não** faz parte da identidade autenticada do
+cache. **Não alterar**: `activeMembership`, `useQueryCacheIdentity`,
+identidade global do ator, sessão Auth — nenhum desses hooks/objetos
+ganha conhecimento do filtro de empresa. `companyFilterId` participa
+somente das query keys das consultas que o consomem (mesmo mecanismo já
+comprovado: `scope.companyId` dentro da key de `useCompanyUsers`/
+`useInactiveCompanyUsers`). Troca Todas → Empresa A → Empresa B produz
+chaves de query distintas — **nunca** um `resetQueryCache()` global só
+por trocar o filtro visual (esse reset continua reservado a mudanças
+reais de identidade — login/logout/mudança de membership). Paginação,
+busca e filtros secundários da tela reiniciam quando a empresa muda
+(consequência natural de uma chave de query nova, mesmo comportamento
+já testado no `companyFilter` atual).
+
+### 26.9 Tela de Usuários — decisão congelada
+
+A implementação futura (S7-C) deve preferir **um único filtro
+contextual compartilhado** pela tela de Usuários, controlando
+`ActiveUserList` e `InactiveUserList` — e `InviteList` **somente se** o
+contrato atual de `fetchInvites` suportar `companyId` com segurança sem
+alteração de backend (auditar antes de implementar; ver achado do
+S7-A0 de que `fetchInvites` já aplica um `.eq('company_id', ...)`
+redundante sobre SELECT direto, nunca substituindo a RLS — precisa
+confirmação explícita de que isso é suficiente para o filtro
+contextual, não presumir). Se `InviteList` não aceitar o filtro com
+segurança: não modificar backend silenciosamente, manter convites
+globais, deixar claro visualmente que o filtro afeta só usuários, e
+relatar antes de implementar. Não manter dois seletores independentes
+de empresa na mesma tela quando um estado compartilhado seguro puder
+existir.
+
+### 26.10 `company_id` legado — decisão congelada
+
+A auditoria do S7-A0 encontrou três consumidores restantes de
+`currentUser.companyId`/`profiles.company_id` legado:
+`components/screens/ScreensBiz.tsx:414` (`usePipelineStages`) e `:480`
+(`useReorderStages`), e `lib/services.ts:364` (ponte de leads remotos,
+M1-E).
+
+**O S7-B corrigirá somente os dois consumidores de pipeline em
+`ScreensBiz.tsx`**, trocando para `activeMembership.companyId`. Regras:
+Manager/Seller usam a empresa da própria membership ativa; Super Admin
+sem membership não ganha acesso ao pipeline por meio do
+`companyFilterId` (o filtro contextual desta etapa nunca autoriza
+pipeline — pipeline está fora do escopo visual do S7, §26.2); nenhum
+`companyFilterId` é usado como autorização de pipeline em nenhuma
+circunstância; mudança de membership/papel deve produzir as query keys
+corretas (mesmo padrão já corrigido em `useQueryCacheIdentity` no
+S6-E).
+
+**O uso em `lib/services.ts` (ponte antiga de leads) permanece
+intocado — fronteira explícita para o S8 e para a retomada do M1-E
+E4.** O S7 não modifica essa ponte.
+
+### 26.11 Feature flag futura — decisão congelada (não criada nesta etapa)
+
+`NEXT_PUBLIC_FF_COMPANY_SELECTOR` — padrão `false`; só tem efeito para
+Super Admin; sem dependência de segredo; rollback visual imediato;
+ativa exclusivamente a superfície contextual aprovada em §26.2 (aba de
+Usuários); não transforma nenhuma tela sem suporte em tela global; não
+altera autorização. Mesmo molde estrutural das seis flags já
+existentes (`lib/flags.ts`). Não criada nesta etapa — pertence ao
+S7-B.
+
+### 26.12 Divisão final do S7
+
+| Sub-etapa | Escopo | Decisão humana pendente? |
+|---|---|---|
+| **S7-A0** | Auditoria factual do estado atual | Concluída |
+| **S7-A1** | Congelamento documental (esta seção) | Concluída — é a etapa atual |
+| **S7-B** | Corrigir os dois usos legados de `companyId` em `ScreensBiz.tsx`; criar estado/hook compartilhado do filtro contextual; validação contra `useCompanies`; query keys; feature flag; testes de estado/cache; **sem interface visual ampla** | **Não** — desbloqueada por esta seção |
+| **S7-C** | Componente visual; integração na tela de Usuários (`ActiveUserList`/`InactiveUserList`/`InviteList` só se compatível); acessibilidade; testes de interface | **Não** — segue direto após S7-B |
+| **S7-D** | Auditoria integrada; documentação; fechamento (mesmo padrão de S5-F/S6-G) | **Não** — fechamento factual |
+
+**Depois desta seção (S7-A1), não resta decisão humana bloqueante para
+iniciar o S7-B.**
+
+### 26.13 Relação com S8
+
+Congelado: o S7 **não remove** `profiles.company_id`, **não remove**
+`profiles.role`, **não remove** nenhuma bridge legada, **não modifica**
+o bridge de leads em `lib/services.ts`. A remoção estrutural dessas
+dependências legadas é trabalho do **S8**. **M1-E E4 continua pausado
+até o S8** — nenhuma alteração desta seção muda essa fronteira.
+
+### 26.14 Confirmações finais
+
+Nenhuma implementação do S7 foi iniciada em nenhuma sub-etapa até
+aqui (S7-A0 é auditoria, S7-A1 é esta documentação). Nenhum arquivo de
+código, migration, RPC, hook, componente ou teste foi criado ou
+alterado. Nenhuma operação remota (migration, SQL, Auth, alteração de
+usuário) foi executada. **O S7-B está desbloqueado** — pode ser
+iniciado sem nenhuma decisão humana pendente de aprovação além do que
+já está congelado nesta seção.
