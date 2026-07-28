@@ -81,3 +81,53 @@ describe('useQueryCacheIdentity', () => {
     expect(getQueryCacheGeneration(other)).toBe(0);
   });
 });
+
+// M1-F S6-E: membershipRole/hasActiveMembership/platformRole — campos novos
+// que fecham a lacuna encontrada na auditoria (suspender/desligar/transferir
+// uma membership não mudava nenhum dos 3 campos antigos).
+describe('useQueryCacheIdentity — campos de membership (M1-F S6-E)', () => {
+  const MANAGER_A: QueryCacheIdentity = {
+    userId: 'user-1', companyId: 'company-a', membershipRole: 'manager', hasActiveMembership: true, isActive: true,
+  };
+
+  it('suspensão/desligamento (activeMembership deixa de existir): hasActiveMembership true → false limpa', () => {
+    const { queryClient, hook } = setup(MANAGER_A);
+    hook.rerender({ ...MANAGER_A, companyId: null, membershipRole: null, hasActiveMembership: false });
+    expect(queryClient.getQueryData(KEY)).toBeUndefined();
+  });
+
+  it('troca de papel seller↔manager (mesma empresa) limpa', () => {
+    const { queryClient, hook } = setup(MANAGER_A);
+    hook.rerender({ ...MANAGER_A, membershipRole: 'seller' });
+    expect(queryClient.getQueryData(KEY)).toBeUndefined();
+  });
+
+  it('transferência (companyId muda, membership continua ativa) limpa', () => {
+    const { queryClient, hook } = setup(MANAGER_A);
+    hook.rerender({ ...MANAGER_A, companyId: 'company-b' });
+    expect(queryClient.getQueryData(KEY)).toBeUndefined();
+  });
+
+  it('Super Admin sem activeMembership é identidade ESTÁVEL: rerender com os mesmos valores não limpa', () => {
+    const SUPER_ADMIN: QueryCacheIdentity = {
+      userId: 'user-sa', platformRole: 'super_admin', companyId: null, membershipRole: null, hasActiveMembership: false, isActive: true,
+    };
+    const { queryClient, hook } = setup(SUPER_ADMIN);
+    hook.rerender({ ...SUPER_ADMIN });
+    expect(queryClient.getQueryData(KEY)).toBeDefined();
+    expect(getQueryCacheGeneration(queryClient)).toBe(0);
+  });
+
+  it('usuário empresarial ativo sem membership ativa (perdeu, mas profile continua ativo) limpa, mas não desautentica (isActive continua true)', () => {
+    const { queryClient, hook } = setup(MANAGER_A);
+    hook.rerender({ userId: 'user-1', companyId: null, membershipRole: null, hasActiveMembership: false, isActive: true });
+    expect(queryClient.getQueryData(KEY)).toBeUndefined();
+    expect(getQueryCacheGeneration(queryClient)).toBeGreaterThanOrEqual(1);
+  });
+
+  it('profile globalmente inativo (isActive true → false) limpa', () => {
+    const { queryClient, hook } = setup(MANAGER_A);
+    hook.rerender({ ...MANAGER_A, userId: null, companyId: null, membershipRole: null, hasActiveMembership: false, isActive: false });
+    expect(queryClient.getQueryData(KEY)).toBeUndefined();
+  });
+});

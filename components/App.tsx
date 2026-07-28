@@ -155,9 +155,21 @@ export function App() {
   // M1-D (commit 9): identidade comercial → limpeza do cache de queries.
   // Boolean(currentUser) = "profile ativo resolvido" (AuthService não mantém
   // User com profile inativo). Chamado incondicionalmente, independe da flag.
+  //
+  // CORREÇÃO (M1-F S6-E): companyId agora vem de activeMembership.companyId
+  // (nunca do profiles.company_id legado) — suspensão/desligamento zera
+  // activeMembership sem mexer no profile, e transferência muda o
+  // companyId da membership sem trocar de usuário; nenhum dos dois mudava
+  // qualquer campo observado aqui antes desta correção. membershipRole
+  // cobre troca de papel (seller↔manager); hasActiveMembership cobre
+  // ganho/perda da membership em si, sem depender de companyId (que já é
+  // null tanto "sem membership" quanto "Super Admin", casos distintos).
   useQueryCacheIdentity({
     userId: currentUser?.id ?? null,
-    companyId: currentUser?.companyId ?? null,
+    platformRole: currentUser?.platformRole ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: currentUser?.activeMembership?.role ?? null,
+    hasActiveMembership: Boolean(currentUser?.activeMembership),
     isActive: Boolean(currentUser),
   });
 

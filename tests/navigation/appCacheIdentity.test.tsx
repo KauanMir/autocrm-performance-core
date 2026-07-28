@@ -67,7 +67,10 @@ vi.mock('@/components/flows/FlowLayer', () => ({ FlowLayer: () => null }));
 import { App } from '@/components/App';
 
 function user(role: User['role'], id: string, companyId: string): User {
-  return { id, name: role, email: `${role}@a.com`, role, sellerId: null, companyId };
+  return {
+    id, name: role, email: `${role}@a.com`, role, sellerId: null, companyId,
+    activeMembership: { companyId, role: role === 'seller' ? 'seller' : 'manager' },
+  };
 }
 
 function lastIdentity() {
@@ -80,17 +83,24 @@ describe('App → useQueryCacheIdentity', () => {
     m.restoredUser.current = null;
     render(<App />);
     // Ainda no gate de loading, o App já chamou o hook com identidade vazia.
-    expect(lastIdentity()).toEqual({ userId: null, companyId: null, isActive: false });
+    expect(lastIdentity()).toEqual({
+      userId: null, platformRole: null, companyId: null, membershipRole: null, hasActiveMembership: false, isActive: false,
+    });
 
     await waitFor(() => expect(screen.getByTestId('mock-login')).toBeInTheDocument());
-    expect(lastIdentity()).toEqual({ userId: null, companyId: null, isActive: false });
+    expect(lastIdentity()).toEqual({
+      userId: null, platformRole: null, companyId: null, membershipRole: null, hasActiveMembership: false, isActive: false,
+    });
 
-    // Login: valores passam a refletir o usuário ativo.
+    // Login: valores passam a refletir o usuário ativo (companyId/membershipRole
+    // vêm de activeMembership — M1-F S6-E — nunca de profiles.company_id).
     const admin = user('admin', 'user-admin', 'company-a');
     m.nextUser.current = admin;
     m.restoredUser.current = admin;
     fireEvent.click(screen.getByTestId('mock-login'));
-    expect(lastIdentity()).toEqual({ userId: 'user-admin', companyId: 'company-a', isActive: true });
+    expect(lastIdentity()).toEqual({
+      userId: 'user-admin', platformRole: null, companyId: 'company-a', membershipRole: 'manager', hasActiveMembership: true, isActive: true,
+    });
   });
 
   it('troca de usuário atualiza os valores fornecidos (flag OFF não interfere)', async () => {
@@ -98,15 +108,21 @@ describe('App → useQueryCacheIdentity', () => {
     m.restoredUser.current = admin;
     render(<App />);
     await waitFor(() =>
-      expect(lastIdentity()).toEqual({ userId: 'user-admin', companyId: 'company-a', isActive: true }));
+      expect(lastIdentity()).toEqual({
+        userId: 'user-admin', platformRole: null, companyId: 'company-a', membershipRole: 'manager', hasActiveMembership: true, isActive: true,
+      }));
 
     act(() => { (window as any).__logout(); });
-    expect(lastIdentity()).toEqual({ userId: null, companyId: null, isActive: false });
+    expect(lastIdentity()).toEqual({
+      userId: null, platformRole: null, companyId: null, membershipRole: null, hasActiveMembership: false, isActive: false,
+    });
 
     const manager = user('manager', 'user-mgr', 'company-b');
     m.nextUser.current = manager;
     m.restoredUser.current = manager;
     fireEvent.click(screen.getByTestId('mock-login'));
-    expect(lastIdentity()).toEqual({ userId: 'user-mgr', companyId: 'company-b', isActive: true });
+    expect(lastIdentity()).toEqual({
+      userId: 'user-mgr', platformRole: null, companyId: 'company-b', membershipRole: 'manager', hasActiveMembership: true, isActive: true,
+    });
   });
 });
