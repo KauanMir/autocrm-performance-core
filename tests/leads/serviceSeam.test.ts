@@ -41,6 +41,12 @@ vi.mock('@/lib/flags', async (importOriginal) => {
   return { ...actual, isRemoteLeadsEnabled: mocks.isRemoteLeadsEnabled };
 });
 
+// M1-F S8-B2: activeMembership adicionada — todo teste deste arquivo
+// representa o MESMO admin empresarial autenticado, com acesso real à
+// Empresa A (nenhum cenário aqui testa ausência de membership por padrão;
+// os que testam isso de propósito sobrescrevem activeMembership
+// explicitamente). companyId legado mantido de propósito em alguns
+// overrides para provar que deixou de ser lido.
 const ADMIN: User = {
   id: 'user-1',
   name: 'Admin Teste',
@@ -48,6 +54,7 @@ const ADMIN: User = {
   role: 'admin',
   sellerId: null,
   companyId: 'company-a',
+  activeMembership: { companyId: 'company-a', role: 'manager' },
 };
 
 function leadRow(overrides: Partial<LeadRow> = {}): LeadRow {
@@ -184,6 +191,7 @@ describe('seam — flag ON lê somente o snapshot remoto', () => {
 
     vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
       ...ADMIN, id: 'user-seller-1', role: 'seller', sellerId: 's1',
+      activeMembership: { companyId: 'company-a', role: 'seller' },
     });
     const caught = ((): unknown => {
       try { LeadService.getAll(); } catch (e) { return e; }
@@ -200,6 +208,7 @@ describe('seam — flag ON lê somente o snapshot remoto', () => {
     setSnapshotFor({ companyId: 'company-a', identityKey: 'user-seller-1' }, [leadRow({ id: 'r-a' })]);
     vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
       ...ADMIN, id: 'user-seller-2', role: 'seller', sellerId: 's2',
+      activeMembership: { companyId: 'company-a', role: 'seller' },
     });
     expect(() => LeadService.getAll()).toThrow('remote_leads_snapshot_unavailable');
   });
@@ -210,8 +219,26 @@ describe('seam — flag ON lê somente o snapshot remoto', () => {
     expect(() => LeadService.getAll()).toThrow('remote_leads_invalid_context');
   });
 
-  it('sem companyId na sessão ⇒ remote_leads_invalid_context', () => {
-    vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({ ...ADMIN, companyId: null });
+  it('M1-F S8-B2: companyId legado presente mas SEM membership ativa ⇒ remote_leads_invalid_context (legado nunca é fallback)', () => {
+    vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
+      ...ADMIN, companyId: 'company-a', activeMembership: null,
+    });
+    expect(() => LeadService.getAll()).toThrow('remote_leads_invalid_context');
+  });
+
+  it('M1-F S8-B2: companyId legado DIFERENTE da membership ativa ⇒ usa a membership, nunca o legado', () => {
+    setSnapshotFor(ADMIN_OWNER, [leadRow({ id: 'r1' })]);
+    vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
+      ...ADMIN, companyId: 'company-legacy-stale', activeMembership: { companyId: 'company-a', role: 'manager' },
+    });
+    const all = LeadService.getAll();
+    expect(all.map((l) => l.id)).toEqual(['r1']);
+  });
+
+  it('M1-F S8-B2: Super Admin sem activeMembership não ganha empresa via companyId legado ⇒ remote_leads_invalid_context', () => {
+    vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
+      ...ADMIN, role: 'seller', companyId: 'company-legacy-stale', platformRole: 'super_admin', activeMembership: null,
+    });
     expect(() => LeadService.getAll()).toThrow('remote_leads_invalid_context');
   });
 
