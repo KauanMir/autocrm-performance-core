@@ -3819,3 +3819,252 @@ modificada — migration nova, puramente aditiva
 remota executada. Implementação protegida por suíte pgTAP dedicada
 (`40_m1f_s8c1b_pipeline_access.sql`) cobrindo catálogo, as quatro
 matrizes de ator, dados cruzados e atomicidade.
+
+## 31. Arquitetura comercial do Super Admin — decisões congeladas do S8-C2
+
+Esta seção registra as decisões humanas definitivas sobre o acesso
+comercial do Super Admin a Leads, tomadas após a reauditoria S8-C2-A1
+(que substitui a decisão anterior de bloqueio total, registrada na
+primeira auditoria S8-C2-A0). **Nenhuma implementação foi iniciada por
+esta seção** — é puramente decisão e planejamento, no mesmo padrão já
+usado em §24, §26, §28, §29, §30. §0–§30 não foram alterados.
+
+### 31.1 Contexto de negócio
+
+A KAPA é proprietária e administradora da plataforma, mas também
+presta serviços de marketing e acompanhamento comercial às empresas
+clientes. Por isso, ao contrário da decisão anterior (Pipeline, §30,
+que permanece válida e intocada), o Super Admin **terá** acesso
+comercial completo aos Leads — para acompanhar organização de
+Manager/Sellers, distribuição e velocidade de atendimento de Leads,
+movimentação pelo funil, histórico de contatos e qualidade da operação
+comercial gerada pelo marketing da KAPA.
+
+### 31.2 Acesso comercial completo, sempre dentro de empresa explícita — decisão congelada
+
+O Super Admin terá acesso comercial completo aos Leads das empresas
+clientes, **sempre** dentro de uma empresa explicitamente selecionada.
+Nenhuma empresa poderá ser inferida, escolhida automaticamente ou
+herdada de outro filtro. Especificamente **proibido**: empresa
+automática; primeira empresa cadastrada; empresa herdada de outro
+contexto; `activeMembership` artificial (Super Admin nunca tem
+membership, por design — isso não muda); reutilização do
+`companyFilterId` da aba Usuários (S7, §26.3) — são estados
+conceitualmente diferentes (`null` ali significa "visão global"; aqui
+significa "nenhuma empresa selecionada ainda", nunca uma visão
+agregada).
+
+### 31.3 Ausência de visão "Todas as empresas" — decisão congelada
+
+Não haverá opção "Todas as empresas" na primeira versão da operação
+comercial. Fluxo congelado: abrir Leads → selecionar uma empresa →
+acompanhar somente aquela empresa → trocar explicitamente quando
+necessário. Nenhuma tela mistura Leads de empresas diferentes na
+mesma lista ou no mesmo Kanban. Uma futura visão consolidada
+(dashboard, somente leitura, métricas agrupadas) poderá existir como
+projeto separado — não faz parte do S8-C2.
+
+### 31.4 Seletor comercial — decisão congelada
+
+Empresas **canceladas** aparecem no seletor comercial, agrupadas como
+somente leitura (diferente da aba Usuários/`useCompanies`, cuja RLS
+subjacente exclui `cancelada` por completo — por isso o seletor
+comercial **não pode** usar somente `useCompanies` como fonte). Será
+necessário um contrato estreito próprio (`list_commercial_companies()`
+— nome provisório, RPC ainda não criada) que liste as empresas
+comercialmente acessíveis ao Super Admin, incluindo no mínimo `id`,
+`name`, `status`, e os demais campos estritamente necessários — nunca
+mais que isso.
+
+### 31.5 Matriz de status — decisão congelada
+
+**Super Admin:**
+
+| Status | Leitura | Mutation |
+|---|---|---|
+| ativa | completa | completa |
+| implantação | completa | completa, caso exista estrutura comercial válida (etapa inicial da empresa já configurada) |
+| suspensa | histórica | nenhuma |
+| cancelada | histórica | nenhuma |
+
+**Manager e Seller:** continuam usando exclusivamente
+`activeMembership`; **somente empresa `ativa`** permite acesso
+comercial (Leads) — `implantação`, `suspensão` e `cancelamento` são
+**negados** na área de Leads para eles (mais restritivo que a regra já
+aprovada para Pipeline no S8-C1-B, que aceita `implantação` — as duas
+áreas têm regras propositalmente diferentes; esta seção não altera
+nada do S8-C1-B). Nenhum `p_company_id` eventualmente enviado por
+Manager/Seller amplia acesso — a empresa deles vem sempre de
+`current_membership_company_id()`.
+
+### 31.6 Estado comercial — decisão congelada
+
+Provider/hook estreito, próprio da área comercial (nome provisório,
+ainda não criado): `selectedCompanyId: string | null`, `null`
+significando literalmente "nenhuma empresa selecionada" (nunca "visão
+global"). Sem `localStorage`/`sessionStorage`/cookie; sem URL na
+primeira versão (salvo necessidade técnica futura comprovada); sem
+Zustand global; sem alterar `activeMembership`; sem reutilizar
+`useCompanyScopeFilter` (S7) — são hooks com contratos semânticos
+diferentes e não devem compartilhar implementação. Ao trocar de
+empresa: fecha Lead aberto, modais, Seller/Stage selecionados, busca e
+paginação; cancela/invalida queries da empresa anterior; nenhuma
+resposta tardia da empresa anterior é aplicada na nova. No
+logout/troca de ator: o contexto comercial é limpo (mesmo padrão já
+usado por `useCompanyScopeFilter` para seu próprio estado).
+
+### 31.7 Leitura de Pipeline para Super Admin — decisão congelada
+
+Por RPC estreita separada, ainda não criada:
+`list_pipeline_stages_for_company(p_company_id)` — somente leitura,
+exige empresa explícita, valida `platform_role`, retorna somente a
+empresa-alvo. **Não altera `stages_select`** (a policy do S8-C1-B
+permanece exatamente como publicada — Super Admin continua sem
+`current_membership_company_id()`, e portanto sem acesso por essa
+via). **Não libera** INSERT/UPDATE em `pipeline_stages` para Super
+Admin, nem `reorder_pipeline_stages` — essas permanecem restritas a
+Manager, exatamente como o S8-C1-B já decidiu e publicou.
+
+### 31.8 Leitura comercial de Leads/Timeline — decisão congelada
+
+Por RPCs estreitas separadas, ainda não criadas:
+`list_commercial_companies()`, `list_platform_leads_for_company(...)`,
+`list_platform_lead_timeline(...)`, além de
+`list_pipeline_stages_for_company(...)` (§31.7). **Nenhuma RLS global
+de Super Admin será criada** em `leads`, `lead_timeline_entries` ou
+`pipeline_stages` — motivo: uma consulta direta sem filtro (ex.:
+`lib/leads/remoteRepository.ts::fetchActiveLeadRows`, que hoje não
+envia nenhum filtro de `company_id`, confiando inteiramente na RLS)
+poderia devolver dados de todas as empresas caso uma policy global
+existisse. Manager e Seller continuam usando as policies RLS normais,
+derivadas da membership, sem nenhuma alteração.
+
+### 31.9 Query keys — decisão congelada
+
+As chaves de cache do caminho de Super Admin precisam conter
+`companyId` **e** um segmento de origem `'platform'`, para nunca
+compartilhar o mesmo slot de cache do caminho RLS de Manager/Seller —
+exemplo conceitual: `['company', companyId, 'leads', 'platform']`,
+`['company', companyId, 'pipeline-stages', 'platform']`. Nenhuma
+mudança na partição por `companyId` já existente para Manager/Seller.
+
+### 31.10 As nove RPCs de mutation — decisão congelada
+
+`create_lead`, `update_lead`, `move_lead_to_stage`,
+`apply_lead_event`, `assign_lead_seller`, `archive_lead`,
+`unarchive_lead`, `add_lead_timeline_entry`,
+`check_lead_phone_duplicate` — todas preservadas, todas receberão
+futuramente `p_company_id uuid default null` no final da assinatura
+(nenhuma quebra de chamada existente, já que nenhuma chamada real
+existe hoje — E4 nunca foi montado). Para Super Admin:
+`p_company_id` é obrigatório na prática (a função rejeita `null`
+para esse ator); valida `platform_role`, empresa, status, e que
+Lead/Seller/Stage pertencem à mesma empresa-alvo. Para Manager/Seller:
+`p_company_id` é **ignorado**; a empresa vem exclusivamente de
+`current_membership_company_id()`; o parâmetro nunca amplia acesso
+para esses dois papéis, mesmo se informado.
+
+### 31.11 Resolver interno compartilhado — decisão congelada, não implementada
+
+Para evitar repetir de forma divergente a resolução de ator, empresa,
+papel, Seller atual, status e permissão de leitura/escrita entre as
+9 RPCs, será usado um resolver SQL interno compartilhado (nome e
+assinatura ainda não definidos). Regras já congeladas para quando for
+criado: não é uma API cliente; não concede autoridade pelo parâmetro
+recebido; não aceita `profile_id` arbitrário; sempre deriva de
+`auth.uid()`; precisa de `search_path` seguro (mesmo padrão de todos os
+helpers já existentes); não deve receber `GRANT` client-side
+desnecessário (uso interno, chamado só pelas próprias RPCs
+`SECURITY DEFINER`). **Não implementado nesta etapa.**
+
+### 31.12 Auditoria — decisão congelada
+
+Toda mutation executada por Super Admin registrará em `public.audit_log`
+(tabela já existente desde `20260720130000_m1f_s4a1_invite_audit_foundation.sql`,
+já usada por 11 RPCs administrativas/de ciclo de vida — nenhuma
+alteração de schema necessária): `actor_profile_id` real (nunca a
+identidade "efetiva"), `company_id` alvo, `entity_type`, `entity_id`,
+`action`, `result`, `occurred_at`, `before_data`/`after_data`
+sanitizados. **A timeline comercial (`lead_timeline_entries`) não
+substitui o `audit_log`** — são propósitos diferentes: timeline é
+informação útil à equipe comercial; `audit_log` é prova de quem
+executou uma operação privilegiada. Mutations de Manager/Seller
+continuam sem escrever em `audit_log`, como sempre.
+
+### 31.13 Política de PII no `audit_log` — decisão congelada
+
+Não registrar telefone completo; não copiar o Lead inteiro; preferir
+IDs, status e campos alterados; telefone, quando indispensável, só
+mascarado; nunca registrar credenciais, tokens ou payloads genéricos —
+mesma disciplina já usada pelas 11 RPCs que hoje escrevem em
+`audit_log` (nenhuma delas usa `row_to_json` genérico).
+
+### 31.14 Feature flags — decisão congelada, nenhuma criada nesta etapa
+
+`NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_READ` (padrão `false`):
+controla navegação comercial do Super Admin, o seletor, leitura de
+empresas/Leads/timeline/Stages. `NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_WRITE`
+(padrão `false`): controla criação, edição, movimentação, atribuição,
+arquivamento e timeline nova — só tem efeito combinada com a de
+leitura já ativa (mesmo molde de dependência entre flags já usado por
+`NEXT_PUBLIC_FF_USER_EMAIL_EDIT`/`NEXT_PUBLIC_FF_USER_LIFECYCLE`
+exigirem `NEXT_PUBLIC_FF_ACTIVE_USERS`). Manager e Seller não
+dependem de nenhuma das duas. Rollout preferencial: leitura →
+acompanhamento real → mutations → auditoria reforçada → rollout
+completo. **Nenhuma flag criada nesta etapa.**
+
+### 31.15 Correções futuras necessárias dentro do S8-C2
+
+- `components/screens/ScreensOps.tsx` (`ScreenAndamento`, o Kanban real)
+  **ainda usa** `currentUser?.companyId ?? null` (legado) — achado da
+  reauditoria S8-C2-A1, nunca corrigido no S7-B/S8-B1 (que só tocaram
+  `ScreensBiz.tsx`). Precisará resolver `activeMembership.companyId`
+  para Manager/Seller e `selectedCompanyId` (§31.6) para Super Admin.
+  **Ainda não corrigido.**
+- `components/App.tsx` (`allowedNavIds`) **ainda autoriza** a
+  visibilidade de "Clientes"/"Andamento" só por `NAV_ROLES[user.role]`
+  (legado, valor arbitrário para Super Admin) — precisará de uma
+  capability comercial explícita nova (molde de `canAccessStageSettings`/
+  `canAccessPlatformAdmin`, já migradas no S8-B1). `User.role` isolado
+  nunca deverá conceder esse acesso. **Ainda não corrigido.**
+
+### 31.16 Divisão final aprovada do S8-C2
+
+| Sub-etapa | Escopo |
+|---|---|
+| S8-C2-A0 | Auditoria original — concluída |
+| S8-C2-A1 | Reauditoria comercial — concluída |
+| S8-C2-A2 | Congelamento documental — **esta seção** |
+| S8-C2-B1 | Backend de leitura: `list_commercial_companies`, Leads, timeline, Stages; SQL, grants, tipos, pgTAP |
+| S8-C2-B2 | Frontend de leitura: contexto comercial, seletor, capability, navegação, correção de `ScreensOps.tsx`, query keys, cache, flag READ, testes TypeScript |
+| S8-C2-C1 | Backend de create/update/duplicate: `p_company_id`, resolver interno, status, `audit_log`, testes SQL |
+| S8-C2-C2 | Frontend de create/update/duplicate: hooks, formulários, contexto explícito, testes; WRITE continua `false` |
+| S8-C2-D1 | Backend de move/assign/archive/unarchive/timeline: locks, atomicidade, `audit_log`, testes críticos |
+| S8-C2-D2 | Frontend das mutations restantes: flag WRITE, modais, troca de contexto, testes |
+| S8-C2-E | Auditoria integrada, validação, documentação, fechamento do C2 |
+
+### 31.17 Compatibilidade e relação com o restante do S8
+
+`profiles.company_id`, `profiles.role`, `profiles.seller_id`, os 4
+helpers legados e `User.companyId`/`role`/`sellerId` permanecem
+fisicamente inalterados até auditoria dedicada do S8-D/S8-E — nenhuma
+remoção nesta etapa. `User.role` isolado nunca deverá autorizar a
+navegação comercial (§31.15) — mesmo princípio já aplicado em todo o
+S8. **M1-E E4 permanece pausado até o fechamento formal do S8 (S8-F)**
+— a arquitetura comercial do Super Admin, mesmo decidida, ainda não
+foi implementada, e o E4 continua sendo trabalho posterior ao
+fechamento completo do S8.
+
+### 31.18 Confirmações finais
+
+Nenhuma implementação desta arquitetura foi iniciada em nenhuma etapa
+até aqui (S8-C2-A0/A1 são auditoria, S8-C2-A2 é esta documentação).
+Nenhum código, migration, RPC, helper, policy, flag ou teste foi
+criado ou alterado. Nenhuma operação remota foi executada. O seletor
+comercial, as flags, as RPCs estreitas de leitura, o parâmetro
+`p_company_id` nas 9 RPCs de mutation e o resolver interno **ainda não
+existem** — são decisões e planejamento, não implementação.
+**O S8-C2-B1 está desbloqueado** — pode ser iniciado sem nenhuma
+decisão humana pendente de aprovação além do que já está congelado
+nesta seção. **M1-E E4 continua pausado** até o fechamento formal do
+S8 (§31.17).
