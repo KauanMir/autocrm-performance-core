@@ -5,9 +5,10 @@ import { NAV, Avatar, PageHead, LCard, LightScreen } from '@/components/ui/kit';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle, TweakButton } from '@/components/ui/TweaksPanel';
 import { NAV_ROLES, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
-import { isRemoteStagesEnabled, isPlatformAdminEnabled } from '@/lib/flags';
-import { canAccessStageSettings, canAccessPlatformAdmin, canManageInvites } from '@/lib/capabilities';
+import { isRemoteStagesEnabled, isPlatformAdminEnabled, isSuperAdminCommercialReadEnabled } from '@/lib/flags';
+import { canAccessStageSettings, canAccessPlatformAdmin, canManageInvites, canAccessCommercialWorkspace } from '@/lib/capabilities';
 import { useQueryCacheIdentity } from '@/lib/hooks/useQueryCacheIdentity';
+import { CommercialCompanyProvider } from '@/lib/commercial/CommercialCompanyContext';
 import { subscribeStore } from '@/lib/store';
 import { AuthService, SellerService, TaskService } from '@/lib/services';
 import { AuthFlow } from '@/components/auth/AuthFlow';
@@ -43,10 +44,27 @@ const TWEAK_DEFAULTS = {
 // um Super Admin nunca tem `role`/`companyId` de empresa, então NAV_ROLES[
 // user.role] pode nem fazer sentido para ele — mesmo assim a entrada
 // 'empresas' é adicionada normalmente, sem depender de `base`.
+// M1-F S8-C2-B2: ids comerciais (Clientes/Andamento). Super Admin NUNCA os
+// recebe via NAV_ROLES[user.role] (achado 2 do S8-C2-A1 — profiles.role
+// legado de um Super Admin, mantido por compatibilidade, hoje resolve para
+// 'admin', que já inclui os dois ids) — são retirados da base e só voltam
+// via canAccessCommercialWorkspace + a flag de leitura comercial. Manager/
+// Seller continuam recebendo-os exatamente como sempre (via `base`, sem
+// nenhuma capability nova envolvida — nenhuma mudança de comportamento).
+const COMMERCIAL_NAV_IDS = ['clientes', 'andamento'];
+
 function allowedNavIds(user: User | null): string[] {
   if (!user) return [];
   const base = NAV_ROLES[user.role] || [];
-  let ids = base;
+  const isSuperAdmin = user.platformRole === 'super_admin';
+  let ids = isSuperAdmin ? base.filter((id) => !COMMERCIAL_NAV_IDS.includes(id)) : base;
+  if (
+    isSuperAdmin &&
+    isSuperAdminCommercialReadEnabled() &&
+    canAccessCommercialWorkspace(user)
+  ) {
+    ids = [...ids, ...COMMERCIAL_NAV_IDS];
+  }
   if (!ids.includes('ajustes') && (
     (isRemoteStagesEnabled() && canAccessStageSettings(user)) || canManageInvites(user)
   )) {
@@ -255,34 +273,40 @@ export function App() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-      <Rail current={effectiveCurrent} go={go} currentUser={currentUser} />
-      <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
-        {effectiveCurrent === 'home'
-          ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} />
-          : (Cur ? <Cur go={go} t={t} /> : <PlaceholderScreen title={navItem?.label} />)}
-      </main>
+    // M1-F S8-C2-B2: CommercialCompanyProvider montado UMA vez aqui, acima da
+    // troca de tela — assim a seleção do Super Admin sobrevive à navegação
+    // entre Clientes/Andamento (Provider compartilhado), e é limpa sozinha
+    // quando currentUser.id muda (login/logout/troca de usuário).
+    <CommercialCompanyProvider identityKey={currentUser.id}>
+      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+        <Rail current={effectiveCurrent} go={go} currentUser={currentUser} />
+        <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
+          {effectiveCurrent === 'home'
+            ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} />
+            : (Cur ? <Cur go={go} t={t} /> : <PlaceholderScreen title={navItem?.label} />)}
+        </main>
 
-      <TweaksPanel>
-        <TweakSection label="Pódio (tela inicial)" />
-        <TweakRadio label="Estilo do pódio" value={t.podium} options={['A', 'B', 'C', 'D']} onChange={(v: string) => setTweak('podium', v)} />
-        <div style={{ fontSize: 11.5, color: '#9aa1ac', padding: '0 2px 8px', lineHeight: 1.5 }}>A · Pódio — B · Líder — C · Galeria — D · Campeão (fotos reais)</div>
-        <TweakToggle label="Animações (coroa, partículas, brilho)" value={t.anim} onChange={(v: boolean) => setTweak('anim', v)} />
-        <TweakSection label="Métricas" />
-        <TweakToggle label="Mostrar receita (discreto)" value={t.showRevenue} onChange={(v: boolean) => setTweak('showRevenue', v)} />
-        <TweakButton label="Reproduzir animação de entrada" onClick={() => setAnimKey(k => k + 1)} />
-        <TweakSection label="Telas novas (revisão)" />
-        <TweakButton label="Ver Login" onClick={() => (window as any).__reviewAuth('login')} />
-        <TweakButton label="Ver Cadastro" onClick={() => (window as any).__reviewAuth('signup')} />
-        <TweakButton label="Ver Recuperação de senha" onClick={() => (window as any).__reviewAuth('recover')} />
-        <TweakButton label="Ver Onboarding" onClick={() => (window as any).__reviewAuth('onboarding')} />
-        <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
-        <TweakButton label="Ver Central de notificações" onClick={() => openFlow('notificacoes')} />
-        <TweakButton label="Ver Busca global" onClick={() => openFlow('busca')} />
-        <TweakButton label="Ver Galeria de estados" onClick={() => openFlow('estados')} />
-      </TweaksPanel>
+        <TweaksPanel>
+          <TweakSection label="Pódio (tela inicial)" />
+          <TweakRadio label="Estilo do pódio" value={t.podium} options={['A', 'B', 'C', 'D']} onChange={(v: string) => setTweak('podium', v)} />
+          <div style={{ fontSize: 11.5, color: '#9aa1ac', padding: '0 2px 8px', lineHeight: 1.5 }}>A · Pódio — B · Líder — C · Galeria — D · Campeão (fotos reais)</div>
+          <TweakToggle label="Animações (coroa, partículas, brilho)" value={t.anim} onChange={(v: boolean) => setTweak('anim', v)} />
+          <TweakSection label="Métricas" />
+          <TweakToggle label="Mostrar receita (discreto)" value={t.showRevenue} onChange={(v: boolean) => setTweak('showRevenue', v)} />
+          <TweakButton label="Reproduzir animação de entrada" onClick={() => setAnimKey(k => k + 1)} />
+          <TweakSection label="Telas novas (revisão)" />
+          <TweakButton label="Ver Login" onClick={() => (window as any).__reviewAuth('login')} />
+          <TweakButton label="Ver Cadastro" onClick={() => (window as any).__reviewAuth('signup')} />
+          <TweakButton label="Ver Recuperação de senha" onClick={() => (window as any).__reviewAuth('recover')} />
+          <TweakButton label="Ver Onboarding" onClick={() => (window as any).__reviewAuth('onboarding')} />
+          <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
+          <TweakButton label="Ver Central de notificações" onClick={() => openFlow('notificacoes')} />
+          <TweakButton label="Ver Busca global" onClick={() => openFlow('busca')} />
+          <TweakButton label="Ver Galeria de estados" onClick={() => openFlow('estados')} />
+        </TweaksPanel>
 
-      <FlowLayer flow={flow} close={closeFlow} openFlow={openFlow} go={go} />
-    </div>
+        <FlowLayer flow={flow} close={closeFlow} openFlow={openFlow} go={go} />
+      </div>
+    </CommercialCompanyProvider>
   );
 }

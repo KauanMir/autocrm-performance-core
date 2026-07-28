@@ -7,6 +7,9 @@ import { useStore } from '@/lib/store';
 import { LeadService, TaskService, PipelineService, AuthService, SellerService } from '@/lib/services';
 import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
+import { isSuperAdminCommercialReadEnabled } from '@/lib/flags';
+import { PlatformCommercialClientsView } from '@/components/commercial/PlatformCommercialClientsView';
+import { PlatformCommercialPipelineView } from '@/components/commercial/PlatformCommercialPipelineView';
 
 const STAGE_TONE: Record<string, string> = {
   'Novo': 'green', 'Qualificado': 'green', 'Visita agendada': 'amber',
@@ -77,7 +80,10 @@ function LeadCard({ lead, go }: any) {
   );
 }
 
-export function ScreenClientes({ go }: any) {
+// M1-F S8-C2-B2: corpo LEGADO de Clientes (Manager/Seller) — extraído sem
+// nenhuma alteração funcional/visual, exportado como ScreenClientes (router,
+// zero hooks) mais abaixo. Super Admin nunca monta este componente.
+function ScreenClientesLegacy({ go }: any) {
   useStore();
   const allLeads = LeadService.getAll(); // already RBAC-scoped: seller sees only their own here
   const currentUser = AuthService.getCurrentUser();
@@ -115,6 +121,21 @@ export function ScreenClientes({ go }: any) {
       </div>
     </LightScreen>
   );
+}
+
+// M1-F S8-C2-B2: router de "Clientes" — ZERO hooks próprios (Rules of
+// Hooks: a escolha é de QUAL componente montar, nunca de qual hook chamar
+// dentro do MESMO componente). Super Admin + flag comercial ON monta a
+// superfície platform (somente leitura, dados reais); qualquer outro caso
+// (Manager/Seller, ou Super Admin com a flag OFF) monta o corpo legado
+// intacto. currentUser.role legado NUNCA decide este switch.
+export function ScreenClientes({ go }: any) {
+  const currentUser = AuthService.getCurrentUser();
+  const isSuperAdmin = currentUser?.platformRole === 'super_admin';
+  if (isSuperAdmin && isSuperAdminCommercialReadEnabled()) {
+    return <PlatformCommercialClientsView userId={currentUser!.id} />;
+  }
+  return <ScreenClientesLegacy go={go} />;
 }
 
 function PipeCard({ lead, go, dragging, onDragStart, onDragEnd }: any) {
@@ -179,7 +200,12 @@ function KanbanStateCard({ testId, children, onRetry }: { testId: string; childr
   );
 }
 
-export function ScreenAndamento({ go }: any) {
+// M1-F S8-C2-B2: corpo LEGADO de Andamento (Manager/Seller) — extraído sem
+// nenhuma alteração funcional/visual além da correção do achado 1 do
+// S8-C2-A1 (companyId agora vem de activeMembership.companyId, nunca do
+// legado profiles.company_id) — exportado como ScreenAndamento (router,
+// zero hooks) mais abaixo. Super Admin nunca monta este componente.
+function ScreenAndamentoLegacy({ go }: any) {
   useStore();
   const allLeads = LeadService.getAll(); // seller already RBAC-scoped to their own leads here
   const currentUser = AuthService.getCurrentUser();
@@ -205,7 +231,15 @@ export function ScreenAndamento({ go }: any) {
   // PipelineService.getStages() adaptados, sem nenhuma chamada remota.
   const pipeline = usePipelineStages({
     userId: currentUser?.id ?? null,
-    companyId: currentUser?.companyId ?? null,
+    // M1-F S8-C2-B2 (achado 1 do S8-C2-A1): companyId vem exclusivamente de
+    // activeMembership.companyId — nunca do legado currentUser?.companyId
+    // (profiles.company_id), que não reflete suspensão/transferência de
+    // membership (mesma correção já aplicada ao pipeline em ScreensBiz.tsx
+    // no S7-B, e ao seam de leads remotos em lib/services.ts no S8-B2).
+    // ScreenAndamentoLegacy só monta para Manager/Seller — Super Admin nunca
+    // chega aqui, então activeMembership.companyId nunca é null por ser
+    // Super Admin (só por ausência real de membership ativa).
+    companyId: currentUser?.activeMembership?.companyId ?? null,
     userIsActive: Boolean(currentUser),
     localStageNames: PipelineService.getStages(),
   });
@@ -326,6 +360,17 @@ export function ScreenAndamento({ go }: any) {
       {body}
     </LightScreen>
   );
+}
+
+// M1-F S8-C2-B2: router de "Em progresso" — mesmo molde de ScreenClientes
+// acima (zero hooks próprios, switch por QUAL componente montar).
+export function ScreenAndamento({ go }: any) {
+  const currentUser = AuthService.getCurrentUser();
+  const isSuperAdmin = currentUser?.platformRole === 'super_admin';
+  if (isSuperAdmin && isSuperAdminCommercialReadEnabled()) {
+    return <PlatformCommercialPipelineView userId={currentUser!.id} />;
+  }
+  return <ScreenAndamentoLegacy go={go} />;
 }
 
 const PRIO: Record<string, { c: string; label: string }> = {
