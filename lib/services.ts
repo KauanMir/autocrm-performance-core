@@ -360,8 +360,16 @@ function _remoteLeadSnapshotOrThrow(): RemoteLeadSnapshot {
   // AuthService) — nunca de um parâmetro vindo da UI. identityKey é o id do
   // usuário autenticado: a RLS entrega conjuntos diferentes por usuário, então
   // o snapshot de um usuário jamais serve outro, mesmo na mesma empresa.
+  //
+  // M1-F S8-B2: companyId vem exclusivamente de activeMembership.companyId —
+  // nunca do legado user.companyId (profiles.company_id), que não reflete
+  // suspensão/transferência de membership (mesma correção já aplicada ao
+  // pipeline em ScreensBiz.tsx no S7-B). Sem fallback deliberado: Super Admin
+  // nunca tem activeMembership, por design, e nunca ganha empresa por essa
+  // via — o filtro contextual de empresa do S7 (companyFilterId) nunca entra
+  // aqui, permanece exclusivo da aba de Usuários.
   const user = AuthService.getCurrentUser();
-  const companyId = user?.companyId ?? null;
+  const companyId = user?.activeMembership?.companyId ?? null;
   const identityKey = user?.id ?? null;
   if (!companyId || !identityKey) {
     throw new RemoteLeadsError('remote_leads_invalid_context', {
