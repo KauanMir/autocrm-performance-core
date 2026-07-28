@@ -159,3 +159,70 @@ describe('AuthService.restoreSession — mesmo comportamento de membership', () 
     expect(user?.activeMembership).toEqual({ companyId: 'company-a', role: 'manager' });
   });
 });
+
+// M1-F S6-E: hardening — restoreSession() precisa falhar fechado quando o
+// profile por trás da sessão Auth não existe mais ou está globalmente
+// inativo (mesma assimetria com login() encontrada na auditoria S6-A0:
+// login() sempre fazia signOut() quando _loadProfile retornava null,
+// restoreSession() nunca fazia). NUNCA deve encerrar a sessão só por causa
+// de company_memberships (suspensa/desligada/ausente) — esse é o contrato
+// central desta correção, testado explicitamente abaixo.
+describe('AuthService.restoreSession — hardening de identidade (M1-F S6-E)', () => {
+  it('profile inexistente (erro/sem linha): retorna null E encerra a sessão Auth (signOut), mesmo padrão de login()', async () => {
+    mocks.profilesSingle.mockResolvedValue({ data: null, error: { code: 'PGRST116', message: 'no rows' } });
+
+    const user = await AuthService.restoreSession();
+
+    expect(user).toBeNull();
+    expect(mocks.signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('profile globalmente inativo (is_active=false): retorna null E encerra a sessão Auth (signOut)', async () => {
+    mockProfile({ is_active: false });
+
+    const user = await AuthService.restoreSession();
+
+    expect(user).toBeNull();
+    expect(mocks.signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('Super Admin globalmente inativo: retorna null E encerra a sessão Auth (platform_role nunca contorna is_active=false)', async () => {
+    mockProfile({ platform_role: 'super_admin', company_id: null, is_active: false });
+
+    const user = await AuthService.restoreSession();
+
+    expect(user).toBeNull();
+    expect(mocks.signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('membership ausente/suspensa (activeMembership=null): profile válido continua autenticado, signOut NUNCA é chamado', async () => {
+    mockProfile();
+    mockMembership(null); // sem linha ativa em company_memberships — suspensa, desligada ou nunca existiu, indistinguível daqui
+
+    const user = await AuthService.restoreSession();
+
+    expect(user).not.toBeNull();
+    expect(user?.activeMembership).toBeNull();
+    expect(mocks.signOut).not.toHaveBeenCalled();
+  });
+
+  it('Super Admin sem membership própria: continua autenticado, signOut NUNCA é chamado', async () => {
+    mockProfile({ platform_role: 'super_admin', company_id: null });
+    mockMembership(null);
+
+    const user = await AuthService.restoreSession();
+
+    expect(user).not.toBeNull();
+    expect(user?.platformRole).toBe('super_admin');
+    expect(mocks.signOut).not.toHaveBeenCalled();
+  });
+
+  it('sem sessão Auth nenhuma (getSession sem session.user): retorna null sem chamar signOut (não há sessão para encerrar)', async () => {
+    mocks.getSession.mockResolvedValue({ data: { session: null } });
+
+    const user = await AuthService.restoreSession();
+
+    expect(user).toBeNull();
+    expect(mocks.signOut).not.toHaveBeenCalled();
+  });
+});

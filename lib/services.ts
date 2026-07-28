@@ -122,12 +122,25 @@ export const AuthService = {
   // Called once on app boot (components/App.tsx) to recover an existing
   // Supabase session — e.g. after F5 — before deciding whether to show the
   // login screen or the app.
+  // CORREÇÃO (M1-F S6-E): esta função lia o profile mas nunca encerrava a
+  // sessão Auth quando ele vinha null (inexistente ou globalmente inativo,
+  // profiles.is_active=false — os dois casos que _loadProfile colapsa em
+  // null) — assimetria com login(), que sempre fazia signOut() nesse mesmo
+  // caso. Resultado: um profile excluído/desativado globalmente deixava a
+  // sessão Auth viva para sempre depois de um F5, mesmo sem nenhum profile
+  // válido por trás dela. Mesmo padrão de login() agora: user null ->
+  // signOut(). NUNCA acontece por causa de company_memberships (suspensa/
+  // desligada/ausente) — _loadProfile só depende de profiles.is_active;
+  // activeMembership null não afeta o retorno de _loadProfile, então um
+  // usuário empresarial sem membership ativa (ou um Super Admin, que nunca
+  // tem membership) continua autenticado normalmente.
   async restoreSession(): Promise<User | null> {
     if (!isSupabaseConfigured) { _cachedUser = null; return null; }
     const { data } = await supabase.auth.getSession();
     const authUser = data.session?.user;
     if (!authUser) { _cachedUser = null; return null; }
     const user = await _loadProfile(authUser.id, authUser.email);
+    if (!user) { await supabase.auth.signOut(); } // profile inexistente ou globalmente inativo — nao deixar sessao Auth orfa
     _cachedUser = user;
     return user;
   },
