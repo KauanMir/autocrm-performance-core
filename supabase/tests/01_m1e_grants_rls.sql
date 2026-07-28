@@ -4,7 +4,10 @@ create extension if not exists pgtap;
 select * from no_plan();
 
 -- ── fixtures (como postgres) ────────────────────────────────────────────
-insert into public.companies (id, name) values ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Empresa B Teste');
+-- M1-F S8-C2-B1: Empresa B precisa de status 'ativa' explícito — a nova
+-- policy de leads_select nega Manager/Seller em 'implantacao' (default da
+-- coluna), diferente do contrato já aprovado para Pipeline (S8-C1-B).
+insert into public.companies (id, name, status) values ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Empresa B Teste', 'ativa');
 insert into public.pipeline_stages (id, company_id, code, name, sort_order)
   values ('bbbbbbbb-0000-0000-0000-00000000000b', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'new', 'Novo', 0);
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at) values
@@ -13,6 +16,12 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
 insert into public.profiles (id, company_id, name, email, role, is_active) values
   ('b1111111-1111-1111-1111-111111111111', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Admin B', 'adminb@test.local', 'admin', true),
   ('d1111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-000000000001', 'Inativo', 'inativo@test.local', 'manager', false);
+-- M1-F S8-C2-B1: Admin B precisa de membership real (leads_select agora
+-- deriva empresa de current_membership_company_id(), nunca mais de
+-- profiles.company_id) — legado 'admin' -> company_memberships.role='manager'
+-- (mesmo mapeamento já usado pelo backfill real do M1-F S1/seed.sql).
+insert into public.company_memberships (company_id, profile_id, role, is_active) values
+  ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'b1111111-1111-1111-1111-111111111111', 'manager', true);
 
 -- Leads: L1 (s4 ativo), L2 (s11 ativo), L3 (sem vendedor), L4 (s4 arquivado), LB (empresa B)
 insert into public.leads (id, company_id, name, phone, car, stage_id, seller_id, archived_at) values
