@@ -63,9 +63,14 @@ type LifecycleAction = 'reactivate' | 'offboard' | 'transfer';
 export type InactiveUserListProps = {
   userId: string;
   actor: CreateInviteActor | null;
+  // M1-F S7-C: mesmo contrato de ActiveUserList — quando DEFINIDO (mesmo
+  // null), substitui o filtro interno de empresa pelo valor compartilhado
+  // da aba Usuários. undefined (omitido, default): comportamento antigo
+  // (S6-F) preservado byte a byte.
+  externalCompanyFilterId?: string | null;
 };
 
-export function InactiveUserList({ userId, actor }: InactiveUserListProps) {
+export function InactiveUserList({ userId, actor, externalCompanyFilterId }: InactiveUserListProps) {
   const isSuperAdmin = actor?.kind === 'super_admin';
 
   const [searchInput, setSearchInput] = useState('');
@@ -85,10 +90,15 @@ export function InactiveUserList({ userId, actor }: InactiveUserListProps) {
     setCompanyFilter(null);
   }, [userId, actor?.kind]);
 
+  // M1-F S7-C: externalCompanyFilterId (quando definido, mesmo null) tem
+  // prioridade sobre o estado interno — nunca os dois ao mesmo tempo.
+  const isExternallyControlled = externalCompanyFilterId !== undefined;
+  const effectiveCompanyFilter = isExternallyControlled ? externalCompanyFilterId : companyFilter;
+
   const scope: InactiveCompanyUserScope | null = actor === null
     ? null
     : actor.kind === 'super_admin'
-      ? { kind: 'platform', companyId: companyFilter }
+      ? { kind: 'platform', companyId: effectiveCompanyFilter }
       : { kind: 'company', companyId: actor.companyId };
 
   const lifecycleActor: MembershipLifecycleActor | null = actor === null
@@ -106,7 +116,10 @@ export function InactiveUserList({ userId, actor }: InactiveUserListProps) {
     search: debouncedSearch || null,
   });
 
-  const companiesQuery = useCompanies({ userId, authorized: isSuperAdmin });
+  // M1-F S7-C: desativada (authorized=false) quando controlado externamente
+  // — nunca duplica a busca de empresas que UsersTabSection já fez uma
+  // única vez via useCompanyScopeFilter.
+  const companiesQuery = useCompanies({ userId, authorized: isSuperAdmin && !isExternallyControlled });
 
   if (actor === null) return null;
 
@@ -154,7 +167,7 @@ export function InactiveUserList({ userId, actor }: InactiveUserListProps) {
               <Chip active={roleFilter === 'manager'} onClick={() => setRoleFilter('manager')}>Managers</Chip>
               <Chip active={roleFilter === 'seller'} onClick={() => setRoleFilter('seller')}>Sellers</Chip>
             </div>
-            {isSuperAdmin && (
+            {isSuperAdmin && !isExternallyControlled && (
               <InactiveCompanyFilter
                 companyId={companyFilter}
                 onPick={setCompanyFilter}

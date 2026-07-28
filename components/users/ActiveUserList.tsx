@@ -103,9 +103,16 @@ export type ActiveUserListProps = {
   // teste/consumidor pré-existente precisa saber das novas ações
   // (Suspender/Desligar/Transferir) para continuar válido.
   lifecycleEnabled?: boolean;
+  // M1-F S7-C: quando DEFINIDO (mesmo null), substitui o filtro interno de
+  // empresa (companyFilter local) pelo valor compartilhado da aba Usuários
+  // (useCompanyScopeFilter, instanciado uma única vez em UsersTabSection) —
+  // o dropdown interno de empresa é ocultado nesse caso. undefined
+  // (omitido, default): comportamento antigo preservado byte a byte — nenhum
+  // teste/consumidor pré-existente do S5/S6 precisa saber deste prop.
+  externalCompanyFilterId?: string | null;
 };
 
-export function ActiveUserList({ userId, actor, userEmailEditEnabled = false, lifecycleEnabled = false }: ActiveUserListProps) {
+export function ActiveUserList({ userId, actor, userEmailEditEnabled = false, lifecycleEnabled = false, externalCompanyFilterId }: ActiveUserListProps) {
   const isSuperAdmin = actor?.kind === 'super_admin';
 
   const [searchInput, setSearchInput] = useState('');
@@ -129,10 +136,15 @@ export function ActiveUserList({ userId, actor, userEmailEditEnabled = false, li
     setCompanyFilter(null);
   }, [userId, actor?.kind]);
 
+  // M1-F S7-C: externalCompanyFilterId (quando definido, mesmo null) tem
+  // prioridade sobre o estado interno — nunca os dois ao mesmo tempo.
+  const isExternallyControlled = externalCompanyFilterId !== undefined;
+  const effectiveCompanyFilter = isExternallyControlled ? externalCompanyFilterId : companyFilter;
+
   const scope: CompanyUserScope | null = actor === null
     ? null
     : actor.kind === 'super_admin'
-      ? { kind: 'platform', companyId: companyFilter }
+      ? { kind: 'platform', companyId: effectiveCompanyFilter }
       : { kind: 'company', companyId: actor.companyId };
 
   const usersQuery = useCompanyUsers({
@@ -151,9 +163,13 @@ export function ActiveUserList({ userId, actor, userEmailEditEnabled = false, li
       ? { kind: 'super_admin', profileId: userId }
       : { kind: 'manager', profileId: userId, companyId: actor.companyId };
 
-  // Só para popular o filtro de empresa do Super Admin — nunca autorização
-  // (RLS/can_access_company decide o que volta). Manager nunca busca isso.
-  const companiesQuery = useCompanies({ userId, authorized: isSuperAdmin });
+  // Só para popular o filtro INTERNO de empresa do Super Admin — nunca
+  // autorização (RLS/can_access_company decide o que volta). Manager nunca
+  // busca isso. M1-F S7-C: quando controlado externamente, o filtro interno
+  // não renderiza, e esta chamada é desativada (authorized=false) para
+  // nunca duplicar a busca de empresas que UsersTabSection já fez uma
+  // única vez via useCompanyScopeFilter.
+  const companiesQuery = useCompanies({ userId, authorized: isSuperAdmin && !isExternallyControlled });
 
   if (actor === null) return null;
 
@@ -222,7 +238,7 @@ export function ActiveUserList({ userId, actor, userEmailEditEnabled = false, li
               <Chip active={roleFilter === 'manager'} onClick={() => setRoleFilter('manager')}>Managers</Chip>
               <Chip active={roleFilter === 'seller'} onClick={() => setRoleFilter('seller')}>Sellers</Chip>
             </div>
-            {isSuperAdmin && (
+            {isSuperAdmin && !isExternallyControlled && (
               <CompanyFilter
                 companyId={companyFilter}
                 onPick={setCompanyFilter}

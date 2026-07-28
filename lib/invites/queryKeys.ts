@@ -32,8 +32,20 @@ function requireCompanyId(value: string): string {
 export const adminInviteQueryKeys = {
   root: (userId: string) => ['admin-invites', requireUserId(userId)] as const,
 
-  list: (userId: string, scope: AdminInviteScope) =>
-    scope.kind === 'company'
-      ? ([...adminInviteQueryKeys.root(userId), 'company', requireCompanyId(scope.companyId)] as const)
-      : ([...adminInviteQueryKeys.root(userId), 'platform'] as const),
+  // M1-F S7-C: companyFilterId é um 3º parâmetro OPCIONAL — omiti-lo
+  // (undefined) preserva exatamente a key antiga (§ compat total com o
+  // contrato pré-S7). Só tem efeito no escopo 'platform' (Super Admin);
+  // no escopo 'company' o Manager já é preso à própria empresa, então o
+  // parâmetro é ignorado nesse ramo mesmo se informado por engano —
+  // nunca combina os dois filtros. null vira o segmento estável 'all'
+  // (mesmo padrão já usado por companyUserQueryKeys/inactiveCompanyUserQueryKeys).
+  list: (userId: string, scope: AdminInviteScope, companyFilterId?: string | null) => {
+    if (scope.kind === 'company') {
+      return [...adminInviteQueryKeys.root(userId), 'company', requireCompanyId(scope.companyId)] as const;
+    }
+    if (companyFilterId === undefined) {
+      return [...adminInviteQueryKeys.root(userId), 'platform'] as const;
+    }
+    return [...adminInviteQueryKeys.root(userId), 'platform', companyFilterId ?? 'all'] as const;
+  },
 };

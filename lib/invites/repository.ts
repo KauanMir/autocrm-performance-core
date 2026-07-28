@@ -37,7 +37,14 @@ export type { AdminInviteScope } from '@/lib/invites/queryKeys';
 // aqui é defesa/coerência de escopo, nunca substitui a RLS: um Manager que
 // tentasse informar companyId de outra empresa continuaria vendo zero
 // linhas (RLS nega antes disso importar).
-export async function fetchInvites(scope: AdminInviteScope): Promise<AdminInviteListItem[]> {
+//
+// M1-F S7-C: companyFilterId é um 2º parâmetro OPCIONAL, só aplicado no
+// escopo 'platform' (Super Admin) — estreita a consulta já autorizada pela
+// RLS (que já concede acesso a TODOS os convites para Super Admin); nunca
+// amplia. Aplicado na PRÓPRIA consulta (.eq), nunca como filtro em memória
+// sobre uma lista já carregada. Escopo 'company' nunca recebe este filtro
+// (Manager já é preso à própria empresa pela RLS + pelo scope.companyId).
+export async function fetchInvites(scope: AdminInviteScope, companyFilterId?: string | null): Promise<AdminInviteListItem[]> {
   let query = supabase
     .from('invites')
     .select(ADMIN_INVITE_SELECT_COLUMNS)
@@ -46,10 +53,12 @@ export async function fetchInvites(scope: AdminInviteScope): Promise<AdminInvite
 
   if (scope.kind === 'company') {
     query = query.eq('company_id', scope.companyId);
+  } else if (companyFilterId) {
+    query = query.eq('company_id', companyFilterId);
   }
-  // scope.kind === 'platform': nenhum filtro adicional de empresa — Super
-  // Admin vê exatamente o que invites_select_own_or_platform permitir
-  // (todos os convites). Nenhum seletor de empresa nesta etapa (S7).
+  // scope.kind === 'platform' sem companyFilterId: nenhum filtro adicional
+  // de empresa — Super Admin vê exatamente o que
+  // invites_select_own_or_platform permitir (todos os convites).
 
   const { data, error } = await query;
 

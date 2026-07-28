@@ -23,6 +23,11 @@ export type UseInvitesOptions = {
   // membership ativa resolvida, ou nenhum escopo aplicável) — a query fica
   // desabilitada nesse caso, nunca assume um escopo implícito.
   scope: AdminInviteScope | null;
+  // M1-F S7-C: filtro contextual de empresa — só tem efeito para escopo
+  // 'platform' (Super Admin); ignorado para escopo 'company' (Manager
+  // sempre preso à própria empresa, nunca ao filtro externo). undefined
+  // (omitido, default): comportamento antigo preservado byte a byte.
+  companyFilterId?: string | null;
 };
 
 export type UseInvitesResult = {
@@ -47,12 +52,16 @@ const DISABLED_INVITES_QUERY_KEY = ['admin-invites', null, 'disabled'] as const;
 const EMPTY_INVITES: readonly AdminInviteListItem[] = Object.freeze([]);
 
 export function useInvites(options: UseInvitesOptions): UseInvitesResult {
-  const { userId, authorized, scope } = options;
+  const { userId, authorized, scope, companyFilterId } = options;
   const hasUser = typeof userId === 'string' && userId.trim() !== '';
+
+  // companyFilterId só participa da key/consulta no escopo 'platform' —
+  // nunca no escopo 'company' (Manager), mesmo que informado por engano.
+  const effectiveCompanyFilterId = scope?.kind === 'platform' ? companyFilterId : undefined;
 
   const queryEnabled = authorized && hasUser && scope !== null;
   const queryKey = hasUser && scope !== null
-    ? adminInviteQueryKeys.list(userId as string, scope)
+    ? adminInviteQueryKeys.list(userId as string, scope, effectiveCompanyFilterId)
     : DISABLED_INVITES_QUERY_KEY;
 
   // Declarada SEMPRE (não autorizado/sem escopo ⇒ enabled=false, zero
@@ -60,7 +69,7 @@ export function useInvites(options: UseInvitesOptions): UseInvitesResult {
   const query = useQuery<AdminInviteListItem[]>({
     queryKey,
     enabled: queryEnabled,
-    queryFn: () => fetchInvites(scope as AdminInviteScope),
+    queryFn: () => fetchInvites(scope as AdminInviteScope, effectiveCompanyFilterId),
   });
 
   const data = query.data ?? null;

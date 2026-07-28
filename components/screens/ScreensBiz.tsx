@@ -10,9 +10,7 @@ import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
 import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites } from '@/lib/capabilities';
-import { InviteList } from '@/components/invites/InviteList';
-import { ActiveUserList } from '@/components/users/ActiveUserList';
-import { InactiveUserList } from '@/components/users/InactiveUserList';
+import { UsersTabSection } from '@/components/users/UsersTabSection';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
 
@@ -567,34 +565,22 @@ export function ScreenAjustes({ go }: any) {
           </div>
         </LCard>
       )}
-      {/* M1-F S5-D: "Usuários ativos" (nova) sempre ACIMA de "Convites"
-          (InviteList), nunca misturados na mesma tabela (§22.9 do design).
-          ActiveUserList só renderiza sob a flag de rollout (RPCs ainda não
-          aplicadas remotamente) — em produção sem a flag, o bloco inteiro
-          fica fora, e InviteList continua idêntico ao S4-F3 (sem
-          regressão). Ambos são seu próprio guard (retornam null com
-          actor=null) — currentUser garantido não-nulo neste ponto
-          (activeTab só chega a 'Usuários' com invitesAccess ou
-          fullSettingsAccess true, ambos exigindo currentUser). */}
+      {/* M1-F S5-D/S6-F/S7-C: composição completa da aba "Usuários"
+          (seletor contextual de empresa + Usuários ativos + Usuários
+          suspensos/desligados + Convites, nessa ordem) extraída para
+          UsersTabSection — só ali o estado compartilhado do filtro de
+          empresa (useCompanyScopeFilter) é instanciado, uma única vez.
+          currentUser garantido não-nulo neste ponto (activeTab só chega a
+          'Usuários' com invitesAccess ou fullSettingsAccess true, ambos
+          exigindo currentUser). */}
       {activeTab === 'Usuários' && currentUser && (
-        <>
-          {activeUsersEnabled && (
-            <ActiveUserList
-              userId={currentUser.id}
-              actor={inviteActor}
-              userEmailEditEnabled={userEmailEditEnabled}
-              lifecycleEnabled={userLifecycleEnabled}
-            />
-          )}
-          {/* M1-F S6-F: "Usuários suspensos e desligados" — sempre entre
-              "Usuários ativos" e "Convites" (ordem congelada), só sob a
-              flag própria (userLifecycleEnabled), nunca sem ACTIVE_USERS
-              habilitada junto. */}
-          {userLifecycleEnabled && (
-            <InactiveUserList userId={currentUser.id} actor={inviteActor} />
-          )}
-          <InviteList userId={currentUser.id} actor={inviteActor} />
-        </>
+        <UsersTabSection
+          userId={currentUser.id}
+          actor={inviteActor}
+          activeUsersEnabled={activeUsersEnabled}
+          userLifecycleEnabled={userLifecycleEnabled}
+          userEmailEditEnabled={userEmailEditEnabled}
+        />
       )}
       {activeTab === 'Etapas' && (
         <LCard style={{ maxWidth: 520 }}>

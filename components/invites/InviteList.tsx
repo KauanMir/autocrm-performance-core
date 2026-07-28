@@ -88,21 +88,27 @@ export type InviteListProps = {
   // renderiza nada (defesa em profundidade; ScreenAjustes já não chega a
   // montar a aba/o componente nesse caso).
   actor: CreateInviteActor | null;
+  // M1-F S7-C: filtro contextual de empresa compartilhado da aba Usuários
+  // (useCompanyScopeFilter, instanciado uma única vez em UsersTabSection).
+  // Só tem efeito para Super Admin (escopo 'platform') — Manager ignora
+  // por completo, sempre preso à própria empresa. undefined (omitido,
+  // default): comportamento antigo preservado byte a byte (visão de
+  // plataforma sem nenhum filtro de empresa, contrato pré-S7).
+  externalCompanyFilterId?: string | null;
 };
 
-export function InviteList({ userId, actor }: InviteListProps) {
+export function InviteList({ userId, actor, externalCompanyFilterId }: InviteListProps) {
   const isSuperAdmin = actor?.kind === 'super_admin';
   // Escopo derivado do actor — nunca um segundo estado paralelo que
-  // pudesse divergir dele. Super Admin: plataforma (nenhum seletor de
-  // empresa nesta etapa, ver §12/S7). Manager: SEMPRE a própria membership
-  // ativa, nunca profiles.company_id legado.
+  // pudesse divergir dele. Super Admin: plataforma. Manager: SEMPRE a
+  // própria membership ativa, nunca profiles.company_id legado.
   const scope: AdminInviteScope | null = actor === null
     ? null
     : actor.kind === 'super_admin'
       ? { kind: 'platform' }
       : { kind: 'company', companyId: actor.companyId };
 
-  const invitesQuery = useInvites({ userId, authorized: actor !== null, scope });
+  const invitesQuery = useInvites({ userId, authorized: actor !== null, scope, companyFilterId: externalCompanyFilterId });
   // Só para mapear company_id → nome na coluna Empresa do Super Admin —
   // nunca para autorização (isso é sempre RLS/actor). Manager nunca busca
   // esta lista (authorized=false quando !isSuperAdmin), evitando uma
