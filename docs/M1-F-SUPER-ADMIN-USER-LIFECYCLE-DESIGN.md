@@ -4068,3 +4068,130 @@ existem** — são decisões e planejamento, não implementação.
 decisão humana pendente de aprovação além do que já está congelado
 nesta seção. **M1-E E4 continua pausado** até o fechamento formal do
 S8 (§31.17).
+
+## 32. Implementação do S8-C2-B1 — backend de leitura comercial
+
+Esta seção registra a implementação (não mais planejamento) do
+backend de leitura comercial decidido em §31. §0–§31 não foram
+alterados.
+
+### 32.1 RLS de Leads/Timeline migrada para membership
+
+`leads_select`/`lead_timeline_select` (`public.leads`/
+`public.lead_timeline_entries`) foram recriadas
+(`20260728160000_m1f_s8c2b1_leads_timeline_membership_access.sql`)
+combinando `current_membership_company_id()`/
+`current_membership_role()` com uma checagem inline de
+`companies.status = 'ativa'` — **nunca** `can_access_company()`/
+`is_manager_or_platform()` isoladamente (ambos aceitam `implantacao`
+também, que a matriz de Leads nega especificamente para Manager/
+Seller, diferente do Pipeline). Manager vê todos os Leads da própria
+empresa `ativa` (incluindo arquivados, comportamento preservado);
+Seller vê somente o próprio Lead (via
+`current_profile_seller_id_for_company(company_id)`, nunca
+`profiles.seller_id`), nunca arquivado. `implantação`/`suspensão`/
+`cancelamento` são negados para Manager/Seller nesta leitura — mais
+restritivo que a regra já aprovada para Pipeline (S8-C1-B, intocado).
+`lead_timeline_select` reaproveita a mesma estrutura de sempre
+(`EXISTS` contra `leads`, nunca uma policy independente), só trocando
+os helpers. **Nenhuma policy global de Super Admin foi criada** — ele
+continua sem SELECT direto em nenhuma das duas tabelas (confirmado por
+teste).
+
+### 32.2 Quatro RPCs estreitas de leitura comercial
+
+Criadas em `20260728170000_m1f_s8c2b1_platform_commercial_read_rpcs.sql`,
+todas `SECURITY DEFINER`, `search_path=''`, validando
+`is_platform_super_admin()` internamente (nunca confiando só no
+`GRANT`), `REVOKE ALL` + `GRANT EXECUTE` só para `authenticated`:
+
+- **`list_commercial_companies()`** — sem parâmetros; devolve `id`,
+  `name`, `status` de **todas** as empresas, incluindo `cancelada`
+  (por isso não reaproveita `useCompanies`/`companies_select_accessible`,
+  que a exclui); ordenação determinística por status
+  (ativa→implantação→suspensa→cancelada), depois `name`, depois `id`.
+- **`list_platform_leads_for_company(p_company_id uuid, p_archived
+  boolean default false)`** — empresa sempre explícita
+  (`company_required` se `null`, `company_not_found` se inexistente);
+  leitura permitida em qualquer status (`ativa`/`implantacao`/
+  `suspensa`/`cancelada` — leitura histórica congelada em §31.5);
+  `p_archived` espelha exatamente `archived_at IS NULL`/`IS NOT NULL`,
+  mesmo predicado já usado por `lib/leads/remoteRepository.ts`; retorna
+  `SETOF public.leads`, mesmo formato já consumido hoje; ordenação
+  `created_at DESC, id ASC`, idêntica ao caminho remoto atual.
+- **`list_platform_lead_timeline(p_company_id uuid, p_lead_id uuid)`**
+  — ambos os parâmetros obrigatórios (`company_required`/
+  `lead_required`); Lead de **outra** empresa produz o mesmo
+  `lead_not_found` de um Lead genuinamente inexistente — nunca revela
+  que o Lead existe em outra empresa; retorna `SETOF public.
+  lead_timeline_entries`; ordenação `occurred_at DESC, id ASC`.
+- **`list_pipeline_stages_for_company(p_company_id uuid)`** — mesma
+  validação de empresa das demais; retorna `SETOF public.
+  pipeline_stages`; ordenação `sort_order ASC, id ASC`. **Não altera**
+  `stages_select`/`stages_insert`/`stages_update`/
+  `reorder_pipeline_stages` (S8-C1-B) — Super Admin continua sem
+  poder criar, editar ou reordenar etapas; a coluna `sort_order`
+  continua fora de qualquer grant de escrita direta, confirmado por
+  teste mesmo após a RPC de leitura existir.
+
+**Nenhuma das quatro grava em `audit_log`** — leitura não é ação
+auditável (decisão congelada em §31.12, reafirmada aqui).
+
+### 32.3 Tipos regenerados
+
+`lib/supabase/database.types.ts` regenerado via `supabase gen types
+typescript --local` — diff estritamente aditivo (81 inserções, zero
+remoção, zero objeto não relacionado alterado): as quatro funções
+novas aparecem com assinaturas e `Returns`/`SetofOptions` corretos,
+apontando para `leads`/`lead_timeline_entries`/`pipeline_stages`.
+Nenhuma edição manual.
+
+### 32.4 Teste antigo atualizado — `01_m1e_grants_rls.sql`
+
+Um único ajuste necessário, causa e garantia documentados: o cenário
+"admin B vê somente o lead da empresa B" cria um profile **novo**
+dentro do próprio arquivo (`b1111111...`), sem `company_memberships`
+— com a policy migrada, isso resolvia `current_membership_company_id()`
+como `null`, zerando a visibilidade. Adicionada a membership real
+(`role='manager'`, mesmo mapeamento do backfill do M1-F S1) e o
+`status='ativa'` explícito da empresa de teste (o `default` da coluna
+é `'implantacao'`, negado pela nova policy). Garantia preservada:
+"admin B" continua vendo exatamente 1 lead, o da própria empresa,
+nunca o de outra — só a fonte da autorização mudou. Nenhuma outra
+assertion do arquivo foi tocada.
+
+### 32.5 Novo teste — `41_m1f_s8c2b1_commercial_read_backend.sql`
+
+72 asserções: catálogo (RLS habilitada, exatamente 1 policy por
+tabela, ausência de helpers legados, as 4 RPCs com assinatura/grants
+corretos, as 9 RPCs de mutation + `reorder_pipeline_stages` + as 3
+policies de `pipeline_stages` confirmadas intactas); matriz completa
+de Manager/Seller (empresa `ativa` — incluindo Seller não vendo Lead
+sem dono, de outro Seller, ou o próprio arquivado; `implantação`/
+`suspensa`/`cancelada` — negado); membership ausente/suspensa/
+offboarded/profile inativo (zero linhas); legado divergente
+(`profiles.company_id`/`role` apontando para outra empresa/papel,
+ignorados); Super Admin sem SELECT direto; as quatro RPCs cobertas
+individualmente (sucesso, erros `company_required`/`company_not_found`/
+`lead_required`/`lead_not_found`, `forbidden` para Manager/Seller,
+isolamento entre empresas, empresa cancelada incluída/lida); `anon`
+negado em tudo.
+
+### 32.6 Validação local
+
+32.7 — Totais confirmados nesta etapa: 36 migrations; SQL 42 arquivos,
+**2154/2154** (2082 + 72 novos); TypeScript 98 arquivos, **1607/1607**
+(inalterado); build verde, 8/8 páginas.
+
+### 32.8 Escopo preservado
+
+Nenhum frontend alterado (nenhum componente, hook, repository, query
+key, bridge, capability ou feature flag tocado). Nenhuma das 9 RPCs de
+mutation de leads alterada. `S8-C1-B` (policies de `pipeline_stages` e
+`reorder_pipeline_stages`) permanece exatamente como publicado.
+`public.profiles`/`public.sellers` permanecem como o S8-C1-A deixou.
+Nenhuma coluna removida, nenhum helper legado removido. Nenhuma
+operação remota executada.
+
+**O S8-C2-B2 está desbloqueado.** **M1-E E4 continua pausado** até o
+fechamento formal do S8 (S8-F).
