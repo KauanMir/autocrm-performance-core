@@ -12,8 +12,9 @@ import type { PipelineStage } from '@/lib/pipeline/adapter';
 import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites } from '@/lib/capabilities';
 import { InviteList } from '@/components/invites/InviteList';
 import { ActiveUserList } from '@/components/users/ActiveUserList';
+import { InactiveUserList } from '@/components/users/InactiveUserList';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
-import { isActiveUsersEnabled, isUserEmailEditEnabled } from '@/lib/flags';
+import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
 // missing from this map is what made VisitRow crash (M0-J audit, M0-K1 fix).
@@ -455,6 +456,13 @@ export function ScreenAjustes({ go }: any) {
   // decididos linha a linha dentro de ActiveUserList (rowCapabilities) —
   // aqui só a combinação das duas flags, nunca autorização.
   const userEmailEditEnabled = activeUsersEnabled && isUserEmailEditEnabled();
+  // M1-F S6-F: ciclo de vida empresarial (suspender/reativar/desligar/
+  // transferir) — flag PRÓPRIA (NEXT_PUBLIC_FF_USER_LIFECYCLE), só tem
+  // efeito combinada com activeUsersEnabled (mesmo contrato de
+  // userEmailEditEnabled). As RPCs que consome (suspend_membership/
+  // reactivate_membership/offboard_seller/offboard_manager/
+  // transfer_membership) ainda não foram aplicadas no banco remoto.
+  const userLifecycleEnabled = activeUsersEnabled && isUserLifecycleEnabled();
   const allowedTabs: string[] = fullSettingsAccess
     ? ['Empresa', 'Usuários', 'Etapas']
     : [
@@ -560,7 +568,19 @@ export function ScreenAjustes({ go }: any) {
       {activeTab === 'Usuários' && currentUser && (
         <>
           {activeUsersEnabled && (
-            <ActiveUserList userId={currentUser.id} actor={inviteActor} userEmailEditEnabled={userEmailEditEnabled} />
+            <ActiveUserList
+              userId={currentUser.id}
+              actor={inviteActor}
+              userEmailEditEnabled={userEmailEditEnabled}
+              lifecycleEnabled={userLifecycleEnabled}
+            />
+          )}
+          {/* M1-F S6-F: "Usuários suspensos e desligados" — sempre entre
+              "Usuários ativos" e "Convites" (ordem congelada), só sob a
+              flag própria (userLifecycleEnabled), nunca sem ACTIVE_USERS
+              habilitada junto. */}
+          {userLifecycleEnabled && (
+            <InactiveUserList userId={currentUser.id} actor={inviteActor} />
           )}
           <InviteList userId={currentUser.id} actor={inviteActor} />
         </>

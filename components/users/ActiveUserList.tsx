@@ -27,6 +27,14 @@ import type { PlatformCompanyRow } from '@/lib/companies/repository';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { EditUserModal } from '@/components/users/EditUserModal';
 import { ChangeUserEmailModal } from '@/components/users/ChangeUserEmailModal';
+import { membershipLifecycleCapabilities, type MembershipLifecycleActor } from '@/lib/capabilities';
+import { MembershipLifecycleActions } from '@/components/users/MembershipLifecycleActions';
+import { SuspendMembershipModal } from '@/components/users/SuspendMembershipModal';
+import { OffboardSellerModal } from '@/components/users/OffboardSellerModal';
+import { OffboardManagerModal } from '@/components/users/OffboardManagerModal';
+import { TransferMembershipModal } from '@/components/users/TransferMembershipModal';
+
+type LifecycleAction = 'suspend' | 'offboard' | 'transfer';
 
 const ROLE_LABEL: Record<CompanyUserRow['company_role'], string> = {
   manager: 'Manager',
@@ -89,9 +97,15 @@ export type ActiveUserListProps = {
   // rowCapabilities(). Default false: nenhum teste/consumidor pré-existente
   // deste componente precisa saber da nova ação para continuar válido.
   userEmailEditEnabled?: boolean;
+  // M1-F S6-F: isUserLifecycleEnabled() && isActiveUsersEnabled() resolvido
+  // pelo chamador (ScreensBiz) — combinado aqui com
+  // membershipLifecycleCapabilities() por linha. Default false: nenhum
+  // teste/consumidor pré-existente precisa saber das novas ações
+  // (Suspender/Desligar/Transferir) para continuar válido.
+  lifecycleEnabled?: boolean;
 };
 
-export function ActiveUserList({ userId, actor, userEmailEditEnabled = false }: ActiveUserListProps) {
+export function ActiveUserList({ userId, actor, userEmailEditEnabled = false, lifecycleEnabled = false }: ActiveUserListProps) {
   const isSuperAdmin = actor?.kind === 'super_admin';
 
   const [searchInput, setSearchInput] = useState('');
@@ -100,6 +114,7 @@ export function ActiveUserList({ userId, actor, userEmailEditEnabled = false }: 
   const [companyFilter, setCompanyFilter] = useState<string | null>(null);
   const [editing, setEditing] = useState<CompanyUserRow | null>(null);
   const [editingEmail, setEditingEmail] = useState<CompanyUserRow | null>(null);
+  const [lifecycleAction, setLifecycleAction] = useState<{ kind: LifecycleAction; row: CompanyUserRow } | null>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -127,6 +142,14 @@ export function ActiveUserList({ userId, actor, userEmailEditEnabled = false }: 
     role: roleFilter,
     search: debouncedSearch || null,
   });
+
+  // M1-F S6-F: ator de ciclo de vida — mesma derivação de InactiveUserList.
+  // profileId vem de userId (o próprio ator, nunca de um campo separado).
+  const lifecycleActor: MembershipLifecycleActor | null = actor === null
+    ? null
+    : actor.kind === 'super_admin'
+      ? { kind: 'super_admin', profileId: userId }
+      : { kind: 'manager', profileId: userId, companyId: actor.companyId };
 
   // Só para popular o filtro de empresa do Super Admin — nunca autorização
   // (RLS/can_access_company decide o que volta). Manager nunca busca isso.
@@ -156,6 +179,19 @@ export function ActiveUserList({ userId, actor, userEmailEditEnabled = false }: 
 
   const closeEditEmail = () => {
     setEditingEmail(null);
+    lastFocusedRef.current?.focus();
+  };
+
+  // M1-F S6-F: ações de ciclo de vida (Suspender/Desligar/Transferir) —
+  // estado próprio, modais próprios, nunca compartilham EditUserModal/
+  // ChangeUserEmailModal.
+  const openLifecycleAction = (kind: LifecycleAction, row: CompanyUserRow, trigger: HTMLElement | null) => {
+    lastFocusedRef.current = trigger;
+    setLifecycleAction({ kind, row });
+  };
+
+  const closeLifecycleAction = () => {
+    setLifecycleAction(null);
     lastFocusedRef.current?.focus();
   };
 
@@ -229,8 +265,11 @@ export function ActiveUserList({ userId, actor, userEmailEditEnabled = false }: 
                 userId={userId}
                 isSuperAdmin={isSuperAdmin}
                 userEmailEditEnabled={userEmailEditEnabled}
+                lifecycleEnabled={lifecycleEnabled}
+                lifecycleActor={lifecycleActor}
                 onEdit={(trigger) => openEdit(row, trigger)}
                 onEditEmail={(trigger) => openEditEmail(row, trigger)}
+                onLifecycleAction={(kind, trigger) => openLifecycleAction(kind, row, trigger)}
               />
             ))}
           </div>
@@ -272,19 +311,41 @@ export function ActiveUserList({ userId, actor, userEmailEditEnabled = false }: 
           onClose={closeEditEmail}
         />
       )}
+
+      {lifecycleAction?.kind === 'suspend' && (
+        <SuspendMembershipModal userId={userId} user={lifecycleAction.row} onClose={closeLifecycleAction} />
+      )}
+      {lifecycleAction?.kind === 'offboard' && lifecycleAction.row.company_role === 'seller' && (
+        <OffboardSellerModal userId={userId} user={lifecycleAction.row} onClose={closeLifecycleAction} />
+      )}
+      {lifecycleAction?.kind === 'offboard' && lifecycleAction.row.company_role === 'manager' && (
+        <OffboardManagerModal userId={userId} user={lifecycleAction.row} onClose={closeLifecycleAction} />
+      )}
+      {lifecycleAction?.kind === 'transfer' && (
+        <TransferMembershipModal userId={userId} user={lifecycleAction.row} onClose={closeLifecycleAction} />
+      )}
     </>
   );
 }
 
-function UserRow({ row, userId, isSuperAdmin, userEmailEditEnabled, onEdit, onEditEmail }: {
+function UserRow({ row, userId, isSuperAdmin, userEmailEditEnabled, lifecycleEnabled, lifecycleActor, onEdit, onEditEmail, onLifecycleAction }: {
   row: CompanyUserRow;
   userId: string;
   isSuperAdmin: boolean;
   userEmailEditEnabled: boolean;
+  lifecycleEnabled: boolean;
+  lifecycleActor: MembershipLifecycleActor | null;
   onEdit: (trigger: HTMLElement | null) => void;
   onEditEmail: (trigger: HTMLElement | null) => void;
+  onLifecycleAction: (kind: LifecycleAction, trigger: HTMLElement | null) => void;
 }) {
   const caps = rowCapabilities(row, userId, isSuperAdmin, userEmailEditEnabled);
+  const lifecycleCaps = lifecycleEnabled
+    ? membershipLifecycleCapabilities(
+        { profileId: row.profile_id, companyId: row.company_id, companyRole: row.company_role, lifecycleStatus: 'active' },
+        lifecycleActor,
+      )
+    : { canSuspend: false, canReactivate: false, canOffboard: false, canTransfer: false };
   return (
     <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border-2)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -315,6 +376,13 @@ function UserRow({ row, userId, isSuperAdmin, userEmailEditEnabled, onEdit, onEd
                   Alterar e-mail
                 </LBtn>
               )}
+              <MembershipLifecycleActions
+                capabilities={lifecycleCaps}
+                onSuspend={(trigger) => onLifecycleAction('suspend', trigger)}
+                onReactivate={() => {}}
+                onOffboard={(trigger) => onLifecycleAction('offboard', trigger)}
+                onTransfer={(trigger) => onLifecycleAction('transfer', trigger)}
+              />
             </>
           )}
         </div>
