@@ -517,15 +517,15 @@ export type Database = {
             foreignKeyName: "leads_created_by_fk"
             columns: ["company_id", "created_by_profile_id"]
             isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["company_id", "id"]
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
           },
           {
             foreignKeyName: "leads_updated_by_fk"
             columns: ["company_id", "updated_by_profile_id"]
             isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["company_id", "id"]
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
           },
         ]
       }
@@ -1139,6 +1139,13 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      list_platform_sellers_for_company: {
+        Args: { p_company_id: string }
+        Returns: {
+          name: string
+          seller_id: string
+        }[]
       }
       move_lead_to_stage: {
         Args: {
