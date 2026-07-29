@@ -22,6 +22,12 @@ import {
   createPlatformLead,
   updatePlatformLead,
   checkPlatformLeadPhoneDuplicate,
+  movePlatformLeadToStage,
+  applyPlatformLeadEvent,
+  assignPlatformLeadSeller,
+  archivePlatformLead,
+  unarchivePlatformLead,
+  addPlatformLeadTimelineEntry,
 } from '@/lib/commercial/repository';
 
 beforeEach(() => {
@@ -261,6 +267,148 @@ describe('nenhuma função lê sellers ou faz SELECT direto', () => {
     await updatePlatformLead({ companyId: 'company-a', leadId: 'lead-1', expectedVersion: 1, name: 'C', phone: '1', car: 'X' });
     mocks.rpc.mockResolvedValue({ data: [], error: null });
     await checkPlatformLeadPhoneDuplicate('company-a', '1');
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+});
+
+// M1-F S8-C2-D2 — mutations restantes.
+const fakeLead = { id: 'lead-1', company_id: 'company-a', version: 2 };
+
+describe('movePlatformLeadToStage', () => {
+  it('chama move_lead_to_stage com p_company_id explícito; expectedVersion omitida vira undefined (LWW preservado)', async () => {
+    mocks.rpc.mockResolvedValue({ data: fakeLead, error: null });
+    const result = await movePlatformLeadToStage({ companyId: 'company-a', leadId: 'lead-1', stageId: 'stage-2' });
+    expect(mocks.rpc).toHaveBeenCalledWith('move_lead_to_stage', {
+      p_company_id: 'company-a', p_lead_id: 'lead-1', p_stage_id: 'stage-2', p_expected_version: undefined,
+    });
+    expect(result).toEqual(fakeLead);
+  });
+
+  it('expectedVersion informada é repassada (optimistic locking)', async () => {
+    mocks.rpc.mockResolvedValue({ data: fakeLead, error: null });
+    await movePlatformLeadToStage({ companyId: 'company-a', leadId: 'lead-1', stageId: 'stage-2', expectedVersion: 1 });
+    expect(mocks.rpc).toHaveBeenCalledWith('move_lead_to_stage', expect.objectContaining({ p_expected_version: 1 }));
+  });
+
+  it('erro ⇒ PlatformCommercialError com o código certo (ex.: stage_not_found)', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'stage_not_found' } });
+    await expect(movePlatformLeadToStage({ companyId: 'company-a', leadId: 'lead-1', stageId: 'stage-x' }))
+      .rejects.toSatisfy((e: unknown) => isPlatformCommercialError(e)
+        && (e as PlatformCommercialError).code === 'platform_commercial_lead_move_failed');
+  });
+
+  it('data null sem erro ⇒ ainda assim rejeita', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    await expect(movePlatformLeadToStage({ companyId: 'company-a', leadId: 'lead-1', stageId: 'stage-2' }))
+      .rejects.toSatisfy((e: unknown) => isPlatformCommercialError(e)
+        && (e as PlatformCommercialError).code === 'platform_commercial_lead_move_failed');
+  });
+});
+
+describe('applyPlatformLeadEvent', () => {
+  it('chama apply_lead_event com p_company_id/p_event_type exatos, nenhum payload adicional', async () => {
+    mocks.rpc.mockResolvedValue({ data: fakeLead, error: null });
+    await applyPlatformLeadEvent({ companyId: 'company-a', leadId: 'lead-1', eventType: 'visit_confirmed' });
+    expect(mocks.rpc).toHaveBeenCalledWith('apply_lead_event', {
+      p_company_id: 'company-a', p_lead_id: 'lead-1', p_event_type: 'visit_confirmed',
+    });
+  });
+
+  it('erro ⇒ PlatformCommercialError com o código certo', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'lead_archived' } });
+    await expect(applyPlatformLeadEvent({ companyId: 'company-a', leadId: 'lead-1', eventType: 'visit_confirmed' }))
+      .rejects.toSatisfy((e: unknown) => isPlatformCommercialError(e)
+        && (e as PlatformCommercialError).code === 'platform_commercial_lead_event_failed');
+  });
+});
+
+describe('assignPlatformLeadSeller', () => {
+  it('chama assign_lead_seller com o seller_id real e p_company_id explícito', async () => {
+    mocks.rpc.mockResolvedValue({ data: fakeLead, error: null });
+    await assignPlatformLeadSeller({ companyId: 'company-a', leadId: 'lead-1', sellerId: 'seller-1', expectedVersion: 1 });
+    expect(mocks.rpc).toHaveBeenCalledWith('assign_lead_seller', {
+      p_company_id: 'company-a', p_lead_id: 'lead-1', p_seller_id: 'seller-1', p_expected_version: 1,
+    });
+  });
+
+  it('sellerId null remove o vendedor — envia null de verdade, nunca omitido', async () => {
+    mocks.rpc.mockResolvedValue({ data: fakeLead, error: null });
+    await assignPlatformLeadSeller({ companyId: 'company-a', leadId: 'lead-1', sellerId: null, expectedVersion: 2 });
+    const sentArgs = mocks.rpc.mock.calls[0][1] as Record<string, unknown>;
+    expect(sentArgs.p_seller_id).toBeNull();
+  });
+
+  it('erro ⇒ PlatformCommercialError com o código certo (ex.: seller_not_found)', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'seller_not_found' } });
+    await expect(assignPlatformLeadSeller({ companyId: 'company-a', leadId: 'lead-1', sellerId: 'seller-x', expectedVersion: 1 }))
+      .rejects.toSatisfy((e: unknown) => isPlatformCommercialError(e)
+        && (e as PlatformCommercialError).code === 'platform_commercial_lead_assign_failed');
+  });
+});
+
+describe('archivePlatformLead / unarchivePlatformLead', () => {
+  it('archivePlatformLead chama archive_lead com p_company_id/p_expected_version exatos', async () => {
+    mocks.rpc.mockResolvedValue({ data: fakeLead, error: null });
+    await archivePlatformLead({ companyId: 'company-a', leadId: 'lead-1', expectedVersion: 1 });
+    expect(mocks.rpc).toHaveBeenCalledWith('archive_lead', {
+      p_company_id: 'company-a', p_lead_id: 'lead-1', p_expected_version: 1,
+    });
+  });
+
+  it('unarchivePlatformLead chama unarchive_lead com p_company_id/p_expected_version exatos', async () => {
+    mocks.rpc.mockResolvedValue({ data: fakeLead, error: null });
+    await unarchivePlatformLead({ companyId: 'company-a', leadId: 'lead-1', expectedVersion: 2 });
+    expect(mocks.rpc).toHaveBeenCalledWith('unarchive_lead', {
+      p_company_id: 'company-a', p_lead_id: 'lead-1', p_expected_version: 2,
+    });
+  });
+
+  it('erro em archive ⇒ código certo', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'stale_write' } });
+    await expect(archivePlatformLead({ companyId: 'company-a', leadId: 'lead-1', expectedVersion: 99 }))
+      .rejects.toSatisfy((e: unknown) => isPlatformCommercialError(e)
+        && (e as PlatformCommercialError).code === 'platform_commercial_lead_archive_failed');
+  });
+
+  it('erro em unarchive ⇒ código certo', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'stale_write' } });
+    await expect(unarchivePlatformLead({ companyId: 'company-a', leadId: 'lead-1', expectedVersion: 99 }))
+      .rejects.toSatisfy((e: unknown) => isPlatformCommercialError(e)
+        && (e as PlatformCommercialError).code === 'platform_commercial_lead_unarchive_failed');
+  });
+});
+
+describe('addPlatformLeadTimelineEntry', () => {
+  const fakeEntry = { id: 'entry-1', company_id: 'company-a', lead_id: 'lead-1' };
+
+  it('chama add_lead_timeline_entry com os campos reais e p_company_id explícito', async () => {
+    mocks.rpc.mockResolvedValue({ data: fakeEntry, error: null });
+    const result = await addPlatformLeadTimelineEntry({
+      companyId: 'company-a', leadId: 'lead-1', icon: 'message', color: '#3B82F6', label: 'Nota', detail: 'Detalhe',
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith('add_lead_timeline_entry', {
+      p_company_id: 'company-a', p_lead_id: 'lead-1', p_icon: 'message', p_color: '#3B82F6',
+      p_label: 'Nota', p_detail: 'Detalhe',
+    });
+    expect(result).toEqual(fakeEntry);
+  });
+
+  it('detail vazio vira undefined (nunca string vazia enviada)', async () => {
+    mocks.rpc.mockResolvedValue({ data: fakeEntry, error: null });
+    await addPlatformLeadTimelineEntry({ companyId: 'company-a', leadId: 'lead-1', icon: 'message', color: '#3B82F6', label: 'Nota' });
+    expect(mocks.rpc).toHaveBeenCalledWith('add_lead_timeline_entry', expect.objectContaining({ p_detail: undefined }));
+  });
+
+  it('erro ⇒ PlatformCommercialError com o código certo', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'lead_archived' } });
+    await expect(addPlatformLeadTimelineEntry({ companyId: 'company-a', leadId: 'lead-1', icon: 'message', color: '#3B82F6', label: 'Nota' }))
+      .rejects.toSatisfy((e: unknown) => isPlatformCommercialError(e)
+        && (e as PlatformCommercialError).code === 'platform_commercial_lead_timeline_add_failed');
+  });
+
+  it('nunca chama supabase.from', async () => {
+    mocks.rpc.mockResolvedValue({ data: fakeEntry, error: null });
+    await addPlatformLeadTimelineEntry({ companyId: 'company-a', leadId: 'lead-1', icon: 'message', color: '#3B82F6', label: 'Nota' });
     expect(mocks.from).not.toHaveBeenCalled();
   });
 });

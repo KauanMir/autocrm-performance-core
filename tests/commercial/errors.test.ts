@@ -17,6 +17,9 @@ describe('getPlatformCommercialErrorMessage — códigos estáveis das RPCs', ()
     ['lead_archived', 'Este Lead está arquivado e não pode ser editado.'],
     ['stale_write', 'Este Lead foi alterado em outro lugar. Abra novamente para editar.'],
     ['invalid_phone', 'Informe um telefone válido.'],
+    // M1-F S8-C2-D2
+    ['stage_not_found', 'A etapa selecionada não está mais disponível.'],
+    ['invalid_event', 'Este evento não é reconhecido pelo sistema.'],
   ];
 
   it.each(cases)('detail.message=%s ⇒ mensagem PT-BR estável', (message, expected) => {
@@ -54,6 +57,27 @@ describe('getPlatformCommercialErrorMessage — erros locais dos hooks (pré-RPC
   it('update-platform-lead-stale-context ⇒ mensagem de contexto mudou', () => {
     expect(getPlatformCommercialErrorMessage(new Error('update-platform-lead-stale-context')))
       .toBe('A empresa selecionada mudou antes da conclusão. Tente novamente.');
+  });
+
+  // M1-F S8-C2-D2 — mesmas duas mensagens locais, reaplicadas às seis
+  // mutations restantes.
+  const localErrorCases: Array<[string, string]> = [
+    ['move-platform-lead-not-allowed', 'Você não tem permissão para mover Leads nesta empresa.'],
+    ['move-platform-lead-stale-context', 'O contexto da empresa mudou. Tente novamente.'],
+    ['apply-platform-lead-event-not-allowed', 'Você não tem permissão para registrar eventos nesta empresa.'],
+    ['apply-platform-lead-event-stale-context', 'O contexto da empresa mudou. Tente novamente.'],
+    ['assign-platform-lead-seller-not-allowed', 'Você não tem permissão para atribuir vendedores nesta empresa.'],
+    ['assign-platform-lead-seller-stale-context', 'O contexto da empresa mudou. Tente novamente.'],
+    ['archive-platform-lead-not-allowed', 'Você não tem permissão para arquivar Leads nesta empresa.'],
+    ['archive-platform-lead-stale-context', 'O contexto da empresa mudou. Tente novamente.'],
+    ['unarchive-platform-lead-not-allowed', 'Você não tem permissão para desarquivar Leads nesta empresa.'],
+    ['unarchive-platform-lead-stale-context', 'O contexto da empresa mudou. Tente novamente.'],
+    ['add-platform-lead-timeline-entry-not-allowed', 'Você não tem permissão para adicionar entradas nesta empresa.'],
+    ['add-platform-lead-timeline-entry-stale-context', 'O contexto da empresa mudou. Tente novamente.'],
+  ];
+
+  it.each(localErrorCases)('%s ⇒ mensagem local estável', (message, expected) => {
+    expect(getPlatformCommercialErrorMessage(new Error(message))).toBe(expected);
   });
 });
 

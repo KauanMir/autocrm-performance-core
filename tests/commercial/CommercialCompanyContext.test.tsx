@@ -13,10 +13,11 @@ import {
 } from '@/lib/commercial/CommercialCompanyContext';
 
 function Consumer() {
-  const { selectedCompanyId, setSelectedCompanyId } = useCommercialCompanyContext();
+  const { selectedCompanyId, setSelectedCompanyId, contextEpoch } = useCommercialCompanyContext();
   return (
     <div>
       <span data-testid="selected">{selectedCompanyId ?? 'null'}</span>
+      <span data-testid="epoch">{contextEpoch}</span>
       <button onClick={() => setSelectedCompanyId('company-a')}>select-a</button>
       <button onClick={() => setSelectedCompanyId('company-b')}>select-b</button>
     </div>
@@ -135,6 +136,62 @@ describe('CommercialCompanyContext — troca de empresa cancela queries da empre
     fireEvent.click(screen.getByText('select-a'));
     fireEvent.click(screen.getByText('select-b'));
     expect(clearSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('CommercialCompanyContext — contextEpoch (M1-F S8-C2-D2)', () => {
+  it('começa em um valor estável e incrementa a cada troca REAL de empresa', () => {
+    const queryClient = new QueryClient();
+    renderWithProvider('user-1', queryClient);
+    const initial = Number(screen.getByTestId('epoch').textContent);
+
+    fireEvent.click(screen.getByText('select-a'));
+    const afterA = Number(screen.getByTestId('epoch').textContent);
+    expect(afterA).toBeGreaterThan(initial);
+
+    fireEvent.click(screen.getByText('select-b'));
+    const afterB = Number(screen.getByTestId('epoch').textContent);
+    expect(afterB).toBeGreaterThan(afterA);
+  });
+
+  it('selecionar a MESMA empresa já selecionada não incrementa o epoch', () => {
+    const queryClient = new QueryClient();
+    renderWithProvider('user-1', queryClient);
+    fireEvent.click(screen.getByText('select-a'));
+    const afterFirst = Number(screen.getByTestId('epoch').textContent);
+    fireEvent.click(screen.getByText('select-a'));
+    expect(Number(screen.getByTestId('epoch').textContent)).toBe(afterFirst);
+  });
+
+  it('troca de identidade também incrementa o epoch (mesmo padrão do reset de seleção)', () => {
+    const queryClient = new QueryClient();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <CommercialCompanyProvider identityKey="user-1">
+          <Consumer />
+        </CommercialCompanyProvider>
+      </QueryClientProvider>,
+    );
+    const initial = Number(screen.getByTestId('epoch').textContent);
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <CommercialCompanyProvider identityKey="user-2">
+          <Consumer />
+        </CommercialCompanyProvider>
+      </QueryClientProvider>,
+    );
+    expect(Number(screen.getByTestId('epoch').textContent)).toBeGreaterThan(initial);
+  });
+
+  it('ida e volta A->B->A produz um epoch diferente do inicial (round-trip detectável)', () => {
+    const queryClient = new QueryClient();
+    renderWithProvider('user-1', queryClient);
+    fireEvent.click(screen.getByText('select-a'));
+    const epochA1 = Number(screen.getByTestId('epoch').textContent);
+    fireEvent.click(screen.getByText('select-b'));
+    fireEvent.click(screen.getByText('select-a'));
+    const epochA2 = Number(screen.getByTestId('epoch').textContent);
+    expect(epochA2).not.toBe(epochA1);
   });
 });
 
