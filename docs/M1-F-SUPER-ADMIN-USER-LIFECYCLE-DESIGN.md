@@ -6276,3 +6276,155 @@ navegação; S8-D2-A: `User.role`/`User.sellerId` + módulos M0;
 S8-D2-B: fim da sincronização de `profiles.role`). **S8-E está
 desbloqueado, mas não iniciado. M1-E E4 continua pausado** até o
 fechamento formal do S8 (S8-F).
+
+## 45. S8-E1 — remoção dos helpers legados de profile
+
+Primeiro corte do S8-E: remove fisicamente do catálogo os 4 helpers
+M1-C que liam a identidade empresarial pelas colunas legadas de
+`profiles` — zero consumidor ativo (frontend ou backend) desde o
+S8-D2-B. As colunas físicas (`profiles.company_id`/`role`/`seller_id`)
+permanecem, reservadas ao S8-E2.
+
+### 45.1 Helpers removidos e razão
+
+- `public.current_profile_company_id()`
+- `public.current_profile_role()`
+- `public.current_profile_seller_id()`
+- `public.is_manager_or_admin()`
+
+Todos da migration M1-C original (`20260717100100_m1c_01_rls_helpers_
+is_active.sql`), superados desde o M1-F S2 (`20260720110100_m1f_s2_02_
+company_access_helpers.sql`) pelos 7 helpers novos baseados em
+`company_memberships`/`platform_role`. Zero consumidor ativo confirmado
+por auditoria (§45.2) — não podiam permanecer disponíveis para
+reutilização futura (risco de um código novo, escrito sem contexto
+histórico, voltar a chamá-los por engano).
+
+### 45.2 Auditoria final — zero consumidor ativo
+
+Mesma metodologia do S8-D2-B (dump de `pg_get_functiondef`/`prosrc` de
+toda função `public.*` no estado ATIVO do catálogo, nunca migrations
+históricas — Postgres substitui funções in-place): confirmado que os
+únicos "consumidores" dos 4 helpers eram (a) suas próprias definições e
+(b) uma referência interna ao grupo (`is_manager_or_admin()` chamava
+`current_profile_role()` — ambos removidos juntos nesta migration).
+Zero policy, zero outra função/RPC, zero trigger, zero view referencia
+qualquer um dos 4 nomes. Todas as policies ativas de
+`leads`/`lead_timeline_entries`/`pipeline_stages` já usam
+`current_membership_role()`/`current_profile_seller_id_for_company()`.
+Zero chamada frontend (`lib/`/`components/`/`app/`) além do arquivo
+gerado `database.types.ts` (declaração de assinatura, não uma chamada
+real). Grants de `EXECUTE` para `authenticated` existiam nos 4, mas sem
+nenhum caminho de produção que os invocasse.
+
+**Achado técnico incidental durante a construção do teste**:
+`pg_get_functiondef()` levanta `"array_agg" is an aggregate function`
+para 3 funções pré-existentes e sem relação alguma com esta etapa
+(`reorder_pipeline_stages`, `complete_invite_delivery`,
+`complete_invite_resend_delivery`) — uma limitação conhecida do
+Postgres ao reconstruir certas definições sob certas condições, não um
+bug introduzido aqui. A auditoria e o novo teste usam `p.prosrc`
+(fonte bruta) para a busca textual de dependências, evitando esse
+caminho por completo — igualmente confiável para uma busca de padrão.
+
+### 45.3 Migration
+
+`20260729180000_m1f_s8e1_drop_legacy_profile_helpers.sql` — 4
+`drop function` com assinatura completa (todas `()`, sem parâmetros),
+sem `CASCADE` e sem `IF EXISTS` de propósito: se o catálogo real não
+bater exatamente com o auditado, a migration falha alto em vez de
+mascarar uma divergência. Nenhuma outra função, policy, grant, tabela
+ou coluna tocada.
+
+### 45.4 Helpers que permanecem intactos
+
+`current_membership_company_id()`, `current_membership_role()`,
+`current_profile_seller_id_for_company(uuid)`,
+`is_platform_super_admin()`, `can_access_company(uuid)`,
+`is_manager_or_platform(uuid)`, `resolve_lead_mutation_context(uuid,
+boolean)` — confirmados existentes e com a mesma assinatura após a
+migration (§45.6/§49).
+
+### 45.5 Testes
+
+Arquivos com referências diretas às assinaturas/comportamento dos 4
+helpers, corrigidos (autorizado pela tarefa — a garantia que testavam
+deixou de existir por design):
+
+- **`13_m1f_s1_compatibility.sql`** e **`18_m1f_s2_compatibility.sql`**:
+  6/5 asserções que chamavam os helpers legados diretamente e
+  comparavam contra o valor esperado (ex.: `current_profile_role() =
+  'admin'`) substituídas pela garantia atual equivalente usando os
+  helpers ativos (`current_membership_role()`, `is_manager_or_platform()`,
+  `current_profile_seller_id_for_company()`) sobre os mesmos usuários
+  seedados — a mesma prova ("o sinal efetivo de autorização para estes
+  usuários legados não mudou"), só que pelo caminho que realmente
+  decide hoje. `18_...` também teve os 4 `has_function(...)` de
+  existência removidos (não substituídos — não fazia sentido provar
+  "existe" para algo que agora não existe mais).
+- **`20_m1f_s11_company_lifecycle.sql`** e
+  **`21_m1f_s3a_company_creation.sql`**: os 4 `has_function(...)` de
+  existência (parte de um rodapé de "nada regrediu", sem relação com o
+  tópico principal do arquivo) removidos, sem substituição — a
+  cobertura da remoção em si vive no novo teste dedicado.
+- **`48_m1f_s8d2b_stop_profile_role_sync.sql`**: 2 `has_function(...)`
+  que afirmavam "helper legado continua existindo (não removido nesta
+  etapa)" — verdade no momento do S8-D2-B, superada por esta migration
+  posterior — removidas, com comentário explicando a superação e
+  apontando para o novo teste.
+- **`14_m1f_s1_platform_role_selfpromotion.sql`**: revisado — só
+  comentários históricos mencionando os helpers (narrando policies já
+  removidas em fases anteriores, S5-A1/S8-C1-A), nenhuma asserção viva
+  depende deles — nenhuma alteração necessária.
+- **`40_m1f_s8c1b_pipeline_access.sql`** e
+  **`41_m1f_s8c2b1_commercial_read_backend.sql`** (controles negativos
+  citados na tarefa): revisados, permanecem sem alteração — continuam
+  provando que `reorder_pipeline_stages`/as policies comerciais nunca
+  usaram os helpers legados, garantia que continua válida e útil
+  independentemente de os helpers existirem ou não no catálogo.
+
+Nenhuma cobertura de promoção/rebaixamento/lifecycle/auditoria/erros/
+locks foi removida em qualquer um dos arquivos acima — só as asserções
+sobre a existência/comportamento dos 4 helpers removidos.
+
+`49_m1f_s8e1_drop_legacy_profile_helpers.sql` (novo arquivo, 30
+assertions): catálogo (os 4 nomes ausentes via `hasnt_function`, zero
+overload residual, zero grant residual); os 7 helpers ativos
+confirmados presentes; zero policy/função ativa referenciando os 4
+nomes antigos (via `prosrc`, não `pg_get_functiondef`); autorização
+real — Manager/Seller reconhecidos via `company_memberships.role`
+mesmo com `profiles.role`/`company_id` legados divergentes (`role=
+'admin'`, `company_id` de uma empresa real mas errada), Super Admin
+reconhecido via `platform_role` mesmo com o mesmo perfil carregando
+`role`/`company_id` legados incoerentes; regressão — as 9 RPCs do
+M1-E, `update_membership_role`, `accept_invite`, as 3 colunas físicas
+de `profiles` e as policies de `leads`/`lead_timeline_entries`/
+`company_memberships` inalteradas.
+
+### 45.6 Validação completa
+
+`npx tsc --noEmit`: diff vazio contra a baseline de 22 erros
+pré-existentes (zero frontend tocado). `npm run test:run`:
+**1950/1950 PASS** (128 arquivos, inalterado — nenhum teste TypeScript
+era necessário). `npm run build`: verde, 8/8 páginas.
+`database.types.ts`: regenerado via `supabase gen types typescript
+--local` e comparado — diff de exatamente 7 linhas removidas (as 4
+entradas de função em `Database['public']['Functions']`), nenhuma outra
+mudança; commitado desta vez (ao contrário do S8-D2-B, aqui a remoção é
+uma alteração real e esperada da superfície pública). SQL:
+`supabase db reset` + `supabase test db` — **45 migrations, 50
+arquivos, 2533/2533 PASS** (2517 do S8-D2-B − 14 asserções obsoletas
+removidas + 30 do novo `49_...`, líquido +16).
+
+### 45.7 Escopo preservado
+
+Nenhum frontend alterado (nenhum componente, hook, `User`,
+`ActiveMembership`, `AuthService`, flag, `.env`). Nenhuma coluna
+removida. `accept_invite`/`update_membership_role` intocados. Nenhuma
+policy/RLS/grant de tabela alterada. `company_memberships`/`sellers`
+intactos. Nenhuma operação Supabase remota.
+
+**O S8-E1 está concluído. S8-E2 (remoção física de
+`profiles.company_id`/`role`/`seller_id`) está desbloqueado, mas não
+iniciado. S8-F não iniciado. M1-E E4 continua pausado** até o
+fechamento formal do S8.
