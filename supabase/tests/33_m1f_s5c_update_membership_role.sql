@@ -1,8 +1,10 @@
 -- M1-F S5-C — RPC update_membership_role
--- (20260723180000_m1f_s5c_update_membership_role.sql). Cobre catálogo,
+-- (20260723180000_m1f_s5c_update_membership_role.sql, com o UPDATE de
+-- profiles.role removido pelo S8-D2-B/20260729170000). Cobre catálogo,
 -- escopo por ator, autoalteração, alvo Super Admin, guarda do último
--- Manager, ponte temporária profiles.role, idempotência/reconciliação,
--- ciclo seller↔manager em public.sellers (preservação de histórico,
+-- Manager, idempotência/reconciliação (profiles.role NUNCA MAIS
+-- sincroniza — divergência é esperada por design, S8-D2-B), ciclo
+-- seller↔manager em public.sellers (preservação de histórico,
 -- desvincular/inativar na promoção, religar/reativar ou criar na volta,
 -- conflitos), auditoria e integração com S5-A1/S5-A2/S5-B. Fixtures
 -- sintéticas @test.local, transação com rollback.
@@ -327,9 +329,12 @@ reset role;
 select is(
   (select role from public.company_memberships where id = 'f5c30000-0000-0000-0000-000000000003'),
   'manager'::public.company_role, 'membership de Seller A1 agora e manager');
+-- M1-F S8-D2-B: a sincronização de profiles.role dentro desta RPC foi
+-- removida (decisão congelada) — a coluna fica congelada no valor do
+-- fixture ('seller') e nunca mais acompanha company_memberships.role.
 select is(
   (select role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000003'),
-  'manager'::public.user_role, 'profiles.role de Seller A1 sincronizado para manager');
+  'seller'::public.user_role, 'profiles.role NUNCA MAIS sincroniza (S8-D2-B) — continua seller mesmo com a membership virando manager');
 select is(
   (select platform_role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000003'),
   null::public.platform_role, 'platform_role nunca mudou');
@@ -383,9 +388,12 @@ reset role;
 select is(
   (select role from public.company_memberships where id = 'f5c30000-0000-0000-0000-000000000003'),
   'seller'::public.company_role, 'membership voltou a seller');
+-- M1-F S8-D2-B: nunca mudou de 'seller' em momento algum do ciclo acima
+-- (a sincronização foi removida) — este check confirma que o rebaixamento
+-- também não a toca, não que ela "voltou".
 select is(
   (select role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000003'),
-  'seller'::public.user_role, 'profiles.role voltou a seller');
+  'seller'::public.user_role, 'profiles.role continua seller (nunca foi tocada em nenhum momento do ciclo seller->manager->seller, S8-D2-B)');
 select is(
   (select membership_id from public.sellers where id = 's5c-a1'),
   'f5c30000-0000-0000-0000-000000000003'::uuid, 'sellers.membership_id religado a mesma membership');
@@ -491,16 +499,29 @@ select is(
   (select count(*)::int from public.sellers where profile_id = 'f5c10000-0000-0000-0000-000000000017' and company_id = 'f5c20000-0000-0000-0000-000000000001'),
   1, 'nenhuma duplicacao na reconciliacao (reutilizou a linha existente)');
 
--- profiles.role divergente (legado 'admin') corrigido quando a membership ja e' 'manager'
+-- M1-F S8-D2-B: profiles.role legado divergente ('admin') NUNCA MAIS e'
+-- corrigida por esta RPC — a sincronizacao foi removida por completo.
+-- Estado: membership ja e' 'manager', profile 018 tem profiles.role
+-- legado 'admin' (nunca populado como 'manager', propositalmente
+-- congelado desde o fixture). A chamada abaixo, com a membership ja no
+-- destino e nenhum seller para reconciliar, e' idempotente de ponta a
+-- ponta: nenhuma escrita, nenhuma auditoria, profiles.role permanece
+-- divergente por design (a divergencia nao concede nem retira
+-- autoridade alguma — o frontend nunca leu este campo desde o S8-D2-A).
 select is((select role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000018'), 'admin'::public.user_role, 'antes: profiles.role legado e admin');
+select count(*)::int as audit_before_018 from public.audit_log where entity_id = 'f5c30000-0000-0000-0000-000000000018' \gset
+
 set local role authenticated;
 select pg_temp.as_user('f5c10000-0000-0000-0000-000000000001');
 select lives_ok(
   $$select * from public.update_membership_role('f5c30000-0000-0000-0000-000000000018', 'f5c20000-0000-0000-0000-000000000001', 'manager')$$,
-  'reconciliacao: membership ja e manager, profiles.role legado admin e corrigido para manager');
+  'membership ja e manager, sem seller a reconciliar: idempotente (profiles.role legado nunca decide se ha trabalho pendente)');
 reset role;
 select is(
-  (select role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000018'), 'manager'::public.user_role, 'profiles.role corrigido de admin para manager (nunca fica admin)');
+  (select role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000018'), 'admin'::public.user_role, 'profiles.role legado permanece admin para sempre (S8-D2-B: sincronizacao removida, divergencia e esperada por design)');
+select is(
+  (select count(*)::int from public.audit_log where entity_id = 'f5c30000-0000-0000-0000-000000000018') - :audit_before_018,
+  0, 'chamada idempotente (profiles.role divergente nao conta como trabalho pendente) nao cria auditoria nova');
 
 -- idempotência total: chamar de novo sobre um estado ja 100% coerente
 select updated_at as membership_updated_before from public.company_memberships where id = 'f5c30000-0000-0000-0000-000000000012' \gset
