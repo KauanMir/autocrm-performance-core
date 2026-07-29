@@ -133,7 +133,7 @@ export function ScreenClientes({ go }: any) {
   const currentUser = AuthService.getCurrentUser();
   const isSuperAdmin = currentUser?.platformRole === 'super_admin';
   if (isSuperAdmin && isSuperAdminCommercialReadEnabled()) {
-    return <PlatformCommercialClientsView userId={currentUser!.id} />;
+    return <PlatformCommercialClientsView userId={currentUser!.id} platformRole={currentUser!.platformRole} />;
   }
   return <ScreenClientesLegacy go={go} />;
 }
@@ -368,7 +368,7 @@ export function ScreenAndamento({ go }: any) {
   const currentUser = AuthService.getCurrentUser();
   const isSuperAdmin = currentUser?.platformRole === 'super_admin';
   if (isSuperAdmin && isSuperAdminCommercialReadEnabled()) {
-    return <PlatformCommercialPipelineView userId={currentUser!.id} />;
+    return <PlatformCommercialPipelineView userId={currentUser!.id} platformRole={currentUser!.platformRole} />;
   }
   return <ScreenAndamentoLegacy go={go} />;
 }

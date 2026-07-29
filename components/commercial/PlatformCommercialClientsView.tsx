@@ -7,18 +7,26 @@
 // nesta árvore: sem criar, editar, mover, atribuir, arquivar.
 import React, { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { Avatar, LBadge, Chip, PageHead, LCard, LightScreen, URG } from '@/components/ui/kit';
+import { Avatar, LBadge, LBtn, Chip, PageHead, LCard, LightScreen, URG } from '@/components/ui/kit';
 import { CommercialWorkspaceHeader, CommercialWorkspaceEmptyState } from '@/components/commercial/CommercialWorkspaceHeader';
 import { PlatformLeadDetails } from '@/components/commercial/PlatformLeadDetails';
+import { PlatformLeadCreateModal } from '@/components/commercial/PlatformLeadCreateModal';
+import { PlatformLeadEditModal } from '@/components/commercial/PlatformLeadEditModal';
 import { useCommercialCompanyContext } from '@/lib/commercial/CommercialCompanyContext';
 import { useCommercialCompanies } from '@/lib/hooks/useCommercialCompanies';
 import { usePlatformLeads } from '@/lib/hooks/usePlatformLeads';
 import { usePlatformPipelineStages } from '@/lib/hooks/usePlatformPipelineStages';
+import { canMutateCommercialWorkspace } from '@/lib/capabilities';
+import { isSuperAdminCommercialWriteEnabled } from '@/lib/flags';
 import { formatLeadAssignmentLabel, resolveLeadAssignmentState, resolveLeadStageName } from '@/lib/commercial/leadDisplay';
 import type { PlatformLeadRow } from '@/lib/commercial/repository';
 
 export type PlatformCommercialClientsViewProps = {
   userId: string;
+  // Sempre 'super_admin' na prática (o router em ScreensOps.tsx só monta
+  // esta superfície para Super Admin) — resolvido pelo chamador, nunca lido
+  // de AuthService aqui.
+  platformRole: 'super_admin' | null;
 };
 
 type AssignmentFilter = 'todos' | 'assigned' | 'unassigned';
@@ -57,7 +65,7 @@ function LeadListCard({ lead, stageName, onOpen }: { lead: PlatformLeadRow; stag
   );
 }
 
-export function PlatformCommercialClientsView({ userId }: PlatformCommercialClientsViewProps) {
+export function PlatformCommercialClientsView({ userId, platformRole }: PlatformCommercialClientsViewProps) {
   const { selectedCompanyId, setSelectedCompanyId } = useCommercialCompanyContext();
   const companiesQuery = useCommercialCompanies({ userId, authorized: true });
   const stagesQuery = usePlatformPipelineStages({ companyId: selectedCompanyId, authorized: true });
@@ -67,14 +75,19 @@ export function PlatformCommercialClientsView({ userId }: PlatformCommercialClie
   const [search, setSearch] = useState('');
   const [assignmentFilter, setAssignmentFilter] = useState<AssignmentFilter>('todos');
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
 
-  // Troca de empresa: fecha o detalhe e limpa filtros locais que não fazem
-  // mais sentido para o novo contexto (decisão do S8-C2-B2, §6/§11).
+  // Troca de empresa: fecha o detalhe/modais e limpa filtros locais que não
+  // fazem mais sentido para o novo contexto (decisão do S8-C2-B2 §6/§11,
+  // estendida no S8-C2-C2 para os modais de criação/edição).
   useEffect(() => {
     setSelectedLeadId(null);
     setSearch('');
     setAssignmentFilter('todos');
     setArchived(false);
+    setCreateModalOpen(false);
+    setEditingLeadId(null);
   }, [selectedCompanyId]);
 
   const filteredLeads = leadsQuery.leads.filter((lead) => {
@@ -85,16 +98,37 @@ export function PlatformCommercialClientsView({ userId }: PlatformCommercialClie
   });
 
   const selectedLead = selectedLeadId ? leadsQuery.leads.find((l) => l.id === selectedLeadId) ?? null : null;
+  const editingLead = editingLeadId ? leadsQuery.leads.find((l) => l.id === editingLeadId) ?? null : null;
+  const selectedCompany = selectedCompanyId ? companiesQuery.companies.find((c) => c.id === selectedCompanyId) ?? null : null;
+
+  // Capability PRÓPRIA (nunca canAccessCommercialWorkspace, que só decide se
+  // o workspace de LEITURA existe) — true somente com READ+WRITE ligadas,
+  // ator Super Admin, empresa selecionada e status ativa/implantacao.
+  const canMutate = canMutateCommercialWorkspace({
+    actor: { platformRole },
+    readEnabled: true,
+    writeEnabled: isSuperAdminCommercialWriteEnabled(),
+    selectedCompanyStatus: selectedCompany?.status ?? null,
+  });
 
   return (
     <LightScreen>
-      <PageHead title="Clientes" sub="Acompanhamento comercial da KAPA — leitura somente, dados reais da empresa selecionada." />
+      <PageHead
+        title="Clientes"
+        sub={canMutate
+          ? 'Acompanhamento comercial da KAPA — dados reais da empresa selecionada.'
+          : 'Acompanhamento comercial da KAPA — leitura somente, dados reais da empresa selecionada.'}
+        actions={canMutate && (
+          <LBtn kind="gold" icon="plus" onClick={() => setCreateModalOpen(true)}>Novo Lead</LBtn>
+        )}
+      />
       <CommercialWorkspaceHeader
         selectedCompanyId={selectedCompanyId}
         onSelectCompany={setSelectedCompanyId}
         companies={companiesQuery.companies}
         companiesLoading={companiesQuery.isLoading}
         companiesError={companiesQuery.isError}
+        readOnly={!canMutate}
       />
 
       {!selectedCompanyId ? (
@@ -147,6 +181,23 @@ export function PlatformCommercialClientsView({ userId }: PlatformCommercialClie
           companyId={selectedCompanyId}
           stagesById={stagesQuery.stagesById}
           onClose={() => setSelectedLeadId(null)}
+          canMutate={canMutate}
+          onEdit={() => { setEditingLeadId(selectedLead.id); setSelectedLeadId(null); }}
+        />
+      )}
+
+      {createModalOpen && canMutate && selectedCompany && (
+        <PlatformLeadCreateModal
+          company={selectedCompany}
+          onClose={() => setCreateModalOpen(false)}
+        />
+      )}
+
+      {editingLead && canMutate && selectedCompany && (
+        <PlatformLeadEditModal
+          lead={editingLead}
+          company={selectedCompany}
+          onClose={() => setEditingLeadId(null)}
         />
       )}
     </LightScreen>

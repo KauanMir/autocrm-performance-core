@@ -16,18 +16,26 @@ export type CommercialWorkspaceHeaderProps = {
   companies: readonly CommercialCompanyRow[];
   companiesLoading: boolean;
   companiesError?: boolean;
+  // M1-F S8-C2-C2 — true (default) preserva o comportamento do B2 (selo
+  // "Modo comercial — somente leitura" sempre visível). false é resolvido
+  // pelo chamador via canMutateCommercialWorkspace(...) — nunca uma flag ou
+  // capability lida diretamente aqui (este componente permanece puramente
+  // visual, sem autorização própria).
+  readOnly?: boolean;
 };
 
 export function CommercialWorkspaceHeader({
-  selectedCompanyId, onSelectCompany, companies, companiesLoading, companiesError,
+  selectedCompanyId, onSelectCompany, companies, companiesLoading, companiesError, readOnly = true,
 }: CommercialWorkspaceHeaderProps) {
   const selected = companies.find((c) => c.id === selectedCompanyId) ?? null;
   return (
     <div style={{ marginBottom: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-        <LBadge tone="amber">
-          <Icon name="eye" size={12} stroke={2.2} /> Modo comercial — somente leitura
-        </LBadge>
+        {readOnly && (
+          <LBadge tone="amber">
+            <Icon name="eye" size={12} stroke={2.2} /> Modo comercial — somente leitura
+          </LBadge>
+        )}
         {selected && (
           <span style={{ fontSize: 12.5, color: 'var(--t-500)' }}>
             Acompanhando: <strong style={{ color: 'var(--t-900)' }}>{selected.name}</strong>

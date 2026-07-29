@@ -6,18 +6,23 @@
 // drop/reorder_pipeline_stages (S8-C1-B permanece intocado).
 import React, { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { PageHead, LCard, LightScreen, URG } from '@/components/ui/kit';
+import { PageHead, LCard, LightScreen, URG, LBtn } from '@/components/ui/kit';
 import { CommercialWorkspaceHeader, CommercialWorkspaceEmptyState } from '@/components/commercial/CommercialWorkspaceHeader';
 import { PlatformLeadDetails } from '@/components/commercial/PlatformLeadDetails';
+import { PlatformLeadCreateModal } from '@/components/commercial/PlatformLeadCreateModal';
+import { PlatformLeadEditModal } from '@/components/commercial/PlatformLeadEditModal';
 import { useCommercialCompanyContext } from '@/lib/commercial/CommercialCompanyContext';
 import { useCommercialCompanies } from '@/lib/hooks/useCommercialCompanies';
 import { usePlatformLeads } from '@/lib/hooks/usePlatformLeads';
 import { usePlatformPipelineStages } from '@/lib/hooks/usePlatformPipelineStages';
+import { canMutateCommercialWorkspace } from '@/lib/capabilities';
+import { isSuperAdminCommercialWriteEnabled } from '@/lib/flags';
 import { formatLeadAssignmentLabel } from '@/lib/commercial/leadDisplay';
 import type { PlatformLeadRow } from '@/lib/commercial/repository';
 
 export type PlatformCommercialPipelineViewProps = {
   userId: string;
+  platformRole: 'super_admin' | null;
 };
 
 function PipelineLeadCard({ lead, onOpen }: { lead: PlatformLeadRow; onOpen: () => void }) {
@@ -44,28 +49,50 @@ function PipelineLeadCard({ lead, onOpen }: { lead: PlatformLeadRow; onOpen: () 
   );
 }
 
-export function PlatformCommercialPipelineView({ userId }: PlatformCommercialPipelineViewProps) {
+export function PlatformCommercialPipelineView({ userId, platformRole }: PlatformCommercialPipelineViewProps) {
   const { selectedCompanyId, setSelectedCompanyId } = useCommercialCompanyContext();
   const companiesQuery = useCommercialCompanies({ userId, authorized: true });
   const stagesQuery = usePlatformPipelineStages({ companyId: selectedCompanyId, authorized: true });
   const leadsQuery = usePlatformLeads({ companyId: selectedCompanyId, archived: false, authorized: true });
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedLeadId(null);
+    setCreateModalOpen(false);
+    setEditingLeadId(null);
   }, [selectedCompanyId]);
 
   const selectedLead = selectedLeadId ? leadsQuery.leads.find((l) => l.id === selectedLeadId) ?? null : null;
+  const editingLead = editingLeadId ? leadsQuery.leads.find((l) => l.id === editingLeadId) ?? null : null;
+  const selectedCompany = selectedCompanyId ? companiesQuery.companies.find((c) => c.id === selectedCompanyId) ?? null : null;
+
+  const canMutate = canMutateCommercialWorkspace({
+    actor: { platformRole },
+    readEnabled: true,
+    writeEnabled: isSuperAdminCommercialWriteEnabled(),
+    selectedCompanyStatus: selectedCompany?.status ?? null,
+  });
 
   return (
     <LightScreen>
-      <PageHead title="Em progresso" sub="Pipeline comercial da KAPA — leitura somente, dados reais da empresa selecionada." />
+      <PageHead
+        title="Em progresso"
+        sub={canMutate
+          ? 'Pipeline comercial da KAPA — dados reais da empresa selecionada.'
+          : 'Pipeline comercial da KAPA — leitura somente, dados reais da empresa selecionada.'}
+        actions={canMutate && (
+          <LBtn kind="gold" icon="plus" onClick={() => setCreateModalOpen(true)}>Novo Lead</LBtn>
+        )}
+      />
       <CommercialWorkspaceHeader
         selectedCompanyId={selectedCompanyId}
         onSelectCompany={setSelectedCompanyId}
         companies={companiesQuery.companies}
         companiesLoading={companiesQuery.isLoading}
         companiesError={companiesQuery.isError}
+        readOnly={!canMutate}
       />
 
       {!selectedCompanyId ? (
@@ -109,6 +136,23 @@ export function PlatformCommercialPipelineView({ userId }: PlatformCommercialPip
           companyId={selectedCompanyId}
           stagesById={stagesQuery.stagesById}
           onClose={() => setSelectedLeadId(null)}
+          canMutate={canMutate}
+          onEdit={() => { setEditingLeadId(selectedLead.id); setSelectedLeadId(null); }}
+        />
+      )}
+
+      {createModalOpen && canMutate && selectedCompany && (
+        <PlatformLeadCreateModal
+          company={selectedCompany}
+          onClose={() => setCreateModalOpen(false)}
+        />
+      )}
+
+      {editingLead && canMutate && selectedCompany && (
+        <PlatformLeadEditModal
+          lead={editingLead}
+          company={selectedCompany}
+          onClose={() => setEditingLeadId(null)}
         />
       )}
     </LightScreen>

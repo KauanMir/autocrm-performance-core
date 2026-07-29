@@ -7,7 +7,7 @@
 // evento, arquivar, mover, atribuir ou remover atribuição.
 import React from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { LBadge } from '@/components/ui/kit';
+import { LBadge, LBtn } from '@/components/ui/kit';
 import { FlowShell } from '@/components/flows/FlowsShared';
 import { usePlatformLeadTimeline } from '@/lib/hooks/usePlatformLeadTimeline';
 import { formatLeadAssignmentLabel, resolveLeadStageName } from '@/lib/commercial/leadDisplay';
@@ -19,6 +19,11 @@ export type PlatformLeadDetailsProps = {
   companyId: string;
   stagesById: Readonly<Record<string, PlatformPipelineStageRow>>;
   onClose: () => void;
+  // M1-F S8-C2-C2 — resolvido pelo chamador via canMutateCommercialWorkspace
+  // (READ+WRITE+empresa ativa/implantacao). false preserva o comportamento
+  // original do B2 (badge "Somente leitura", nenhuma ação de edição).
+  canMutate?: boolean;
+  onEdit?: () => void;
 };
 
 function formatDate(value: string | null): string {
@@ -27,19 +32,21 @@ function formatDate(value: string | null): string {
   return isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR');
 }
 
-export function PlatformLeadDetails({ lead, companyId, stagesById, onClose }: PlatformLeadDetailsProps) {
+export function PlatformLeadDetails({ lead, companyId, stagesById, onClose, canMutate = false, onEdit }: PlatformLeadDetailsProps) {
   const timeline = usePlatformLeadTimeline({ companyId, leadId: lead.id, authorized: true });
   const stageName = resolveLeadStageName(lead.stage_id, stagesById);
   const assignmentLabel = formatLeadAssignmentLabel(lead.seller_id);
 
   return (
     <FlowShell
-      eyebrow="MODO COMERCIAL — SOMENTE LEITURA"
+      eyebrow={canMutate ? 'MODO COMERCIAL' : 'MODO COMERCIAL — SOMENTE LEITURA'}
       title={lead.name}
       icon="user"
       accent="#3B82F6"
       onClose={onClose}
-      status={<LBadge tone="amber"><Icon name="eye" size={12} stroke={2.2} /> Somente leitura</LBadge>}
+      status={canMutate
+        ? <LBtn kind="ghost" icon="edit" onClick={onEdit}>Editar</LBtn>
+        : <LBadge tone="amber"><Icon name="eye" size={12} stroke={2.2} /> Somente leitura</LBadge>}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: 22, borderRadius: 16, background: 'linear-gradient(120deg,#1b1b1f,#121214)', border: '1px solid var(--border)', marginBottom: 20, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0 }}>
