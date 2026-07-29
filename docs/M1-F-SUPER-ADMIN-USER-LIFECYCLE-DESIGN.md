@@ -4963,3 +4963,190 @@ executada.
 
 **O S8-C2-C2 (frontend de create/update/duplicidade) está completo.
 S8-C2-D1/S8-D permanecem não iniciados. M1-E E4 continua pausado.**
+
+## 38. Implementação do S8-C2-D1 — mutations comerciais restantes
+
+Esta seção registra a implementação (não mais planejamento) de
+`move_lead_to_stage`/`apply_lead_event`/`assign_lead_seller`/
+`archive_lead`/`unarchive_lead`/`add_lead_timeline_entry` com contexto
+comercial explícito, fechando a migração das 9 RPCs de mutation de Leads
+iniciada no S8-C2-C1 (§34). §0–§37 não foram alterados.
+
+### 38.1 Seis RPCs migradas, resolver reutilizado sem duplicação
+
+`20260729140000_m1f_s8c2d1_move_event_assign_commercial.sql` (move/event/
+assign) e `20260729150000_m1f_s8c2d1_archive_unarchive_timeline_commercial.sql`
+(archive/unarchive/timeline) — mesmo molde de `20260729110000` (S8-C2-C1):
+`DROP FUNCTION` da assinatura antiga + `CREATE` da nova, na mesma
+transação (nenhuma janela com as duas coexistindo, nenhum overload).
+Todas as seis chamam exclusivamente `resolve_lead_mutation_context
+(p_company_id)` (mesmo resolver do S8-C2-C1, `p_read_only=false` — são
+mutation real) — nenhuma lê mais `profiles.company_id`/`profiles.role`/
+`profiles.seller_id`. Nenhuma segunda lógica de resolução empresarial foi
+criada. Divisão em duas migrations pelo motivo já previsto: isolar
+movimentação/atribuição de lifecycle/timeline — nenhuma dependência
+circular exigiu migration única.
+
+### 38.2 Regras por ator, preservadas e estendidas
+
+- **Super Admin**: `p_company_id` obrigatório na prática (`company_
+  required`/`company_not_found` do resolver); status `ativa`/`implantacao`
+  permitido, `suspensa`/`cancelada` nega com `company_read_only`; pode
+  mover, aplicar evento e adicionar timeline em qualquer Lead da empresa
+  explícita; pode atribuir/trocar/remover Seller e arquivar/desarquivar —
+  autoridade que as 6 RPCs nunca concediam antes (a checagem original
+  `profiles.company_id is null` bloqueava Super Admin em todas elas, já
+  que ele nunca tem `company_id`).
+- **Manager**: contrato idêntico ao já publicado (movimenta/atribui/
+  arquiva/desarquiva/adiciona timeline em qualquer Lead da própria
+  empresa), agora resolvido por `current_membership_company_id()` em vez
+  de `profiles.company_id`; `p_company_id` enviado pelo cliente
+  **totalmente ignorado**, inclusive apontando para outra empresa
+  (provado no teste novo).
+- **Seller**: move/aplica evento/adiciona timeline somente no próprio
+  Lead (via `actor_seller_id` do resolver, nunca `profiles.seller_id`);
+  **nunca** atribui Seller, arquiva ou desarquiva — mesmo contrato
+  anterior, checagem de papel adaptada para `actor_kind = 'seller'`.
+
+### 38.3 Status permitidos e isolamento entre empresas
+
+Idêntico à matriz já congelada em §31.5/§34.1: Super Admin `ativa`/
+`implantacao`; Manager/Seller exatamente `ativa` (implantação/suspensão/
+cancelamento negados, mais restritivo que Pipeline/S8-C1-B). Stage e
+Seller de destino sempre validados contra `v_ctx.resolved_company_id` —
+Stage/Seller/Lead de outra empresa nunca alcançáveis, mesmo com
+`p_company_id` explícito de Super Admin apontando para a empresa
+correta (o Lead/Stage/Seller alheio simplesmente não existe dentro do
+filtro da empresa resolvida); Lead de outra empresa produz o mesmo
+`lead_not_found` de um Lead inexistente, nunca vazando a outra empresa.
+
+### 38.4 Autoria: NULL para Super Admin, preservada para Manager/Seller
+
+`updated_by_profile_id` (leads) e `actor_profile_id`
+(`lead_timeline_entries`) seguem exatamente a decisão do §34.3/§35:
+`NULL` quando o ator é Super Admin (nenhuma das FKs — `leads_updated_by_
+fk`, já reapontada para `company_memberships` no S8-C2-C1-AUTH-A1, e
+`lead_timeline_actor_fk`, que **continua** apontando para
+`public.profiles(company_id, id)` e não foi tocada nesta etapa — pode
+ser satisfeita por um ator sem `company_id`/membership); valor real do
+profile para Manager/Seller, sem nenhuma mudança de comportamento ou de
+risco em relação ao que já estava publicado (o valor inserido é
+idêntico ao de antes, só a origem da leitura mudou de `profiles` para o
+resolver). `created_by_profile_id` de Leads nunca é tocado por nenhuma
+das seis RPCs (nenhuma delas escreve nesse campo). Nenhuma FK foi
+alterada nesta etapa.
+
+### 38.5 Locks, atomicidade, idempotência e eventos preservados
+
+`SELECT ... FOR UPDATE` e o caminho idempotente de `archive_lead`/
+`unarchive_lead` (estado já alcançado → devolve a linha, sem `UPDATE`,
+sem bump de `version`, sem `stale_write` mesmo com versão antiga)
+preservados caractere a caractere do M1-E original. `move_lead_to_stage`
+continua last-write-wins quando chamado sem `p_expected_version`;
+`assign_lead_seller` continua exigindo `p_expected_version` sempre
+(nunca LWW). O mapeamento completo dos 18 valores de
+`lead_event_type` em `apply_lead_event` foi preservado integralmente
+(mesmo `case`, mesmos textos, mesma ordem) — revalidado pelo teste
+antigo `04_m1e_move_event.sql` sem nenhuma alteração de asserção.
+Nenhum lock ou garantia de atomicidade foi removida; cada RPC continua
+sendo uma única função `SECURITY DEFINER`/uma única transação (mutação
+comercial e `audit_log` sempre juntos, quando aplicável).
+
+### 38.6 `audit_log` — somente Super Admin, somente mutação real
+
+Mutations bem-sucedidas de Super Admin gravam em `audit_log` na mesma
+transação: `lead_stage_moved` (before/after `stage_id`);
+`p_event_type::text` como `action` (o próprio evento, um enum fechado
+já livre de PII — before/after com `stage_id`/`urgency`);
+`lead_seller_assigned` (before/after `seller_id`, inclusive remoção com
+`null`); `lead_archived`/`lead_unarchived` (before/after `archived`,
+mais `archived_at` quando aplicável); `lead_timeline_entry_added`
+(`entity_type='lead_timeline_entry'`, `after_data` só com `lead_id`/
+`timeline_entry_id` — nunca `label`/`detail`, a timeline comercial em si
+continua sendo a fonte de verdade do conteúdo). **Decisão desta etapa**:
+o caminho idempotente de `archive_lead`/`unarchive_lead` (nenhuma
+transição de estado real) **não** grava `audit_log` — não há delta a
+registrar, e uma chamada repetida do mesmo Super Admin no mesmo estado
+não deve produzir entradas redundantes; a mutação real (a transição
+efetiva) é sempre auditada exatamente uma vez. Manager/Seller continuam
+sem gravar `audit_log`, como em toda a etapa anterior. Nenhum `row_to_
+json` genérico; nenhum telefone, nome completo ou conteúdo integral de
+timeline/evento gravado.
+
+### 38.7 Tipos regenerados
+
+`lib/supabase/database.types.ts` via `supabase gen types typescript
+--local` — diff estritamente aditivo (16 linhas: `p_company_id?: string`
+adicionado aos `Args` das seis RPCs), nenhuma remoção, nenhum objeto não
+relacionado alterado.
+
+### 38.8 Testes antigos — apenas um arquivo precisou de ajuste
+
+De `04_m1e_move_event.sql`/`05_m1e_assign.sql`/`06_m1e_archive.sql`/
+`07_m1e_timeline_rpc.sql`/`09_m1e_concurrency.sql`, somente
+`04_m1e_move_event.sql` precisou de ajuste: o fixture "Admin B" (usado
+só no teste de `stage_not_found` de `apply_lead_event`) tinha `profiles`
+mas nenhuma `company_memberships` real, e "Empresa B Teste" não tinha
+`status` explícito (default `implantacao`) — com a nova autorização via
+`resolve_lead_mutation_context`, isso resolvia `forbidden` antes de
+alcançar a checagem de estágio que o arquivo quer exercitar. Corrigido
+com o mesmo padrão já usado em `01_m1e_grants_rls.sql`/
+`02_m1e_create_lead.sql`: `status='ativa'` explícito + membership real
+(`role='manager'`, mesmo mapeamento do backfill do S1). Garantia
+preservada: mesma asserção final (`stage_not_found`). Os outros quatro
+arquivos usam exclusivamente atores do seed (Empresa A, `ativa`,
+memberships reais desde o M1-F S1) ou casos que falham antes de
+qualquer resolução de empresa (profile globalmente inativo) — nenhuma
+alteração foi necessária.
+
+### 38.9 Novo teste — `45_m1f_s8c2d1_remaining_mutations.sql`
+
+98 asserções: catálogo (as 6 RPCs com assinatura única, `p_company_id`
+como último parâmetro com default, `SECURITY DEFINER`, `search_path`,
+grants, resolver reutilizado sem grant novo, as demais RPCs/policies
+confirmadas intactas); Super Admin por RPC (`move`/`event`/`assign`/
+`archive`/`unarchive`/`timeline`) cobrindo sucesso, `company_required`/
+`company_not_found`/`company_read_only`, isolamento cross-company sem
+vazamento, idempotência de archive/unarchive sem duplicar `audit_log`,
+e o conteúdo do `audit_log` (ator real, before/after, ausência de PII);
+Manager (empresa própria, `p_company_id` de outra empresa ignorado,
+autoria preservada); Seller (somente o próprio Lead, `assign`/`archive`/
+`unarchive` sempre `forbidden`, `p_company_id` nunca amplia acesso);
+membership ausente/suspensa/offboarded/profile globalmente inativo;
+matriz de status para Manager (implantação/suspensa/cancelada negados);
+legado divergente (`profiles.role`/`company_id`/`seller_id` nunca
+decidem — a membership/`sellers.membership_id` reais decidem sempre);
+atomicidade (nenhum rastro de tentativas negadas — nem estado, nem
+`audit_log` órfão; nenhuma timeline órfã). Concorrência real (duas
+conexões via `dblink`) já coberta e revalidada sem alteração por
+`09_m1e_concurrency.sql` (`update_lead`/`assign_lead_seller`/
+`archive_lead`) — deliberadamente **não duplicada** no arquivo novo com
+simulação falsa; locks/idempotência das seis RPCs desta etapa são
+provados por asserções de estado (mesmo padrão do `06_m1e_archive.sql`
+original), não por concorrência simulada.
+
+### 38.10 Validação completa
+
+42 migrations locais; SQL 46 arquivos, **2414/2414** (2316 + 98 novos);
+TypeScript 118 arquivos, **1808/1808** (inalterado — nenhum frontend
+tocado); build verde, 8/8 páginas.
+
+### 38.11 Escopo preservado
+
+Nenhuma alteração em `create_lead`/`update_lead`/
+`check_lead_phone_duplicate`/`resolve_lead_mutation_context` (S8-C2-C1) ou
+nas 5 RPCs de leitura comercial (S8-C2-B1/S8-C2-C2-SELLERS-B1). Nenhuma
+policy de `leads`/`lead_timeline_entries`/`pipeline_stages`/`profiles`/
+`sellers` tocada. Nenhuma FK alterada — inclusive `lead_timeline_actor_
+fk`, que permanece apontando para `profiles(company_id, id)` (mesmo
+comportamento pré-existente para Manager/Seller; Super Admin usa `NULL`,
+que a FK sempre aceitou). Nenhuma coluna removida, nenhum helper legado
+removido. Nenhum frontend, hook, componente ou flag alterado;
+`NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_READ`/`_WRITE` inalteradas.
+Nenhuma operação remota executada; nenhuma migration aplicada no
+Supabase remoto.
+
+**As 9 RPCs de mutation de Leads estão integralmente migradas para
+contexto comercial explícito. S8-C2-D2 (frontend das mutations
+restantes) permanece não iniciado. M1-E E4 continua pausado** até o
+fechamento formal do S8 (S8-F).
