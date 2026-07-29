@@ -5895,3 +5895,205 @@ não montada em `App.tsx`; ponte `update_membership_role` →
 
 **O S8-D1 está concluído. S8-D2 está desbloqueado, mas não iniciado.
 M1-E E4 continua pausado** até o fechamento formal do S8 (S8-F).
+
+## 43. S8-D2-A — identidade empresarial dos módulos locais (User.role/sellerId)
+
+Segundo corte do S8-D: remove `User.role`/`User.sellerId` do tipo
+autenticado e migra os últimos consumidores restantes (os módulos M0
+locais) para `activeMembership.role`/`activeMembership.sellerId`.
+
+### 43.1 Decisões humanas congeladas
+
+1. `User.role` é removido do tipo nesta etapa.
+2. `User.sellerId` é removido do tipo nesta etapa.
+3. O papel empresarial atual passa a ser acessado exclusivamente por
+   `activeMembership.role`.
+4. A identidade comercial de Seller fica escopada à membership:
+   `activeMembership.sellerId`.
+5. `activeMembership.sellerId` tem o tipo real de `public.sellers.id`
+   (`text`) ou `null`.
+6. Manager: `activeMembership.sellerId = null`, sempre.
+7. Seller com cadastro válido: `activeMembership.sellerId` = o
+   `sellers.id` real ligado à membership ativa.
+8. Seller sem linha válida em `public.sellers`:
+   `activeMembership.sellerId = null` e os módulos locais falham
+   fechados — nunca mostram dados de todos os vendedores, nunca
+   inventam `sellerId`, nunca usam `profile.id`/`membership.id` como
+   substituto, nunca caem de volta em `profiles.seller_id`.
+9. Super Admin sem membership continua sem `activeMembership` (nenhuma
+   mudança em relação ao S8-D1).
+10. `profiles.role`/`profiles.seller_id` continuam fisicamente no
+    banco até o S8-E — só deixam de ser lidos pelo frontend.
+11. A sincronização de `profiles.role` dentro de `update_membership_role`
+    permanece intacta nesta etapa (remoção adiada para o S8-D2-B, após
+    zero consumidor TypeScript restante).
+12. Nenhum SQL alterado no S8-D2-A.
+13. A bridge do M1-E permanece preservada, intocada.
+14. M1-E E4 continua pausado até o S8-F.
+
+Decisão complementar tomada durante a implementação (usuário
+autenticado sem `platformRole==='super_admin'` e sem `activeMembership`
+nenhuma — ex.: membership suspensa/desligada/transferida sem novo
+vínculo, com sessão Auth/profile global ainda válidos): **fail-closed**
+— Tasks/Visits/Deals/Sales/Leads locais retornam lista vazia,
+`SellerService.getCurrentSeller()` retorna `null`, nenhum dado do
+Seller anterior é reaproveitado, nenhum comportamento de Manager é
+concedido por acidente. Antes desta etapa esse usuário ainda era
+filtrado pelo `profiles.role`/`seller_id` legados (nunca zerados por
+`suspend_membership`/`offboard_*`), então via os próprios dados
+antigos (ou, se o legado fosse `'admin'`/`'manager'`, todos os dados) —
+essa lacuna se fecha aqui, mesmo raciocínio de "identidade não
+reconhecida ⇒ zero acesso" já aplicado à navegação no S8-D1.
+
+### 43.2 Auditoria da fonte segura de sellerId
+
+`current_profile_seller_id_for_company(p_target_company_id uuid)`
+(migration `20260720110100_m1f_s2_02_company_access_helpers.sql`, um
+dos 7 helpers de autorização do S2) foi auditada e aprovada como fonte
+única: `SECURITY DEFINER`, `search_path=''`, deriva tudo de
+`auth.uid()` (nenhum `profile_id` aceito por parâmetro); primeiro
+valida acesso à empresa alvo via `require_company_access` (levanta
+`insufficient_privilege` se negado — nunca acionado na prática, porque
+o chamador só passa o `company_id` já resolvido da própria membership
+ativa do usuário, nunca um valor vindo do cliente); resolve o seller
+exclusivamente pela cadeia `sellers.membership_id → company_memberships`
+filtrada por `cm.profile_id = auth.uid()` — nunca por
+`sellers.profile_id` isolado; retorna `NULL` para Manager (a própria
+membership tem `role='manager'`, não casa com o filtro), para Super
+Admin (nunca tem `company_memberships`), para Seller de outra empresa,
+Seller/membership/profile inativos, e para qualquer ambiguidade
+estrutural (`sellers.membership_id` sem `UNIQUE` — a query conta
+`matches` e só devolve quando há exatamente 1). `GRANT EXECUTE`
+restrito a `authenticated` (nunca `anon`/`PUBLIC`). Retorno `text`,
+compatível com `sellers.id`. Nenhuma lacuna encontrada — nenhuma RPC
+nova, nenhuma migration.
+
+### 43.3 Inventário de consumidores
+
+`User.role`/`User.sellerId` tinham exatamente estes consumidores reais
+(fora de fixtures de teste): `components/App.tsx` (Rail — seller
+lookup e rótulo "Administrador"/"Gerente"), `components/flows/Flows2.tsx`
+(3 flows: `isSeller` + `assignedSellerId`/`finalSellerId`,
+autoatribuição de Visita/Proposta/Task ao próprio usuário quando
+Seller), `components/screens/ScreensOps.tsx` (`ScreenClientesLegacy`/
+`ScreenAndamentoLegacy` — toggle do filtro de vendedor),
+`components/screens/ScreensBiz.tsx` (`exportResultadosCSV` — recorte
+do CSV para o próprio Seller), e em `lib/services.ts`: `_loadProfile`
+(populava `User.role`/`sellerId`), os 5 `_filtered*`
+(Leads/Visits/Deals/Sales/Tasks) e `SellerService.getCurrentSeller`,
+mais os métodos públicos `AuthService.currentRole/isAdmin/isManager/
+isSeller` (que liam `_cachedUser.role`). Nenhum consumidor foi
+encontrado fora dessas categorias — nenhuma entidade de domínio
+(Lead/Task/Visit/Deal/Sale `.sellerId`/RPC `p_role`/`company_role`/
+`MembershipLifecycleTargetUser`/`CreateInviteActor`) foi tocada.
+
+### 43.4 Implementação
+
+**`lib/data.ts`**: `role`/`sellerId` removidos de `User`; `activeMembership`
+ganha `sellerId: string | null`.
+
+**`lib/services.ts`**: `_loadActiveMembership` chama a RPC (via novo
+helper privado `_loadActiveMembershipSellerId`) só quando
+`role==='seller'` — erro/ausência falha fechado para `null`, nunca
+lança. `_loadProfile` para de selecionar `role`/`seller_id` de
+`profiles`. `currentRole()` passa a ler `activeMembership?.role`
+(tipo `'manager' | 'seller' | null`, nunca mais `'admin'`). `isAdmin()`
+passa a ser `isPlatformSuperAdmin()` — Super Admin é o substituto
+moderno do "admin" legado. `isManager()` passa a ser
+`isPlatformSuperAdmin() || currentRole()==='manager'` — correção de
+consistência da mesma classe do achado de navegação do S8-D1 (sob o
+`profiles.role` legado, se Super Admin passava em `isManager()`
+dependia de um valor arbitrário de seed; agora é determinístico, sem
+alterar o resultado para Manager/Seller reais). `isSeller()` migra
+para `currentRole()==='seller'` (já era código morto, auditado sem
+call site real). Os 5 `_filtered*` passam a usar um helper privado
+único `_currentSellerScope()` (`'all' | 'none' | { sellerId }`):
+Super Admin e Manager → `'all'`; Seller com `sellerId` real →
+`{ sellerId }`; Seller sem `sellerId` ou sem identidade empresarial
+alguma → `'none'` (lista vazia). `SellerService.getCurrentSeller` lê
+`activeMembership?.sellerId`.
+
+**Componentes**: todos os consumidores listados em §43.3 migrados
+mecanicamente de `user.role`/`user.sellerId` para
+`user.activeMembership?.role`/`user.activeMembership?.sellerId`. Em
+`App.tsx`, o rótulo "Administrador" passa a depender de
+`platformRole==='super_admin'` (era `role==='admin'`) — mesma correção
+de consistência do S8-D1 aplicada a mais um lugar que lia o `role`
+legado do Super Admin.
+
+### 43.5 Fixtures e testes atualizados
+
+18 arquivos de teste tiveram `role`/`sellerId` soltos removidos de
+fixtures de `User` (preservando `activeMembership.role`/`sellerId`,
+legítimos): `tests/capabilities.test.ts`,
+`tests/integration/stagePermissionsFlow.test.tsx`,
+`tests/leads/serviceSeam.test.ts`,
+`tests/navigation/{appCacheIdentity,commercialWorkspaceAccess,
+legacyProfileDivergence,platformAdminAccess,settingsAccess}.test.tsx`,
+`tests/screens/{ScreenAjustesStages,ScreenAjustesInvites,
+ScreenAjustesUserLifecycle,ScreenAjustesUserEmailEdit,
+ScreenAjustesActiveUsers,ScreenEmpresas,ScreenAndamento}.test.tsx`,
+`tests/integration/{remoteStagesKanban,remoteStagesReorder}.test.tsx`.
+Um resíduo do S8-D1 (`companyId: null` solto, não pego pelo `tsc`
+porque `m.user.current` é `any`) foi encontrado e corrigido em
+`ScreenAjustesInvites.test.tsx` durante esta varredura.
+`tests/navigation/legacyProfileDivergence.test.tsx` teve seu cenário
+simplificado: "profiles.role divergente" deixou de ser representável
+(o campo não existe mais), então os dois testes passaram a provar
+diretamente que `platformRole`/`activeMembership.role` decidem a
+navegação isoladamente. `tests/navigation/settingsAccess.test.tsx`
+teve seu helper `user(role)` generalizado para `user(label)` (o
+parâmetro nomeia só id/name/email agora).
+
+### 43.6 Testes novos
+
+`tests/services/localScopeFiltering.test.ts` (novo arquivo, 15 testes)
+cobre o escopo local M0 diretamente sobre a store real (mesmo padrão
+de `tests/leads/serviceSeam.test.ts`): Manager vê tudo sem filtro;
+Seller com `sellerId` válido vê só o próprio recorte em Leads/Visits/
+Deals/Sales/Tasks; Seller B nunca vê dados do Seller A; Tasks não-
+atribuídas continuam visíveis a qualquer Seller; `getCurrentSeller`
+retorna a linha real; transferência troca o recorte para o `sellerId`
+da empresa nova; Seller sem `sellerId` válido recebe listas vazias em
+tudo; Super Admin vê tudo mesmo sem `activeMembership`; sem
+`platformRole` e sem `activeMembership` (membership suspensa/
+offboarded/sessão residual) todas as listas ficam vazias; reativação
+restaura o filtro correto. `tests/services/authService.test.ts` ganhou
+7 testes novos: Manager nunca chama a RPC de sellerId; Seller com
+`sellers.id` real chama a RPC com o `company_id` certo; Seller sem
+linha válida recebe `sellerId=null`; erro na RPC falha fechado (nunca
+lança); transferência resolve o `sellerId` da empresa de destino; User
+não possui `role`/`sellerId`/`companyId`; e um describe dedicado a
+`currentRole/isAdmin/isManager/isSeller` cobrindo Manager, Seller,
+Super Admin (incluindo a correção de `isAdmin`/`isManager`) e ausência
+total de identidade.
+
+### 43.7 Validação completa
+
+TypeScript: `npx tsc --noEmit` — diff vazio contra a baseline de 22
+erros pré-existentes registrada no preflight (mesmos 4 arquivos,
+mesmas linhas, zero erro novo, zero erro nos arquivos alterados).
+`npm run test:run`: **1950/1950 PASS** (128 arquivos; 1927 + 23
+novos). `npm run build`: verde, 8/8 páginas. SQL: `supabase db reset`
++ `supabase test db` — **43 migrations, 48 arquivos, 2478/2478 PASS**,
+exatamente inalterado em relação ao S8-D1 (§42.6), confirmando **zero
+alteração de banco** nesta etapa.
+
+### 43.8 Escopo preservado
+
+Nenhuma migration, nenhuma alteração em RPC/RLS/grants/schema, nenhuma
+alteração em `database.types.ts`, nenhuma operação Supabase remota,
+nenhum arquivo `.env` modificado, nenhuma flag ativada.
+`profiles.role`/`profiles.seller_id` continuam fisicamente no banco.
+`update_membership_role` (ponte de sincronização de `profiles.role`)
+intacta. Módulos M0 preservados em espírito (mesmo comportamento para
+Manager/Seller-com-sellerId-válido/Super Admin — só a fonte da
+identidade mudou); `StoreAdapter`/`Flows2.tsx`/corpos legados de
+`ScreensOps`/`ScreensBiz` continuam sendo o mesmo mock local, sem
+nenhuma conexão nova com Supabase. Bridge do M1-E intacta, ainda não
+montada em `App.tsx`.
+
+**O S8-D2-A está concluído. S8-D2-B (remoção da sincronização
+`profiles.role` em `update_membership_role`) está desbloqueado, mas
+não iniciado. S8-E não iniciado. M1-E E4 continua pausado** até o
+fechamento formal do S8 (S8-F).
