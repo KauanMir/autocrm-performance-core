@@ -572,57 +572,33 @@ export type Database = {
       }
       profiles: {
         Row: {
-          company_id: string | null
           created_at: string
           email: string
           id: string
           is_active: boolean
           name: string
           platform_role: Database["public"]["Enums"]["platform_role"] | null
-          role: Database["public"]["Enums"]["user_role"]
-          seller_id: string | null
           updated_at: string
         }
         Insert: {
-          company_id?: string | null
           created_at?: string
           email: string
           id: string
           is_active?: boolean
           name: string
           platform_role?: Database["public"]["Enums"]["platform_role"] | null
-          role: Database["public"]["Enums"]["user_role"]
-          seller_id?: string | null
           updated_at?: string
         }
         Update: {
-          company_id?: string | null
           created_at?: string
           email?: string
           id?: string
           is_active?: boolean
           name?: string
           platform_role?: Database["public"]["Enums"]["platform_role"] | null
-          role?: Database["public"]["Enums"]["user_role"]
-          seller_id?: string | null
           updated_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "profiles_company_id_fkey"
-            columns: ["company_id"]
-            isOneToOne: false
-            referencedRelation: "companies"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "profiles_seller_id_fkey"
-            columns: ["seller_id"]
-            isOneToOne: false
-            referencedRelation: "sellers"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       sellers: {
         Row: {

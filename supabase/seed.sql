@@ -77,10 +77,15 @@ on conflict (id) do nothing;
 -- a FK profiles.id -> auth.users.id e permitir validar profiles, sellers,
 -- RLS e RPCs direto no PostgreSQL local. NÃO destinados à produção.
 --
---   11111111-…  admin@autocrm.com      → role admin,   seller_id null
---   22222222-…  gerente@autocrm.com    → role manager, seller_id null
---   33333333-…  vendedor1@autocrm.com  → role seller,  seller_id 's4'  (Lucas Martins)
---   44444444-…  vendedor2@autocrm.com  → role seller,  seller_id 's11' (Fernanda Dias)
+-- M1-F S8-E2: profiles não carrega mais empresa/cargo/seller_id
+-- (colunas removidas fisicamente) — o mapeamento role/empresa/seller de
+-- cada usuário vive inteiramente na Parte 4 abaixo
+-- (company_memberships) e no religamento de sellers.profile_id logo
+-- adiante:
+--   11111111-…  admin@autocrm.com      → membership manager (Parte 4)
+--   22222222-…  gerente@autocrm.com    → membership manager (Parte 4)
+--   33333333-…  vendedor1@autocrm.com  → membership seller, sellers.id 's4'  (Lucas Martins)
+--   44444444-…  vendedor2@autocrm.com  → membership seller, sellers.id 's11' (Fernanda Dias)
 
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values
@@ -90,11 +95,11 @@ values
   ('00000000-0000-0000-0000-000000000000', '44444444-4444-4444-4444-444444444444', 'authenticated', 'authenticated', 'vendedor2@autocrm.com', now(), now(), now())
 on conflict (id) do nothing;
 
-insert into profiles (id, company_id, name, email, role, seller_id) values
-  ('11111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-000000000001', 'Admin',          'admin@autocrm.com',     'admin',   null),
-  ('22222222-2222-2222-2222-222222222222', '00000000-0000-0000-0000-000000000001', 'Carlos Mendes',  'gerente@autocrm.com',   'manager', null),
-  ('33333333-3333-3333-3333-333333333333', '00000000-0000-0000-0000-000000000001', 'Lucas Martins',  'vendedor1@autocrm.com', 'seller',  's4'),
-  ('44444444-4444-4444-4444-444444444444', '00000000-0000-0000-0000-000000000001', 'Fernanda Costa', 'vendedor2@autocrm.com', 'seller',  's11')
+insert into profiles (id, name, email) values
+  ('11111111-1111-1111-1111-111111111111', 'Admin',          'admin@autocrm.com'),
+  ('22222222-2222-2222-2222-222222222222', 'Carlos Mendes',  'gerente@autocrm.com'),
+  ('33333333-3333-3333-3333-333333333333', 'Lucas Martins',  'vendedor1@autocrm.com'),
+  ('44444444-4444-4444-4444-444444444444', 'Fernanda Costa', 'vendedor2@autocrm.com')
 on conflict (id) do nothing;
 
 -- Opcional, mas recomendado: linkar sellers.profile_id de volta para os dois
