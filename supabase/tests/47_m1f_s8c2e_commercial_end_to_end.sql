@@ -31,10 +31,10 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'e2000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'e2e-mgr-a@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'e2000000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'e2e-seller-a@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('e2000000-0000-0000-0000-000000000001', null, 'E2E Super Admin', 'e2e-sa@test.local', 'seller', true, 'super_admin'),
-  ('e2000000-0000-0000-0000-000000000002', 'e1000000-0000-0000-0000-000000000001', 'E2E Manager A', 'e2e-mgr-a@test.local', 'manager', true, null),
-  ('e2000000-0000-0000-0000-000000000003', 'e1000000-0000-0000-0000-000000000001', 'E2E Seller A', 'e2e-seller-a@test.local', 'seller', true, null);
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('e2000000-0000-0000-0000-000000000001', 'E2E Super Admin', 'e2e-sa@test.local', true, 'super_admin'),
+  ('e2000000-0000-0000-0000-000000000002', 'E2E Manager A', 'e2e-mgr-a@test.local', true, null),
+  ('e2000000-0000-0000-0000-000000000003', 'E2E Seller A', 'e2e-seller-a@test.local', true, null);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status) values
   ('e3000000-0000-0000-0000-000000000002', 'e1000000-0000-0000-0000-000000000001', 'e2000000-0000-0000-0000-000000000002', 'manager', true, 'active'),

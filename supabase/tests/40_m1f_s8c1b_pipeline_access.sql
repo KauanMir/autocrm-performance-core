@@ -39,16 +39,16 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'cb200000-0000-0000-0000-000000000008', 'authenticated', 'authenticated', 's8c1b-inactive-profile@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'cb200000-0000-0000-0000-000000000009', 'authenticated', 'authenticated', 's8c1b-manager-c@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('cb200000-0000-0000-0000-000000000001', 'cb100000-0000-0000-0000-000000000001', 'Manager A', 's8c1b-manager-a@test.local', 'manager', true, null),
-  ('cb200000-0000-0000-0000-000000000002', 'cb100000-0000-0000-0000-000000000001', 'Seller A', 's8c1b-seller-a@test.local', 'seller', true, null),
-  ('cb200000-0000-0000-0000-000000000003', 'cb100000-0000-0000-0000-000000000002', 'Manager B', 's8c1b-manager-b@test.local', 'manager', true, null),
-  ('cb200000-0000-0000-0000-000000000004', null, 'Super Admin S8C1B', 's8c1b-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('cb200000-0000-0000-0000-000000000005', 'cb100000-0000-0000-0000-000000000001', 'Sem Membership', 's8c1b-nomembership@test.local', 'manager', true, null),
-  ('cb200000-0000-0000-0000-000000000006', 'cb100000-0000-0000-0000-000000000001', 'Manager Suspenso', 's8c1b-suspended@test.local', 'manager', true, null),
-  ('cb200000-0000-0000-0000-000000000007', 'cb100000-0000-0000-0000-000000000001', 'Manager Desligado', 's8c1b-offboarded@test.local', 'manager', true, null),
-  ('cb200000-0000-0000-0000-000000000008', 'cb100000-0000-0000-0000-000000000001', 'Profile Inativo', 's8c1b-inactive-profile@test.local', 'manager', false, null),
-  ('cb200000-0000-0000-0000-000000000009', 'cb100000-0000-0000-0000-000000000003', 'Manager C', 's8c1b-manager-c@test.local', 'manager', true, null);
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('cb200000-0000-0000-0000-000000000001', 'Manager A', 's8c1b-manager-a@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000002', 'Seller A', 's8c1b-seller-a@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000003', 'Manager B', 's8c1b-manager-b@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000004', 'Super Admin S8C1B', 's8c1b-superadmin@test.local', true, 'super_admin'),
+  ('cb200000-0000-0000-0000-000000000005', 'Sem Membership', 's8c1b-nomembership@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000006', 'Manager Suspenso', 's8c1b-suspended@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000007', 'Manager Desligado', 's8c1b-offboarded@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000008', 'Profile Inativo', 's8c1b-inactive-profile@test.local', false, null),
+  ('cb200000-0000-0000-0000-000000000009', 'Manager C', 's8c1b-manager-c@test.local', true, null);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status) values
   ('cb300000-0000-0000-0000-000000000001', 'cb100000-0000-0000-0000-000000000001', 'cb200000-0000-0000-0000-000000000001', 'manager', true, 'active'),
@@ -268,7 +268,7 @@ select pg_temp.as_user('cb200000-0000-0000-0000-000000000005');
 
 select is(
   (select count(*)::int from public.pipeline_stages where company_id = 'cb100000-0000-0000-0000-000000000001'),
-  0, 'Sem membership: NAO le etapas, mesmo com profiles.company_id legado apontando para a Empresa A');
+  0, 'Sem membership: NAO le etapas (profile ativo, zero company_memberships)');
 
 select throws_ok(
   $$select public.reorder_pipeline_stages(array['cb400000-0000-0000-0000-000000000001'::uuid])$$,

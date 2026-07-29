@@ -13,9 +13,9 @@ insert into public.pipeline_stages (id, company_id, code, name, sort_order)
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at) values
   ('00000000-0000-0000-0000-000000000000', 'b1111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'adminb@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'd1111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'inativo@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('b1111111-1111-1111-1111-111111111111', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Admin B', 'adminb@test.local', 'admin', true),
-  ('d1111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-000000000001', 'Inativo', 'inativo@test.local', 'manager', false);
+insert into public.profiles (id, name, email, is_active) values
+  ('b1111111-1111-1111-1111-111111111111', 'Admin B', 'adminb@test.local', true),
+  ('d1111111-1111-1111-1111-111111111111', 'Inativo', 'inativo@test.local', false);
 -- M1-F S8-C2-B1: Admin B precisa de membership real (leads_select agora
 -- deriva empresa de current_membership_company_id(), nunca mais de
 -- profiles.company_id) — legado 'admin' -> company_memberships.role='manager'

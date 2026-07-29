@@ -2,7 +2,7 @@
 -- company_memberships (autoria da timeline por membership histórica).
 -- Prova: (1) a FK aponta para company_memberships(company_id, profile_id),
 -- nunca mais para profiles; (2) transferência A->B preserva a timeline
--- antiga e libera a nova, mesmo com profiles.company_id divergente;
+-- antiga e libera a nova;
 -- (3) offboarding sustenta o histórico e bloqueia hard delete da
 -- membership referenciada; (4) Super Admin continua com actor_profile_id
 -- null; (5) defesa cross-company ao nível da própria constraint; (6)
@@ -33,21 +33,20 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'f2000000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 's8c2d1tl-mgr-backup@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'f2000000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 's8c2d1tl-legacy@test.local', now(), now(), now());
 
--- profiles.company_id do "legacy" e DELIBERADAMENTE F2 (divergente da
--- membership real, F1) — prova que nunca decide a autoria da timeline.
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('f2000000-0000-0000-0000-000000000001', null, 'Repro SA TL', 's8c2d1tl-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('f2000000-0000-0000-0000-000000000002', 'f1000000-0000-0000-0000-000000000001', 'Manager Transfer', 's8c2d1tl-mgr-transfer@test.local', 'manager', true, null),
-  ('f2000000-0000-0000-0000-000000000003', 'f1000000-0000-0000-0000-000000000001', 'Manager Offboard', 's8c2d1tl-mgr-offboard@test.local', 'manager', true, null),
-  ('f2000000-0000-0000-0000-000000000004', 'f1000000-0000-0000-0000-000000000001', 'Manager Backup', 's8c2d1tl-mgr-backup@test.local', 'manager', true, null),
-  ('f2000000-0000-0000-0000-000000000005', 'f1000000-0000-0000-0000-000000000002', 'Legado Divergente TL', 's8c2d1tl-legacy@test.local', 'seller', true, null);
+-- M1-F S8-E2: profiles.company_id/role/seller_id foram removidos
+-- fisicamente do catálogo — a FK já apontava exclusivamente para
+-- company_memberships(company_id, profile_id).
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('f2000000-0000-0000-0000-000000000001', 'Repro SA TL', 's8c2d1tl-superadmin@test.local', true, 'super_admin'),
+  ('f2000000-0000-0000-0000-000000000002', 'Manager Transfer', 's8c2d1tl-mgr-transfer@test.local', true, null),
+  ('f2000000-0000-0000-0000-000000000003', 'Manager Offboard', 's8c2d1tl-mgr-offboard@test.local', true, null),
+  ('f2000000-0000-0000-0000-000000000004', 'Manager Backup', 's8c2d1tl-mgr-backup@test.local', true, null),
+  ('f2000000-0000-0000-0000-000000000005', 'Legado Divergente TL', 's8c2d1tl-legacy@test.local', true, null);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status) values
   ('f3000000-0000-0000-0000-000000000002', 'f1000000-0000-0000-0000-000000000001', 'f2000000-0000-0000-0000-000000000002', 'manager', true, 'active'),
   ('f3000000-0000-0000-0000-000000000003', 'f1000000-0000-0000-0000-000000000001', 'f2000000-0000-0000-0000-000000000003', 'manager', true, 'active'),
   ('f3000000-0000-0000-0000-000000000004', 'f1000000-0000-0000-0000-000000000001', 'f2000000-0000-0000-0000-000000000004', 'manager', true, 'active'),
-  -- Legado divergente: membership REAL e manager em F1 — profiles.company_id
-  -- (F2) acima e so ruido legado.
   ('f3000000-0000-0000-0000-000000000005', 'f1000000-0000-0000-0000-000000000001', 'f2000000-0000-0000-0000-000000000005', 'manager', true, 'active');
 
 insert into public.pipeline_stages (id, company_id, code, name, sort_order) values
@@ -135,10 +134,6 @@ reset role;
 select is(
   (select is_active from public.company_memberships where id = 'f3000000-0000-0000-0000-000000000002'),
   false, 'membership antiga (F1) fica offboarded, nunca apagada');
-select is(
-  (select company_id from public.profiles where id = 'f2000000-0000-0000-0000-000000000002'),
-  'f1000000-0000-0000-0000-000000000001'::uuid,
-  'profiles.company_id permanece F1 apos a transferencia (nunca sincronizado)');
 
 -- timeline ANTIGA de F1 continua valida (FK satisfeita pela membership
 -- historica, agora offboarded).
@@ -219,11 +214,10 @@ select is(
   1, 'audit_log continua registrando o Super Admin real');
 
 -- ═══════════════════════════════════════════════════════════════════════
--- LEGADO DIVERGENTE
+-- RESOLUÇÃO EXCLUSIVAMENTE VIA MEMBERSHIP (ex-"legado divergente")
 -- ═══════════════════════════════════════════════════════════════════════
 
--- profiles.company_id do "legacy" e F2 (legado, nunca lido) — a
--- membership real (F1, manager) e quem autoriza e satisfaz a FK.
+-- a membership real (F1, manager) e quem autoriza e satisfaz a FK.
 select pg_temp.as_user('f2000000-0000-0000-0000-000000000005');
 set local role authenticated;
 create temp table t_tl_legacy as
@@ -231,7 +225,7 @@ create temp table t_tl_legacy as
 reset role;
 
 select is((select actor_profile_id from t_tl_legacy), 'f2000000-0000-0000-0000-000000000005'::uuid,
-  'legado divergente: FK satisfeita pela membership real em F1, profiles.company_id (F2) nunca interfere');
+  'FK satisfeita pela membership real em F1');
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- DEFESA CROSS-COMPANY AO NÍVEL DA CONSTRAINT

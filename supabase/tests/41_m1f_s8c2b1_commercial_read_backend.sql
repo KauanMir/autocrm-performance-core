@@ -46,18 +46,18 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'cc200000-0000-0000-0000-00000000000a', 'authenticated', 'authenticated', 's8c2b1-offboarded@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'cc200000-0000-0000-0000-00000000000b', 'authenticated', 'authenticated', 's8c2b1-inactive-profile@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('cc200000-0000-0000-0000-000000000001', 'cc100000-0000-0000-0000-000000000001', 'Manager A', 's8c2b1-manager-a@test.local', 'manager', true, null),
-  ('cc200000-0000-0000-0000-000000000002', 'cc100000-0000-0000-0000-000000000001', 'Seller A1', 's8c2b1-seller-a1@test.local', 'seller', true, null),
-  ('cc200000-0000-0000-0000-000000000003', 'cc100000-0000-0000-0000-000000000001', 'Seller A2', 's8c2b1-seller-a2@test.local', 'seller', true, null),
-  ('cc200000-0000-0000-0000-000000000004', 'cc100000-0000-0000-0000-000000000003', 'Manager C', 's8c2b1-manager-c@test.local', 'manager', true, null),
-  ('cc200000-0000-0000-0000-000000000005', 'cc100000-0000-0000-0000-000000000004', 'Seller D', 's8c2b1-seller-d@test.local', 'seller', true, null),
-  ('cc200000-0000-0000-0000-000000000006', 'cc100000-0000-0000-0000-000000000005', 'Manager E', 's8c2b1-manager-e@test.local', 'manager', true, null),
-  ('cc200000-0000-0000-0000-000000000007', null, 'Super Admin S8C2B1', 's8c2b1-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('cc200000-0000-0000-0000-000000000008', 'cc100000-0000-0000-0000-000000000001', 'Sem Membership', 's8c2b1-nomembership@test.local', 'manager', true, null),
-  ('cc200000-0000-0000-0000-000000000009', 'cc100000-0000-0000-0000-000000000001', 'Manager Suspenso', 's8c2b1-suspended@test.local', 'manager', true, null),
-  ('cc200000-0000-0000-0000-00000000000a', 'cc100000-0000-0000-0000-000000000001', 'Manager Desligado', 's8c2b1-offboarded@test.local', 'manager', true, null),
-  ('cc200000-0000-0000-0000-00000000000b', 'cc100000-0000-0000-0000-000000000001', 'Profile Inativo', 's8c2b1-inactive-profile@test.local', 'manager', false, null);
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('cc200000-0000-0000-0000-000000000001', 'Manager A', 's8c2b1-manager-a@test.local', true, null),
+  ('cc200000-0000-0000-0000-000000000002', 'Seller A1', 's8c2b1-seller-a1@test.local', true, null),
+  ('cc200000-0000-0000-0000-000000000003', 'Seller A2', 's8c2b1-seller-a2@test.local', true, null),
+  ('cc200000-0000-0000-0000-000000000004', 'Manager C', 's8c2b1-manager-c@test.local', true, null),
+  ('cc200000-0000-0000-0000-000000000005', 'Seller D', 's8c2b1-seller-d@test.local', true, null),
+  ('cc200000-0000-0000-0000-000000000006', 'Manager E', 's8c2b1-manager-e@test.local', true, null),
+  ('cc200000-0000-0000-0000-000000000007', 'Super Admin S8C2B1', 's8c2b1-superadmin@test.local', true, 'super_admin'),
+  ('cc200000-0000-0000-0000-000000000008', 'Sem Membership', 's8c2b1-nomembership@test.local', true, null),
+  ('cc200000-0000-0000-0000-000000000009', 'Manager Suspenso', 's8c2b1-suspended@test.local', true, null),
+  ('cc200000-0000-0000-0000-00000000000a', 'Manager Desligado', 's8c2b1-offboarded@test.local', true, null),
+  ('cc200000-0000-0000-0000-00000000000b', 'Profile Inativo', 's8c2b1-inactive-profile@test.local', false, null);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status) values
   ('cc300000-0000-0000-0000-000000000001', 'cc100000-0000-0000-0000-000000000001', 'cc200000-0000-0000-0000-000000000001', 'manager', true, 'active'),
@@ -260,7 +260,7 @@ set local role authenticated;
 select pg_temp.as_user('cc200000-0000-0000-0000-000000000008');
 select is(
   (select count(*)::int from public.leads where company_id='cc100000-0000-0000-0000-000000000001'),
-  0, 'Sem membership: zero leads, mesmo com profiles.company_id legado apontando para a empresa A');
+  0, 'Sem membership: zero leads (profile ativo, zero company_memberships)');
 reset role;
 
 set local role authenticated;
@@ -284,23 +284,14 @@ select is(
   0, 'Profile globalmente inativo: zero leads (helpers ja filtram profiles.is_active)');
 reset role;
 
--- ══════════════════════════════════════════════════════════════════════
--- LEGADO DIVERGENTE — profiles.company_id/role/seller_id nunca amplia
--- ══════════════════════════════════════════════════════════════════════
-
-update public.profiles set company_id = 'cc100000-0000-0000-0000-000000000002', role = 'admin'
-  where id = 'cc200000-0000-0000-0000-000000000001';
-set local role authenticated;
-select pg_temp.as_user('cc200000-0000-0000-0000-000000000001');
-select is(
-  (select count(*)::int from public.leads where company_id='cc100000-0000-0000-0000-000000000001'),
-  4, 'Manager A: profiles.company_id/role divergentes (apontando para Empresa B/admin) sao ignorados — membership real continua valendo');
-select is(
-  (select count(*)::int from public.leads where company_id='cc100000-0000-0000-0000-000000000002'),
-  0, 'Manager A: mesmo com profiles.company_id legado='||'Empresa B, NAO ganha acesso a ela');
-reset role;
-update public.profiles set company_id = 'cc100000-0000-0000-0000-000000000001', role = 'manager'
-  where id = 'cc200000-0000-0000-0000-000000000001';
+-- NOTA M1-F S8-E2: a seção "LEGADO DIVERGENTE" que existia aqui provava
+-- que profiles.company_id/role divergentes eram ignorados pela
+-- autorização real (company_memberships). As colunas foram removidas
+-- fisicamente do catálogo nesta etapa — não há mais nenhum campo legado
+-- capaz de divergir, logo o cenário deixou de ser estruturalmente
+-- possível. A garantia em si (autorização deriva exclusivamente de
+-- company_memberships) continua coberta pelos blocos MANAGER/SELLER
+-- ATIVO acima.
 
 -- ══════════════════════════════════════════════════════════════════════
 -- SUPER ADMIN — SELECT DIRETO (sempre negado, sem policy global)

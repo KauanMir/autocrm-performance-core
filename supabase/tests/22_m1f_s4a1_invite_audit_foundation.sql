@@ -21,11 +21,11 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'e1000000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'e1seller@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'e9000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'e9superadmin@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('e1000000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001', 'E1 Manager', 'e1manager@test.local', 'manager', true),
-  ('e1000000-0000-0000-0000-000000000002', 'a2000000-0000-0000-0000-000000000002', 'E2 Manager', 'e2manager@test.local', 'manager', true),
-  ('e1000000-0000-0000-0000-000000000003', 'a1000000-0000-0000-0000-000000000001', 'E1 Seller',  'e1seller@test.local',  'seller',  true),
-  ('e9000000-0000-0000-0000-000000000001', null, 'E9 SuperAdmin (fixture)', 'e9superadmin@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('e1000000-0000-0000-0000-000000000001', 'E1 Manager', 'e1manager@test.local', true),
+  ('e1000000-0000-0000-0000-000000000002', 'E2 Manager', 'e2manager@test.local', true),
+  ('e1000000-0000-0000-0000-000000000003', 'E1 Seller',  'e1seller@test.local',  true),
+  ('e9000000-0000-0000-0000-000000000001', 'E9 SuperAdmin (fixture)', 'e9superadmin@test.local', true);
 
 insert into public.company_memberships (company_id, profile_id, role, is_active) values
   ('a1000000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001', 'manager', true),
@@ -269,10 +269,10 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'f2000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'f2aceito@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'f3000000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'f3ator@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('f1000000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000001', 'F1 Convidador', 'f1convidador@test.local', 'manager', true),
-  ('f2000000-0000-0000-0000-000000000002', 'c1000000-0000-0000-0000-000000000001', 'F2 Aceito', 'f2aceito@test.local', 'seller', true),
-  ('f3000000-0000-0000-0000-000000000003', 'c2000000-0000-0000-0000-000000000002', 'F3 Ator Audit', 'f3ator@test.local', 'manager', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('f1000000-0000-0000-0000-000000000001', 'F1 Convidador', 'f1convidador@test.local', true),
+  ('f2000000-0000-0000-0000-000000000002', 'F2 Aceito', 'f2aceito@test.local', true),
+  ('f3000000-0000-0000-0000-000000000003', 'F3 Ator Audit', 'f3ator@test.local', true);
 
 -- ── company_id: RESTRICT — excluir uma empresa com convite associado
 --    e NEGADO; empresa e convite sobrevivem intactos ────────────────────

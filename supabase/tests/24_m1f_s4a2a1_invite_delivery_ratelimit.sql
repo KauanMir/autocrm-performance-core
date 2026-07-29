@@ -30,12 +30,12 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'aa900000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'h9sellerh1@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'aa900000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 'h9inativo@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('aa900000-0000-0000-0000-000000000001', 'aa100000-0000-0000-0000-000000000001', 'H9 Manager H1', 'h9managerh1@test.local', 'manager', true),
-  ('aa900000-0000-0000-0000-000000000002', 'aa200000-0000-0000-0000-000000000002', 'H9 Manager H2', 'h9managerh2@test.local', 'manager', true),
-  ('aa900000-0000-0000-0000-000000000003', null,                                   'H9 Super Admin', 'h9superadmin@test.local', 'seller', true),
-  ('aa900000-0000-0000-0000-000000000004', 'aa100000-0000-0000-0000-000000000001', 'H9 Seller H1', 'h9sellerh1@test.local', 'seller', true),
-  ('aa900000-0000-0000-0000-000000000005', 'aa100000-0000-0000-0000-000000000001', 'H9 Inativo', 'h9inativo@test.local', 'manager', false);
+insert into public.profiles (id, name, email, is_active) values
+  ('aa900000-0000-0000-0000-000000000001', 'H9 Manager H1', 'h9managerh1@test.local', true),
+  ('aa900000-0000-0000-0000-000000000002', 'H9 Manager H2', 'h9managerh2@test.local', true),
+  ('aa900000-0000-0000-0000-000000000003', 'H9 Super Admin', 'h9superadmin@test.local', true),
+  ('aa900000-0000-0000-0000-000000000004', 'H9 Seller H1', 'h9sellerh1@test.local', true),
+  ('aa900000-0000-0000-0000-000000000005', 'H9 Inativo', 'h9inativo@test.local', false);
 
 update public.profiles set platform_role = 'super_admin' where id = 'aa900000-0000-0000-0000-000000000003';
 

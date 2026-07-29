@@ -20,10 +20,10 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'd1000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'd1seller2@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'd2000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'd2seller1@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('d1000000-0000-0000-0000-000000000001', 'd1eeeeee-1111-1111-1111-111111111111', 'D1 Seller 1', 'd1seller1@test.local', 'seller', true),
-  ('d1000000-0000-0000-0000-000000000002', 'd1eeeeee-1111-1111-1111-111111111111', 'D1 Seller 2', 'd1seller2@test.local', 'seller', true),
-  ('d2000000-0000-0000-0000-000000000001', 'd2eeeeee-2222-2222-2222-222222222222', 'D2 Seller 1', 'd2seller1@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('d1000000-0000-0000-0000-000000000001', 'D1 Seller 1', 'd1seller1@test.local', true),
+  ('d1000000-0000-0000-0000-000000000002', 'D1 Seller 2', 'd1seller2@test.local', true),
+  ('d2000000-0000-0000-0000-000000000001', 'D2 Seller 1', 'd2seller1@test.local', true);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active) values
   ('d1c00000-0000-0000-0000-000000000001', 'd1eeeeee-1111-1111-1111-111111111111', 'd1000000-0000-0000-0000-000000000001', 'seller', true),

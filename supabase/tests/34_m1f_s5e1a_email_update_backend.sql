@@ -42,20 +42,20 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', '5e110000-0000-0000-0000-000000000012', 'authenticated', 'authenticated', '5e1a-conflito-alvo@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', '5e110000-0000-0000-0000-000000000013', 'authenticated', 'authenticated', '5e1a-outro-auth-email@test.local', now(), now(), now());
 
-insert into public.profiles (id, name, email, role, is_active, platform_role) values
-  ('5e110000-0000-0000-0000-000000000001', 'S5E1A Super Admin', '5e1a-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('5e110000-0000-0000-0000-000000000002', 'S5E1A Super Admin Alvo', '5e1a-superadmin-alvo@test.local', 'seller', true, 'super_admin'),
-  ('5e110000-0000-0000-0000-000000000003', 'S5E1A Manager', '5e1a-manager@test.local', 'manager', true, null),
-  ('5e110000-0000-0000-0000-000000000004', 'S5E1A Seller', '5e1a-seller@test.local', 'seller', true, null),
-  ('5e110000-0000-0000-0000-000000000005', 'S5E1A Profile Inativo', '5e1a-inactive-profile@test.local', 'seller', false, null),
-  ('5e110000-0000-0000-0000-000000000006', 'S5E1A Sem Membership', '5e1a-sem-membership@test.local', 'seller', true, null),
-  ('5e110000-0000-0000-0000-000000000007', 'S5E1A Empresa Cancelada', '5e1a-empresa-cancelada@test.local', 'seller', true, null),
-  ('5e110000-0000-0000-0000-000000000008', 'S5E1A Manager Ator', '5e1a-manager-ator@test.local', 'manager', true, null),
-  ('5e110000-0000-0000-0000-000000000009', 'S5E1A Seller Ator', '5e1a-seller-ator@test.local', 'seller', true, null),
-  ('5e110000-0000-0000-0000-000000000010', 'S5E1A Ator Inativo', '5e1a-inactive-ator@test.local', 'seller', false, null),
-  ('5e110000-0000-0000-0000-000000000011', 'S5E1A Idempotente', '5e1a-idempotente@test.local', 'seller', true, null),
-  ('5e110000-0000-0000-0000-000000000012', 'S5E1A Conflito Alvo', '5e1a-conflito-alvo@test.local', 'seller', true, null),
-  ('5e110000-0000-0000-0000-000000000013', 'S5E1A Outro Auth Email', '5e1a-outro-auth-email@test.local', 'seller', true, null);
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('5e110000-0000-0000-0000-000000000001', 'S5E1A Super Admin', '5e1a-superadmin@test.local', true, 'super_admin'),
+  ('5e110000-0000-0000-0000-000000000002', 'S5E1A Super Admin Alvo', '5e1a-superadmin-alvo@test.local', true, 'super_admin'),
+  ('5e110000-0000-0000-0000-000000000003', 'S5E1A Manager', '5e1a-manager@test.local', true, null),
+  ('5e110000-0000-0000-0000-000000000004', 'S5E1A Seller', '5e1a-seller@test.local', true, null),
+  ('5e110000-0000-0000-0000-000000000005', 'S5E1A Profile Inativo', '5e1a-inactive-profile@test.local', false, null),
+  ('5e110000-0000-0000-0000-000000000006', 'S5E1A Sem Membership', '5e1a-sem-membership@test.local', true, null),
+  ('5e110000-0000-0000-0000-000000000007', 'S5E1A Empresa Cancelada', '5e1a-empresa-cancelada@test.local', true, null),
+  ('5e110000-0000-0000-0000-000000000008', 'S5E1A Manager Ator', '5e1a-manager-ator@test.local', true, null),
+  ('5e110000-0000-0000-0000-000000000009', 'S5E1A Seller Ator', '5e1a-seller-ator@test.local', true, null),
+  ('5e110000-0000-0000-0000-000000000010', 'S5E1A Ator Inativo', '5e1a-inactive-ator@test.local', false, null),
+  ('5e110000-0000-0000-0000-000000000011', 'S5E1A Idempotente', '5e1a-idempotente@test.local', true, null),
+  ('5e110000-0000-0000-0000-000000000012', 'S5E1A Conflito Alvo', '5e1a-conflito-alvo@test.local', true, null),
+  ('5e110000-0000-0000-0000-000000000013', 'S5E1A Outro Auth Email', '5e1a-outro-auth-email@test.local', true, null);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active) values
   ('5e130000-0000-0000-0000-000000000003', '5e120000-0000-0000-0000-000000000001', '5e110000-0000-0000-0000-000000000003', 'manager', true),

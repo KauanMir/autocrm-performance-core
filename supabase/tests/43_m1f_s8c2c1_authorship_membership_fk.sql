@@ -35,18 +35,18 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'cb200000-0000-0000-0000-000000000006', 'authenticated', 'authenticated', 'authA1-superadmin@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'cb200000-0000-0000-0000-000000000007', 'authenticated', 'authenticated', 'authA1-legacy@test.local', now(), now(), now());
 
--- profiles.company_id/role/seller_id de "Legado" abaixo são DELIBERADAMENTE
--- divergentes da membership real (empresa terceira, role manager) — prova
--- de que a nova FK nunca lê profiles.company_id (ela nem referencia
--- profiles).
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('cb200000-0000-0000-0000-000000000001', 'cb100000-0000-0000-0000-000000000001', 'Manager Um', 'authA1-manager1@test.local', 'manager', true, null),
-  ('cb200000-0000-0000-0000-000000000002', 'cb100000-0000-0000-0000-000000000001', 'Manager Dois', 'authA1-manager2@test.local', 'manager', true, null),
-  ('cb200000-0000-0000-0000-000000000003', 'cb100000-0000-0000-0000-000000000001', 'Seller Um', 'authA1-seller1@test.local', 'seller', true, null),
-  ('cb200000-0000-0000-0000-000000000004', 'cb100000-0000-0000-0000-000000000001', 'Sucessor', 'authA1-successor@test.local', 'seller', true, null),
-  ('cb200000-0000-0000-0000-000000000005', 'cb100000-0000-0000-0000-000000000003', 'Outsider', 'authA1-outsider@test.local', 'manager', true, null),
-  ('cb200000-0000-0000-0000-000000000006', null, 'Super Admin AuthA1', 'authA1-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('cb200000-0000-0000-0000-000000000007', 'cb100000-0000-0000-0000-000000000003', 'Legado Divergente', 'authA1-legacy@test.local', 'manager', true, null);
+-- M1-F S8-E2: profiles.company_id/role/seller_id foram removidos
+-- fisicamente do catálogo — a nova FK (leads_created_by_fk/updated_by_fk)
+-- nem referencia profiles, já apontava exclusivamente para
+-- company_memberships(company_id, profile_id).
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('cb200000-0000-0000-0000-000000000001', 'Manager Um', 'authA1-manager1@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000002', 'Manager Dois', 'authA1-manager2@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000003', 'Seller Um', 'authA1-seller1@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000004', 'Sucessor', 'authA1-successor@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000005', 'Outsider', 'authA1-outsider@test.local', true, null),
+  ('cb200000-0000-0000-0000-000000000006', 'Super Admin AuthA1', 'authA1-superadmin@test.local', true, 'super_admin'),
+  ('cb200000-0000-0000-0000-000000000007', 'Legado Divergente', 'authA1-legacy@test.local', true, null);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status) values
   ('cb300000-0000-0000-0000-000000000001', 'cb100000-0000-0000-0000-000000000001', 'cb200000-0000-0000-0000-000000000001', 'manager', true, 'active'),
@@ -55,9 +55,9 @@ insert into public.company_memberships (id, company_id, profile_id, role, is_act
   ('cb300000-0000-0000-0000-000000000004', 'cb100000-0000-0000-0000-000000000001', 'cb200000-0000-0000-0000-000000000004', 'seller',  true, 'active'),
   ('cb300000-0000-0000-0000-000000000005', 'cb100000-0000-0000-0000-000000000003', 'cb200000-0000-0000-0000-000000000005', 'manager', true, 'active'),
   -- "Legado Divergente": membership real e MANAGER na empresa TERCEIRA —
-  -- coincide com profiles.company_id aqui de proposito (o ponto sensivel
-  -- desta suite e a FK, nao a autorizacao por role/seller_id legado, ja
-  -- coberta exaustivamente no teste 42).
+  -- o ponto sensivel desta suite e a FK (leads_created_by_fk/updated_by_fk
+  -- via company_memberships), nao autorizacao por campo legado, ja
+  -- coberta exaustivamente no teste 42.
   ('cb300000-0000-0000-0000-000000000007', 'cb100000-0000-0000-0000-000000000003', 'cb200000-0000-0000-0000-000000000007', 'manager', true, 'active');
 
 insert into public.sellers (id, company_id, name, first_name, profile_id, membership_id, is_active) values
@@ -159,10 +159,6 @@ select is(
   (select company_id from public.company_memberships
     where profile_id = 'cb200000-0000-0000-0000-000000000003' and is_active),
   'cb100000-0000-0000-0000-000000000002'::uuid, 'membership ativa de Seller Um agora e na empresa B');
-select is(
-  (select company_id from public.profiles where id = 'cb200000-0000-0000-0000-000000000003'),
-  'cb100000-0000-0000-0000-000000000001'::uuid,
-  'profiles.company_id (legado) permanece empresa A — nunca sincronizado pela transferencia');
 
 select pg_temp.as_user('cb200000-0000-0000-0000-000000000003'); -- Seller Um, agora em B
 set local role authenticated;
@@ -291,17 +287,17 @@ select is(
   1, 'membership do Manager Um continua existindo apos a tentativa de exclusao bloqueada');
 
 -- ═══════════════════════════════════════════════════════════════════════
--- LEGADO DIVERGENTE: profiles.company_id nunca participa da FK nem da autorizacao
+-- RESOLUÇÃO EXCLUSIVAMENTE VIA MEMBERSHIP (ex-"legado divergente")
 -- ═══════════════════════════════════════════════════════════════════════
 
-select pg_temp.as_user('cb200000-0000-0000-0000-000000000007'); -- Legado Divergente (membership real: empresa terceira)
+select pg_temp.as_user('cb200000-0000-0000-0000-000000000007'); -- membership real: empresa terceira
 set local role authenticated;
 create temp table t_legacy_lead as
   select * from public.create_lead('Lead Legado', '(11) 90000-9005', 'Onix');
 select is((select company_id from t_legacy_lead), 'cb100000-0000-0000-0000-000000000003'::uuid,
-  'legado divergente: cria na empresa da MEMBERSHIP real (terceira), FK satisfeita normalmente');
+  'cria na empresa da MEMBERSHIP real (terceira), FK satisfeita normalmente');
 select is((select created_by_profile_id from t_legacy_lead), 'cb200000-0000-0000-0000-000000000007'::uuid,
-  'legado divergente: autoria gravada normalmente, FK nunca consultou profiles.company_id');
+  'autoria gravada normalmente, FK deriva exclusivamente de company_memberships');
 reset role;
 
 select * from finish();

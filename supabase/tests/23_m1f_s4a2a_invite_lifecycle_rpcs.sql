@@ -41,17 +41,17 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'd9000000-0000-0000-0000-000000000009', 'authenticated', 'authenticated', 'd9superexistente@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'd9000000-0000-0000-0000-000000000010', 'authenticated', 'authenticated', 'd9managergamma@test.local',  now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('d9000000-0000-0000-0000-000000000001', 'd1000000-0000-0000-0000-000000000001', 'Manager Alpha',    'd9manageralpha@test.local',   'manager', true),
-  ('d9000000-0000-0000-0000-000000000002', 'd2000000-0000-0000-0000-000000000002', 'Manager Beta',     'd9managerbeta@test.local',    'manager', true),
-  ('d9000000-0000-0000-0000-000000000003', 'd1000000-0000-0000-0000-000000000001', 'Seller Alpha',     'd9selleralpha@test.local',    'seller',  true),
-  ('d9000000-0000-0000-0000-000000000004', null,                                   'Super Admin (fx)', 'd9superadmin@test.local',     'seller',  true),
-  ('d9000000-0000-0000-0000-000000000005', null,                                   'Admin Legado',     'd9adminlegado@test.local',    'admin',   true),
-  ('d9000000-0000-0000-0000-000000000006', 'd1000000-0000-0000-0000-000000000001', 'Inativo',          'd9inativo@test.local',        'manager', false),
-  ('d9000000-0000-0000-0000-000000000007', 'd1000000-0000-0000-0000-000000000001', 'Membro Inativo',   'd9membroinativo@test.local',  'seller',  true),
-  ('d9000000-0000-0000-0000-000000000008', 'd2000000-0000-0000-0000-000000000002', 'Membro Beta',      'd9membrobeta@test.local',     'seller',  true),
-  ('d9000000-0000-0000-0000-000000000009', null,                                   'Super Existente',  'd9superexistente@test.local', 'seller',  true),
-  ('d9000000-0000-0000-0000-000000000010', 'd1000000-0000-0000-0000-000000000001', 'Manager Gamma',    'd9managergamma@test.local',   'manager', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('d9000000-0000-0000-0000-000000000001', 'Manager Alpha',    'd9manageralpha@test.local',   true),
+  ('d9000000-0000-0000-0000-000000000002', 'Manager Beta',     'd9managerbeta@test.local',    true),
+  ('d9000000-0000-0000-0000-000000000003', 'Seller Alpha',     'd9selleralpha@test.local',    true),
+  ('d9000000-0000-0000-0000-000000000004', 'Super Admin (fx)', 'd9superadmin@test.local',     true),
+  ('d9000000-0000-0000-0000-000000000005', 'Admin Legado',     'd9adminlegado@test.local',    true),
+  ('d9000000-0000-0000-0000-000000000006', 'Inativo',          'd9inativo@test.local',        false),
+  ('d9000000-0000-0000-0000-000000000007', 'Membro Inativo',   'd9membroinativo@test.local',  true),
+  ('d9000000-0000-0000-0000-000000000008', 'Membro Beta',      'd9membrobeta@test.local',     true),
+  ('d9000000-0000-0000-0000-000000000009', 'Super Existente',  'd9superexistente@test.local', true),
+  ('d9000000-0000-0000-0000-000000000010', 'Manager Gamma',    'd9managergamma@test.local',   true);
 
 update public.profiles set platform_role = 'super_admin' where id in
   ('d9000000-0000-0000-0000-000000000004', 'd9000000-0000-0000-0000-000000000009');
@@ -334,9 +334,9 @@ reset role;
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at) values
   ('00000000-0000-0000-0000-000000000000', 'd9000000-0000-0000-0000-000000000011', 'authenticated', 'authenticated', 'ambiguo.a@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'd9000000-0000-0000-0000-000000000012', 'authenticated', 'authenticated', ' ambiguo.a@test.local ', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('d9000000-0000-0000-0000-000000000011', 'd1000000-0000-0000-0000-000000000001', 'Ambiguo A', 'ambiguo.a@test.local', 'seller', true),
-  ('d9000000-0000-0000-0000-000000000012', 'd2000000-0000-0000-0000-000000000002', 'Ambiguo B', ' ambiguo.a@test.local ', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('d9000000-0000-0000-0000-000000000011', 'Ambiguo A', 'ambiguo.a@test.local', true),
+  ('d9000000-0000-0000-0000-000000000012', 'Ambiguo B', ' ambiguo.a@test.local ', true);
 select is(
   (select count(*)::int from public.profiles where lower(btrim(email)) = 'ambiguo.a@test.local'),
   2, 'confirmado: duas linhas de profiles normalizam para o MESMO e-mail canônico (lower+btrim) sem violar profiles_email_idx (que é só lower(email), sem btrim) — ambiguidade pré-existente do M1-B, real e reproduzível');

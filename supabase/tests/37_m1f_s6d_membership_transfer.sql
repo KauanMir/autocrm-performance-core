@@ -59,29 +59,29 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', '6d010000-0000-0000-0000-000000000023', 'authenticated', 'authenticated', 's6d-seller-destino-incompat@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', '6d010000-0000-0000-0000-000000000024', 'authenticated', 'authenticated', 's6d-seller-origem-cancelada@test.local', now(), now(), now());
 
-insert into public.profiles (id, name, email, role, is_active, platform_role) values
-  ('6d010000-0000-0000-0000-000000000001', 'S6D Super Admin', 's6d-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('6d010000-0000-0000-0000-000000000002', 'S6D Manager A', 's6d-manager-a@test.local', 'manager', true, null),
-  ('6d010000-0000-0000-0000-000000000003', 'S6D Seller A1', 's6d-seller-a1@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000004', 'S6D Seller A1 Successor', 's6d-seller-a1-successor@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000005', 'S6D Seller A2 Sem Leads', 's6d-seller-a2-sem-leads@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000006', 'S6D Seller A3 Suspenso', 's6d-seller-a3-suspenso@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000007', 'S6D Profile Inativo', 's6d-inactive-profile@test.local', 'seller', false, null),
-  ('6d010000-0000-0000-0000-000000000008', 'S6D Super Admin Alvo', 's6d-superadmin-alvo@test.local', 'seller', true, 'super_admin'),
-  ('6d010000-0000-0000-0000-000000000011', 'S6D LastMgr X', 's6d-lastmgr-x@test.local', 'manager', true, null),
-  ('6d010000-0000-0000-0000-000000000012', 'S6D LastMgr Y', 's6d-lastmgr-y@test.local', 'manager', true, null),
-  ('6d010000-0000-0000-0000-000000000013', 'S6D ManagerSolo', 's6d-managersolo@test.local', 'manager', true, null),
-  ('6d010000-0000-0000-0000-000000000014', 'S6D Hist Offboarded', 's6d-hist-offboarded@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000015', 'S6D Hist Suspensa', 's6d-hist-suspensa@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000016', 'S6D Hist Ativa', 's6d-hist-ativa@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000017', 'S6D Manager Para Seller', 's6d-manager-para-seller@test.local', 'manager', true, null),
-  ('6d010000-0000-0000-0000-000000000018', 'S6D Seller Para Manager', 's6d-seller-para-manager@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000019', 'S6D Seller Outra Empresa', 's6d-seller-outra-empresa@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000020', 'S6D Seller Catalogo', 's6d-seller-catalogo@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000021', 'S6D Seller Idempotencia', 's6d-seller-idempotencia@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000022', 'S6D Seller Idempotencia Successor', 's6d-seller-idempotencia-successor@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000023', 'S6D Seller Destino Incompat', 's6d-seller-destino-incompat@test.local', 'seller', true, null),
-  ('6d010000-0000-0000-0000-000000000024', 'S6D Seller Origem Cancelada', 's6d-seller-origem-cancelada@test.local', 'seller', true, null);
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('6d010000-0000-0000-0000-000000000001', 'S6D Super Admin', 's6d-superadmin@test.local', true, 'super_admin'),
+  ('6d010000-0000-0000-0000-000000000002', 'S6D Manager A', 's6d-manager-a@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000003', 'S6D Seller A1', 's6d-seller-a1@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000004', 'S6D Seller A1 Successor', 's6d-seller-a1-successor@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000005', 'S6D Seller A2 Sem Leads', 's6d-seller-a2-sem-leads@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000006', 'S6D Seller A3 Suspenso', 's6d-seller-a3-suspenso@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000007', 'S6D Profile Inativo', 's6d-inactive-profile@test.local', false, null),
+  ('6d010000-0000-0000-0000-000000000008', 'S6D Super Admin Alvo', 's6d-superadmin-alvo@test.local', true, 'super_admin'),
+  ('6d010000-0000-0000-0000-000000000011', 'S6D LastMgr X', 's6d-lastmgr-x@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000012', 'S6D LastMgr Y', 's6d-lastmgr-y@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000013', 'S6D ManagerSolo', 's6d-managersolo@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000014', 'S6D Hist Offboarded', 's6d-hist-offboarded@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000015', 'S6D Hist Suspensa', 's6d-hist-suspensa@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000016', 'S6D Hist Ativa', 's6d-hist-ativa@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000017', 'S6D Manager Para Seller', 's6d-manager-para-seller@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000018', 'S6D Seller Para Manager', 's6d-seller-para-manager@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000019', 'S6D Seller Outra Empresa', 's6d-seller-outra-empresa@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000020', 'S6D Seller Catalogo', 's6d-seller-catalogo@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000021', 'S6D Seller Idempotencia', 's6d-seller-idempotencia@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000022', 'S6D Seller Idempotencia Successor', 's6d-seller-idempotencia-successor@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000023', 'S6D Seller Destino Incompat', 's6d-seller-destino-incompat@test.local', true, null),
+  ('6d010000-0000-0000-0000-000000000024', 'S6D Seller Origem Cancelada', 's6d-seller-origem-cancelada@test.local', true, null);
 -- 6d010000-...-000009 (auth user sem profile) deliberadamente sem linha em profiles
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status, created_at) values

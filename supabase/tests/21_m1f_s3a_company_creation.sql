@@ -16,8 +16,8 @@ select * from no_plan();
 --    pelo rollback do arquivo. ─────────────────────────────────────────
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at) values
   ('00000000-0000-0000-0000-000000000000', 'f9000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'f9superadmin@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('f9000000-0000-0000-0000-000000000001', null, 'F9 SuperAdmin (fixture)', 'f9superadmin@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('f9000000-0000-0000-0000-000000000001', 'F9 SuperAdmin (fixture)', 'f9superadmin@test.local', true);
 update public.profiles set platform_role = 'super_admin' where id = 'f9000000-0000-0000-0000-000000000001';
 
 -- ═══════════════════════════════════════════════════════════════════════

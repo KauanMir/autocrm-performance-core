@@ -62,9 +62,8 @@ insert into public.sellers (id, company_id, name, first_name)
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
   values ('00000000-0000-0000-0000-000000000000', 'b1111111-1111-1111-1111-111111111111',
           'authenticated', 'authenticated', 'adminb@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role)
-  values ('b1111111-1111-1111-1111-111111111111', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-          'Admin B', 'adminb@test.local', 'admin');
+insert into public.profiles (id, name, email)
+  values ('b1111111-1111-1111-1111-111111111111', 'Admin B', 'adminb@test.local');
 
 -- ── lead válido: defaults, generated column e triggers ──────────────────
 insert into public.leads (id, company_id, name, phone, car, stage_id, seller_id)
@@ -139,9 +138,8 @@ select throws_ok($$insert into public.leads (company_id, name, phone, car, stage
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
   values ('00000000-0000-0000-0000-000000000000', 'dddddddd-0000-0000-0000-000000000001',
           'authenticated', 'authenticated', 'descartavel@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role)
-  values ('dddddddd-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001',
-          'Descartavel', 'descartavel@test.local', 'manager');
+insert into public.profiles (id, name, email)
+  values ('dddddddd-0000-0000-0000-000000000001', 'Descartavel', 'descartavel@test.local');
 insert into public.company_memberships (id, company_id, profile_id, role, is_active)
   values ('dddddddd-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001',
           'dddddddd-0000-0000-0000-000000000001', 'manager', true);

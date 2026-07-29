@@ -30,12 +30,12 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'e1100000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 's4f1-manager-inactive@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'e1100000-0000-0000-0000-000000000006', 'authenticated', 'authenticated', 's4f1-noprofile@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('e1100000-0000-0000-0000-000000000001', 'e1000000-0000-0000-0000-000000000001', 'Manager A', 's4f1-manager-a@test.local', 'manager', true, null),
-  ('e1100000-0000-0000-0000-000000000002', 'e1000000-0000-0000-0000-000000000001', 'Manager A2', 's4f1-manager-a2@test.local', 'manager', true, null),
-  ('e1100000-0000-0000-0000-000000000003', 'e1000000-0000-0000-0000-000000000001', 'Seller A', 's4f1-seller-a@test.local', 'seller', true, null),
-  ('e1100000-0000-0000-0000-000000000004', 'e1000000-0000-0000-0000-000000000002', 'Manager B', 's4f1-manager-b@test.local', 'manager', true, null),
-  ('e1100000-0000-0000-0000-000000000005', 'e1000000-0000-0000-0000-000000000001', 'Manager Inactive', 's4f1-manager-inactive@test.local', 'manager', true, null);
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('e1100000-0000-0000-0000-000000000001', 'Manager A', 's4f1-manager-a@test.local', true, null),
+  ('e1100000-0000-0000-0000-000000000002', 'Manager A2', 's4f1-manager-a2@test.local', true, null),
+  ('e1100000-0000-0000-0000-000000000003', 'Seller A', 's4f1-seller-a@test.local', true, null),
+  ('e1100000-0000-0000-0000-000000000004', 'Manager B', 's4f1-manager-b@test.local', true, null),
+  ('e1100000-0000-0000-0000-000000000005', 'Manager Inactive', 's4f1-manager-inactive@test.local', true, null);
 -- e1100000-...-000006 (auth user sem profile) deliberadamente SEM linha em profiles
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status) values

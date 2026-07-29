@@ -92,14 +92,17 @@ select is(
 -- 4. SELECT PRESERVADO — nenhuma coluna de leitura necessaria foi removida
 -- ══════════════════════════════════════════════════════════════════════
 
+-- M1-F S8-E2 removeu company_id/role/seller_id do catálogo — o privilégio
+-- de coluna concedido pela migration histórica (S4-C2C) cai junto com a
+-- coluna dropada, restando 5 colunas.
 select is(
   (select array_agg(column_name::text order by column_name::text) from information_schema.role_column_grants
     where table_schema = 'public' and table_name = 'profiles'
       and grantee = 'authenticated' and privilege_type = 'SELECT'),
   (select array_agg(c order by c) from unnest(array[
-    'id', 'company_id', 'name', 'email', 'role', 'seller_id', 'is_active', 'platform_role'
+    'id', 'name', 'email', 'is_active', 'platform_role'
   ]) as c),
-  'authenticated mantem SELECT exatamente nas 8 colunas ja autorizadas (S4-C2C) — nenhuma removida, nenhuma nova');
+  'authenticated mantem SELECT exatamente nas 5 colunas restantes (S4-C2C) — nenhuma removida a mais, nenhuma nova');
 
 select is(
   (select count(*)::int from information_schema.role_column_grants

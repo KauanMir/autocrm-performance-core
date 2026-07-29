@@ -94,16 +94,15 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'f8e20000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 's8e1-manager@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'f8e20000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 's8e1-seller-divergente@test.local', now(), now(), now());
 
--- profile 002 tem role='admin' e company_id apontando para a Empresa B
--- (uma empresa real, mas NUNCA a da membership ativa dele) — divergência
--- deliberada para provar que nem role nem company_id decidem mais nada.
--- seller_id fica null (FK real para sellers.id impediria um valor
--- "fake" sem criar a linha primeiro — current_profile_seller_id_for_
--- company() nunca leu profiles.seller_id de qualquer forma, então a
--- ausência aqui não enfraquece a prova abaixo).
-insert into public.profiles (id, name, email, role, company_id, seller_id, is_active, platform_role) values
-  ('f8e20000-0000-0000-0000-000000000001', 'S8E1 Manager', 's8e1-manager@test.local', 'manager', 'f8e10000-0000-0000-0000-000000000001', null, true, null),
-  ('f8e20000-0000-0000-0000-000000000002', 'S8E1 Seller Divergente', 's8e1-seller-divergente@test.local', 'admin', 'f8e10000-0000-0000-0000-000000000002', null, true, null);
+-- M1-F S8-E2 removeu profiles.role/company_id/seller_id fisicamente do
+-- catálogo — não há mais nenhum campo legado nesta tabela capaz de
+-- divergir da membership real. Os dois profiles abaixo continuam
+-- provando que current_membership_role/current_membership_company_id/
+-- is_manager_or_platform/current_profile_seller_id_for_company derivam
+-- exclusivamente de company_memberships/sellers.
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('f8e20000-0000-0000-0000-000000000001', 'S8E1 Manager', 's8e1-manager@test.local', true, null),
+  ('f8e20000-0000-0000-0000-000000000002', 'S8E1 Seller Divergente', 's8e1-seller-divergente@test.local', true, null);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, created_at) values
   ('f8e30000-0000-0000-0000-000000000001', 'f8e10000-0000-0000-0000-000000000001', 'f8e20000-0000-0000-0000-000000000001', 'manager', true, now()),
@@ -117,17 +116,16 @@ reset role;
 
 select set_config('request.jwt.claims', '{"sub":"f8e20000-0000-0000-0000-000000000002","role":"authenticated"}', true);
 set local role authenticated;
-select is(public.current_membership_role()::text, 'seller', 'Seller reconhecido via company_memberships.role — profiles.role="admin" legado nao concede nada diferente');
-select is(public.is_manager_or_platform('f8e10000-0000-0000-0000-000000000001'::uuid), false, 'profiles.role="admin" legado NAO transforma Seller em Manager/Super Admin');
-select is(public.current_profile_seller_id_for_company('f8e10000-0000-0000-0000-000000000001'::uuid), null::text, 'sem linha real em sellers vinculada a esta membership, resultado e null (nunca inventa a partir de profiles.seller_id)');
+select is(public.current_membership_role()::text, 'seller', 'Seller reconhecido via company_memberships.role');
+select is(public.is_manager_or_platform('f8e10000-0000-0000-0000-000000000001'::uuid), false, 'Seller sem membership de manager/platform_role NAO e tratado como Manager/Super Admin');
+select is(public.current_profile_seller_id_for_company('f8e10000-0000-0000-0000-000000000001'::uuid), null::text, 'sem linha real em sellers vinculada a esta membership, resultado e null');
 reset role;
 
--- Super Admin continua identificado exclusivamente por platform_role,
--- nunca por profiles.role/company_id/seller_id.
+-- Super Admin continua identificado exclusivamente por platform_role.
 update public.profiles set platform_role = 'super_admin' where id = 'f8e20000-0000-0000-0000-000000000002';
 select set_config('request.jwt.claims', '{"sub":"f8e20000-0000-0000-0000-000000000002","role":"authenticated"}', true);
 set local role authenticated;
-select is(public.is_platform_super_admin(), true, 'Super Admin reconhecido via platform_role, mesmo com profiles.role="admin" legado e company_id divergente');
+select is(public.is_platform_super_admin(), true, 'Super Admin reconhecido via platform_role');
 reset role;
 
 -- ══════════════════════════════════════════════════════════════════════
@@ -144,12 +142,14 @@ select has_function('public'::name, 'update_membership_role'::name, array['uuid'
 select has_function('public'::name, 'accept_invite'::name, array['text']::name[],
   'accept_invite continua existindo, intocada');
 
-select has_column('public'::name, 'profiles'::name, 'company_id'::name,
-  'profiles.company_id continua existindo fisicamente (remoção física reservada ao S8-E2)');
-select has_column('public'::name, 'profiles'::name, 'role'::name,
-  'profiles.role continua existindo fisicamente (remoção física reservada ao S8-E2)');
-select has_column('public'::name, 'profiles'::name, 'seller_id'::name,
-  'profiles.seller_id continua existindo fisicamente (remoção física reservada ao S8-E2)');
+-- M1-F S8-E2 removeu fisicamente as 3 colunas legadas do catálogo (a
+-- remoção estava apenas "reservada" no momento desta migration S8-E1) —
+-- cobertura completa da remoção em 50_m1f_s8e2_drop_profile_legacy_columns.sql.
+select is(
+  (select count(*)::int from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles'
+      and column_name in ('company_id', 'role', 'seller_id')),
+  0, 'profiles.company_id/role/seller_id foram removidas fisicamente pelo M1-F S8-E2');
 
 select is(
   (select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'leads'),

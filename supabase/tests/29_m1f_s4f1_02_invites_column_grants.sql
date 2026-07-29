@@ -30,12 +30,12 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'e2100000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 's4f1-inv-superadmin@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'e2100000-0000-0000-0000-000000000006', 'authenticated', 'authenticated', 's4f1-inv-noprofile@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('e2100000-0000-0000-0000-000000000001', 'e2000000-0000-0000-0000-000000000001', 'Inv Manager A', 's4f1-inv-manager-a@test.local', 'manager', true, null),
-  ('e2100000-0000-0000-0000-000000000002', 'e2000000-0000-0000-0000-000000000001', 'Inv Manager A2', 's4f1-inv-manager-a2@test.local', 'manager', true, null),
-  ('e2100000-0000-0000-0000-000000000003', 'e2000000-0000-0000-0000-000000000001', 'Inv Seller A', 's4f1-inv-seller-a@test.local', 'seller', true, null),
-  ('e2100000-0000-0000-0000-000000000004', 'e2000000-0000-0000-0000-000000000002', 'Inv Manager B', 's4f1-inv-manager-b@test.local', 'manager', true, null),
-  ('e2100000-0000-0000-0000-000000000005', null, 'Inv Super Admin', 's4f1-inv-superadmin@test.local', 'seller', true, 'super_admin');
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('e2100000-0000-0000-0000-000000000001', 'Inv Manager A', 's4f1-inv-manager-a@test.local', true, null),
+  ('e2100000-0000-0000-0000-000000000002', 'Inv Manager A2', 's4f1-inv-manager-a2@test.local', true, null),
+  ('e2100000-0000-0000-0000-000000000003', 'Inv Seller A', 's4f1-inv-seller-a@test.local', true, null),
+  ('e2100000-0000-0000-0000-000000000004', 'Inv Manager B', 's4f1-inv-manager-b@test.local', true, null),
+  ('e2100000-0000-0000-0000-000000000005', 'Inv Super Admin', 's4f1-inv-superadmin@test.local', true, 'super_admin');
 -- e2100000-...-000006 (auth user sem profile) deliberadamente SEM linha em profiles
 
 insert into public.invites (id, company_id, email, name, role_kind, token_hash, status, invited_by_profile_id, expires_at) values

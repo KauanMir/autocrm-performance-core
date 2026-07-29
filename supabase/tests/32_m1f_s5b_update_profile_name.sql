@@ -38,23 +38,23 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'f5b20000-0000-0000-0000-000000000013', 'authenticated', 'authenticated', 's5b-validation-user@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'f5b20000-0000-0000-0000-000000000014', 'authenticated', 'authenticated', 's5b-audit-target@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('f5b20000-0000-0000-0000-000000000001', 'f5b10000-0000-0000-0000-000000000001', 'S5B Manager X', 's5b-manager-x@test.local', 'manager', true, null),
-  ('f5b20000-0000-0000-0000-000000000002', 'f5b10000-0000-0000-0000-000000000001', 'S5B Seller X1', 's5b-seller-x1@test.local', 'seller', true, null),
-  ('f5b20000-0000-0000-0000-000000000003', 'f5b10000-0000-0000-0000-000000000001', 'S5B Seller X Profile Inativo', 's5b-seller-x-inactive-profile@test.local', 'seller', false, null),
-  ('f5b20000-0000-0000-0000-000000000004', 'f5b10000-0000-0000-0000-000000000001', 'S5B Seller X Membership Inativa', 's5b-seller-x-inactive-membership@test.local', 'seller', true, null),
-  ('f5b20000-0000-0000-0000-000000000005', 'f5b10000-0000-0000-0000-000000000002', 'S5B Manager Y', 's5b-manager-y@test.local', 'manager', true, null),
-  ('f5b20000-0000-0000-0000-000000000006', 'f5b10000-0000-0000-0000-000000000002', 'S5B Seller Y1', 's5b-seller-y1@test.local', 'seller', true, null),
-  ('f5b20000-0000-0000-0000-000000000007', 'f5b10000-0000-0000-0000-000000000003', 'S5B Membro Empresa Cancelada', 's5b-membro-z@test.local', 'seller', true, null),
-  ('f5b20000-0000-0000-0000-000000000008', null, 'S5B Super Admin Solo', 's5b-superadmin-solo@test.local', 'seller', true, 'super_admin'),
-  ('f5b20000-0000-0000-0000-000000000009', null, 'S5B Super Admin Membro', 's5b-superadmin-membro@test.local', 'seller', true, 'super_admin'),
-  ('f5b20000-0000-0000-0000-000000000010', null, 'S5B Plain Sem Membership', 's5b-plain-sem-membership@test.local', 'seller', true, null),
-  -- profiles.company_id legado aponta (de forma enganosa) para a Empresa X,
-  -- mas a membership REAL fica na Empresa Y — prova de que a RPC nunca usa
-  -- este campo legado para autorizar.
-  ('f5b20000-0000-0000-0000-000000000012', 'f5b10000-0000-0000-0000-000000000001', 'S5B Legacy Trap', 's5b-legacy-trap@test.local', 'seller', true, null),
-  ('f5b20000-0000-0000-0000-000000000013', null, 'S5B Validation User', 's5b-validation-user@test.local', 'seller', true, null),
-  ('f5b20000-0000-0000-0000-000000000014', 'f5b10000-0000-0000-0000-000000000001', 'S5B Audit Target', 's5b-audit-target@test.local', 'seller', true, null);
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('f5b20000-0000-0000-0000-000000000001', 'S5B Manager X', 's5b-manager-x@test.local', true, null),
+  ('f5b20000-0000-0000-0000-000000000002', 'S5B Seller X1', 's5b-seller-x1@test.local', true, null),
+  ('f5b20000-0000-0000-0000-000000000003', 'S5B Seller X Profile Inativo', 's5b-seller-x-inactive-profile@test.local', false, null),
+  ('f5b20000-0000-0000-0000-000000000004', 'S5B Seller X Membership Inativa', 's5b-seller-x-inactive-membership@test.local', true, null),
+  ('f5b20000-0000-0000-0000-000000000005', 'S5B Manager Y', 's5b-manager-y@test.local', true, null),
+  ('f5b20000-0000-0000-0000-000000000006', 'S5B Seller Y1', 's5b-seller-y1@test.local', true, null),
+  ('f5b20000-0000-0000-0000-000000000007', 'S5B Membro Empresa Cancelada', 's5b-membro-z@test.local', true, null),
+  ('f5b20000-0000-0000-0000-000000000008', 'S5B Super Admin Solo', 's5b-superadmin-solo@test.local', true, 'super_admin'),
+  ('f5b20000-0000-0000-0000-000000000009', 'S5B Super Admin Membro', 's5b-superadmin-membro@test.local', true, 'super_admin'),
+  ('f5b20000-0000-0000-0000-000000000010', 'S5B Plain Sem Membership', 's5b-plain-sem-membership@test.local', true, null),
+  -- M1-F S8-E2: profiles.company_id legado foi removido do catálogo; a
+  -- membership REAL deste profile fica na Empresa Y — mantém a cobertura
+  -- cross-tenant (Manager X, da Empresa X, não pode editá-lo).
+  ('f5b20000-0000-0000-0000-000000000012', 'S5B Legacy Trap', 's5b-legacy-trap@test.local', true, null),
+  ('f5b20000-0000-0000-0000-000000000013', 'S5B Validation User', 's5b-validation-user@test.local', true, null),
+  ('f5b20000-0000-0000-0000-000000000014', 'S5B Audit Target', 's5b-audit-target@test.local', true, null);
 -- f5b20000-...-000011 (auth user sem profile) deliberadamente sem linha em profiles
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status, created_at) values
@@ -267,12 +267,12 @@ select throws_ok(
   $$select * from public.update_profile_name('f5b20000-0000-0000-0000-000000000004', 'Tentativa Membership Inativa')$$,
   'P0001', 'user_inactive', 'Manager: Seller da propria empresa com membership inativa -> user_inactive');
 
--- profiles.company_id legado aponta para Empresa X, mas a membership REAL
--- esta na Empresa Y — Manager X NAO deve conseguir editar (prova de que
--- profiles.company_id legado nunca e usado para autorizar)
+-- alvo tem membership REAL na Empresa Y — Manager X (Empresa X) NAO deve
+-- conseguir editar (cross-tenant via company_memberships, única fonte de
+-- identidade empresarial após M1-F S8-E2)
 select throws_ok(
   $$select * from public.update_profile_name('f5b20000-0000-0000-0000-000000000012', 'Tentativa Legacy Trap')$$,
-  'P0002', 'profile_not_found', 'Manager X NAO edita "legacy trap" — profiles.company_id legado (Empresa X) e ignorado, membership real e da Empresa Y');
+  'P0002', 'profile_not_found', 'Manager X NAO edita "legacy trap" — membership real e da Empresa Y, cross-tenant');
 reset role;
 
 -- ── mesmo teste de "outro Manager", agora com um Manager de verdade NA MESMA empresa ──
@@ -391,14 +391,8 @@ select is(
   (select email from public.profiles where id = 'f5b20000-0000-0000-0000-000000000002'),
   's5b-seller-x1@test.local', 'email do alvo inalterado apos edicao de nome');
 select is(
-  (select role from public.profiles where id = 'f5b20000-0000-0000-0000-000000000002'),
-  'seller'::public.user_role, 'role legado do alvo inalterado');
-select is(
   (select platform_role from public.profiles where id = 'f5b20000-0000-0000-0000-000000000002'),
   null::public.platform_role, 'platform_role do alvo inalterado (continua null)');
-select is(
-  (select company_id from public.profiles where id = 'f5b20000-0000-0000-0000-000000000002'),
-  'f5b10000-0000-0000-0000-000000000001'::uuid, 'profiles.company_id legado do alvo inalterado');
 select is(
   (select is_active from public.profiles where id = 'f5b20000-0000-0000-0000-000000000002'),
   true, 'is_active do alvo inalterado');

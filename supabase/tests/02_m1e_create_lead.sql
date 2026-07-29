@@ -14,9 +14,9 @@ insert into public.companies (id, name, status) values ('cccccccc-cccc-cccc-cccc
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at) values
   ('00000000-0000-0000-0000-000000000000', 'c1111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'adminc@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'd1111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'inativo@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('c1111111-1111-1111-1111-111111111111', 'cccccccc-cccc-cccc-cccc-cccccccccccc', 'Admin C', 'adminc@test.local', 'admin', true),
-  ('d1111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-000000000001', 'Inativo', 'inativo@test.local', 'seller', false);
+insert into public.profiles (id, name, email, is_active) values
+  ('c1111111-1111-1111-1111-111111111111', 'Admin C', 'adminc@test.local', true),
+  ('d1111111-1111-1111-1111-111111111111', 'Inativo', 'inativo@test.local', false);
 -- M1-F S8-C2-C1: create_lead agora deriva a empresa de
 -- current_membership_company_id(), nunca mais de profiles.company_id —
 -- Admin C precisa de uma membership real (legado 'admin' ->

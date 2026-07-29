@@ -46,35 +46,26 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'ca200000-0000-0000-0000-00000000000b', 'authenticated', 'authenticated', 's8c2c1-inactive-profile@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'ca200000-0000-0000-0000-00000000000c', 'authenticated', 'authenticated', 's8c2c1-legacy-divergent@test.local', now(), now(), now());
 
--- profiles.company_id/role/seller_id legados aqui são DELIBERADAMENTE
--- divergentes da membership real (ver "legacy-divergent" abaixo) — provam
--- que nenhum deles é lido pelas RPCs migradas.
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('ca200000-0000-0000-0000-000000000001', null, 'Super Admin S8C2C1', 's8c2c1-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('ca200000-0000-0000-0000-000000000002', 'ca100000-0000-0000-0000-000000000001', 'Manager A', 's8c2c1-manager-a@test.local', 'manager', true, null),
-  ('ca200000-0000-0000-0000-000000000003', 'ca100000-0000-0000-0000-000000000001', 'Seller A1', 's8c2c1-seller-a1@test.local', 'seller', true, null),
-  ('ca200000-0000-0000-0000-000000000004', 'ca100000-0000-0000-0000-000000000003', 'Manager C', 's8c2c1-manager-c@test.local', 'manager', true, null),
-  ('ca200000-0000-0000-0000-000000000005', 'ca100000-0000-0000-0000-000000000004', 'Manager D', 's8c2c1-manager-d@test.local', 'manager', true, null),
-  ('ca200000-0000-0000-0000-000000000006', 'ca100000-0000-0000-0000-000000000005', 'Manager E', 's8c2c1-manager-e@test.local', 'manager', true, null),
-  ('ca200000-0000-0000-0000-000000000007', 'ca100000-0000-0000-0000-000000000003', 'Seller C', 's8c2c1-seller-c@test.local', 'seller', true, null),
-  ('ca200000-0000-0000-0000-000000000008', 'ca100000-0000-0000-0000-000000000001', 'Sem Membership', 's8c2c1-nomembership@test.local', 'manager', true, null),
-  ('ca200000-0000-0000-0000-000000000009', 'ca100000-0000-0000-0000-000000000001', 'Manager Suspenso', 's8c2c1-suspended@test.local', 'manager', true, null),
-  ('ca200000-0000-0000-0000-00000000000a', 'ca100000-0000-0000-0000-000000000001', 'Manager Desligado', 's8c2c1-offboarded@test.local', 'manager', true, null),
-  ('ca200000-0000-0000-0000-00000000000b', 'ca100000-0000-0000-0000-000000000001', 'Profile Inativo', 's8c2c1-inactive-profile@test.local', 'manager', false, null),
-  -- company_id aqui e CA1 (coincide com a membership real) DE PROPOSITO:
-  -- leads_created_by_fk/leads_updated_by_fk exigem profiles.company_id =
-  -- leads.company_id para o AUTOR do lead — um profiles.company_id
-  -- genuinamente divergente (ex.: CA2) tornaria create_lead estruturalmente
-  -- impossivel para este ator, exatamente pelo mesmo motivo de schema do
-  -- Super Admin, mas a decisao humana restringiu o tratamento NULL
-  -- exclusivamente a Super Admin ("Manager/Seller preservam exatamente o
-  -- comportamento atual"). A prova de "profiles.company_id nunca autoriza"
-  -- e feita separadamente por uma RPC de leitura (check_lead_phone_
-  -- duplicate, que nao escreve em created_by/updated_by); aqui o campo
-  -- diferente que precisa provar "nunca lido" e profiles.role (='manager'
-  -- legado, mas a membership real e 'seller') e profiles.seller_id (nunca
-  -- setado, mas o seller real vem da cadeia sellers.membership_id).
-  ('ca200000-0000-0000-0000-00000000000c', 'ca100000-0000-0000-0000-000000000001', 'Legado Divergente', 's8c2c1-legacy-divergent@test.local', 'manager', true, null);
+-- M1-F S8-E2: profiles.company_id/role/seller_id foram removidos
+-- fisicamente do catálogo — não há mais nenhum campo legado nesta tabela
+-- capaz de divergir da membership real. O profile "Legado Divergente"
+-- abaixo é mantido apenas como um ator comum (membership real = seller em
+-- CA1, ver company_memberships), preservando a cobertura de que
+-- create_lead/update_lead resolvem empresa/vendedor exclusivamente via
+-- company_memberships/sellers.
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('ca200000-0000-0000-0000-000000000001', 'Super Admin S8C2C1', 's8c2c1-superadmin@test.local', true, 'super_admin'),
+  ('ca200000-0000-0000-0000-000000000002', 'Manager A', 's8c2c1-manager-a@test.local', true, null),
+  ('ca200000-0000-0000-0000-000000000003', 'Seller A1', 's8c2c1-seller-a1@test.local', true, null),
+  ('ca200000-0000-0000-0000-000000000004', 'Manager C', 's8c2c1-manager-c@test.local', true, null),
+  ('ca200000-0000-0000-0000-000000000005', 'Manager D', 's8c2c1-manager-d@test.local', true, null),
+  ('ca200000-0000-0000-0000-000000000006', 'Manager E', 's8c2c1-manager-e@test.local', true, null),
+  ('ca200000-0000-0000-0000-000000000007', 'Seller C', 's8c2c1-seller-c@test.local', true, null),
+  ('ca200000-0000-0000-0000-000000000008', 'Sem Membership', 's8c2c1-nomembership@test.local', true, null),
+  ('ca200000-0000-0000-0000-000000000009', 'Manager Suspenso', 's8c2c1-suspended@test.local', true, null),
+  ('ca200000-0000-0000-0000-00000000000a', 'Manager Desligado', 's8c2c1-offboarded@test.local', true, null),
+  ('ca200000-0000-0000-0000-00000000000b', 'Profile Inativo', 's8c2c1-inactive-profile@test.local', false, null),
+  ('ca200000-0000-0000-0000-00000000000c', 'Legado Divergente', 's8c2c1-legacy-divergent@test.local', true, null);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status) values
   ('ca300000-0000-0000-0000-000000000002', 'ca100000-0000-0000-0000-000000000001', 'ca200000-0000-0000-0000-000000000002', 'manager', true, 'active'),
@@ -86,8 +77,6 @@ insert into public.company_memberships (id, company_id, profile_id, role, is_act
   ('ca300000-0000-0000-0000-000000000009', 'ca100000-0000-0000-0000-000000000001', 'ca200000-0000-0000-0000-000000000009', 'manager', false, 'suspended'),
   ('ca300000-0000-0000-0000-00000000000a', 'ca100000-0000-0000-0000-000000000001', 'ca200000-0000-0000-0000-00000000000a', 'manager', false, 'offboarded'),
   ('ca300000-0000-0000-0000-00000000000b', 'ca100000-0000-0000-0000-000000000001', 'ca200000-0000-0000-0000-00000000000b', 'manager', true, 'active'),
-  -- Legado divergente: membership REAL é seller em CA1 — profiles.company_id
-  -- (CA2)/role ('manager')/seller_id (nenhum) acima são só ruído legado.
   ('ca300000-0000-0000-0000-00000000000c', 'ca100000-0000-0000-0000-000000000001', 'ca200000-0000-0000-0000-00000000000c', 'seller', true, 'active');
 -- ca200000-...-08 (Sem Membership) deliberadamente sem nenhuma linha.
 
@@ -597,43 +586,27 @@ select throws_ok($$select public.create_lead('X', '(11) 9', 'C')$$, 'forbidden',
 reset role;
 
 -- ═══════════════════════════════════════════════════════════════════════
--- LEGADO DIVERGENTE NUNCA AUTORIZA
+-- RESOLUÇÃO EXCLUSIVAMENTE VIA MEMBERSHIP (ex-"legado divergente")
 -- ═══════════════════════════════════════════════════════════════════════
--- Membership real: seller em CA1. profiles.role='manager' (divergente da
--- membership real, que e 'seller') e profiles.seller_id nunca setado —
--- nenhum dos dois e lido; o ator se comporta EXATAMENTE como Seller de
--- CA1. profiles.company_id deliberadamente IGUAL a CA1 nesta fixture (ver
--- comentario na criacao do profile) — a prova de que profiles.company_id
--- nunca autoriza usa uma RPC de leitura (check_lead_phone_duplicate) para
--- um segundo perfil divergente dedicado, nunca create_lead/update_lead.
+-- M1-F S8-E2 removeu fisicamente profiles.company_id/role/seller_id — não
+-- há mais campo legado para divergir. Este bloco preserva a cobertura de
+-- que create_lead/update_lead resolvem empresa/vendedor exclusivamente a
+-- partir de company_memberships/sellers: o ator abaixo é seller ativo em
+-- CA1 (via membership) e deve se comportar exatamente como qualquer outro
+-- Seller da empresa.
 
 select pg_temp.as_user('ca200000-0000-0000-0000-00000000000c');
 set local role authenticated;
 create temp table t_legacy_create as
   select * from public.create_lead('Legado Cliente', '(11) 90000-6001', 'C');
 select is((select company_id from t_legacy_create), 'ca100000-0000-0000-0000-000000000001'::uuid,
-  'legado divergente: empresa resolvida e a da MEMBERSHIP real (CA1)');
+  'empresa resolvida e a da MEMBERSHIP real (CA1)');
 select is((select seller_id from t_legacy_create), 's8c2c1SellerLegacy',
-  'legado divergente: autoatribuido ao seller da membership real (profiles.seller_id nunca setado), nunca a um seller inventado');
+  'autoatribuido ao seller da membership real, nunca a um seller inventado');
 select throws_ok(
   $$select public.create_lead('X', '(11) 9', 'C', 's8c2c1SellerA1')$$,
-  'forbidden', 'legado divergente: continua tratado como Seller (nao escolhe outro vendedor), profiles.role=manager e ignorado');
+  'forbidden', 'ator continua tratado como Seller (nao escolhe outro vendedor)');
 reset role;
-
--- Nota sobre profiles.company_id especificamente: a prova "nunca lido"
--- para esse campo já está coberta por dois testes independentes acima —
--- "Manager: p_company_id de outra empresa enviado pelo cliente e ignorado"
--- e "Seller: p_company_id de outra empresa enviado pelo cliente e
--- ignorado" (secão MANAGER/SELLER) — ambos provam que nenhum valor de
--- empresa fora da membership ativa (seja ele enviado pelo cliente ou, por
--- extensão, armazenado em profiles.company_id) desvia a empresa resolvida.
--- Um profiles.company_id genuinamente divergente da membership real neste
--- fixture NÃO é exercitado via create_lead/update_lead (que escreveriam em
--- created_by/updated_by_profile_id) por esbarrar em leads_created_by_fk/
--- leads_updated_by_fk (ver comentário na criação do profile) — decisão
--- humana restringiu o tratamento NULL desses dois campos exclusivamente a
--- Super Admin, então este teste não pode usar essa combinação sem violar
--- "preservar exatamente o comportamento atual" de Manager/Seller.
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- ANON

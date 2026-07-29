@@ -51,25 +51,25 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', '6b010000-0000-0000-0000-000000000022', 'authenticated', 'authenticated', 's6b-seller-catalogo@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', '6b010000-0000-0000-0000-000000000023', 'authenticated', 'authenticated', 's6b-seller-a4@test.local', now(), now(), now());
 
-insert into public.profiles (id, name, email, role, is_active, platform_role) values
-  ('6b010000-0000-0000-0000-000000000001', 'S6B Super Admin', 's6b-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('6b010000-0000-0000-0000-000000000002', 'S6B Manager A', 's6b-manager-a@test.local', 'manager', true, null),
-  ('6b010000-0000-0000-0000-000000000003', 'S6B Seller A1', 's6b-seller-a1@test.local', 'seller', true, null),
-  ('6b010000-0000-0000-0000-000000000004', 'S6B Seller A2 Sem Seller', 's6b-seller-a2-noseller@test.local', 'seller', true, null),
-  ('6b010000-0000-0000-0000-000000000005', 'S6B Seller A3', 's6b-seller-a3@test.local', 'seller', true, null),
-  ('6b010000-0000-0000-0000-000000000006', 'S6B Profile Inativo', 's6b-inactive-profile@test.local', 'seller', false, null),
-  ('6b010000-0000-0000-0000-000000000007', 'S6B Manager B', 's6b-manager-b@test.local', 'manager', true, null),
-  ('6b010000-0000-0000-0000-000000000008', 'S6B Seller B1', 's6b-seller-b1@test.local', 'seller', true, null),
-  ('6b010000-0000-0000-0000-000000000009', 'S6B Manager Ator Inativo', 's6b-manager-inactive-actor@test.local', 'manager', false, null),
-  ('6b010000-0000-0000-0000-000000000010', 'S6B Super Admin Alvo', 's6b-superadmin-alvo@test.local', 'seller', true, 'super_admin'),
-  ('6b010000-0000-0000-0000-000000000013', 'S6B Seller Empresa Suspensa', 's6b-seller-suspensa@test.local', 'seller', true, null),
-  ('6b010000-0000-0000-0000-000000000014', 'S6B Seller Empresa Cancelada', 's6b-seller-cancelada@test.local', 'seller', true, null),
-  ('6b010000-0000-0000-0000-000000000015', 'S6B LastMgr X', 's6b-lastmgr-x@test.local', 'manager', true, null),
-  ('6b010000-0000-0000-0000-000000000016', 'S6B LastMgr Y', 's6b-lastmgr-y@test.local', 'manager', true, null),
-  ('6b010000-0000-0000-0000-000000000017', 'S6B Seller Offboarded', 's6b-seller-offboarded@test.local', 'seller', true, null),
-  ('6b010000-0000-0000-0000-000000000020', 'S6B Manager A2', 's6b-manager-a2@test.local', 'manager', true, null),
-  ('6b010000-0000-0000-0000-000000000022', 'S6B Seller Catalogo', 's6b-seller-catalogo@test.local', 'seller', true, null),
-  ('6b010000-0000-0000-0000-000000000023', 'S6B Seller A4', 's6b-seller-a4@test.local', 'seller', true, null);
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('6b010000-0000-0000-0000-000000000001', 'S6B Super Admin', 's6b-superadmin@test.local', true, 'super_admin'),
+  ('6b010000-0000-0000-0000-000000000002', 'S6B Manager A', 's6b-manager-a@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000003', 'S6B Seller A1', 's6b-seller-a1@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000004', 'S6B Seller A2 Sem Seller', 's6b-seller-a2-noseller@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000005', 'S6B Seller A3', 's6b-seller-a3@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000006', 'S6B Profile Inativo', 's6b-inactive-profile@test.local', false, null),
+  ('6b010000-0000-0000-0000-000000000007', 'S6B Manager B', 's6b-manager-b@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000008', 'S6B Seller B1', 's6b-seller-b1@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000009', 'S6B Manager Ator Inativo', 's6b-manager-inactive-actor@test.local', false, null),
+  ('6b010000-0000-0000-0000-000000000010', 'S6B Super Admin Alvo', 's6b-superadmin-alvo@test.local', true, 'super_admin'),
+  ('6b010000-0000-0000-0000-000000000013', 'S6B Seller Empresa Suspensa', 's6b-seller-suspensa@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000014', 'S6B Seller Empresa Cancelada', 's6b-seller-cancelada@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000015', 'S6B LastMgr X', 's6b-lastmgr-x@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000016', 'S6B LastMgr Y', 's6b-lastmgr-y@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000017', 'S6B Seller Offboarded', 's6b-seller-offboarded@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000020', 'S6B Manager A2', 's6b-manager-a2@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000022', 'S6B Seller Catalogo', 's6b-seller-catalogo@test.local', true, null),
+  ('6b010000-0000-0000-0000-000000000023', 'S6B Seller A4', 's6b-seller-a4@test.local', true, null);
 -- 6b010000-...-000021 (auth user sem profile) deliberadamente sem linha em profiles
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status, created_at) values

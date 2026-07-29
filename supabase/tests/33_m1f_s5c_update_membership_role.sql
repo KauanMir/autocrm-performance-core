@@ -54,27 +54,30 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'f5c10000-0000-0000-0000-000000000020', 'authenticated', 'authenticated', 's5c-lastmgr-x@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'f5c10000-0000-0000-0000-000000000021', 'authenticated', 'authenticated', 's5c-lastmgr-y@test.local', now(), now(), now());
 
-insert into public.profiles (id, name, email, role, is_active, platform_role) values
-  ('f5c10000-0000-0000-0000-000000000001', 'S5C Super Admin', 's5c-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('f5c10000-0000-0000-0000-000000000002', 'S5C Manager A', 's5c-manager-a@test.local', 'manager', true, null),
-  ('f5c10000-0000-0000-0000-000000000003', 'S5C Seller A1', 's5c-seller-a1@test.local', 'seller', true, null),
-  ('f5c10000-0000-0000-0000-000000000004', 'S5C Seller A2 Sem Historico', 's5c-seller-a2-nohist@test.local', 'seller', true, null),
-  ('f5c10000-0000-0000-0000-000000000005', 'S5C Manager A2 Last', 's5c-manager-a2-lastmgr@test.local', 'manager', true, null),
-  ('f5c10000-0000-0000-0000-000000000006', 'S5C Profile Inativo', 's5c-inactive-profile@test.local', 'seller', false, null),
-  ('f5c10000-0000-0000-0000-000000000007', 'S5C Seller Conflict Dup', 's5c-seller-conflict-dup@test.local', 'seller', true, null),
-  ('f5c10000-0000-0000-0000-000000000008', 'S5C Seller Wrong Membership', 's5c-seller-wrong-membership@test.local', 'seller', true, null),
-  ('f5c10000-0000-0000-0000-000000000009', 'S5C Manager B', 's5c-manager-b@test.local', 'manager', true, null),
-  ('f5c10000-0000-0000-0000-000000000010', 'S5C Manager', 's5c-manager@test.local', 'manager', true, null),
-  ('f5c10000-0000-0000-0000-000000000012', 'S5C Seller Plain', 's5c-seller-plain@test.local', 'seller', true, null),
-  ('f5c10000-0000-0000-0000-000000000013', 'S5C Super Admin Alvo', 's5c-superadmin-alvo@test.local', 'seller', true, 'super_admin'),
-  ('f5c10000-0000-0000-0000-000000000014', 'S5C Manager Suspensa', 's5c-manager-suspensa@test.local', 'manager', true, null),
-  ('f5c10000-0000-0000-0000-000000000015', 'S5C Manager Implantacao', 's5c-manager-implantacao@test.local', 'manager', true, null),
-  ('f5c10000-0000-0000-0000-000000000016', 'S5C Recon Manager', 's5c-recon-manager@test.local', 'manager', true, null),
-  ('f5c10000-0000-0000-0000-000000000017', 'S5C Recon Seller', 's5c-recon-seller@test.local', 'seller', true, null),
-  ('f5c10000-0000-0000-0000-000000000018', 'S5C Legacy Admin', 's5c-legacy-admin@test.local', 'admin', true, null),
-  ('f5c10000-0000-0000-0000-000000000019', 'S5C Manager Isolado Companheiro', 's5c-manager-isolado-companheiro@test.local', 'manager', true, null),
-  ('f5c10000-0000-0000-0000-000000000020', 'S5C LastMgr X', 's5c-lastmgr-x@test.local', 'manager', true, null),
-  ('f5c10000-0000-0000-0000-000000000021', 'S5C LastMgr Y', 's5c-lastmgr-y@test.local', 'manager', true, null);
+-- M1-F S8-E2: profiles.role foi removida fisicamente do catálogo — o
+-- profile "Legacy Admin" (018) é mantido apenas como ator comum (membership
+-- real já é manager), preservando a cobertura de idempotência da seção 11.
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('f5c10000-0000-0000-0000-000000000001', 'S5C Super Admin', 's5c-superadmin@test.local', true, 'super_admin'),
+  ('f5c10000-0000-0000-0000-000000000002', 'S5C Manager A', 's5c-manager-a@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000003', 'S5C Seller A1', 's5c-seller-a1@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000004', 'S5C Seller A2 Sem Historico', 's5c-seller-a2-nohist@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000005', 'S5C Manager A2 Last', 's5c-manager-a2-lastmgr@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000006', 'S5C Profile Inativo', 's5c-inactive-profile@test.local', false, null),
+  ('f5c10000-0000-0000-0000-000000000007', 'S5C Seller Conflict Dup', 's5c-seller-conflict-dup@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000008', 'S5C Seller Wrong Membership', 's5c-seller-wrong-membership@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000009', 'S5C Manager B', 's5c-manager-b@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000010', 'S5C Manager', 's5c-manager@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000012', 'S5C Seller Plain', 's5c-seller-plain@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000013', 'S5C Super Admin Alvo', 's5c-superadmin-alvo@test.local', true, 'super_admin'),
+  ('f5c10000-0000-0000-0000-000000000014', 'S5C Manager Suspensa', 's5c-manager-suspensa@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000015', 'S5C Manager Implantacao', 's5c-manager-implantacao@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000016', 'S5C Recon Manager', 's5c-recon-manager@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000017', 'S5C Recon Seller', 's5c-recon-seller@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000018', 'S5C Legacy Admin', 's5c-legacy-admin@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000019', 'S5C Manager Isolado Companheiro', 's5c-manager-isolado-companheiro@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000020', 'S5C LastMgr X', 's5c-lastmgr-x@test.local', true, null),
+  ('f5c10000-0000-0000-0000-000000000021', 'S5C LastMgr Y', 's5c-lastmgr-y@test.local', true, null);
 -- f5c10000-...-000011 (auth user sem profile) deliberadamente sem linha em profiles
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, created_at) values
@@ -329,12 +332,6 @@ reset role;
 select is(
   (select role from public.company_memberships where id = 'f5c30000-0000-0000-0000-000000000003'),
   'manager'::public.company_role, 'membership de Seller A1 agora e manager');
--- M1-F S8-D2-B: a sincronização de profiles.role dentro desta RPC foi
--- removida (decisão congelada) — a coluna fica congelada no valor do
--- fixture ('seller') e nunca mais acompanha company_memberships.role.
-select is(
-  (select role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000003'),
-  'seller'::public.user_role, 'profiles.role NUNCA MAIS sincroniza (S8-D2-B) — continua seller mesmo com a membership virando manager');
 select is(
   (select platform_role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000003'),
   null::public.platform_role, 'platform_role nunca mudou');
@@ -388,12 +385,6 @@ reset role;
 select is(
   (select role from public.company_memberships where id = 'f5c30000-0000-0000-0000-000000000003'),
   'seller'::public.company_role, 'membership voltou a seller');
--- M1-F S8-D2-B: nunca mudou de 'seller' em momento algum do ciclo acima
--- (a sincronização foi removida) — este check confirma que o rebaixamento
--- também não a toca, não que ela "voltou".
-select is(
-  (select role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000003'),
-  'seller'::public.user_role, 'profiles.role continua seller (nunca foi tocada em nenhum momento do ciclo seller->manager->seller, S8-D2-B)');
 select is(
   (select membership_id from public.sellers where id = 's5c-a1'),
   'f5c30000-0000-0000-0000-000000000003'::uuid, 'sellers.membership_id religado a mesma membership');
@@ -499,29 +490,20 @@ select is(
   (select count(*)::int from public.sellers where profile_id = 'f5c10000-0000-0000-0000-000000000017' and company_id = 'f5c20000-0000-0000-0000-000000000001'),
   1, 'nenhuma duplicacao na reconciliacao (reutilizou a linha existente)');
 
--- M1-F S8-D2-B: profiles.role legado divergente ('admin') NUNCA MAIS e'
--- corrigida por esta RPC — a sincronizacao foi removida por completo.
--- Estado: membership ja e' 'manager', profile 018 tem profiles.role
--- legado 'admin' (nunca populado como 'manager', propositalmente
--- congelado desde o fixture). A chamada abaixo, com a membership ja no
--- destino e nenhum seller para reconciliar, e' idempotente de ponta a
--- ponta: nenhuma escrita, nenhuma auditoria, profiles.role permanece
--- divergente por design (a divergencia nao concede nem retira
--- autoridade alguma — o frontend nunca leu este campo desde o S8-D2-A).
-select is((select role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000018'), 'admin'::public.user_role, 'antes: profiles.role legado e admin');
+-- membership ja e' 'manager', sem nenhum seller vinculado a reconciliar —
+-- a chamada abaixo e' idempotente de ponta a ponta: nenhuma escrita,
+-- nenhuma auditoria.
 select count(*)::int as audit_before_018 from public.audit_log where entity_id = 'f5c30000-0000-0000-0000-000000000018' \gset
 
 set local role authenticated;
 select pg_temp.as_user('f5c10000-0000-0000-0000-000000000001');
 select lives_ok(
   $$select * from public.update_membership_role('f5c30000-0000-0000-0000-000000000018', 'f5c20000-0000-0000-0000-000000000001', 'manager')$$,
-  'membership ja e manager, sem seller a reconciliar: idempotente (profiles.role legado nunca decide se ha trabalho pendente)');
+  'membership ja e manager, sem seller a reconciliar: idempotente');
 reset role;
 select is(
-  (select role from public.profiles where id = 'f5c10000-0000-0000-0000-000000000018'), 'admin'::public.user_role, 'profiles.role legado permanece admin para sempre (S8-D2-B: sincronizacao removida, divergencia e esperada por design)');
-select is(
   (select count(*)::int from public.audit_log where entity_id = 'f5c30000-0000-0000-0000-000000000018') - :audit_before_018,
-  0, 'chamada idempotente (profiles.role divergente nao conta como trabalho pendente) nao cria auditoria nova');
+  0, 'chamada idempotente nao cria auditoria nova');
 
 -- idempotência total: chamar de novo sobre um estado ja 100% coerente
 select updated_at as membership_updated_before from public.company_memberships where id = 'f5c30000-0000-0000-0000-000000000012' \gset
@@ -552,18 +534,20 @@ select is(
 -- chaves (nao as linhas de audit_log), truncando o resultado para 1 unica
 -- chave. Por isso a linha e' resolvida primeiro (subquery escalar), e so
 -- entao jsonb_object_keys() e' aplicado ao jsonb ja isolado.
+-- M1-F S8-E2 (Migration 1) removeu a chave profile_role de before_data/
+-- after_data por completo (decisão registrada em §46) — restam 4 campos.
 select is(
   (select array_agg(k order by k) from jsonb_object_keys(
     (select before_data from public.audit_log where entity_id = 'f5c30000-0000-0000-0000-000000000010' order by occurred_at desc limit 1)
   ) as k),
-  array['company_role','profile_role','seller_active','seller_id','seller_linked']::text[],
-  'before_data contem exatamente company_role/profile_role/seller_id/seller_active/seller_linked');
+  array['company_role','seller_active','seller_id','seller_linked']::text[],
+  'before_data contem exatamente company_role/seller_id/seller_active/seller_linked, sem profile_role');
 select is(
   (select array_agg(k order by k) from jsonb_object_keys(
     (select after_data from public.audit_log where entity_id = 'f5c30000-0000-0000-0000-000000000010' order by occurred_at desc limit 1)
   ) as k),
-  array['company_role','profile_role','seller_active','seller_id','seller_linked']::text[],
-  'after_data contem exatamente os mesmos 5 campos, nada mais');
+  array['company_role','seller_active','seller_id','seller_linked']::text[],
+  'after_data contem exatamente os mesmos 4 campos, nada mais');
 select is(
   (select (before_data ? 'name') or (before_data ? 'email') or (before_data ? 'platform_role') from public.audit_log where entity_id = 'f5c30000-0000-0000-0000-000000000010' order by occurred_at desc limit 1),
   false, 'nenhum dado sensivel (nome/email/platform_role) na auditoria');

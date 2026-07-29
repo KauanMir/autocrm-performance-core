@@ -5,8 +5,8 @@ select * from no_plan();
 
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
   values ('00000000-0000-0000-0000-000000000000', 'd1111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'inativo@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active)
-  values ('d1111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-000000000001', 'Inativo', 'inativo@test.local', 'seller', false);
+insert into public.profiles (id, name, email, is_active)
+  values ('d1111111-1111-1111-1111-111111111111', 'Inativo', 'inativo@test.local', false);
 insert into public.leads (id, company_id, name, phone, car, stage_id, seller_id, archived_at) values
   ('aaaaaaaa-0000-0000-0000-000000000071', '00000000-0000-0000-0000-000000000001', 'Tl Um',  '(11) 90000-0071', 'C1',
    (select id from public.pipeline_stages where company_id='00000000-0000-0000-0000-000000000001' and code='new'), 's4',  null),

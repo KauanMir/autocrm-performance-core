@@ -13,8 +13,8 @@ insert into public.companies (id, name) values
   ('44eeeeee-4444-4444-4444-444444444444', 'Empresa Security 2');
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at) values
   ('00000000-0000-0000-0000-000000000000', '5ec00000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'secmanager1@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('5ec00000-0000-0000-0000-000000000001', '33eeeeee-3333-3333-3333-333333333333', 'Sec Manager 1', 'secmanager1@test.local', 'manager', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('5ec00000-0000-0000-0000-000000000001', 'Sec Manager 1', 'secmanager1@test.local', true);
 insert into public.company_memberships (company_id, profile_id, role, is_active) values
   ('33eeeeee-3333-3333-3333-333333333333', '5ec00000-0000-0000-0000-000000000001', 'manager', true);
 

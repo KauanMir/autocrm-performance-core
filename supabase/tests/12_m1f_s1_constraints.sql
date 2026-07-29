@@ -23,11 +23,11 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'e0000000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'econstraint3@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'e0000000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'econstraint4@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role) values
-  ('e0000000-0000-0000-0000-000000000001', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 'E Constraint 1', 'econstraint1@test.local', 'seller'),
-  ('e0000000-0000-0000-0000-000000000002', 'dddddddd-dddd-dddd-dddd-dddddddddddd', 'E Constraint 2', 'econstraint2@test.local', 'seller'),
-  ('e0000000-0000-0000-0000-000000000003', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 'E Constraint 3', 'econstraint3@test.local', 'seller'),
-  ('e0000000-0000-0000-0000-000000000004', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 'E Manager 4',    'econstraint4@test.local', 'manager');
+insert into public.profiles (id, name, email) values
+  ('e0000000-0000-0000-0000-000000000001', 'E Constraint 1', 'econstraint1@test.local'),
+  ('e0000000-0000-0000-0000-000000000002', 'E Constraint 2', 'econstraint2@test.local'),
+  ('e0000000-0000-0000-0000-000000000003', 'E Constraint 3', 'econstraint3@test.local'),
+  ('e0000000-0000-0000-0000-000000000004', 'E Manager 4',    'econstraint4@test.local');
 
 insert into public.company_memberships (company_id, profile_id, role) values
   ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 'e0000000-0000-0000-0000-000000000001', 'seller'),

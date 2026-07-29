@@ -55,33 +55,33 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'f6e10000-0000-0000-0000-000000000024', 'authenticated', 'authenticated', 's6e-pag-p4@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'f6e10000-0000-0000-0000-000000000025', 'authenticated', 'authenticated', 's6e-pag-p5@test.local', now(), now(), now());
 
--- profiles.role (legado) preenchido só para satisfazer a coluna NOT NULL —
--- nunca lido nem retornado por list_inactive_company_users.
-insert into public.profiles (id, name, email, role, is_active, platform_role) values
-  ('f6e10000-0000-0000-0000-000000000001', 'S6E Manager A', 's6e-manager-a@test.local', 'manager', true, null),
-  ('f6e10000-0000-0000-0000-000000000002', 'S6E Seller A1 Suspenso', 's6e-seller-a1-suspenso@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000003', 'S6E Manager A2 Desligado', 's6e-manager-a2-desligado@test.local', 'manager', true, null),
-  ('f6e10000-0000-0000-0000-000000000004', 'S6E Seller A2 Ativo', 's6e-seller-a2-ativo@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000005', 'S6E Profile Inativo', 's6e-profile-inativo@test.local', 'seller', false, null),
-  ('f6e10000-0000-0000-0000-000000000006', 'S6E Seller B1 Suspenso', 's6e-seller-b1-suspenso@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000007', 'Zephyr Busca S6E', 's6e-zephyr-busca@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000008', 'S6E Super Admin Solo', 's6e-superadmin-solo@test.local', 'seller', true, 'super_admin'),
-  ('f6e10000-0000-0000-0000-000000000009', 'S6E Super Admin Membro', 's6e-superadmin-membro@test.local', 'seller', true, 'super_admin'),
-  ('f6e10000-0000-0000-0000-000000000010', 'S6E Manager Empresa Cancelada', 's6e-manager-cancelada@test.local', 'manager', true, null),
-  ('f6e10000-0000-0000-0000-000000000011', 'S6E Seller Empresa Suspensa', 's6e-seller-suspensa@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000012', 'S6E Manager Empresa Suspensa', 's6e-manager-empresa-suspensa@test.local', 'manager', true, null),
-  ('f6e10000-0000-0000-0000-000000000014', 'S6E Sem Membership', 's6e-sem-membership@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000015', 'S6E Seller Ativo Solo', 's6e-seller-ativo-solo@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000016', 'S6E Seller A3 Desligado', 's6e-seller-a3-desligado@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000017', 'S6E Manager Inativo', 's6e-manager-inativo@test.local', 'manager', false, null),
-  ('f6e10000-0000-0000-0000-000000000018', 'Bus%ca_Especial S6E', 's6e-escape-percent@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000019', 'CaXEspecial S6E Decoy', 's6e-escape-underscore-decoy@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000020', 'S6E Pag Manager', 's6e-pag-manager@test.local', 'manager', true, null),
-  ('f6e10000-0000-0000-0000-000000000021', 'S6E Pag P1', 's6e-pag-p1@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000022', 'S6E Pag P2', 's6e-pag-p2@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000023', 'S6E Pag P3', 's6e-pag-p3@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000024', 'S6E Pag P4', 's6e-pag-p4@test.local', 'seller', true, null),
-  ('f6e10000-0000-0000-0000-000000000025', 'S6E Pag P5', 's6e-pag-p5@test.local', 'seller', true, null);
+-- M1-F S8-E2: profiles.role foi removida fisicamente do catálogo (nunca
+-- foi lida nem retornada por list_inactive_company_users).
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('f6e10000-0000-0000-0000-000000000001', 'S6E Manager A', 's6e-manager-a@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000002', 'S6E Seller A1 Suspenso', 's6e-seller-a1-suspenso@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000003', 'S6E Manager A2 Desligado', 's6e-manager-a2-desligado@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000004', 'S6E Seller A2 Ativo', 's6e-seller-a2-ativo@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000005', 'S6E Profile Inativo', 's6e-profile-inativo@test.local', false, null),
+  ('f6e10000-0000-0000-0000-000000000006', 'S6E Seller B1 Suspenso', 's6e-seller-b1-suspenso@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000007', 'Zephyr Busca S6E', 's6e-zephyr-busca@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000008', 'S6E Super Admin Solo', 's6e-superadmin-solo@test.local', true, 'super_admin'),
+  ('f6e10000-0000-0000-0000-000000000009', 'S6E Super Admin Membro', 's6e-superadmin-membro@test.local', true, 'super_admin'),
+  ('f6e10000-0000-0000-0000-000000000010', 'S6E Manager Empresa Cancelada', 's6e-manager-cancelada@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000011', 'S6E Seller Empresa Suspensa', 's6e-seller-suspensa@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000012', 'S6E Manager Empresa Suspensa', 's6e-manager-empresa-suspensa@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000014', 'S6E Sem Membership', 's6e-sem-membership@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000015', 'S6E Seller Ativo Solo', 's6e-seller-ativo-solo@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000016', 'S6E Seller A3 Desligado', 's6e-seller-a3-desligado@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000017', 'S6E Manager Inativo', 's6e-manager-inativo@test.local', false, null),
+  ('f6e10000-0000-0000-0000-000000000018', 'Bus%ca_Especial S6E', 's6e-escape-percent@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000019', 'CaXEspecial S6E Decoy', 's6e-escape-underscore-decoy@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000020', 'S6E Pag Manager', 's6e-pag-manager@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000021', 'S6E Pag P1', 's6e-pag-p1@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000022', 'S6E Pag P2', 's6e-pag-p2@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000023', 'S6E Pag P3', 's6e-pag-p3@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000024', 'S6E Pag P4', 's6e-pag-p4@test.local', true, null),
+  ('f6e10000-0000-0000-0000-000000000025', 'S6E Pag P5', 's6e-pag-p5@test.local', true, null);
 -- f6e10000-...-000013 (auth user sem profile) deliberadamente sem linha em profiles
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status, created_at, updated_at) values
@@ -541,14 +541,16 @@ select is(
   'list_company_users continua com exatamente as mesmas 8 colunas de saida, nesta ordem — contrato S5-A2 intacto');
 
 -- grants de profiles/company_memberships nao foram ampliados por esta etapa
+-- (M1-F S8-E2 removeu company_id/role/seller_id do catálogo — o grant de
+-- coluna cai junto com a coluna dropada, restando 5).
 select is(
   (select array_agg(column_name::text order by column_name::text) from information_schema.role_column_grants
     where table_schema = 'public' and table_name = 'profiles'
       and grantee = 'authenticated' and privilege_type = 'SELECT'),
   (select array_agg(c order by c) from unnest(array[
-    'id', 'company_id', 'name', 'email', 'role', 'seller_id', 'is_active', 'platform_role'
+    'id', 'name', 'email', 'is_active', 'platform_role'
   ]) as c),
-  'grants de SELECT em profiles permanecem exatamente as mesmas 8 colunas (nao ampliados)');
+  'grants de SELECT em profiles permanecem exatamente as 5 colunas restantes (nao ampliados)');
 select is(
   (select array_agg(column_name::text order by column_name::text) from information_schema.role_column_grants
     where table_schema = 'public' and table_name = 'company_memberships'

@@ -22,11 +22,11 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'fa900000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'g6superadmin@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'fa900000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'g6outrodono@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('fa900000-0000-0000-0000-000000000001', 'fa100000-0000-0000-0000-000000000001', 'G6 Manager H1', 'g6managerh1@test.local', 'manager', true),
-  ('fa900000-0000-0000-0000-000000000002', 'fa200000-0000-0000-0000-000000000002', 'G6 Manager H2', 'g6managerh2@test.local', 'manager', true),
-  ('fa900000-0000-0000-0000-000000000003', null, 'G6 Super Admin', 'g6superadmin@test.local', 'seller', true),
-  ('fa900000-0000-0000-0000-000000000004', 'fa100000-0000-0000-0000-000000000001', 'G6 Outro Dono', 'g6identityconflict@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('fa900000-0000-0000-0000-000000000001', 'G6 Manager H1', 'g6managerh1@test.local', true),
+  ('fa900000-0000-0000-0000-000000000002', 'G6 Manager H2', 'g6managerh2@test.local', true),
+  ('fa900000-0000-0000-0000-000000000003', 'G6 Super Admin', 'g6superadmin@test.local', true),
+  ('fa900000-0000-0000-0000-000000000004', 'G6 Outro Dono', 'g6identityconflict@test.local', true);
 
 update public.profiles set platform_role = 'super_admin' where id = 'fa900000-0000-0000-0000-000000000003';
 
@@ -451,8 +451,8 @@ select is((select accepted_profile_id from public.invites where token_hash = rep
 -- já é Super Admin -> already_member
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa920000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'g6.jasuper@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role)
-values ('fa920000-0000-0000-0000-000000000002', null, 'Ja Super', 'g6.jasuper@test.local', 'seller', true, 'super_admin');
+insert into public.profiles (id, name, email, is_active, platform_role)
+values ('fa920000-0000-0000-0000-000000000002', 'Ja Super', 'g6.jasuper@test.local', true, 'super_admin');
 set local role service_role;
 select ok(
   (with r as (select rr.* from public.create_invite('fa900000-0000-0000-0000-000000000003', null, 'g6.jasuper@test.local', 'Ja Super Admin Invite', 'super_admin', repeat('11', 32)) rr)
@@ -486,7 +486,7 @@ select is((select count(*)::int from public.sellers where profile_id = 'fa930000
 -- membership ativa na MESMA empresa -> already_member
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa930000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'g6.jamembro@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa930000-0000-0000-0000-000000000002', 'fa100000-0000-0000-0000-000000000001', 'Ja Membro', 'g6.jamembro@test.local', 'manager', true);
+insert into public.profiles (id, name, email, is_active) values ('fa930000-0000-0000-0000-000000000002', 'Ja Membro', 'g6.jamembro@test.local', true);
 insert into public.company_memberships (company_id, profile_id, role, is_active) values ('fa100000-0000-0000-0000-000000000001', 'fa930000-0000-0000-0000-000000000002', 'manager', true);
 set local role service_role;
 select ok(
@@ -510,7 +510,7 @@ reset role;
 -- injeta a membership inativa na mesma empresa DEPOIS do create_invite
 -- (simula um estado histórico pré-existente que create_invite não viu
 -- porque não existia no momento da criação do convite)
-insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa930000-0000-0000-0000-000000000003', 'fa100000-0000-0000-0000-000000000001', 'Inativo Mesma', 'g6.inativomesma@test.local', 'manager', true);
+insert into public.profiles (id, name, email, is_active) values ('fa930000-0000-0000-0000-000000000003', 'Inativo Mesma', 'g6.inativomesma@test.local', true);
 insert into public.company_memberships (company_id, profile_id, role, is_active, lifecycle_status) values ('fa100000-0000-0000-0000-000000000001', 'fa930000-0000-0000-0000-000000000003', 'manager', false, 'suspended');
 set local role authenticated;
 select pg_temp.as_user('fa930000-0000-0000-0000-000000000003');
@@ -529,7 +529,7 @@ select is((select status from public.invites where token_hash = repeat('22', 32)
 -- desativada/transferida)
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa930000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'g6.outraempresa@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa930000-0000-0000-0000-000000000004', 'fa200000-0000-0000-0000-000000000002', 'Outra Empresa', 'g6.outraempresa@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values ('fa930000-0000-0000-0000-000000000004', 'Outra Empresa', 'g6.outraempresa@test.local', true);
 insert into public.company_memberships (company_id, profile_id, role, is_active) values ('fa200000-0000-0000-0000-000000000002', 'fa930000-0000-0000-0000-000000000004', 'seller', true);
 set local role service_role;
 select public.create_invite('fa900000-0000-0000-0000-000000000003', 'fa100000-0000-0000-0000-000000000001', 'g6.outraempresa@test.local', 'Outra Empresa Invite', 'manager', repeat('23', 32));
@@ -625,7 +625,7 @@ select is(
 -- único de provisionamento)
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa940000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'g6.sellerconflito@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa940000-0000-0000-0000-000000000002', 'fa200000-0000-0000-0000-000000000002', 'Seller Conflito', 'g6.sellerconflito@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values ('fa940000-0000-0000-0000-000000000002', 'Seller Conflito', 'g6.sellerconflito@test.local', true);
 insert into public.company_memberships (company_id, profile_id, role, is_active) values ('fa200000-0000-0000-0000-000000000002', 'fa940000-0000-0000-0000-000000000002', 'seller', true);
 -- convidador precisa ser Super Admin: create_invite() só pula a checagem
 -- not_eligible (membership ativa em OUTRA empresa) quando o ator é
@@ -664,7 +664,7 @@ select is((select status from public.invites where token_hash = repeat('31', 32)
 -- exato desta subetapa)
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa960000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'g6.orfaomesmaempresa@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa960000-0000-0000-0000-000000000001', 'fa200000-0000-0000-0000-000000000002', 'Orfao Mesma Empresa', 'g6.orfaomesmaempresa@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values ('fa960000-0000-0000-0000-000000000001', 'Orfao Mesma Empresa', 'g6.orfaomesmaempresa@test.local', true);
 insert into public.sellers (id, company_id, membership_id, profile_id, name, first_name, is_active)
 values (gen_random_uuid()::text, 'fa100000-0000-0000-0000-000000000001', null, 'fa960000-0000-0000-0000-000000000001', 'Orfao Mesma Empresa', 'Orfao', true);
 set local role service_role;
@@ -690,7 +690,7 @@ select is((select status from public.invites where token_hash = repeat('45', 32)
 -- Seller órfão em OUTRA empresa (membership_id NULL) -> provisioning_failed
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa960000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'g6.orfaooutraempresa@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa960000-0000-0000-0000-000000000002', 'fa100000-0000-0000-0000-000000000001', 'Orfao Outra Empresa', 'g6.orfaooutraempresa@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values ('fa960000-0000-0000-0000-000000000002', 'Orfao Outra Empresa', 'g6.orfaooutraempresa@test.local', true);
 -- seller antigo em H1 (fa100000...), membership_id NULL, ZERO
 -- company_memberships correspondente — profile NÃO tem nenhuma membership
 insert into public.sellers (id, company_id, membership_id, profile_id, name, first_name, is_active)
@@ -725,7 +725,7 @@ select is((select status from public.invites where token_hash = repeat('46', 32)
 -- CONSISTENTE -> aceite permitido (histórico válido, nunca bloqueia)
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa960000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'g6.historicovalido@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa960000-0000-0000-0000-000000000003', 'fa100000-0000-0000-0000-000000000001', 'Historico Valido', 'g6.historicovalido@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values ('fa960000-0000-0000-0000-000000000003', 'Historico Valido', 'g6.historicovalido@test.local', true);
 -- membership histórica INATIVA e CONSISTENTE (profile_id/company_id/role
 -- batem exatamente com a linha sellers abaixo) — identificada depois por
 -- subselect (profile_id, company_id, role) é única por
@@ -787,8 +787,8 @@ select is(
 -- próprio já é Super Admin, ou qualquer outra) -> invalid_relationship
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa950000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'g6.superparamanager@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role)
-values ('fa950000-0000-0000-0000-000000000001', null, 'Super Virando Manager', 'g6.superparamanager@test.local', 'seller', true, 'super_admin');
+insert into public.profiles (id, name, email, is_active, platform_role)
+values ('fa950000-0000-0000-0000-000000000001', 'Super Virando Manager', 'g6.superparamanager@test.local', true, 'super_admin');
 set local role service_role;
 select public.create_invite('fa900000-0000-0000-0000-000000000003', 'fa100000-0000-0000-0000-000000000001', 'g6.superparamanager@test.local', 'Super Para Manager Invite', 'manager', repeat('40', 32));
 select public.complete_invite_delivery('fa900000-0000-0000-0000-000000000003', (select id from public.invites where token_hash = repeat('40', 32)), true, null);
@@ -812,8 +812,8 @@ select ok(
 -- Super Admin aceitando convite de SELLER -> mesmo código
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa950000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'g6.superparaseller@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role)
-values ('fa950000-0000-0000-0000-000000000002', null, 'Super Virando Seller', 'g6.superparaseller@test.local', 'seller', true, 'super_admin');
+insert into public.profiles (id, name, email, is_active, platform_role)
+values ('fa950000-0000-0000-0000-000000000002', 'Super Virando Seller', 'g6.superparaseller@test.local', true, 'super_admin');
 set local role service_role;
 select public.create_invite('fa900000-0000-0000-0000-000000000003', 'fa100000-0000-0000-0000-000000000001', 'g6.superparaseller@test.local', 'Super Para Seller Invite', 'seller', repeat('41', 32));
 select public.complete_invite_delivery('fa900000-0000-0000-0000-000000000003', (select id from public.invites where token_hash = repeat('41', 32)), true, null);
@@ -833,7 +833,7 @@ select is(
 -- membership original intacta, platform_role NUNCA atribuído
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa950000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 'g6.managerparasuper@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa950000-0000-0000-0000-000000000003', 'fa100000-0000-0000-0000-000000000001', 'Manager Virando Super', 'g6.managerparasuper@test.local', 'manager', true);
+insert into public.profiles (id, name, email, is_active) values ('fa950000-0000-0000-0000-000000000003', 'Manager Virando Super', 'g6.managerparasuper@test.local', true);
 insert into public.company_memberships (company_id, profile_id, role, is_active) values ('fa100000-0000-0000-0000-000000000001', 'fa950000-0000-0000-0000-000000000003', 'manager', true);
 set local role service_role;
 select public.create_invite('fa900000-0000-0000-0000-000000000003', null, 'g6.managerparasuper@test.local', 'Manager Para Super Invite', 'super_admin', repeat('42', 32));
@@ -856,7 +856,7 @@ select is(
 -- membership HISTÓRICA INATIVA nunca bloqueia convite de Super Admin
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa950000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 'g6.historicoinativosuper@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa950000-0000-0000-0000-000000000004', 'fa100000-0000-0000-0000-000000000001', 'Historico Inativo Super', 'g6.historicoinativosuper@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values ('fa950000-0000-0000-0000-000000000004', 'Historico Inativo Super', 'g6.historicoinativosuper@test.local', true);
 insert into public.company_memberships (company_id, profile_id, role, is_active, lifecycle_status) values ('fa100000-0000-0000-0000-000000000001', 'fa950000-0000-0000-0000-000000000004', 'seller', false, 'suspended');
 set local role service_role;
 select public.create_invite('fa900000-0000-0000-0000-000000000003', null, 'g6.historicoinativosuper@test.local', 'Historico Inativo Super Invite', 'super_admin', repeat('43', 32));
@@ -890,7 +890,7 @@ select enum_has_labels('public'::name, 'platform_role'::name, array['super_admin
 -- reutiliza/atualiza automaticamente a linha antiga
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000000000', 'fa950000-0000-0000-0000-000000000005', 'authenticated', 'authenticated', 'g6.sellerorfao@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values ('fa950000-0000-0000-0000-000000000005', 'fa200000-0000-0000-0000-000000000002', 'Seller Orfao', 'g6.sellerorfao@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values ('fa950000-0000-0000-0000-000000000005', 'Seller Orfao', 'g6.sellerorfao@test.local', true);
 insert into public.sellers (id, company_id, membership_id, profile_id, name, first_name, is_active)
 values (gen_random_uuid()::text, 'fa200000-0000-0000-0000-000000000002', null, 'fa950000-0000-0000-0000-000000000005', 'Seller Orfao', 'Seller', true);
 set local role service_role;

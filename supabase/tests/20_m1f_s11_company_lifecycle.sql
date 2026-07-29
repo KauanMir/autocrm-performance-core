@@ -34,15 +34,15 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'e9000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'e9superadmin@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'e9000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'e9legacyadmin@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('e1000000-0000-0000-0000-000000000001', 'e1eeeeee-1111-1111-1111-111111111111', 'E1 Manager', 'e1manager@test.local', 'manager', true),
-  ('e1000000-0000-0000-0000-000000000002', 'e1eeeeee-1111-1111-1111-111111111111', 'E1 Seller',  'e1seller@test.local',  'seller',  true),
-  ('e2000000-0000-0000-0000-000000000001', 'e2eeeeee-2222-2222-2222-222222222222', 'E2 Manager', 'e2manager@test.local', 'manager', true),
-  ('e2000000-0000-0000-0000-000000000002', 'e2eeeeee-2222-2222-2222-222222222222', 'E2 Seller',  'e2seller@test.local',  'seller',  true),
-  ('e3000000-0000-0000-0000-000000000001', 'e3eeeeee-3333-3333-3333-333333333333', 'E3 Manager', 'e3manager@test.local', 'manager', true),
-  ('e3000000-0000-0000-0000-000000000002', 'e3eeeeee-3333-3333-3333-333333333333', 'E3 Seller',  'e3seller@test.local',  'seller',  true),
-  ('e9000000-0000-0000-0000-000000000001', 'e1eeeeee-1111-1111-1111-111111111111', 'E9 SuperAdmin (fixture)', 'e9superadmin@test.local', 'seller', true),
-  ('e9000000-0000-0000-0000-000000000002', 'e2eeeeee-2222-2222-2222-222222222222', 'E9 Legacy Admin', 'e9legacyadmin@test.local', 'admin', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('e1000000-0000-0000-0000-000000000001', 'E1 Manager', 'e1manager@test.local', true),
+  ('e1000000-0000-0000-0000-000000000002', 'E1 Seller',  'e1seller@test.local',  true),
+  ('e2000000-0000-0000-0000-000000000001', 'E2 Manager', 'e2manager@test.local', true),
+  ('e2000000-0000-0000-0000-000000000002', 'E2 Seller',  'e2seller@test.local',  true),
+  ('e3000000-0000-0000-0000-000000000001', 'E3 Manager', 'e3manager@test.local', true),
+  ('e3000000-0000-0000-0000-000000000002', 'E3 Seller',  'e3seller@test.local',  true),
+  ('e9000000-0000-0000-0000-000000000001', 'E9 SuperAdmin (fixture)', 'e9superadmin@test.local', true),
+  ('e9000000-0000-0000-0000-000000000002', 'E9 Legacy Admin', 'e9legacyadmin@test.local', true);
 
 insert into public.company_memberships (company_id, profile_id, role, is_active) values
   ('e1eeeeee-1111-1111-1111-111111111111', 'e1000000-0000-0000-0000-000000000001', 'manager', true),
@@ -126,8 +126,8 @@ insert into public.companies (id, name) values
   ('e5eeeeee-5555-5555-5555-555555555555', 'Empresa E5 Autoria Teste');
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at) values
   ('00000000-0000-0000-0000-000000000000', 'e5000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'e5disposable@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('e5000000-0000-0000-0000-000000000001', null, 'E5 Disposable', 'e5disposable@test.local', 'seller', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('e5000000-0000-0000-0000-000000000001', 'E5 Disposable', 'e5disposable@test.local', true);
 update public.companies set created_by_profile_id = 'e5000000-0000-0000-0000-000000000001' where id = 'e5eeeeee-5555-5555-5555-555555555555';
 delete from public.profiles where id = 'e5000000-0000-0000-0000-000000000001';
 select is(

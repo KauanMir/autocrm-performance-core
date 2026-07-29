@@ -38,16 +38,16 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'cc900000-0000-0000-0000-000000000008', 'authenticated', 'authenticated', 'r25managerh3suspensa@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'cc900000-0000-0000-0000-000000000009', 'authenticated', 'authenticated', 'r25managerh4cancelada@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('cc900000-0000-0000-0000-000000000001', 'cc100000-0000-0000-0000-000000000001', 'R25 Manager H1',            'r25managerh1@test.local',        'manager', true),
-  ('cc900000-0000-0000-0000-000000000002', 'cc200000-0000-0000-0000-000000000002', 'R25 Manager H2',            'r25managerh2@test.local',        'manager', true),
-  ('cc900000-0000-0000-0000-000000000003', null,                                   'R25 Super Admin',           'r25superadmin@test.local',       'seller',  true),
-  ('cc900000-0000-0000-0000-000000000004', 'cc100000-0000-0000-0000-000000000001', 'R25 Seller H1',             'r25sellerh1@test.local',         'seller',  true),
-  ('cc900000-0000-0000-0000-000000000005', 'cc100000-0000-0000-0000-000000000001', 'R25 Manager Inativo H1',    'r25managerinativoh1@test.local', 'manager', true),
-  ('cc900000-0000-0000-0000-000000000006', 'cc100000-0000-0000-0000-000000000001', 'R25 Admin Legado',          'r25adminlegado@test.local',      'admin',   true),
-  ('cc900000-0000-0000-0000-000000000007', 'cc100000-0000-0000-0000-000000000001', 'R25 Profile Inativo',       'r25profileinativo@test.local',   'manager', false),
-  ('cc900000-0000-0000-0000-000000000008', 'cc300000-0000-0000-0000-000000000003', 'R25 Manager H3 Suspensa',   'r25managerh3suspensa@test.local', 'manager', true),
-  ('cc900000-0000-0000-0000-000000000009', 'cc400000-0000-0000-0000-000000000004', 'R25 Manager H4 Cancelada',  'r25managerh4cancelada@test.local', 'manager', true);
+insert into public.profiles (id, name, email, is_active) values
+  ('cc900000-0000-0000-0000-000000000001', 'R25 Manager H1',            'r25managerh1@test.local',        true),
+  ('cc900000-0000-0000-0000-000000000002', 'R25 Manager H2',            'r25managerh2@test.local',        true),
+  ('cc900000-0000-0000-0000-000000000003', 'R25 Super Admin',           'r25superadmin@test.local',       true),
+  ('cc900000-0000-0000-0000-000000000004', 'R25 Seller H1',             'r25sellerh1@test.local',         true),
+  ('cc900000-0000-0000-0000-000000000005', 'R25 Manager Inativo H1',    'r25managerinativoh1@test.local', true),
+  ('cc900000-0000-0000-0000-000000000006', 'R25 Admin Legado',          'r25adminlegado@test.local',      true),
+  ('cc900000-0000-0000-0000-000000000007', 'R25 Profile Inativo',       'r25profileinativo@test.local',   false),
+  ('cc900000-0000-0000-0000-000000000008', 'R25 Manager H3 Suspensa',   'r25managerh3suspensa@test.local', true),
+  ('cc900000-0000-0000-0000-000000000009', 'R25 Manager H4 Cancelada',  'r25managerh4cancelada@test.local', true);
 
 update public.profiles set platform_role = 'super_admin' where id = 'cc900000-0000-0000-0000-000000000003';
 

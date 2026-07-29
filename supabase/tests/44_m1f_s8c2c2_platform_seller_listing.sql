@@ -38,17 +38,17 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'ce200000-0000-0000-0000-000000000009', 'authenticated', 'authenticated', 'sellersb1-seller-successor@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'ce200000-0000-0000-0000-00000000000a', 'authenticated', 'authenticated', 'sellersb1-seller-promoted@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('ce200000-0000-0000-0000-000000000001', 'ce100000-0000-0000-0000-000000000001', 'Manager Um', 'sellersb1-manager@test.local', 'manager', true, null),
-  ('ce200000-0000-0000-0000-000000000002', 'ce100000-0000-0000-0000-000000000001', 'Seller Ativo', 'sellersb1-seller-ativo@test.local', 'seller', true, null),
-  ('ce200000-0000-0000-0000-000000000003', 'ce100000-0000-0000-0000-000000000001', 'Seller Suspenso', 'sellersb1-seller-suspenso@test.local', 'seller', true, null),
-  ('ce200000-0000-0000-0000-000000000004', 'ce100000-0000-0000-0000-000000000001', 'Seller Offboarded', 'sellersb1-seller-offboarded@test.local', 'seller', true, null),
-  ('ce200000-0000-0000-0000-000000000005', 'ce100000-0000-0000-0000-000000000001', 'Seller Profile Inativo', 'sellersb1-seller-inativoprofile@test.local', 'seller', false, null),
-  ('ce200000-0000-0000-0000-000000000006', 'ce100000-0000-0000-0000-000000000001', 'Sem Membership', 'sellersb1-nomembership@test.local', 'manager', true, null),
-  ('ce200000-0000-0000-0000-000000000007', null, 'Super Admin SellersB1', 'sellersb1-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('ce200000-0000-0000-0000-000000000008', 'ce100000-0000-0000-0000-000000000001', 'Seller Transferido', 'sellersb1-seller-transfer@test.local', 'seller', true, null),
-  ('ce200000-0000-0000-0000-000000000009', 'ce100000-0000-0000-0000-000000000001', 'Seller Sucessor', 'sellersb1-seller-successor@test.local', 'seller', true, null),
-  ('ce200000-0000-0000-0000-00000000000a', 'ce100000-0000-0000-0000-000000000001', 'Seller Promovido', 'sellersb1-seller-promoted@test.local', 'seller', true, null);
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('ce200000-0000-0000-0000-000000000001', 'Manager Um', 'sellersb1-manager@test.local', true, null),
+  ('ce200000-0000-0000-0000-000000000002', 'Seller Ativo', 'sellersb1-seller-ativo@test.local', true, null),
+  ('ce200000-0000-0000-0000-000000000003', 'Seller Suspenso', 'sellersb1-seller-suspenso@test.local', true, null),
+  ('ce200000-0000-0000-0000-000000000004', 'Seller Offboarded', 'sellersb1-seller-offboarded@test.local', true, null),
+  ('ce200000-0000-0000-0000-000000000005', 'Seller Profile Inativo', 'sellersb1-seller-inativoprofile@test.local', false, null),
+  ('ce200000-0000-0000-0000-000000000006', 'Sem Membership', 'sellersb1-nomembership@test.local', true, null),
+  ('ce200000-0000-0000-0000-000000000007', 'Super Admin SellersB1', 'sellersb1-superadmin@test.local', true, 'super_admin'),
+  ('ce200000-0000-0000-0000-000000000008', 'Seller Transferido', 'sellersb1-seller-transfer@test.local', true, null),
+  ('ce200000-0000-0000-0000-000000000009', 'Seller Sucessor', 'sellersb1-seller-successor@test.local', true, null),
+  ('ce200000-0000-0000-0000-00000000000a', 'Seller Promovido', 'sellersb1-seller-promoted@test.local', true, null);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status) values
   ('ce300000-0000-0000-0000-000000000001', 'ce100000-0000-0000-0000-000000000001', 'ce200000-0000-0000-0000-000000000001', 'manager', true, 'active'),

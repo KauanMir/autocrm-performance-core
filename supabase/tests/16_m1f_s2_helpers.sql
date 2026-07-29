@@ -22,12 +22,12 @@ insert into public.sellers (id, company_id, name, first_name) values
   ('hSeller1', '11eeeeee-1111-1111-1111-111111111111', 'Seller Helper 1', 'S1'),
   ('hSellerInactive', '11eeeeee-1111-1111-1111-111111111111', 'Seller Inativo', 'SI');
 
-insert into public.profiles (id, company_id, name, email, role, is_active) values
-  ('a1000000-0000-0000-0000-000000000001', '11eeeeee-1111-1111-1111-111111111111', 'H1 Manager', 'h1manager@test.local', 'manager', true),
-  ('a1000000-0000-0000-0000-000000000002', '11eeeeee-1111-1111-1111-111111111111', 'H1 Seller',  'h1seller@test.local',  'seller',  true),
-  ('a2000000-0000-0000-0000-000000000001', '22eeeeee-2222-2222-2222-222222222222', 'H2 Manager', 'h2manager@test.local', 'manager', true),
-  ('a9000000-0000-0000-0000-000000000001', '11eeeeee-1111-1111-1111-111111111111', 'H9 SuperAdmin (fixture)', 'h9superadmin@test.local', 'seller', true),
-  ('a9000000-0000-0000-0000-000000000002', '11eeeeee-1111-1111-1111-111111111111', 'H9 Normal',  'h9normal@test.local',  'seller',  true);
+insert into public.profiles (id, name, email, is_active) values
+  ('a1000000-0000-0000-0000-000000000001', 'H1 Manager', 'h1manager@test.local', true),
+  ('a1000000-0000-0000-0000-000000000002', 'H1 Seller',  'h1seller@test.local',  true),
+  ('a2000000-0000-0000-0000-000000000001', 'H2 Manager', 'h2manager@test.local', true),
+  ('a9000000-0000-0000-0000-000000000001', 'H9 SuperAdmin (fixture)', 'h9superadmin@test.local', true),
+  ('a9000000-0000-0000-0000-000000000002', 'H9 Normal',  'h9normal@test.local',  true);
 
 update public.sellers set profile_id = 'a1000000-0000-0000-0000-000000000002' where id = 'hSeller1';
 

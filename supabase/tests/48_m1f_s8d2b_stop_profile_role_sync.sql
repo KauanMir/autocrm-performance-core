@@ -2,8 +2,20 @@
 -- update_membership_role (20260729170000_m1f_s8d2b_stop_profile_role_sync.sql,
 -- docs/M1-F-SUPER-ADMIN-USER-LIFECYCLE-DESIGN.md §44). Cobre: catálogo
 -- (assinatura/grants/search_path inalterados), Seller->Manager e
--- Manager->Seller sem sincronizar profiles.role, legado divergente nunca
--- concede/retira autoridade, e que erros continuam sem escrita parcial.
+-- Manager->Seller sem sincronizar profiles.role, e que erros continuam sem
+-- escrita parcial.
+--
+-- M1-F S8-E2: profiles.role foi removida fisicamente do catálogo (a coluna
+-- que este arquivo originalmente provava "nunca sincronizar" deixou de
+-- existir) e o Migration 1 do S8-E2 redefiniu update_membership_role para
+-- também parar de LER profiles.role (a chave profile_role saiu por
+-- completo de before_data/after_data no audit_log, decisão humana
+-- registrada em §46). As asserções que comparavam profiles.role
+-- antes/depois e as que liam before_data/after_data->>'profile_role' foram
+-- removidas — o comportamento real que restou (membership.role muda,
+-- lifecycle de sellers preservado, idempotência, autorização por
+-- platform_role, nenhuma escrita parcial em erro) continua integralmente
+-- coberto abaixo.
 -- Fixtures sintéticas @test.local, transação com rollback.
 begin;
 create extension if not exists pgtap;
@@ -48,21 +60,17 @@ select ok(
   has_function_privilege('authenticated', 'public.update_membership_role(uuid,uuid,company_role)', 'EXECUTE'),
   'authenticated com EXECUTE (inalterado)');
 
--- profiles.role continua existindo fisicamente (reservada ao S8-E) e
--- accept_invite continua intacto (fora de escopo desta etapa).
-select has_column('public'::name, 'profiles'::name, 'role'::name,
-  'profiles.role continua existindo fisicamente — remoção física fica para o S8-E');
 select has_function('public'::name, 'accept_invite'::name, array['text']::name[],
   'accept_invite continua existindo, intocado nesta etapa');
 
--- M1-F S8-E1: os helpers legados M1-C (current_profile_role,
--- is_manager_or_admin, current_profile_company_id, current_profile_
--- seller_id) foram removidos fisicamente do catálogo numa etapa
--- posterior — cobertura completa da remoção em
--- 49_m1f_s8e1_drop_legacy_profile_helpers.sql. No momento do S8-D2-B
--- (esta migration) eles ainda existiam, sem nenhum consumidor ativo
--- (auditoria S8-D2-B) — essa garantia intermediária não é mais o estado
--- atual do catálogo, por isso não é mais afirmada aqui.
+-- update_membership_role nunca mais escreve OU lê profiles.role — a chave
+-- profile_role deixou de existir em before_data/after_data (decisão S8-E2).
+-- Checa a chave jsonb literal (com aspas), não a substring "profile_role"
+-- crua, que também aparece num comentário explicativo no corpo da função.
+select is(
+  (select p.prosrc ilike '%''profile_role''%' from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'update_membership_role'),
+  false, 'update_membership_role nao constroi mais a chave jsonb ''profile_role'' em lugar nenhum do corpo (S8-E2)');
 
 -- ══════════════════════════════════════════════════════════════════════
 -- FIXTURES
@@ -77,15 +85,11 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'f8d10000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 's8d2b-seller-target@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'f8d10000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 's8d2b-manager-target@test.local', now(), now(), now());
 
--- role legado 'seller'/'manager' abaixo COINCIDE de propósito com o papel
--- ATUAL da membership no início do teste — isso prova que a divergência
--- é introduzida pela própria mudança real de role (nunca mais
--- reconciliada), não uma fixture já desalinhada de partida.
-insert into public.profiles (id, name, email, role, is_active, platform_role) values
-  ('f8d10000-0000-0000-0000-000000000001', 'S8D2B Super Admin', 's8d2b-superadmin@test.local', 'seller', true, 'super_admin'),
-  ('f8d10000-0000-0000-0000-000000000002', 'S8D2B Manager Companion', 's8d2b-manager-companion@test.local', 'manager', true, null),
-  ('f8d10000-0000-0000-0000-000000000003', 'S8D2B Seller Target', 's8d2b-seller-target@test.local', 'seller', true, null),
-  ('f8d10000-0000-0000-0000-000000000004', 'S8D2B Manager Target', 's8d2b-manager-target@test.local', 'manager', true, null);
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('f8d10000-0000-0000-0000-000000000001', 'S8D2B Super Admin', 's8d2b-superadmin@test.local', true, 'super_admin'),
+  ('f8d10000-0000-0000-0000-000000000002', 'S8D2B Manager Companion', 's8d2b-manager-companion@test.local', true, null),
+  ('f8d10000-0000-0000-0000-000000000003', 'S8D2B Seller Target', 's8d2b-seller-target@test.local', true, null),
+  ('f8d10000-0000-0000-0000-000000000004', 'S8D2B Manager Target', 's8d2b-manager-target@test.local', true, null);
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, created_at) values
   ('f8d30000-0000-0000-0000-000000000002', 'f8d20000-0000-0000-0000-000000000001', 'f8d10000-0000-0000-0000-000000000002', 'manager', true, now()),
@@ -96,10 +100,9 @@ insert into public.sellers (id, company_id, membership_id, profile_id, name, fir
   ('s8d2b-target', 'f8d20000-0000-0000-0000-000000000001', 'f8d30000-0000-0000-0000-000000000003', 'f8d10000-0000-0000-0000-000000000003', 'S8D2B Seller Target', 'S8D2B', true);
 
 -- ══════════════════════════════════════════════════════════════════════
--- 2. SELLER -> MANAGER: profiles.role nunca sincroniza
+-- 2. SELLER -> MANAGER
 -- ══════════════════════════════════════════════════════════════════════
 
-select is((select role from public.profiles where id = 'f8d10000-0000-0000-0000-000000000003'), 'seller'::public.user_role, '1. antes: profiles.role = seller (em sincronia com a membership)');
 select is((select role from public.company_memberships where id = 'f8d30000-0000-0000-0000-000000000003'), 'seller'::public.company_role, '1. antes: membership.role = seller');
 
 set local role authenticated;
@@ -113,31 +116,26 @@ select is(
   (select role from public.company_memberships where id = 'f8d30000-0000-0000-0000-000000000003'),
   'manager'::public.company_role, '1. membership.role agora e manager');
 select is(
-  (select role from public.profiles where id = 'f8d10000-0000-0000-0000-000000000003'),
-  'seller'::public.user_role, '1. profiles.role NUNCA sincroniza — continua seller mesmo com a membership virando manager (S8-D2-B)');
-select is(
   (select membership_id from public.sellers where id = 's8d2b-target'),
   null::uuid, '1. seller desvinculado (membership_id NULL) apos a promocao — lifecycle preservado');
 select is(
   (select is_active from public.sellers where id = 's8d2b-target'),
   false, '1. seller inativado apos a promocao — lifecycle preservado');
 select is(
-  (select (before_data->>'profile_role')::public.user_role from public.audit_log
-    where entity_id = 'f8d30000-0000-0000-0000-000000000003' order by occurred_at desc limit 1),
-  'seller'::public.user_role, '1. audit_log.before_data.profile_role mostra o valor REAL (seller), nunca um valor esperado');
-select is(
-  (select (after_data->>'profile_role')::public.user_role from public.audit_log
-    where entity_id = 'f8d30000-0000-0000-0000-000000000003' order by occurred_at desc limit 1),
-  'seller'::public.user_role, '1. audit_log.after_data.profile_role IGUAL ao before (nunca afirma que profiles.role foi alterado)');
-select is(
   (select action from public.audit_log where entity_id = 'f8d30000-0000-0000-0000-000000000003' order by occurred_at desc limit 1),
   'user_membership_role_updated', '1. audit_log criado normalmente para a mudanca real de membership');
+select ok(
+  not ((select before_data from public.audit_log where entity_id = 'f8d30000-0000-0000-0000-000000000003' order by occurred_at desc limit 1) ? 'profile_role'),
+  '1. audit_log.before_data NAO contem a chave profile_role (removida no S8-E2)');
+select ok(
+  not ((select after_data from public.audit_log where entity_id = 'f8d30000-0000-0000-0000-000000000003' order by occurred_at desc limit 1) ? 'profile_role'),
+  '1. audit_log.after_data NAO contem a chave profile_role (removida no S8-E2)');
 
 -- ══════════════════════════════════════════════════════════════════════
--- 3. MANAGER -> SELLER: profiles.role nunca sincroniza (sem historico de seller)
+-- 3. MANAGER -> SELLER (sem historico de seller)
 -- ══════════════════════════════════════════════════════════════════════
 
-select is((select role from public.profiles where id = 'f8d10000-0000-0000-0000-000000000004'), 'manager'::public.user_role, '2. antes: profiles.role = manager (em sincronia com a membership)');
+select is((select role from public.company_memberships where id = 'f8d30000-0000-0000-0000-000000000004'), 'manager'::public.company_role, '2. antes: membership.role = manager');
 
 set local role authenticated;
 select pg_temp.as_user('f8d10000-0000-0000-0000-000000000001'); -- Super Admin
@@ -150,22 +148,17 @@ select is(
   (select role from public.company_memberships where id = 'f8d30000-0000-0000-0000-000000000004'),
   'seller'::public.company_role, '2. membership.role agora e seller');
 select is(
-  (select role from public.profiles where id = 'f8d10000-0000-0000-0000-000000000004'),
-  'manager'::public.user_role, '2. profiles.role NUNCA sincroniza — continua manager mesmo com a membership virando seller (S8-D2-B)');
-select is(
   (select count(*)::int from public.sellers where profile_id = 'f8d10000-0000-0000-0000-000000000004' and company_id = 'f8d20000-0000-0000-0000-000000000001' and is_active),
   1, '2. exatamente 1 seller ativo criado — lifecycle preservado');
-select is(
-  (select (before_data->>'profile_role')::public.user_role from public.audit_log
-    where entity_id = 'f8d30000-0000-0000-0000-000000000004' order by occurred_at desc limit 1),
-  'manager'::public.user_role, '2. audit_log.before_data.profile_role mostra o valor REAL (manager)');
-select is(
-  (select (after_data->>'profile_role')::public.user_role from public.audit_log
-    where entity_id = 'f8d30000-0000-0000-0000-000000000004' order by occurred_at desc limit 1),
-  'manager'::public.user_role, '2. audit_log.after_data.profile_role IGUAL ao before (nunca afirma alteracao)');
+select ok(
+  not ((select before_data from public.audit_log where entity_id = 'f8d30000-0000-0000-0000-000000000004' order by occurred_at desc limit 1) ? 'profile_role'),
+  '2. audit_log.before_data NAO contem a chave profile_role');
+select ok(
+  not ((select after_data from public.audit_log where entity_id = 'f8d30000-0000-0000-0000-000000000004' order by occurred_at desc limit 1) ? 'profile_role'),
+  '2. audit_log.after_data NAO contem a chave profile_role');
 
 -- ══════════════════════════════════════════════════════════════════════
--- 4. IDEMPOTÊNCIA: profiles.role divergente NUNCA conta como trabalho pendente
+-- 4. IDEMPOTÊNCIA
 -- ══════════════════════════════════════════════════════════════════════
 
 select count(*)::int as audit_before_003 from public.audit_log where entity_id = 'f8d30000-0000-0000-0000-000000000003' \gset
@@ -179,46 +172,30 @@ reset role;
 
 select is(
   (select count(*)::int from public.audit_log where entity_id = 'f8d30000-0000-0000-0000-000000000003') - :audit_before_003,
-  0, '3. chamada idempotente (profiles.role="seller" divergente da membership="manager") NAO cria auditoria nova — a divergencia nunca conta como trabalho pendente');
-select is(
-  (select role from public.profiles where id = 'f8d10000-0000-0000-0000-000000000003'),
-  'seller'::public.user_role, '3. profiles.role continua seller (permanece divergente para sempre — comportamento esperado por design)');
+  0, '3. chamada idempotente NAO cria auditoria nova');
 
 -- ══════════════════════════════════════════════════════════════════════
--- 5. LEGADO DIVERGENTE: profiles.role nunca concede nem retira autoridade
+-- 5. AUTORIZAÇÃO: somente platform_role decide, Manager continua barrado
 -- ══════════════════════════════════════════════════════════════════════
 
--- profiles.role='seller' no ator Super Admin (fixture deliberada, linha
--- 1) nunca interferiu na autorizacao — a chamada acima (secoes 2-4) so
--- funcionou porque platform_role='super_admin', nunca por causa do role
--- legado. No momento desta migration, current_profile_role()/
--- is_manager_or_admin() (helpers legados) ainda existiam no catálogo e
--- continuavam lendo profiles.role, mas nenhuma policy/RPC ativa os
--- consultava — comprovado empiricamente pela ausencia de qualquer
--- policy/funcao no catalogo ativo que os referencie (auditoria S8-D2-B).
--- Removidos fisicamente numa etapa posterior (S8-E1).
 set local role authenticated;
-select pg_temp.as_user('f8d10000-0000-0000-0000-000000000004'); -- Manager Target: profiles.role legado='manager', platform_role=null
+select pg_temp.as_user('f8d10000-0000-0000-0000-000000000004'); -- Manager Target (agora seller de fato)
 select is(
   public.is_platform_super_admin(),
-  false, '4. Manager Target (profiles.role legado="manager", platform_role=null) NUNCA e tratado como Super Admin — helper real ignora profiles.role');
+  false, '4. Manager Target (platform_role=null) NUNCA e tratado como Super Admin');
 reset role;
 
--- Manager com profiles.role legado divergente continua barrado de chamar
--- a RPC (autorizacao e' platform_role, nunca profiles.role) — profile
--- role='manager' aqui nao amplia nada.
 set local role authenticated;
-select pg_temp.as_user('f8d10000-0000-0000-0000-000000000004'); -- Manager Target (agora seller de fato, profiles.role ainda diz 'manager')
+select pg_temp.as_user('f8d10000-0000-0000-0000-000000000004');
 select throws_ok(
   $$select * from public.update_membership_role('f8d30000-0000-0000-0000-000000000002', 'f8d20000-0000-0000-0000-000000000001', 'seller')$$,
-  '42501', 'forbidden', '4. profiles.role legado "manager" NAO concede autoridade de Super Admin — continua forbidden');
+  '42501', 'forbidden', '4. Manager continua barrado de chamar a RPC (autorizacao e exclusivamente platform_role)');
 reset role;
 
 -- ══════════════════════════════════════════════════════════════════════
--- 6. ERROS: nenhuma escrita parcial, profiles.role sempre intacto
+-- 6. ERROS: nenhuma escrita parcial
 -- ══════════════════════════════════════════════════════════════════════
 
-select role as profile_role_before_err_2 from public.profiles where id = 'f8d10000-0000-0000-0000-000000000002' \gset
 select role as membership_role_before_err_2 from public.company_memberships where id = 'f8d30000-0000-0000-0000-000000000002' \gset
 
 set local role authenticated;
@@ -234,9 +211,6 @@ select throws_ok(
   'P0002', 'membership_not_found', '5. empresa errada (nao bate com a membership real) — nenhuma escrita');
 reset role;
 
-select is(
-  (select role from public.profiles where id = 'f8d10000-0000-0000-0000-000000000002'),
-  :'profile_role_before_err_2'::public.user_role, '5. profiles.role do alvo intacto apos as 3 falhas acima');
 select is(
   (select role from public.company_memberships where id = 'f8d30000-0000-0000-0000-000000000002'),
   :'membership_role_before_err_2'::public.company_role, '5. company_memberships.role do alvo intacto apos as 3 falhas acima (nenhuma alteracao parcial)');

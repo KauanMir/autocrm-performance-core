@@ -14,8 +14,8 @@ insert into public.pipeline_stages (id, company_id, code, name, sort_order)
   values ('bbbbbbbb-0000-0000-0000-00000000000b', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'new', 'Novo', 0);
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
   values ('00000000-0000-0000-0000-000000000000', 'b1111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'adminb@test.local', now(), now(), now());
-insert into public.profiles (id, company_id, name, email, role)
-  values ('b1111111-1111-1111-1111-111111111111', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Admin B', 'adminb@test.local', 'admin');
+insert into public.profiles (id, name, email)
+  values ('b1111111-1111-1111-1111-111111111111', 'Admin B', 'adminb@test.local');
 -- M1-F S8-C2-D1: Admin B precisa de membership real (apply_lead_event agora
 -- deriva empresa/papel de resolve_lead_mutation_context, nunca mais de
 -- profiles.company_id/role) — legado 'admin' -> company_memberships.role='manager'

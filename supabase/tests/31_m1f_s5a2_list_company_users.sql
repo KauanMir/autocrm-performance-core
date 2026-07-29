@@ -50,30 +50,30 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'f5a10000-0000-0000-0000-000000000054', 'authenticated', 'authenticated', 's5a2-pag-p4@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'f5a10000-0000-0000-0000-000000000055', 'authenticated', 'authenticated', 's5a2-pag-p5@test.local', now(), now(), now());
 
--- profiles.role (legado) preenchido só para satisfazer a coluna NOT NULL —
--- nunca lido nem retornado por list_company_users.
-insert into public.profiles (id, name, email, role, is_active, platform_role) values
-  ('f5a10000-0000-0000-0000-000000000001', 'S5A2 Manager A', 's5a2-manager-a@test.local', 'manager', true, null),
-  ('f5a10000-0000-0000-0000-000000000002', 'S5A2 Seller A1', 's5a2-seller-a1@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000003', 'S5A2 Profile Inativo', 's5a2-inactive-profile@test.local', 'manager', false, null),
-  ('f5a10000-0000-0000-0000-000000000004', 'S5A2 Membership Inativa', 's5a2-inactive-membership@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000005', 'Zephyr Busca', 'zephyr-busca@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000006', 'Bus%ca_Especial', 'escape-test@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000007', 'S5A2 Manager A2', 's5a2-manager-a2@test.local', 'manager', true, null),
-  ('f5a10000-0000-0000-0000-000000000008', 'CaXEspecial Decoy', 'decoy-underscore@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000009', 'Back\Slash', 'backslash-test@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000010', 'S5A2 Manager B', 's5a2-manager-b@test.local', 'manager', true, null),
-  ('f5a10000-0000-0000-0000-000000000011', 'S5A2 Seller B1', 's5a2-seller-b1@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000020', 'S5A2 Membro Empresa Cancelada', 's5a2-cancelada-membro@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000031', 'S5A2 Sem Membership', 's5a2-sem-membership@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000040', 'S5A2 Super Admin Solo', 's5a2-superadmin-solo@test.local', 'seller', true, 'super_admin'),
-  ('f5a10000-0000-0000-0000-000000000041', 'S5A2 Super Admin Membro', 's5a2-superadmin-membro@test.local', 'seller', true, 'super_admin'),
-  ('f5a10000-0000-0000-0000-000000000050', 'S5A2 Pag Manager', 's5a2-pag-manager@test.local', 'manager', true, null),
-  ('f5a10000-0000-0000-0000-000000000051', 'S5A2 Pag P1', 's5a2-pag-p1@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000052', 'S5A2 Pag P2', 's5a2-pag-p2@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000053', 'S5A2 Pag P3', 's5a2-pag-p3@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000054', 'S5A2 Pag P4', 's5a2-pag-p4@test.local', 'seller', true, null),
-  ('f5a10000-0000-0000-0000-000000000055', 'S5A2 Pag P5', 's5a2-pag-p5@test.local', 'seller', true, null);
+-- M1-F S8-E2: profiles.role foi removida fisicamente do catálogo (nunca
+-- foi lida nem retornada por list_company_users).
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('f5a10000-0000-0000-0000-000000000001', 'S5A2 Manager A', 's5a2-manager-a@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000002', 'S5A2 Seller A1', 's5a2-seller-a1@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000003', 'S5A2 Profile Inativo', 's5a2-inactive-profile@test.local', false, null),
+  ('f5a10000-0000-0000-0000-000000000004', 'S5A2 Membership Inativa', 's5a2-inactive-membership@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000005', 'Zephyr Busca', 'zephyr-busca@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000006', 'Bus%ca_Especial', 'escape-test@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000007', 'S5A2 Manager A2', 's5a2-manager-a2@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000008', 'CaXEspecial Decoy', 'decoy-underscore@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000009', 'Back\Slash', 'backslash-test@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000010', 'S5A2 Manager B', 's5a2-manager-b@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000011', 'S5A2 Seller B1', 's5a2-seller-b1@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000020', 'S5A2 Membro Empresa Cancelada', 's5a2-cancelada-membro@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000031', 'S5A2 Sem Membership', 's5a2-sem-membership@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000040', 'S5A2 Super Admin Solo', 's5a2-superadmin-solo@test.local', true, 'super_admin'),
+  ('f5a10000-0000-0000-0000-000000000041', 'S5A2 Super Admin Membro', 's5a2-superadmin-membro@test.local', true, 'super_admin'),
+  ('f5a10000-0000-0000-0000-000000000050', 'S5A2 Pag Manager', 's5a2-pag-manager@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000051', 'S5A2 Pag P1', 's5a2-pag-p1@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000052', 'S5A2 Pag P2', 's5a2-pag-p2@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000053', 'S5A2 Pag P3', 's5a2-pag-p3@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000054', 'S5A2 Pag P4', 's5a2-pag-p4@test.local', true, null),
+  ('f5a10000-0000-0000-0000-000000000055', 'S5A2 Pag P5', 's5a2-pag-p5@test.local', true, null);
 -- f5a10000-...-000030 (auth user sem profile) deliberadamente sem linha em profiles
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active, lifecycle_status, created_at) values
@@ -513,14 +513,16 @@ select is(
   0, 'S5-A1 intacto: anon/authenticated continuam sem UPDATE de tabela em profiles');
 
 -- grants de profiles/company_memberships nao foram ampliados por esta etapa
+-- (M1-F S8-E2 removeu company_id/role/seller_id do catálogo — o grant de
+-- coluna cai junto com a coluna dropada, restando 5).
 select is(
   (select array_agg(column_name::text order by column_name::text) from information_schema.role_column_grants
     where table_schema = 'public' and table_name = 'profiles'
       and grantee = 'authenticated' and privilege_type = 'SELECT'),
   (select array_agg(c order by c) from unnest(array[
-    'id', 'company_id', 'name', 'email', 'role', 'seller_id', 'is_active', 'platform_role'
+    'id', 'name', 'email', 'is_active', 'platform_role'
   ]) as c),
-  'grants de SELECT em profiles permanecem exatamente as mesmas 8 colunas (nao ampliados)');
+  'grants de SELECT em profiles permanecem exatamente as 5 colunas restantes (nao ampliados)');
 select is(
   (select array_agg(column_name::text order by column_name::text) from information_schema.role_column_grants
     where table_schema = 'public' and table_name = 'company_memberships'

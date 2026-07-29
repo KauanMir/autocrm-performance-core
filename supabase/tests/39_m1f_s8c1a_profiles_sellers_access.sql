@@ -30,11 +30,11 @@ insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, c
   ('00000000-0000-0000-0000-000000000000', 'ca200000-0000-0000-0000-000000000003', 'authenticated', 'authenticated', 's8c1a-manager-b@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'ca200000-0000-0000-0000-000000000004', 'authenticated', 'authenticated', 's8c1a-superadmin@test.local', now(), now(), now());
 
-insert into public.profiles (id, company_id, name, email, role, is_active, platform_role) values
-  ('ca200000-0000-0000-0000-000000000001', 'ca100000-0000-0000-0000-000000000001', 'Manager A', 's8c1a-manager-a@test.local', 'manager', true, null),
-  ('ca200000-0000-0000-0000-000000000002', 'ca100000-0000-0000-0000-000000000001', 'Seller A', 's8c1a-seller-a@test.local', 'seller', true, null),
-  ('ca200000-0000-0000-0000-000000000003', 'ca100000-0000-0000-0000-000000000002', 'Manager B', 's8c1a-manager-b@test.local', 'manager', true, null),
-  ('ca200000-0000-0000-0000-000000000004', null, 'Super Admin S8C1A', 's8c1a-superadmin@test.local', 'seller', true, 'super_admin');
+insert into public.profiles (id, name, email, is_active, platform_role) values
+  ('ca200000-0000-0000-0000-000000000001', 'Manager A', 's8c1a-manager-a@test.local', true, null),
+  ('ca200000-0000-0000-0000-000000000002', 'Seller A', 's8c1a-seller-a@test.local', true, null),
+  ('ca200000-0000-0000-0000-000000000003', 'Manager B', 's8c1a-manager-b@test.local', true, null),
+  ('ca200000-0000-0000-0000-000000000004', 'Super Admin S8C1A', 's8c1a-superadmin@test.local', true, 'super_admin');
 
 insert into public.company_memberships (id, company_id, profile_id, role, is_active) values
   ('ca300000-0000-0000-0000-000000000001', 'ca100000-0000-0000-0000-000000000001', 'ca200000-0000-0000-0000-000000000001', 'manager', true),
@@ -186,12 +186,15 @@ select is(
     )),
   8, 'as 8 RPCs administrativas/de ciclo de vida continuam no catalogo, nenhuma removida por esta migration');
 
--- ── nenhuma tabela/coluna foi removida (schema intacto) ──────────────────
+-- ── nenhuma tabela/coluna foi removida POR ESTA migration (S8-C1-A só
+--    tocou policies/grants) — M1-F S8-E2, em migration POSTERIOR, removeu
+--    fisicamente company_id/role/seller_id de public.profiles; o conjunto
+--    abaixo reflete o catálogo final após toda a suíte de migrations ─────
 select is(
   (select count(*)::int from information_schema.columns
     where table_schema = 'public' and table_name = 'profiles'
-      and column_name in ('id', 'company_id', 'name', 'email', 'role', 'seller_id', 'is_active', 'platform_role', 'created_at', 'updated_at')),
-  10, 'todas as 10 colunas de public.profiles permanecem intactas');
+      and column_name in ('id', 'name', 'email', 'is_active', 'platform_role', 'created_at', 'updated_at')),
+  7, 'as 7 colunas finais de public.profiles permanecem intactas (company_id/role/seller_id removidas pelo S8-E2)');
 
 select is(
   (select count(*)::int from information_schema.columns

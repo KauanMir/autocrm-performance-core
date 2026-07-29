@@ -193,15 +193,21 @@ reset role;
 select col_type_is('public'::name, 'sellers'::name, 'membership_id'::name, 'uuid');
 select col_is_null('public'::name, 'sellers'::name, 'membership_id'::name);
 
--- ── colunas legadas preservadas (migration é aditiva/compatível) ────────
--- col_type_is prova existência + tipo em uma única asserção (mesmo motivo
--- de não usar has_column citado acima).
+-- ── colunas de sellers preservadas (migration S1 é aditiva/compatível);
+--    profiles.company_id/role/seller_id ERAM legadas nesta etapa (S1) mas
+--    foram removidas fisicamente do catálogo pelo M1-F S8-E2 — este bloco
+--    reflete o estado final após toda a suíte de migrations, não mais a
+--    "preservação" original de S1 ──────────────────────────────────────
 select col_type_is('public'::name, 'sellers'::name, 'profile_id'::name, 'uuid');
 select col_type_is('public'::name, 'sellers'::name, 'company_id'::name, 'uuid');
-select col_type_is('public'::name, 'profiles'::name, 'company_id'::name, 'uuid');
-select col_type_is('public'::name, 'profiles'::name, 'role'::name, 'user_role');
-select col_type_is('public'::name, 'profiles'::name, 'seller_id'::name, 'text');
 select col_type_is('public'::name, 'profiles'::name, 'is_active'::name, 'boolean');
+select is(
+  (select count(*)::int from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles'
+      and column_name in ('company_id', 'role', 'seller_id')),
+  0, 'profiles.company_id/role/seller_id (legado do S1) foram removidas fisicamente pelo M1-F S8-E2');
+-- o enum user_role em si NÃO foi removido (nenhuma coluna o usa mais, mas
+-- o M1-F S8-E2 não foi autorizado a fazer DROP TYPE) — continua no catálogo.
 select has_enum('public', 'user_role'::name);
 select enum_has_labels('public', 'user_role', array['admin','manager','seller']);
 
