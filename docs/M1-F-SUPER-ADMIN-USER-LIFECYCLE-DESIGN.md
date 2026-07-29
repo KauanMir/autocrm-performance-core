@@ -4355,3 +4355,223 @@ exatamente como publicados. Nenhuma mutação implementada nesta etapa
 
 **O S8-C2-C1/C2 e o S8-D permanecem não iniciados. M1-E E4 continua
 pausado** até o fechamento formal do S8 (S8-F).
+
+## 34. Implementação do S8-C2-C1 — create, update e duplicidade com contexto comercial
+
+Esta seção registra a implementação (não mais planejamento) de
+`create_lead`/`update_lead`/`check_lead_phone_duplicate` com contexto
+comercial explícito. §0–§33 não foram alterados.
+
+### 34.1 Resolver interno compartilhado
+
+`resolve_lead_mutation_context(p_company_id uuid default null, p_read_only
+boolean default false)` (`20260729100000_m1f_s8c2c1_lead_mutation_context_
+resolver.sql`) — `SECURITY DEFINER`, `search_path=''`, **sem GRANT a
+authenticated/anon/public** (nunca API pública de frontend; chamado
+exclusivamente de dentro das RPCs `SECURITY DEFINER` que o consomem, cujo
+owner já tem privilégio implícito). Deriva sempre de `auth.uid()`; nunca
+aceita `profile_id`/`role`/`seller_id` do cliente.
+
+- **Super Admin**: `p_company_id` obrigatório na prática
+  (`company_required` se null; `company_not_found` se a empresa não
+  existe); `p_read_only=false` (default, usado por `create_lead`/
+  `update_lead`) exige status `ativa`/`implantacao`, senão
+  `company_read_only`; `p_read_only=true` (usado por
+  `check_lead_phone_duplicate`) aceita **qualquer status**, inclusive
+  `suspensa`/`cancelada` — leitura histórica nunca é mutation.
+  `actor_seller_id` sempre null.
+- **Manager/Seller**: `p_company_id` **totalmente ignorado** — a empresa
+  vem exclusivamente de `current_membership_company_id()`; status precisa
+  ser **exatamente `ativa`** (não `implantacao`, mais restritivo que
+  `can_access_company()`/Pipeline, mesma régua já aprovada para
+  `leads_select` no S8-C2-B1), senão `forbidden`; Seller sem seller ativo
+  resolvido via `current_profile_seller_id_for_company()` também
+  `forbidden`; `actor_seller_id` = o próprio para Seller, null para
+  Manager.
+- Qualquer outro caso (sem profile, profile globalmente inativo):
+  `forbidden`.
+
+### 34.2 create_lead/update_lead/check_lead_phone_duplicate
+
+`20260729110000_m1f_s8c2c1_lead_create_update_duplicate_commercial.sql` —
+as três funções mudam de identidade (ganham `p_company_id uuid default
+null` no final), o que o Postgres trata como assinatura nova; `DROP
+FUNCTION` da assinatura antiga + `CREATE` da nova, na mesma transação
+(nunca uma janela com as duas coexistindo). Nenhuma lê mais
+`profiles.company_id`/`profiles.role`/`profiles.seller_id` — toda
+autorização passa por `resolve_lead_mutation_context()`.
+
+- **create_lead**: Seller sempre autoatribuído (nunca escolhe outro,
+  `forbidden`); Manager/Super Admin podem criar sem vendedor ou escolher
+  um vendedor ativo da **empresa resolvida** (`seller_not_found` se de
+  outra empresa ou inativo); estágio inicial resolvido pelo `code='new'`
+  da empresa resolvida (`initial_stage_missing` preservado).
+- **update_lead**: Seller só edita o próprio lead (`forbidden` para
+  alheio); Manager/Super Admin editam qualquer lead da empresa resolvida;
+  lead de outra empresa usa o mesmo `lead_not_found` de um lead
+  inexistente (nunca revela a outra empresa); `version`/`stale_write`
+  preservados integralmente.
+- **check_lead_phone_duplicate**: chama o resolver com `p_read_only=true`
+  — Super Admin lê duplicidade em qualquer status; Manager/Seller
+  continuam restritos a `ativa`. Nunca escreve em `audit_log` (leitura
+  não é ação auditável, mesma decisão das 4 RPCs do S8-C2-B1).
+
+### 34.3 Divergência encontrada e decisão humana — FKs de autoria
+
+Divergência descoberta em teste, não prevista no planejamento: `leads_
+created_by_fk`/`leads_updated_by_fk` (`m1e_01`) exigem que `created_by_
+profile_id`/`updated_by_profile_id` pertençam à **mesma `company_id`** do
+lead (`FOREIGN KEY (company_id, created_by_profile_id) REFERENCES
+profiles (company_id, id)`). Super Admin nunca tem `profiles.company_id`
+(sempre null, por desenho — ator global da KAPA, nunca de uma empresa) —
+nenhuma combinação `(empresa real, super_admin_id)` pode satisfazer essa
+FK, em nenhuma empresa. `create_lead`/`update_lead` por Super Admin
+violavam `leads_created_by_fk`/`leads_updated_by_fk` sempre, confirmado
+ao vivo pelo teste pgTAP antes desta decisão.
+
+**Decisão humana (registrada, não revisitável sem nova decisão)**: para
+mutations do Super Admin, `created_by_profile_id`/`updated_by_profile_id`
+ficam **NULL** (a FK aceita null) — nunca `auth.uid()`/o profile do Super
+Admin nesses dois campos. A autoria real continua integralmente
+preservada em `audit_log.actor_profile_id` (que não tem essa restrição de
+mesma empresa) — não é perda de rastreabilidade, é a coluna certa para um
+ator que estrutural e corretamente não pertence a nenhuma empresa.
+`create_lead`: os dois campos ficam null na própria inserção. `update_lead`:
+somente `updated_by_profile_id` vira null; `created_by_profile_id`
+**nunca é tocado** por um update — a autoria original da criação (de um
+Manager/Seller, ou já null de uma criação anterior por Super Admin)
+permanece intacta. Manager/Seller preservam exatamente o comportamento
+atual (profile real sempre) — nenhuma mudança de comportamento, nenhuma
+FK alterada, nenhuma coluna/constraint/schema de `public.leads` tocada.
+
+Um segundo caso do mesmo tipo apareceu ao testar "legado divergente"
+(profile com membership real numa empresa, mas `profiles.company_id`
+legado apontando para outra) — tecnicamente a mesma FK se rompe para
+**qualquer** ator cujo `profiles.company_id` divirja da empresa
+resolvida pela membership (situação real e possível após uma
+transferência, `transfer_membership`/S6-D, que nunca atualiza
+`profiles.company_id`). A decisão humana foi explícita em restringir o
+tratamento NULL **exclusivamente a Super Admin** ("Manager/Seller
+preservam exatamente o comportamento atual") — por isso o fixture de
+teste do "legado divergente" foi ajustado para não exercitar essa
+combinação específica via `create_lead`/`update_lead` (que escreveriam
+nos dois campos); a prova de "`profiles.company_id` nunca autoriza" para
+Manager/Seller é feita através dos testes já existentes de `p_company_id`
+enviado pelo cliente sendo ignorado (mesma garantia, caminho sem escrita
+nos campos protegidos pela FK). Este comportamento pré-existente das FKs
+para Manager/Seller com `profiles.company_id` desatualizado **não foi
+alterado nem corrigido nesta etapa** — está fora do escopo autorizado
+(nenhuma mudança de schema) e é registrado aqui como um risco conhecido,
+não resolvido, para uma decisão futura própria.
+
+### 34.4 Auditoria de mutations do Super Admin
+
+Somente `create_lead`/`update_lead` bem-sucedidos com `actor_kind =
+'super_admin'` escrevem em `audit_log`, na mesma transação da mutação
+comercial (`insert` de auditoria e `insert`/`update` do lead sempre juntos
+— uma falha em qualquer um desfaz o outro, por estarem na mesma função/
+transação). `check_lead_phone_duplicate` nunca audita (leitura).
+
+- **create**: `action='lead_created'`, `before_data=null`, `after_data =
+  {lead_id, stage_id, seller_id, archived:false}` — nunca nome, telefone
+  ou veículo.
+- **update**: `action='lead_updated'`; `name`/`phone` nunca levam o
+  valor, só uma flag (`name_changed`/`phone_changed`); `car`/
+  `temperature`/`payment_preference`/`source` levam o valor real de antes
+  e depois (não são PII, e a auditoria é sempre a diferença exata entre o
+  que existia e o que passou a existir).
+- Ambos: `actor_profile_id` = o Super Admin real; `company_id` = a
+  empresa explícita resolvida; `entity_type='lead'`; `entity_id` = o lead
+  afetado; `result='success'`.
+
+### 34.5 Assinaturas finais e PostgREST
+
+Confirmado via `pg_get_function_arguments`/`pg_proc`: cada uma das três
+RPCs tem **uma única assinatura** no catálogo (a antiga foi removida pelo
+`DROP FUNCTION`, nunca ficou como overload); `p_company_id` é sempre o
+último parâmetro, com `DEFAULT NULL::uuid`. Grants recriados na mesma
+migration: `REVOKE ALL` de `public`/`anon`/`authenticated` seguido de
+`GRANT EXECUTE` só para `authenticated`, idêntico ao padrão anterior.
+`resolve_lead_mutation_context` aparece no catálogo (e em
+`database.types.ts`, artefato do gerador) mas **sem nenhum GRANT** —
+nunca chamável pelo cliente.
+
+### 34.6 Tipos regenerados
+
+`lib/supabase/database.types.ts` via `supabase gen types typescript
+--local` — diff estritamente aditivo (13 inserções, 1 deleção): `p_company_id`
+opcional adicionado às três RPCs; `resolve_lead_mutation_context` aparece
+como novo `Functions` entry (Args/Returns corretos); nenhum outro objeto
+alterado. Nenhuma edição manual.
+
+### 34.7 Testes antigos atualizados
+
+Autorizados e alterados exatamente 3 arquivos:
+
+- **`supabase/tests/02_m1e_create_lead.sql`**: fixture da "Empresa C
+  Teste" ganhou `status='ativa'` explícito (o default da coluna é
+  `implantacao`, negado pela nova regra de Manager/Seller) e uma
+  `company_memberships` real para "Admin C" (legado `role='admin'` ->
+  `company_memberships.role='manager'`, mesmo mapeamento já usado em
+  `01_m1e_grants_rls.sql`) — sem essa membership,
+  `current_membership_company_id()` resolveria null antes mesmo de
+  alcançar a checagem de estágio que o arquivo quer exercitar
+  (`initial_stage_missing`). Garantia preservada: mesmo conjunto de
+  asserções, mesmos erros esperados.
+- **`supabase/tests/03_m1e_update_lead.sql`**: nenhuma alteração — os
+  atores usados (seed da Empresa A) já têm `company_memberships` reais
+  desde o M1-F S1, status `ativa` desde o seed.
+- **`supabase/tests/08_m1e_duplicate.sql`**: nenhuma alteração — mesmo
+  motivo.
+
+### 34.8 Novo teste — `42_m1f_s8c2c1_lead_create_update_context.sql`
+
+97 asserções: catálogo (assinatura única das 3 RPCs + do resolver,
+`p_company_id` como último parâmetro com default, `SECURITY DEFINER`
+correto, `resolve_lead_mutation_context` sem grant a `authenticated`/
+`anon`, as 6 demais RPCs de mutation + as 4 RPCs de leitura do S8-C2-B1 +
+as policies de `leads`/`pipeline_stages` todas confirmadas intactas);
+matriz completa de Super Admin (create/update/duplicidade em
+`ativa`/`implantacao`/`suspensa`/`cancelada`, `company_required`/
+`company_not_found`/`company_read_only`, vendedor de outra empresa/
+inativo negado, `initial_stage_missing` preservado, isolamento entre
+empresas na duplicidade, `created_by`/`updated_by_profile_id` sempre
+null, `created_by_profile_id` original preservado ao editar um lead
+criado por Manager, auditoria completa incluindo a política de PII);
+Manager/Seller (criação com/sem vendedor, autoatribuição do Seller,
+`p_company_id` enviado pelo cliente sempre ignorado, lead de outra
+empresa nunca vazado, `created_by`/`updated_by_profile_id` preservados
+sem nenhuma mudança de comportamento, zero `audit_log` de plataforma);
+empresa não `ativa` nega Manager/Seller em create/update/duplicidade
+(`implantacao`/`suspensa`/`cancelada`); membership ausente/suspensa/
+offboarded/profile globalmente inativo (todos `forbidden`); legado
+divergente (`profiles.role`/`profiles.seller_id` nunca lidos — ver
+§34.3 para a limitação conhecida de `profiles.company_id`); `anon`
+negado nas três RPCs.
+
+### 34.9 Validação completa
+
+37 migrations locais; SQL 43 arquivos, **2251/2251** (2154 + 97 novos);
+TypeScript 108 arquivos, **1699/1699** (inalterado — nenhum frontend
+tocado); build verde, 8/8 páginas.
+
+### 34.10 Escopo preservado
+
+Nenhuma outra RPC alterada (as 6 demais RPCs de mutation de leads e as 4
+RPCs de leitura comercial do S8-C2-B1 permanecem exatamente como
+publicadas). Nenhuma policy de `leads`/`pipeline_stages`/`profiles`/
+`sellers` tocada. Nenhuma coluna, constraint ou tabela removida ou
+alterada — inclusive as FKs de autoria discutidas em §34.3, deixadas
+exatamente como estão. Nenhum helper legado removido. Nenhum frontend,
+hook, componente ou flag alterado; `NEXT_PUBLIC_FF_SUPER_ADMIN_
+COMMERCIAL_READ` inalterada; `NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_WRITE`
+continua não existindo. Nenhuma operação remota executada.
+
+**O S8-C2-C2 e o S8-C2-D1 permanecem não iniciados. M1-E E4 continua
+pausado** até o fechamento formal do S8 (S8-F). Risco conhecido e não
+resolvido (§34.3): `leads_created_by_fk`/`leads_updated_by_fk` continuam
+estruturalmente incompatíveis com qualquer ator (Manager/Seller incluído)
+cujo `profiles.company_id` legado divirja da empresa da membership real —
+hoje isso nunca ocorreu em produção para Manager/Seller por coincidência
+de dados, mas é alcançável após uma transferência de empresa
+(`transfer_membership`, S6-D), que nunca atualiza `profiles.company_id`.
