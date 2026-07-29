@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   membershipMaybeSingle: vi.fn(),
   profilesEq: vi.fn(),
   membershipEq: vi.fn(),
+  rpc: vi.fn(),
 }));
 
 vi.mock('@/lib/supabase/client', () => ({
@@ -20,6 +21,7 @@ vi.mock('@/lib/supabase/client', () => ({
       getSession: mocks.getSession,
       signOut: mocks.signOut,
     },
+    rpc: mocks.rpc,
     from: (table: string) => {
       if (table === 'profiles') {
         return {
@@ -71,10 +73,17 @@ function mockMembership(data: unknown, error: unknown = null) {
   mocks.membershipMaybeSingle.mockResolvedValue({ data, error });
 }
 
+// M1-F S8-D2-A: current_profile_seller_id_for_company (RPC real,
+// m1f_s2_02) — só chamada quando a membership resolvida é role='seller'.
+function mockSellerIdRpc(data: string | null, error: unknown = null) {
+  mocks.rpc.mockResolvedValue({ data, error });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.signInWithPassword.mockResolvedValue({ data: { user: { id: 'profile-1', email: 'fixture@exemplo.test' } }, error: null });
   mocks.getSession.mockResolvedValue({ data: { session: { user: { id: 'profile-1', email: 'fixture@exemplo.test' } } } });
+  mockSellerIdRpc(null); // default seguro — testes de Seller sobrescrevem explicitamente
 });
 
 afterEach(() => {
@@ -82,16 +91,25 @@ afterEach(() => {
 });
 
 describe('AuthService.login — carrega activeMembership junto do profile', () => {
-  it('Manager com membership ativa: activeMembership = { companyId, role: manager }', async () => {
+  it('Manager com membership ativa: activeMembership = { companyId, role: manager, sellerId: null }', async () => {
     mockProfile();
     mockMembership({ company_id: 'company-a', role: 'manager', is_active: true });
 
     const user = await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
 
-    expect(user?.activeMembership).toEqual({ companyId: 'company-a', role: 'manager' });
+    expect(user?.activeMembership).toEqual({ companyId: 'company-a', role: 'manager', sellerId: null });
   });
 
-  it('M1-F S8-D1: User retornado não possui companyId (legado removido do tipo e da leitura do profile)', async () => {
+  it('Manager NUNCA chama current_profile_seller_id_for_company (não tem seller próprio, por definição)', async () => {
+    mockProfile();
+    mockMembership({ company_id: 'company-a', role: 'manager', is_active: true });
+
+    await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
+
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it('M1-F S8-D1/S8-D2-A: User retornado não possui companyId, role nem sellerId próprios (legado removido do tipo e da leitura do profile)', async () => {
     mockProfile();
     mockMembership({ company_id: 'company-a', role: 'manager', is_active: true });
 
@@ -99,9 +117,12 @@ describe('AuthService.login — carrega activeMembership junto do profile', () =
 
     expect(user).not.toBeNull();
     expect(user).not.toHaveProperty('companyId');
-    // PROFILE_BASE.company_id continua no mock (coluna física ainda existe no
-    // banco), mas _loadProfile não a seleciona mais — provando que mesmo
-    // presente na resposta bruta, ela nunca chega a compor o User.
+    expect(user).not.toHaveProperty('role');
+    expect(user).not.toHaveProperty('sellerId');
+    // PROFILE_BASE.company_id/role/seller_id continuam no mock (colunas
+    // físicas ainda existem no banco), mas _loadProfile não as seleciona
+    // mais — provando que mesmo presentes na resposta bruta, nunca chegam
+    // a compor o User.
   });
 
   it('Super Admin sem nenhuma membership: activeMembership = null (nunca lança, nunca inventa)', async () => {
@@ -114,13 +135,47 @@ describe('AuthService.login — carrega activeMembership junto do profile', () =
     expect(user?.activeMembership).toBeNull();
   });
 
-  it('Seller com membership ativa: activeMembership.role = seller (nunca manager)', async () => {
+  it('Seller com membership ativa e sellers.id real: activeMembership.role = seller, sellerId real (nunca manager)', async () => {
     mockProfile({ role: 'seller' });
     mockMembership({ company_id: 'company-a', role: 'seller', is_active: true });
+    mockSellerIdRpc('seller-real-1');
 
     const user = await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
 
-    expect(user?.activeMembership).toEqual({ companyId: 'company-a', role: 'seller' });
+    expect(user?.activeMembership).toEqual({ companyId: 'company-a', role: 'seller', sellerId: 'seller-real-1' });
+    expect(mocks.rpc).toHaveBeenCalledWith('current_profile_seller_id_for_company', { p_target_company_id: 'company-a' });
+  });
+
+  it('Seller com membership ativa mas SEM linha válida em sellers: activeMembership.sellerId = null (nunca inventa, nunca cai em profiles.seller_id)', async () => {
+    mockProfile({ role: 'seller' });
+    mockMembership({ company_id: 'company-a', role: 'seller', is_active: true });
+    mockSellerIdRpc(null);
+
+    const user = await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
+
+    expect(user?.activeMembership).toEqual({ companyId: 'company-a', role: 'seller', sellerId: null });
+  });
+
+  it('erro na RPC de sellerId: activeMembership.sellerId = null, login NÃO falha por causa disso (falha fechada, nunca lança)', async () => {
+    mockProfile({ role: 'seller' });
+    mockMembership({ company_id: 'company-a', role: 'seller', is_active: true });
+    mockSellerIdRpc(null, { code: '42501', message: 'permission denied' });
+
+    const user = await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
+
+    expect(user).not.toBeNull();
+    expect(user?.activeMembership).toEqual({ companyId: 'company-a', role: 'seller', sellerId: null });
+  });
+
+  it('transferência: membership de destino resolve o sellerId da empresa NOVA, nunca reaproveita o antigo', async () => {
+    mockProfile({ role: 'seller' });
+    mockMembership({ company_id: 'company-b', role: 'seller', is_active: true });
+    mockSellerIdRpc('seller-empresa-b');
+
+    const user = await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
+
+    expect(mocks.rpc).toHaveBeenCalledWith('current_profile_seller_id_for_company', { p_target_company_id: 'company-b' });
+    expect(user?.activeMembership).toEqual({ companyId: 'company-b', role: 'seller', sellerId: 'seller-empresa-b' });
   });
 
   it('erro na consulta de membership: activeMembership = null, login NÃO falha por causa disso', async () => {
@@ -169,7 +224,7 @@ describe('AuthService.restoreSession — mesmo comportamento de membership', () 
 
     const user = await AuthService.restoreSession();
 
-    expect(user?.activeMembership).toEqual({ companyId: 'company-a', role: 'manager' });
+    expect(user?.activeMembership).toEqual({ companyId: 'company-a', role: 'manager', sellerId: null });
   });
 });
 
@@ -237,5 +292,56 @@ describe('AuthService.restoreSession — hardening de identidade (M1-F S6-E)', (
 
     expect(user).toBeNull();
     expect(mocks.signOut).not.toHaveBeenCalled();
+  });
+});
+
+// M1-F S8-D2-A: currentRole/isAdmin/isManager/isSeller migraram de
+// _cachedUser.role (legado) para activeMembership.role/platformRole —
+// login() é o único jeito público de popular _cachedUser, por isso estes
+// testes passam por ele em vez de construir o cache diretamente.
+describe('AuthService.currentRole/isAdmin/isManager/isSeller — M1-F S8-D2-A', () => {
+  it('Manager com membership ativa: currentRole="manager", isManager=true, isAdmin=false, isSeller=false', async () => {
+    mockProfile();
+    mockMembership({ company_id: 'company-a', role: 'manager', is_active: true });
+    await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
+
+    expect(AuthService.currentRole()).toBe('manager');
+    expect(AuthService.isManager()).toBe(true);
+    expect(AuthService.isAdmin()).toBe(false);
+    expect(AuthService.isSeller()).toBe(false);
+  });
+
+  it('Seller com membership ativa: currentRole="seller", isSeller=true, isManager=false', async () => {
+    mockProfile({ role: 'seller' });
+    mockMembership({ company_id: 'company-a', role: 'seller', is_active: true });
+    mockSellerIdRpc('seller-real-1');
+    await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
+
+    expect(AuthService.currentRole()).toBe('seller');
+    expect(AuthService.isSeller()).toBe(true);
+    expect(AuthService.isManager()).toBe(false);
+    expect(AuthService.isAdmin()).toBe(false);
+  });
+
+  it('Super Admin: isAdmin=true e isManager=true (correção de consistência do S8-D2-A — antes dependia do profiles.role legado, arbitrário para Super Admin)', async () => {
+    mockProfile({ platform_role: 'super_admin', company_id: null });
+    mockMembership(null);
+    await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
+
+    expect(AuthService.isAdmin()).toBe(true);
+    expect(AuthService.isManager()).toBe(true);
+    expect(AuthService.isSeller()).toBe(false);
+    expect(AuthService.currentRole()).toBeNull(); // Super Admin nunca tem activeMembership própria
+  });
+
+  it('sem activeMembership e sem platformRole (ex.: offboarded/suspenso): currentRole=null, isManager/isAdmin/isSeller=false', async () => {
+    mockProfile();
+    mockMembership(null);
+    await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
+
+    expect(AuthService.currentRole()).toBeNull();
+    expect(AuthService.isManager()).toBe(false);
+    expect(AuthService.isAdmin()).toBe(false);
+    expect(AuthService.isSeller()).toBe(false);
   });
 });
