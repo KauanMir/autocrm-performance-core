@@ -409,8 +409,8 @@ export type Database = {
             foreignKeyName: "lead_timeline_actor_fk"
             columns: ["company_id", "actor_profile_id"]
             isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["company_id", "id"]
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
           },
           {
             foreignKeyName: "lead_timeline_company_lead_fk"
