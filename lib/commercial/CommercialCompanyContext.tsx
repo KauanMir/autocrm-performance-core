@@ -19,6 +19,15 @@ import { platformCommercialQueryKeys } from '@/lib/commercial/queryKeys';
 export type CommercialCompanyContextValue = {
   selectedCompanyId: string | null;
   setSelectedCompanyId: (id: string | null) => void;
+  // M1-F S8-C2-D2 — contador monotônico, incrementado a cada troca REAL de
+  // empresa (mesmo gatilho do cancelQueries abaixo). Protege contra o
+  // caso raro de uma mutation pendente sobreviver a uma troca A->B->A: a
+  // simples comparação de companyId não detectaria essa ida-e-volta (o
+  // valor final é igual ao inicial), mas o epoch capturado no início da
+  // ação nunca mais bate. Capturado pelo chamador (hooks/formulários) no
+  // momento de abrir uma ação e revalidado imediatamente antes de cada
+  // RPC de mutation.
+  contextEpoch: number;
 };
 
 const CommercialCompanyContext = createContext<CommercialCompanyContextValue | null>(null);
@@ -34,11 +43,13 @@ export type CommercialCompanyProviderProps = {
 export function CommercialCompanyProvider({ children, identityKey }: CommercialCompanyProviderProps) {
   const queryClient = useQueryClient();
   const [selectedCompanyId, setSelectedCompanyIdState] = useState<string | null>(null);
+  const [contextEpoch, setContextEpoch] = useState(0);
   const previousCompanyIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setSelectedCompanyIdState(null);
     previousCompanyIdRef.current = null;
+    setContextEpoch((e) => e + 1);
   }, [identityKey]);
 
   const setSelectedCompanyId = useCallback((id: string | null) => {
@@ -53,12 +64,15 @@ export function CommercialCompanyProvider({ children, identityKey }: CommercialC
       void queryClient.cancelQueries({ queryKey: platformCommercialQueryKeys.leadsRoot(previous) });
       void queryClient.cancelQueries({ queryKey: platformCommercialQueryKeys.stages(previous) });
     }
+    if (previous !== id) {
+      setContextEpoch((e) => e + 1);
+    }
     previousCompanyIdRef.current = id;
     setSelectedCompanyIdState(id);
   }, [queryClient]);
 
   return (
-    <CommercialCompanyContext.Provider value={{ selectedCompanyId, setSelectedCompanyId }}>
+    <CommercialCompanyContext.Provider value={{ selectedCompanyId, setSelectedCompanyId, contextEpoch }}>
       {children}
     </CommercialCompanyContext.Provider>
   );

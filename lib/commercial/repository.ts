@@ -36,6 +36,58 @@ export type PlatformLeadRecord = Database['public']['Functions']['create_lead'][
 export type PlatformLeadDuplicateRow =
   Database['public']['Functions']['check_lead_phone_duplicate']['Returns'][number];
 
+// M1-F S8-C2-D2 — as seis RPCs restantes de mutation comercial. Todas
+// retornam a linha REAL de leads (isOneToOne=true), exceto
+// add_lead_timeline_entry (retorna a linha real de lead_timeline_entries).
+export type MovePlatformLeadInput = {
+  companyId: string;
+  leadId: string;
+  stageId: string;
+  // Omitido -> last-write-wins no drag/seletor (preservado do contrato real
+  // da RPC, nunca inventado); enviado -> optimistic locking pela version.
+  expectedVersion?: number;
+};
+
+export type ApplyPlatformLeadEventInput = {
+  companyId: string;
+  leadId: string;
+  eventType: Database['public']['Enums']['lead_event_type'];
+};
+
+export type AssignPlatformLeadSellerInput = {
+  companyId: string;
+  leadId: string;
+  // null remove o vendedor (contrato real de assign_lead_seller) — NUNCA
+  // profile_id/membership_id/nome, sempre o seller_id real da empresa
+  // selecionada (list_platform_sellers_for_company).
+  sellerId: string | null;
+  expectedVersion: number;
+};
+
+export type ArchivePlatformLeadInput = {
+  companyId: string;
+  leadId: string;
+  expectedVersion: number;
+};
+
+export type UnarchivePlatformLeadInput = {
+  companyId: string;
+  leadId: string;
+  expectedVersion: number;
+};
+
+export type AddPlatformLeadTimelineEntryInput = {
+  companyId: string;
+  leadId: string;
+  icon: string;
+  color: string;
+  label: string;
+  detail?: string;
+};
+
+export type PlatformLeadTimelineEntryRecord =
+  Database['public']['Functions']['add_lead_timeline_entry']['Returns'];
+
 export type CreatePlatformLeadInput = {
   companyId: string;
   name: string;
@@ -233,4 +285,148 @@ export async function checkPlatformLeadPhoneDuplicate(
     });
   }
   return data ?? [];
+}
+
+// ── M1-F S8-C2-D2 — mutations restantes ──────────────────────────────────
+// Mesmo padrão de createPlatformLead/updatePlatformLead: p_company_id
+// SEMPRE o valor capturado pelo chamador (nunca um fallback implícito), erro
+// sanitizado por operação, nenhum payload/PII exposto no erro.
+
+export async function movePlatformLeadToStage(input: MovePlatformLeadInput): Promise<PlatformLeadRecord> {
+  const { data, error } = await supabase.rpc('move_lead_to_stage', {
+    p_company_id: input.companyId,
+    p_lead_id: input.leadId,
+    p_stage_id: input.stageId,
+    p_expected_version: input.expectedVersion,
+  });
+  if (error) {
+    throw new PlatformCommercialError('platform_commercial_lead_move_failed', {
+      ...detailFrom(error),
+      operation: 'move_lead_to_stage',
+    });
+  }
+  if (!data) {
+    throw new PlatformCommercialError('platform_commercial_lead_move_failed', {
+      operation: 'move_lead_to_stage',
+      message: 'empty_response',
+    });
+  }
+  return data;
+}
+
+export async function applyPlatformLeadEvent(input: ApplyPlatformLeadEventInput): Promise<PlatformLeadRecord> {
+  const { data, error } = await supabase.rpc('apply_lead_event', {
+    p_company_id: input.companyId,
+    p_lead_id: input.leadId,
+    p_event_type: input.eventType,
+  });
+  if (error) {
+    throw new PlatformCommercialError('platform_commercial_lead_event_failed', {
+      ...detailFrom(error),
+      operation: 'apply_lead_event',
+    });
+  }
+  if (!data) {
+    throw new PlatformCommercialError('platform_commercial_lead_event_failed', {
+      operation: 'apply_lead_event',
+      message: 'empty_response',
+    });
+  }
+  return data;
+}
+
+// p_seller_id: o gerador de tipos marca este parâmetro como `string`
+// (obrigatório, sem refletir a nullability real aceita pela RPC — null
+// remove o vendedor, contrato confirmado na migration/pgTAP do S8-C2-D1).
+// A checagem de tipos aqui é intencionalmente relaxada SÓ neste campo (cast
+// local, nunca editando database.types.ts) para permitir o valor real que a
+// RPC sempre aceitou.
+export async function assignPlatformLeadSeller(input: AssignPlatformLeadSellerInput): Promise<PlatformLeadRecord> {
+  const { data, error } = await supabase.rpc('assign_lead_seller', {
+    p_company_id: input.companyId,
+    p_lead_id: input.leadId,
+    p_seller_id: input.sellerId as unknown as string,
+    p_expected_version: input.expectedVersion,
+  });
+  if (error) {
+    throw new PlatformCommercialError('platform_commercial_lead_assign_failed', {
+      ...detailFrom(error),
+      operation: 'assign_lead_seller',
+    });
+  }
+  if (!data) {
+    throw new PlatformCommercialError('platform_commercial_lead_assign_failed', {
+      operation: 'assign_lead_seller',
+      message: 'empty_response',
+    });
+  }
+  return data;
+}
+
+export async function archivePlatformLead(input: ArchivePlatformLeadInput): Promise<PlatformLeadRecord> {
+  const { data, error } = await supabase.rpc('archive_lead', {
+    p_company_id: input.companyId,
+    p_lead_id: input.leadId,
+    p_expected_version: input.expectedVersion,
+  });
+  if (error) {
+    throw new PlatformCommercialError('platform_commercial_lead_archive_failed', {
+      ...detailFrom(error),
+      operation: 'archive_lead',
+    });
+  }
+  if (!data) {
+    throw new PlatformCommercialError('platform_commercial_lead_archive_failed', {
+      operation: 'archive_lead',
+      message: 'empty_response',
+    });
+  }
+  return data;
+}
+
+export async function unarchivePlatformLead(input: UnarchivePlatformLeadInput): Promise<PlatformLeadRecord> {
+  const { data, error } = await supabase.rpc('unarchive_lead', {
+    p_company_id: input.companyId,
+    p_lead_id: input.leadId,
+    p_expected_version: input.expectedVersion,
+  });
+  if (error) {
+    throw new PlatformCommercialError('platform_commercial_lead_unarchive_failed', {
+      ...detailFrom(error),
+      operation: 'unarchive_lead',
+    });
+  }
+  if (!data) {
+    throw new PlatformCommercialError('platform_commercial_lead_unarchive_failed', {
+      operation: 'unarchive_lead',
+      message: 'empty_response',
+    });
+  }
+  return data;
+}
+
+export async function addPlatformLeadTimelineEntry(
+  input: AddPlatformLeadTimelineEntryInput,
+): Promise<PlatformLeadTimelineEntryRecord> {
+  const { data, error } = await supabase.rpc('add_lead_timeline_entry', {
+    p_company_id: input.companyId,
+    p_lead_id: input.leadId,
+    p_icon: input.icon,
+    p_color: input.color,
+    p_label: input.label,
+    p_detail: input.detail || undefined,
+  });
+  if (error) {
+    throw new PlatformCommercialError('platform_commercial_lead_timeline_add_failed', {
+      ...detailFrom(error),
+      operation: 'add_lead_timeline_entry',
+    });
+  }
+  if (!data) {
+    throw new PlatformCommercialError('platform_commercial_lead_timeline_add_failed', {
+      operation: 'add_lead_timeline_entry',
+      message: 'empty_response',
+    });
+  }
+  return data;
 }

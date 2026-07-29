@@ -14,6 +14,14 @@ export type PlatformCommercialErrorCode =
   | 'platform_commercial_lead_create_failed'
   | 'platform_commercial_lead_update_failed'
   | 'platform_commercial_duplicate_check_failed'
+  // M1-F S8-C2-D2 — mutations restantes (move/event/assign/archive/
+  // unarchive/timeline).
+  | 'platform_commercial_lead_move_failed'
+  | 'platform_commercial_lead_event_failed'
+  | 'platform_commercial_lead_assign_failed'
+  | 'platform_commercial_lead_archive_failed'
+  | 'platform_commercial_lead_unarchive_failed'
+  | 'platform_commercial_lead_timeline_add_failed'
   // Espelham os erros estáveis das 4 RPCs (forbidden/company_required/
   // company_not_found/lead_required/lead_not_found) — nunca inventados aqui,
   // só repassados como causa técnica em `detail.message`.
@@ -51,6 +59,21 @@ const LOCAL_ERROR_MESSAGES: Record<string, string> = {
   'create-platform-lead-stale-context': 'A empresa selecionada mudou antes da conclusão. Tente novamente.',
   'update-platform-lead-not-allowed': 'Você não tem permissão para editar Leads nesta empresa.',
   'update-platform-lead-stale-context': 'A empresa selecionada mudou antes da conclusão. Tente novamente.',
+  // M1-F S8-C2-D2 — mesmas duas mensagens locais, reaplicadas às seis
+  // mutations restantes (nunca uma nova mensagem por RPC — o motivo local é
+  // sempre um dos dois: falta de autorização ou contexto obsoleto).
+  'move-platform-lead-not-allowed': 'Você não tem permissão para mover Leads nesta empresa.',
+  'move-platform-lead-stale-context': 'O contexto da empresa mudou. Tente novamente.',
+  'apply-platform-lead-event-not-allowed': 'Você não tem permissão para registrar eventos nesta empresa.',
+  'apply-platform-lead-event-stale-context': 'O contexto da empresa mudou. Tente novamente.',
+  'assign-platform-lead-seller-not-allowed': 'Você não tem permissão para atribuir vendedores nesta empresa.',
+  'assign-platform-lead-seller-stale-context': 'O contexto da empresa mudou. Tente novamente.',
+  'archive-platform-lead-not-allowed': 'Você não tem permissão para arquivar Leads nesta empresa.',
+  'archive-platform-lead-stale-context': 'O contexto da empresa mudou. Tente novamente.',
+  'unarchive-platform-lead-not-allowed': 'Você não tem permissão para desarquivar Leads nesta empresa.',
+  'unarchive-platform-lead-stale-context': 'O contexto da empresa mudou. Tente novamente.',
+  'add-platform-lead-timeline-entry-not-allowed': 'Você não tem permissão para adicionar entradas nesta empresa.',
+  'add-platform-lead-timeline-entry-stale-context': 'O contexto da empresa mudou. Tente novamente.',
 };
 
 // M1-F S8-C2-C2 — tradutor único dos códigos estáveis das RPCs de mutation/
@@ -90,6 +113,11 @@ export function getPlatformCommercialErrorMessage(error: unknown): string {
       return 'Este Lead foi alterado em outro lugar. Abra novamente para editar.';
     case 'invalid_phone':
       return 'Informe um telefone válido.';
+    // M1-F S8-C2-D2
+    case 'stage_not_found':
+      return 'A etapa selecionada não está mais disponível.';
+    case 'invalid_event':
+      return 'Este evento não é reconhecido pelo sistema.';
     default:
       return 'Não foi possível concluir esta ação.';
   }
