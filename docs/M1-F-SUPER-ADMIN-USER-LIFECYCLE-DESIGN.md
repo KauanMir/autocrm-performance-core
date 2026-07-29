@@ -4682,3 +4682,90 @@ coluna escalar, nunca via embedding) — deixar essa metadata desatualizada
 
 **O S8-C2-C2 só se desbloqueia com esta etapa publicada e validada. M1-E
 E4 continua pausado.**
+
+## 36. Fonte segura de Sellers para a operação comercial
+
+Esta seção registra a implementação (não mais planejamento) da RPC de
+leitura que desbloqueia o Seller picker do S8-C2-C2. §0–§35 não foram
+alterados. **O S8-C2-C2 (frontend de create/update/duplicidade) continua
+pausado** — nenhuma linha de frontend foi tocada nesta etapa.
+
+### 36.1 Bloqueio encontrado
+
+Ao planejar o formulário de criação do S8-C2-C2, nenhuma fonte publicada
+fornecia o identificador que `create_lead`/`assign_lead_seller` exigem em
+`p_seller_id` (`public.sellers.id`, `text`, independente de
+`profiles.id`). `list_company_users`/`list_inactive_company_users`
+devolvem `profile_id`/`membership_id` — nunca `sellers.id`. `public.
+sellers` não tem nenhuma RLS policy e `authenticated`/`anon` não têm
+`SELECT` (apenas os privilégios default `TRUNCATE`/`REFERENCES`/
+`TRIGGER`, confirmado ao vivo). Nenhuma RPC publicada retornava um
+roster de sellers. `profile_id`, `membership_id` e `seller_id` são três
+identidades **distintas**, nunca substituíveis entre si — usar
+`profile_id` no lugar de `seller_id` teria feito `create_lead` falhar
+sempre com `seller_not_found`, ou pior, atribuído o Lead a um Seller
+diferente do pretendido caso algum id colidisse por acaso.
+
+### 36.2 RPC estreita: list_platform_sellers_for_company
+
+`list_platform_sellers_for_company(p_company_id uuid)` — mesmo padrão
+das quatro RPCs do S8-C2-B1 (`SECURITY DEFINER`, `search_path=''`,
+valida `is_platform_super_admin()` internamente, `REVOKE ALL` + `GRANT
+EXECUTE` só para `authenticated`). Empresa sempre explícita
+(`company_required`/`company_not_found`); `ativa`/`implantacao`
+permitidas (mesma matriz de mutation do S8-C2-C1); `suspensa`/`cancelada`
+→ `company_read_only` (é preparação para o Seller picker de escrita,
+nunca leitura histórica solta). Qualquer ator que não seja Super Admin
+→ `forbidden`, mesmo com empresa válida — Manager/Seller nunca precisam
+desta RPC (já resolvem o próprio Seller via
+`current_profile_seller_id_for_company()`).
+
+### 36.3 Filtro de "Seller operacional"
+
+Retorna somente sellers que satisfaçam **simultaneamente**:
+`sellers.company_id = p_company_id`, `sellers.is_active = true`,
+`sellers.membership_id` resolvendo uma `company_memberships` com
+`company_id` igual, `role = 'seller'`, `is_active = true`,
+`lifecycle_status = 'active'`, e `profiles.is_active = true` (via
+`company_memberships.profile_id`). Mesmo padrão defensivo de
+`current_profile_seller_id_for_company()` (S2) — `sellers.is_active` já
+é mantido em sincronia em **todo** ponto de transição do ciclo de vida
+(`suspend_membership`/`reactivate_membership`/`offboard_seller`/
+`transfer_membership`/`update_membership_role`, confirmado por auditoria
+de todas as migrations que escrevem `sellers.is_active`), mas a checagem
+completa da cadeia é redundância deliberada, nunca confiança cega numa
+única coluna. `profiles.role`/`profiles.seller_id` legados **nunca** são
+lidos. Um Seller promovido a Manager, transferido para outra empresa,
+suspenso ou offboarded nunca aparece — a mesma linha física de `sellers`
+não desaparece (nunca é apagada), só deixa de satisfazer o filtro.
+
+### 36.4 Retorno mínimo
+
+Somente `seller_id` (tipo real de `sellers.id`, `text`) e `name`
+(`sellers.name`, nunca vazio pela constraint já existente na tabela).
+Nenhum e-mail, telefone, `platform_role`, `company_role`,
+`lifecycle_status`, `membership_id` ou qualquer dado administrativo —
+o Seller picker só precisa do valor a enviar em `p_seller_id` e do nome
+a exibir. Ordenação determinística: `name`, depois `seller_id` como
+desempate.
+
+### 36.5 Grants e segurança
+
+`REVOKE ALL` de `public`/`anon`/`authenticated` seguido de `GRANT
+EXECUTE` só para `authenticated` — nenhum `SELECT` novo em `sellers`,
+`profiles` ou `company_memberships`; a RPC continua sendo o único
+caminho. `database.types.ts` regenerado — diff estritamente aditivo (a
+nova função aparece; nenhuma outra assinatura muda).
+
+### 36.6 Escopo preservado
+
+Nenhuma RPC de mutation alterada (`create_lead`/`update_lead`/
+`check_lead_phone_duplicate`/`assign_lead_seller`/as demais 5 RPCs de
+leads intactas). Nenhuma policy tocada. Nenhum `SELECT` direto concedido
+em `sellers`/`profiles`/`company_memberships`. Nenhuma coluna alterada.
+Nenhum frontend, hook, componente ou flag criado/alterado — o Seller
+picker e o restante do S8-C2-C2 permanecem para a próxima etapa. Nenhuma
+operação remota executada.
+
+**O S8-C2-C2 (frontend de create/update/duplicidade) só se desbloqueia
+com esta subetapa publicada e validada. M1-E E4 continua pausado.**
