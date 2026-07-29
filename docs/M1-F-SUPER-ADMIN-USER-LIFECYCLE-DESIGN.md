@@ -6097,3 +6097,182 @@ montada em `App.tsx`.
 `profiles.role` em `update_membership_role`) está desbloqueado, mas
 não iniciado. S8-E não iniciado. M1-E E4 continua pausado** até o
 fechamento formal do S8 (S8-F).
+
+## 44. S8-D2-B — fim da sincronização de profiles.role
+
+Terceiro e último corte do S8-D: remove o único escritor ativo de
+`profiles.role` (`update_membership_role`) — a coluna continua
+existindo fisicamente, mas para de ser mantida em sincronia com
+`company_memberships.role`. Com isso, o frontend já totalmente
+desacoplado desde o S8-D2-A e o backend deixam de compartilhar
+qualquer sincronização de papel empresarial: `company_memberships.role`
+passa a ser a única fonte real, ponto final.
+
+### 44.1 Decisões humanas congeladas
+
+1. `company_memberships.role` é a única fonte válida do papel
+   empresarial.
+2. `profiles.role` não possui mais nenhum consumidor runtime legítimo
+   no frontend (confirmado desde o S8-D2-A).
+3. A sincronização `update_membership_role → UPDATE public.profiles
+   SET role = ...` é removida.
+4. `profiles.role` continua fisicamente no banco até o S8-E.
+5. Nenhum backfill.
+6. Nenhuma limpeza dos valores antigos existentes.
+7. `profiles.role` nunca é definida como `null`.
+8. `accept_invite` não é alterado nesta etapa — continua preenchendo
+   `profiles.role` inicialmente enquanto a coluna existir; esse INSERT
+   é tratado junto da remoção física da coluna no S8-E.
+9. `profiles.company_id`/`profiles.seller_id` não são alterados.
+10. Nenhum helper SQL legado é removido nesta etapa.
+11. A assinatura pública de `update_membership_role` não muda.
+12. Preservados integralmente: mudança de role na membership,
+    promoção Seller→Manager, rebaixamento Manager→Seller, ativação/
+    desativação de `sellers`, lifecycle, locks, validações, erros,
+    `audit_log`, retorno, grants, `search_path`, comportamento de
+    Super Admin e Manager.
+13. M1-E E4 continua pausado até o S8-F.
+
+### 44.2 Auditoria final de profiles.role — zero consumidor ativo além do já esperado
+
+Auditoria no estado ATIVO do banco (não nas migrations históricas —
+funções Postgres são substituídas in-place, então só a definição mais
+recente de cada objeto importa): dump completo de `pg_get_functiondef`
+de toda função `public.*`, `pg_policies` e `information_schema.views`.
+Confirmado: **único escritor** de `profiles.role` é
+`update_membership_role` (2 `UPDATE`, um em cada branch SELLER→MANAGER/
+MANAGER→SELLER); `accept_invite` só faz `INSERT` inicial na criação do
+profile (fora de escopo, decisão #8); **zero** policy/trigger/view/
+outra RPC lê `profiles.role` — todas as policies ativas de
+`leads`/`lead_timeline_entries`/`pipeline_stages` já usam
+`current_membership_role()`/`current_profile_seller_id_for_company()`
+(helpers do S2), nunca a coluna legada. Os 4 helpers legados M1-C
+(`current_profile_role`, `current_profile_seller_id`,
+`current_profile_company_id`, `is_manager_or_admin`) continuam
+existindo e continuam lendo `profiles.role`/`seller_id`/`company_id`
+internamente, mas **zero consumidor ativo** os chama (nem policy, nem
+outra função) — confirmado por busca direta no dump — deixados
+intocados, reservados ao S8-E (decisão #10).
+
+### 44.3 Revalidação de update_membership_role e correção de idempotência
+
+Releitura completa da função (migration `20260723180000_m1f_s5c_...`)
+identificou exatamente o trecho a remover: `v_expected_profile_role`/
+`v_needs_profile_update` e as duas linhas `update public.profiles set
+role = v_expected_profile_role ...`. Uma remoção puramente mecânica
+dessas linhas, porém, deixaria `v_needs_profile_update` órfã em dois
+lugares que não podem simplesmente desaparecer sem gerar um bug real:
+o curto-circuito de idempotência (`if not v_needs_membership_update and
+not v_needs_profile_update and not v_needs_seller_update`) e o valor
+`after_data.profile_role` do `audit_log`. Deixar essas duas referências
+como estavam faria a função **nunca mais** se considerar idempotente
+depois da primeira troca real de role (`profiles.role` fica congelado
+para sempre, então `v_target_profile.role is distinct from
+v_expected_profile_role` seria `true` para sempre) — toda chamada
+repetida com o mesmo `p_role` passaria a gravar um `audit_log` novo em
+vez de retornar cedo sem escrever nada, e `after_data.profile_role`
+continuaria afirmando que o profile foi atualizado para um valor que
+nunca chega a ser escrito. Decisão humana explícita (confirmada antes
+da implementação): remover `v_needs_profile_update`/
+`v_expected_profile_role` por completo — a idempotência passa a
+depender só de efeitos reais ainda executados pela função (mudança de
+`company_memberships.role`, necessidade de ativar/desativar/criar
+`sellers`); `before_data`/`after_data.profile_role` passam a mostrar
+sempre `v_target_profile.role` (o valor real, nunca mais tocado por
+esta RPC — igual antes e depois, honesto sobre o que de fato
+aconteceu, nunca afirma uma alteração que não ocorreu).
+
+### 44.4 Migration
+
+`20260729170000_m1f_s8d2b_stop_profile_role_sync.sql` —
+`create or replace function public.update_membership_role(...)` com
+assinatura/parâmetros/retorno/`SECURITY DEFINER`/`search_path=''`/
+grants idênticos à versão anterior; único efeito real removido: as duas
+linhas `UPDATE public.profiles SET role = ...`. Nenhuma alteração em
+`company_memberships`, `sellers`, `profiles.company_id`/`seller_id`,
+`accept_invite` ou qualquer outra RPC. Sem backfill — nenhum `UPDATE`
+de dados existentes.
+
+### 44.5 Semântica final
+
+**SELLER → MANAGER**: `company_memberships.role` vira `manager`; Seller
+é desvinculado/inativado conforme o contrato já existente;
+`profiles.role` permanece com o valor antigo (nunca mais sincroniza);
+frontend reconhece Manager via `activeMembership.role`; nenhuma
+permissão depende do valor antigo.
+
+**MANAGER → SELLER**: `company_memberships.role` vira `seller`; Seller
+é criado/reativado/religado conforme o contrato já existente;
+`profiles.role` permanece com o valor antigo;
+`activeMembership.sellerId` resolve o Seller real via
+`current_profile_seller_id_for_company`; nenhuma permissão depende do
+valor antigo.
+
+**Transferência**: a membership atual continua sendo a fonte;
+`profiles.role` divergente não interfere. **Suspensão/offboarding**:
+comportamento atual preservado, nenhuma autoridade vem de
+`profiles.role`. **Super Admin**: `platformRole` continua sendo a
+identidade global; `profiles.role` nunca concede acesso.
+
+### 44.6 Testes
+
+`tests/33_m1f_s5c_update_membership_role.sql`: 3 assertions
+desatualizadas corrigidas (autorizado pela tarefa — afirmavam que
+`profiles.role` deveria acompanhar `company_memberships.role`) — Seller
+A1 promovido a Manager: `profiles.role` continua `seller` (nunca
+sincroniza, em vez de "sincronizado para manager"); rebaixamento de
+volta: mesma asserção, comentário corrigido para não implicar que
+"voltou" (nunca saiu); e o bloco de "reconciliação de legado admin"
+(membership já correta, `profiles.role='admin'` divergente) reescrito
+por completo — a chamada agora é **idempotente** (nenhuma escrita,
+nenhum `audit_log` novo), `profiles.role` permanece `admin` para
+sempre, em vez do comportamento antigo de "correção automática para
+manager". Nenhuma cobertura de promoção/rebaixamento/lifecycle de
+Seller/`audit_log`/erros/locks/atomicidade foi removida — só as 3
+asserções sobre o efeito retirado.
+
+`tests/48_m1f_s8d2b_stop_profile_role_sync.sql` (novo arquivo, 38
+assertions): catálogo (assinatura/overload única/`SECURITY DEFINER`/
+`search_path=''`/grants `public`+`anon` sem `EXECUTE`+`authenticated`
+com `EXECUTE`, coluna `profiles.role` e função `accept_invite`
+intactas, helpers legados intactos); Seller→Manager e Manager→Seller
+com `profiles.role` começando EM SINCRONIA com a membership (prova que
+a divergência nasce da própria mudança real, não de uma fixture já
+desalinhada) e permanecendo divergente para sempre depois, com
+`audit_log.before_data`/`after_data.profile_role` iguais entre si (o
+valor real, nunca o "esperado"); idempotência — repetir a mesma chamada
+sobre um estado com `profiles.role` divergente não cria `audit_log`
+novo; legado divergente — `is_platform_super_admin()` real ignora
+`profiles.role`, um Manager com `profiles.role` legado `'manager'`
+continua `forbidden` ao tentar chamar a RPC (autoridade é sempre
+`platform_role`); erros (`p_role` nulo, membership inexistente, empresa
+errada) confirmando `profiles.role`/`company_memberships.role` do alvo
+intactos após cada falha — nenhuma escrita parcial.
+
+### 44.7 Validação completa
+
+`npx tsc --noEmit`: diff vazio contra a baseline de 22 erros
+pré-existentes (nenhum arquivo TypeScript foi tocado nesta etapa).
+`npm run test:run`: **1950/1950 PASS** (128 arquivos, inalterado —
+nenhum teste TypeScript era necessário). `npm run build`: verde, 8/8
+páginas. `database.types.ts`: `supabase gen types typescript --local`
+gerado e comparado byte a byte contra o arquivo já commitado — **diff
+vazio**, confirmando que a assinatura pública da RPC não mudou em
+nenhum detalhe observável pelo gerador. SQL: `supabase db reset` +
+`supabase test db` — **44 migrations, 49 arquivos, 2517/2517 PASS**
+(2478 do S8-D2-A + 1 assertion nova em `33_...` + 38 do novo
+`48_...`).
+
+### 44.8 Escopo preservado
+
+Nenhum frontend alterado (nenhum componente, hook, tipo, `AuthService`,
+flag). `database.types.ts` não commitado (diff vazio, gerado só para
+validação). Assinatura de `update_membership_role` idêntica.
+`accept_invite` intocado. `profiles.company_id`/`seller_id` intactos.
+Helpers legados M1-C intactos. Nenhuma operação Supabase remota.
+
+**O S8-D está formalmente concluído** (S8-D1: `User.companyId` +
+navegação; S8-D2-A: `User.role`/`User.sellerId` + módulos M0;
+S8-D2-B: fim da sincronização de `profiles.role`). **S8-E está
+desbloqueado, mas não iniciado. M1-E E4 continua pausado** até o
+fechamento formal do S8 (S8-F).
