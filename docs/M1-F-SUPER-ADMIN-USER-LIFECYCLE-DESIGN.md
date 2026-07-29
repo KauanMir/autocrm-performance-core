@@ -5150,3 +5150,183 @@ Supabase remoto.
 contexto comercial explícito. S8-C2-D2 (frontend das mutations
 restantes) permanece não iniciado. M1-E E4 continua pausado** até o
 fechamento formal do S8 (S8-F).
+
+## 39. Autoria da timeline por membership histórica
+
+Esta seção fecha o risco registrado em §38.11 (`lead_timeline_actor_fk`
+continuava apontando para `profiles(company_id, id)`, ao contrário das
+duas FKs equivalentes de `leads`, já corrigidas no S8-C2-C1-AUTH-A1,
+§35). §0–§38 não foram alterados.
+
+### 39.1 FK antiga e conflito reproduzido
+
+`lead_timeline_actor_fk` exigia `profiles.company_id = lead_timeline_
+entries.company_id` para o ator — `profiles.company_id` nunca é
+atualizado por `transfer_membership` (nem por nenhuma outra RPC além de
+`accept_invite`, na criação inicial do profile). Reprodução local
+(rollback, nenhum dado persistido): Manager com membership ativa em A
+cria uma entrada de timeline em A; Super Admin executa
+`transfer_membership` para B (com sucessor, pois era o último manager de
+A); a membership em B fica `active`, a de A fica `offboarded` (nunca
+apagada); `profiles.company_id` **permanece A**. `add_lead_timeline_
+entry` em B, já corretamente autorizado pela membership real (via
+`resolve_lead_mutation_context`, S8-C2-C1), falhava com
+`lead_timeline_actor_fk` (SQLSTATE 23503) — o mesmo conflito estrutural
+já corrigido para `leads_created_by_fk`/`leads_updated_by_fk`, agora
+confirmado também na timeline.
+
+### 39.2 Decisão: reapontar a FK para a membership histórica
+
+`20260729160000_m1f_s8c2d1timeline_a1_actor_membership_fk.sql` —
+`lead_timeline_actor_fk` passa a referenciar `public.company_memberships
+(company_id, profile_id)` — nunca mais `public.profiles(company_id,
+id)`. Mesmo molde exato de `20260729120000_m1f_s8c2c1auth_a1_lead_
+authorship_membership_fk.sql`: validação de dados preexistentes (falha
+fechada, sem PII, erro estável `timeline_actor_membership_backfill_
+required`) antes de `DROP CONSTRAINT` + `ADD CONSTRAINT` na mesma
+transação; `MATCH SIMPLE` (default), não deferrable, `ON UPDATE NO
+ACTION`, `ON DELETE RESTRICT` (nunca `SET NULL`/`CASCADE` — mudança
+deliberada em relação ao `ON DELETE SET NULL` anterior, para bloquear
+hard delete de uma membership referenciada, mesma política já usada por
+`leads_created_by_fk`/`leads_updated_by_fk`). `lead_timeline_entries.
+actor_profile_id` preservada exatamente como está (continua guardando o
+`profiles.id` global, continua nullable) — só o alvo da integridade
+referencial muda. `UNIQUE(company_id, profile_id)` de `company_
+memberships` (já existente desde o S1) não é recriada. Nenhuma RPC
+alterada: `add_lead_timeline_entry` já gravava exatamente o valor certo
+(profile real do ator para Manager/Seller, `NULL` para Super Admin,
+desde o S8-C2-D1, §38.4) — apenas o destino da checagem referencial
+muda.
+
+### 39.3 Significado final da coluna
+
+`actor_profile_id` representa "o profile que efetuou a ação, provado por
+ter tido (em qualquer momento, inclusive hoje offboarded) uma membership
+na mesma empresa da entrada de timeline" — mesmo significado já adotado
+para `leads.created_by_profile_id`/`updated_by_profile_id` desde o §35.
+`company_memberships` nunca apaga fisicamente uma linha (nenhuma RPC do
+projeto o faz) — a membership histórica sustenta a autoria de uma
+entrada de timeline para sempre, mesmo após offboarding, suspensão ou
+transferência para outra empresa.
+
+### 39.4 Transferência, offboarding e mudança de papel preservam a autoria
+
+Transferência A→B: a membership de A vira `offboarded` (nunca apagada) —
+entradas de timeline antigas criadas em A continuam com FK válida contra
+essa linha histórica; a nova membership em B autoriza `add_lead_
+timeline_entry` em B normalmente (via `resolve_lead_mutation_context`),
+e a nova FK é satisfeita pela membership de B. `profiles.company_id`
+pode permanecer A indefinidamente sem interferir em nada — nem na
+autorização (já não lido desde o S8-C2-C1), nem agora na integridade
+referencial da timeline. Offboarding e suspensão: a membership perde
+`is_active`/`lifecycle_status='active'` mas a linha permanece — a FK
+continua satisfeita, a autoria histórica nunca é afetada; o ator só
+perde autorização **operacional** (via `resolve_lead_mutation_context`),
+nunca a prova de autoria passada. Mudança de papel (`update_membership_
+role`): a mesma linha de `company_memberships` é atualizada, `profile_
+id`/`company_id` permanecem imutáveis (trigger de consistência do S1) —
+a FK nunca é afetada por uma troca de `role`.
+
+### 39.5 Super Admin e audit_log inalterados
+
+`actor_profile_id` continua `NULL` para Super Admin (decisão do
+S8-C2-D1, §38.4 — Super Admin nunca tem `company_memberships`, por
+desenho; nenhuma membership artificial foi criada). `NULL` satisfaz
+qualquer FK trivialmente. A autoria real do Super Admin continua
+exclusivamente em `audit_log.actor_profile_id`, sem nenhuma alteração
+nesta etapa.
+
+### 39.6 Defesa cross-company preservada
+
+Um profile sem membership na empresa-alvo nunca pode ser gravado como
+ator de uma timeline daquela empresa: `resolve_lead_mutation_context`
+já resolve `actor_profile_id`/`resolved_company_id` exclusivamente a
+partir da membership ativa do próprio chamador (Manager/Seller) ou da
+empresa explícita validada (Super Admin) — nenhuma RPC aceita um
+`actor_profile_id` arbitrário do cliente. A FK é defesa em profundidade
+adicional: mesmo uma tentativa hipotética de gravar um ator de outra
+empresa falharia pela integridade referencial, nunca só pela lógica da
+RPC.
+
+### 39.7 Hard delete bloqueado
+
+`ON DELETE RESTRICT` (nunca `SET NULL`/`CASCADE`) — uma tentativa de
+apagar fisicamente uma `company_memberships` referenciada por qualquer
+entrada de timeline falha imediatamente. Nenhuma RPC do projeto apaga
+`company_memberships` hoje — a política é defesa em profundidade contra
+uma exclusão manual/futura, nunca um caminho operacional real. `ON
+UPDATE` permanece `NO ACTION`, idêntico ao anterior e às demais FKs
+compostas do domínio — `company_id`/`profile_id` de uma membership são
+imutáveis após a criação, então a cláusula nunca é exercitada na
+prática.
+
+### 39.8 Validação de dados preexistentes
+
+A migration valida, antes de alterar a constraint, que todo
+`actor_profile_id` não nulo já existente possui uma linha correspondente
+em `company_memberships(company_id, profile_id)` — se não, a migration
+falha fechada com `timeline_actor_membership_backfill_required`
+(contagem sanitizada, nenhum dado pessoal). Localmente, a validação
+passou trivialmente (nenhuma incompatibilidade encontrada).
+
+### 39.9 Teste antigo — ajuste pontual autorizado
+
+`supabase/tests/10_m1f_s1_schema.sql` continha uma asserção `fk_ok`
+(escrita durante o S8-C2-C1-AUTH-A1, como controle negativo deliberado)
+confirmando que `lead_timeline_entries.actor_profile_id` **ainda**
+referenciava `profiles(company_id, id)`, ao contrário das duas FKs de
+`leads` já corrigidas naquela etapa. A correção desta migration torna
+essa asserção obsoleta por desenho — achado fora da autorização inicial
+desta etapa, apresentado e aprovado antes de qualquer alteração. Ajuste
+pontual, autorizado e aplicado: o alvo esperado passou a `public.
+company_memberships(company_id, profile_id)`, com a mensagem atualizada
+para "`lead_timeline_entries.actor_profile_id` referencia membership
+histórica da empresa (S8-C2-D1-TIMELINE-AUTH-A1)". Nenhuma outra
+asserção do arquivo foi tocada (as duas de `leads_created_by_fk`/
+`leads_updated_by_fk` permanecem exatamente como estavam). Garantia
+preservada: o arquivo continua provando, para as três FKs de autoria do
+domínio (`leads` × 2, `lead_timeline_entries` × 1), que nenhuma aponta
+mais para `profiles` — apenas o contrato esperado da terceira mudou,
+refletindo a decisão humana desta etapa.
+
+### 39.10 Novo teste — `46_m1f_s8c2d1_timeline_actor_membership_fk.sql`
+
+Cobre: catálogo (`lead_timeline_actor_fk` aponta para `company_
+memberships(company_id, profile_id)`, nunca para `profiles`; `UNIQUE
+(company_id, profile_id)` existe; `ON DELETE` bloqueia hard delete; `ON
+UPDATE` sem ação; `actor_profile_id` continua nullable; nenhuma coluna
+nova; nenhuma RPC redefinida); cenário completo de transferência A→B
+(membership A histórica, membership B ativa, `profiles.company_id`
+permanece A, `add_lead_timeline_entry` em B funciona, timeline antiga de
+A permanece válida); offboarding (membership histórica sustenta a
+timeline antiga; hard delete da membership referenciada falha; ator
+offboarded não executa nova mutation); Super Admin (`actor_profile_id`
+`NULL`, `audit_log` com o ator real, nenhuma membership artificial);
+defesa cross-company (profile sem membership na empresa-alvo nunca é
+gravado como ator); legado divergente (`profiles.company_id`/`role`/
+`seller_id` nunca decidem).
+
+### 39.11 Tipos regenerados
+
+`lib/supabase/database.types.ts` via `supabase gen types typescript
+--local` — diff estritamente restrito à metadata `Relationships` de
+`lead_timeline_actor_fk` (`referencedRelation`/`referencedColumns`
+passam de `profiles`/`["company_id","id"]` para `company_memberships`/
+`["company_id","profile_id"]`); nenhuma coluna, nenhuma assinatura de
+RPC, nenhum outro objeto alterado.
+
+### 39.12 Escopo preservado
+
+Nenhuma RPC alterada (`add_lead_timeline_entry` e as demais 8 RPCs de
+mutation de Leads, `resolve_lead_mutation_context`, e as 5 RPCs de
+leitura comercial continuam exatamente como publicadas). Nenhuma policy
+tocada. Nenhuma coluna adicionada, removida ou com nullability alterada.
+`public.leads`/`public.profiles`/`public.company_memberships` sem
+alteração de schema. Nenhuma membership artificial criada; `profiles.
+company_id` nunca sincronizado. Nenhum helper legado removido. Nenhum
+frontend, hook, componente ou flag alterado. Nenhuma operação remota
+executada.
+
+**O risco estrutural registrado em §38.11 está fechado. S8-C2-D2 só se
+desbloqueia com esta etapa publicada e validada. M1-E E4 continua
+pausado** até o fechamento formal do S8 (S8-F).
