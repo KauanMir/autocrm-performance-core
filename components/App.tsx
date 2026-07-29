@@ -24,10 +24,24 @@ const TWEAK_DEFAULTS = {
   showRevenue: false,
 };
 
-// M1-D (commit 8): navegação efetiva. Base = NAV_ROLES legado; o manager
-// ganha 'ajustes' SOMENTE com a flag remota ON (e dentro da tela vê apenas a
-// aba Etapas — ver ScreenAjustes). Com a flag OFF a lista é idêntica ao
-// legado. A combinação capability×flag mora aqui, nunca em lib/capabilities.
+// M1-D (commit 8): navegação efetiva. Base = lista de nav ids por ator; o
+// manager ganha 'ajustes' SOMENTE com a flag remota ON (e dentro da tela vê
+// apenas a aba Etapas — ver ScreenAjustes). Com a flag OFF a lista é
+// idêntica ao legado. A combinação capability×flag mora aqui, nunca em
+// lib/capabilities.
+//
+// M1-F S8-D1: a base NÃO é mais indexada por `user.role` legado
+// (`NAV_ROLES[user.role]`, achado do S8-D-A0) — `platformRole`/
+// `activeMembership.role` são agora a ÚNICA fonte da identidade que decide
+// qual lista de `NAV_ROLES` usar. `NAV_ROLES` continua existindo como DADO
+// puro (as três listas por papel), só a forma de ESCOLHER a lista mudou.
+// Contrato preservado exatamente: Super Admin usa a lista de `admin` (sem
+// os ids comerciais, que voltam só via capability+flag, como antes);
+// Manager usa a lista de `manager`; Seller usa a lista de `seller`; um
+// usuário autenticado sem `platformRole` e sem `activeMembership` (ex.:
+// membership suspensa/desligada, cuja `profiles.role` legada nunca é
+// limpa) não recebe mais nenhum id empresarial — apenas `'home'`, nunca
+// inferido do cargo legado que já não descreve o estado real.
 //
 // M1-F S4-F1: canManageInvites (Super Admin OU Manager com membership
 // ATIVA) também libera 'ajustes', SEM depender de nenhuma flag — diferente
@@ -40,24 +54,32 @@ const TWEAK_DEFAULTS = {
 //
 // M1-F S3-B: 'empresas' segue o mesmo molde — só entra com
 // NEXT_PUBLIC_FF_PLATFORM_ADMIN ON E platformRole === 'super_admin'
-// (canAccessPlatformAdmin). Independente da condição de 'ajustes' acima:
-// um Super Admin nunca tem `role`/`companyId` de empresa, então NAV_ROLES[
-// user.role] pode nem fazer sentido para ele — mesmo assim a entrada
-// 'empresas' é adicionada normalmente, sem depender de `base`.
+// (canAccessPlatformAdmin) — a entrada é adicionada normalmente, sem
+// depender de `base`.
 // M1-F S8-C2-B2: ids comerciais (Clientes/Andamento). Super Admin NUNCA os
-// recebe via NAV_ROLES[user.role] (achado 2 do S8-C2-A1 — profiles.role
-// legado de um Super Admin, mantido por compatibilidade, hoje resolve para
-// 'admin', que já inclui os dois ids) — são retirados da base e só voltam
-// via canAccessCommercialWorkspace + a flag de leitura comercial. Manager/
-// Seller continuam recebendo-os exatamente como sempre (via `base`, sem
-// nenhuma capability nova envolvida — nenhuma mudança de comportamento).
+// recebe da base (retirados explicitamente) — só voltam via
+// canAccessCommercialWorkspace + a flag de leitura comercial. Manager/
+// Seller continuam recebendo-os exatamente como sempre (fazem parte da
+// própria lista de `NAV_ROLES.manager`/`NAV_ROLES.seller`, sem nenhuma
+// capability nova envolvida — nenhuma mudança de comportamento).
 const COMMERCIAL_NAV_IDS = ['clientes', 'andamento'];
 
 function allowedNavIds(user: User | null): string[] {
   if (!user) return [];
-  const base = NAV_ROLES[user.role] || [];
   const isSuperAdmin = user.platformRole === 'super_admin';
-  let ids = isSuperAdmin ? base.filter((id) => !COMMERCIAL_NAV_IDS.includes(id)) : base;
+  const membershipRole = user.activeMembership?.role ?? null;
+
+  const base = isSuperAdmin
+    ? NAV_ROLES.admin.filter((id) => !COMMERCIAL_NAV_IDS.includes(id))
+    : membershipRole === 'manager'
+      ? NAV_ROLES.manager
+      : membershipRole === 'seller'
+        ? NAV_ROLES.seller
+        // Nem Super Admin, nem membership ativa (ex.: suspenso/desligado):
+        // nenhum id empresarial — nunca inferido de `user.role` legado.
+        : ['home'];
+
+  let ids = [...base];
   if (
     isSuperAdmin &&
     isSuperAdminCommercialReadEnabled() &&
