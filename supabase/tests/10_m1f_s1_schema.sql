@@ -205,14 +205,21 @@ select col_type_is('public'::name, 'profiles'::name, 'is_active'::name, 'boolean
 select has_enum('public', 'user_role'::name);
 select enum_has_labels('public', 'user_role', array['admin','manager','seller']);
 
--- ── autoria histórica continua apontando direto para profiles (nunca para
---    company_memberships nem sellers) — design §6.3, §9 do prompt ────────
+-- ── autoria empresarial: revisado no S8-C2-C1-AUTH-A1 (design §35) ──────
+-- Contrato ORIGINAL desta linha (S1, 2026-07-20): as FKs de autoria
+-- apontavam direto para profiles(company_id, id) — verdadeiro na época
+-- ("a fundação de company_memberships não muda nada do runtime atual").
+-- Decisão humana do S8-C2-C1-AUTH-A1 substituiu deliberadamente esse alvo:
+-- profiles.company_id nunca é sincronizado após uma transferência de
+-- empresa (transfer_membership não o escreve), então a integridade
+-- referencial da autoria agora é sustentada pela membership HISTÓRICA
+-- (nunca apagada por nenhuma RPC), não mais pelo profile global.
 select fk_ok('public', 'leads', array['company_id','created_by_profile_id'],
-             'public', 'profiles', array['company_id','id'],
-             'leads.created_by_profile_id ainda referencia profiles diretamente');
+             'public', 'company_memberships', array['company_id','profile_id'],
+             'leads.created_by_profile_id referencia company_memberships (autoria sustentada pela membership historica, S8-C2-C1-AUTH-A1)');
 select fk_ok('public', 'leads', array['company_id','updated_by_profile_id'],
-             'public', 'profiles', array['company_id','id'],
-             'leads.updated_by_profile_id ainda referencia profiles diretamente');
+             'public', 'company_memberships', array['company_id','profile_id'],
+             'leads.updated_by_profile_id referencia company_memberships (autoria sustentada pela membership historica, S8-C2-C1-AUTH-A1)');
 select fk_ok('public', 'lead_timeline_entries', array['company_id','actor_profile_id'],
              'public', 'profiles', array['company_id','id'],
              'lead_timeline_entries.actor_profile_id ainda referencia profiles diretamente');

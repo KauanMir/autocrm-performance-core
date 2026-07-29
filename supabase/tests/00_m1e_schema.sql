@@ -125,13 +125,27 @@ select throws_ok($$insert into public.leads (company_id, name, phone, car, stage
     'b1111111-1111-1111-1111-111111111111')$$,
   '23503', null, 'profile de outra empresa em created_by falha');
 
--- ── FK de auditoria: delete do profile anula SOMENTE a coluna de profile ─
+-- ── FK de auditoria: revisado no S8-C2-C1-AUTH-A1 (design §35) ──────────
+-- Cenário ORIGINAL desta linha (M1-E, 2026-07-19): a autoria bastava
+-- profiles.company_id — apagar o profile anulava created_by/updated_by
+-- via ON DELETE SET NULL. Esse dado passou a ser deliberadamente inválido:
+-- hoje a integridade da autoria é sustentada pela membership HISTÓRICA
+-- (company_memberships), nunca mais pelo profile isolado — um profile sem
+-- nenhuma membership na empresa do lead nem consegue ser gravado como
+-- autor (a FK já nega o INSERT). A prova "remover/desligar o autor não
+-- derruba o Lead" continua válida, mas agora é ON DELETE RESTRICT sobre a
+-- membership referenciada (nunca SET NULL/CASCADE) — desligamento é
+-- lifecycle (offboarding), nunca DELETE físico.
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at)
   values ('00000000-0000-0000-0000-000000000000', 'dddddddd-0000-0000-0000-000000000001',
           'authenticated', 'authenticated', 'descartavel@test.local', now(), now(), now());
 insert into public.profiles (id, company_id, name, email, role)
   values ('dddddddd-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001',
           'Descartavel', 'descartavel@test.local', 'manager');
+insert into public.company_memberships (id, company_id, profile_id, role, is_active)
+  values ('dddddddd-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001',
+          'dddddddd-0000-0000-0000-000000000001', 'manager', true);
+
 insert into public.leads (id, company_id, name, phone, car, stage_id, created_by_profile_id, updated_by_profile_id)
 values ('aaaaaaaa-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001',
         'Auditoria', '(11) 90000-0002', 'Carro Y',
@@ -139,14 +153,27 @@ values ('aaaaaaaa-0000-0000-0000-000000000002', '00000000-0000-0000-0000-0000000
           where company_id = '00000000-0000-0000-0000-000000000001' and code = 'new'),
         'dddddddd-0000-0000-0000-000000000001', 'dddddddd-0000-0000-0000-000000000001');
 
-delete from public.profiles where id = 'dddddddd-0000-0000-0000-000000000001';
+select is((select created_by_profile_id from public.leads where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
+  'dddddddd-0000-0000-0000-000000000001'::uuid,
+  'INSERT com autor sustentado por membership real na mesma empresa funciona normalmente');
+
+-- Hard delete da membership referenciada é bloqueado (nunca SET NULL,
+-- nunca CASCADE) — desligamento continua sendo lifecycle_status, nunca
+-- exclusão física.
+select throws_ok(
+  $$delete from public.company_memberships where id = 'dddddddd-0000-0000-0000-000000000002'$$,
+  '23503', null, 'DELETE fisico da membership referenciada por um lead e bloqueado pela FK');
 
 select is((select created_by_profile_id from public.leads where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
-  null::uuid, 'created_by_profile_id anulado apos delete do profile');
+  'dddddddd-0000-0000-0000-000000000001'::uuid,
+  'created_by_profile_id permanece intacto apos a tentativa de exclusao bloqueada (nenhum SET NULL silencioso)');
 select is((select updated_by_profile_id from public.leads where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
-  null::uuid, 'updated_by_profile_id anulado apos delete do profile');
+  'dddddddd-0000-0000-0000-000000000001'::uuid,
+  'updated_by_profile_id permanece intacto apos a tentativa de exclusao bloqueada');
 select is((select company_id from public.leads where id = 'aaaaaaaa-0000-0000-0000-000000000002'),
-  '00000000-0000-0000-0000-000000000001'::uuid, 'company_id intacto apos delete do profile');
+  '00000000-0000-0000-0000-000000000001'::uuid, 'company_id do lead permanece intacto');
+select is((select count(*)::int from public.company_memberships where id = 'dddddddd-0000-0000-0000-000000000002'),
+  1, 'a membership referenciada continua existindo (bloqueio efetivo, nenhum CASCADE)');
 
 -- ── timeline: FK composta e cascade ─────────────────────────────────────
 select throws_ok($$insert into public.lead_timeline_entries (company_id, lead_id, icon, color, label)

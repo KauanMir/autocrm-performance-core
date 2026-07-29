@@ -250,15 +250,20 @@ select is(
   (select count(*)::int from public.company_memberships where company_id = 'ffffffff-ffff-ffff-ffff-ffffffffffff'),
   5, 'catch-up: total permanece 5 memberships (4 originais + 1 tardio) apos a terceira reexecucao — sem duplicacao');
 
--- ── leads continuam apontando para o mesmo seller; autoria continua
---    apontando para profiles (schema não tocado pelo S1 — asserção
---    estrutural, não depende de dados) ────────────────────────────────
+-- ── leads continuam apontando para o mesmo seller (schema não tocado pelo
+--    S1 — asserção estrutural, não depende de dados); autoria revisada no
+--    S8-C2-C1-AUTH-A1 (design §35) — a garantia original aqui era "o
+--    backfill do S1 não altera nada observável", o que continua verdadeiro
+--    para este arquivo (nenhuma migration de backfill é alterada); o alvo
+--    da FK em si mudou deliberadamente numa etapa muito posterior e não
+--    relacionada ao backfill (autoria agora sustentada pela membership
+--    histórica, nunca mais por profiles.company_id) ────────────────────
 select fk_ok('public', 'leads', array['company_id','seller_id'],
              'public', 'sellers', array['company_id','id'],
              'leads.seller_id continua referenciando sellers diretamente (inalterado pelo S1)');
 select fk_ok('public', 'leads', array['company_id','created_by_profile_id'],
-             'public', 'profiles', array['company_id','id'],
-             'autoria (leads.created_by_profile_id) continua apontando para profiles (inalterado pelo S1)');
+             'public', 'company_memberships', array['company_id','profile_id'],
+             'autoria (leads.created_by_profile_id) referencia company_memberships (revisado no S8-C2-C1-AUTH-A1, nao pelo S1)');
 
 select * from finish();
 rollback;
