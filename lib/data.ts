@@ -43,15 +43,8 @@ export interface User {
    * compatibilidade M0) — nunca autorização empresarial. Fronteira própria,
    * condicionada à migração desses módulos locais (§28.6 do design). */
   sellerId: string | null;
-  /** @deprecated M1-F S8-A0: legado (`profiles.company_id`). Nenhuma
-   * autorização ou contexto empresarial novo pode ler este campo —
-   * pipeline já usa exclusivamente `activeMembership.companyId` desde
-   * S7-B, sem fallback. Consumidor restante: bridge de leads remotos
-   * (`lib/services.ts`, migração prevista para S8-B2). Permanece no tipo
-   * até zero consumidor runtime restar (§28.5/§28.10 do design). */
-  companyId: string | null;
-  // M1-F S3-B: platform_role da profile (independente de `role`/`companyId`
-  // — um Super Admin não tem empresa). Opcional (não `| null` obrigatório)
+  // M1-F S3-B: platform_role da profile (independente de `role` — um Super
+  // Admin não tem empresa, por design). Opcional (não `| null` obrigatório)
   // de propósito: dezenas de fixtures de teste pré-existentes constroem
   // User sem este campo — undefined e null são equivalentes em todo check
   // (`=== 'super_admin'`), então tornar obrigatório só quebraria testes

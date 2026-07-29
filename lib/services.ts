@@ -65,9 +65,13 @@ async function _loadActiveMembership(): Promise<{ companyId: string; role: 'mana
 }
 
 async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise<User | null> {
+  // M1-F S8-D1: company_id removido desta seleção — User.companyId não
+  // existe mais no tipo (zero consumidor runtime confirmado por auditoria,
+  // S8-D-A0). activeMembership (abaixo) continua sendo a única fonte de
+  // empresa para qualquer decisão real.
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, company_id, name, email, role, seller_id, is_active, platform_role')
+    .select('id, name, email, role, seller_id, is_active, platform_role')
     .eq('id', authUserId)
     .single<ProfileRow>();
   if (error || !data || !data.is_active) return null;
@@ -78,7 +82,6 @@ async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise
     email: data.email || fallbackEmail || '',
     role: data.role,
     sellerId: data.seller_id,
-    companyId: data.company_id,
     platformRole: data.platform_role,
     activeMembership,
   };

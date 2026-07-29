@@ -19,9 +19,11 @@ export interface CompanyRow {
 
 export interface ProfileRow {
   id: string; // = auth.users.id
-  // nullable desde o M1-F S1: um Super Admin de plataforma nunca tem
-  // company_id (nenhuma membership de empresa) — ver platform_role abaixo.
-  company_id: string | null;
+  // M1-F S8-D1: company_id removido deste tipo — _loadProfile() não
+  // seleciona mais essa coluna (zero consumidor runtime de User.companyId,
+  // confirmado por auditoria S8-D-A0/S8-D1). A coluna física
+  // `profiles.company_id` continua existindo no banco (reservada ao S8-E),
+  // só não faz mais parte da leitura do profile autenticado.
   name: string;
   email: string;
   role: UserRole;
@@ -31,9 +33,9 @@ export interface ProfileRow {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  // M1-F S1/S3-B: platform_role é independente de role/company_id — só
-  // 'super_admin' ou null, nunca lido como autoridade real no frontend
-  // (ver lib/data.ts User.platformRole).
+  // M1-F S1/S3-B: platform_role é independente de role — só 'super_admin'
+  // ou null, nunca lido como autoridade real no frontend (ver lib/data.ts
+  // User.platformRole).
   platform_role: Database['public']['Enums']['platform_role'] | null;
 }
 
