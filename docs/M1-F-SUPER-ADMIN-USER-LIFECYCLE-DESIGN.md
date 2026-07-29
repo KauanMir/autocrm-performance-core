@@ -4575,3 +4575,110 @@ cujo `profiles.company_id` legado divirja da empresa da membership real —
 hoje isso nunca ocorreu em produção para Manager/Seller por coincidência
 de dados, mas é alcançável após uma transferência de empresa
 (`transfer_membership`, S6-D), que nunca atualiza `profiles.company_id`.
+
+## 35. Autoria empresarial por membership histórica
+
+Esta seção fecha o risco registrado em §34.3/34.10 e na auditoria
+S8-C2-C1-AUTH-A0. §0–§34 não foram alterados.
+
+### 35.1 Conflito reproduzido
+
+Reprodução local (rollback, nenhum dado persistido): Seller1 (membership
+ativa em A) cria um Lead em A; Super Admin executa `transfer_membership`
+para B (com sucessor, pois havia lead aberto); a membership em B fica
+`active`, a membership em A fica `offboarded` (nunca apagada);
+`profiles.company_id` **permanece A** (`transfer_membership` nunca o
+escreve — nenhuma RPC jamais escreveu nele além de `accept_invite`, na
+criação inicial do profile). `create_lead` em B, já corretamente
+autorizado pela membership real, falhava com
+`leads_created_by_fk` (SQLSTATE 23503) — a autorização (membership) e a
+integridade referencial (`profiles.company_id`) usavam fontes diferentes
+e divergiram exatamente neste ponto.
+
+### 35.2 Decisão: reapontar as FKs para a membership histórica
+
+`leads_created_by_fk`/`leads_updated_by_fk` passam a referenciar
+`public.company_memberships(company_id, profile_id)` — nunca mais
+`public.profiles(company_id, id)`. `profiles.company_id` permanece
+deliberadamente legado, nunca sincronizado, nunca lido por nenhuma RPC ou
+constraint nova. As colunas `leads.created_by_profile_id`/
+`updated_by_profile_id` são preservadas exatamente como estão (continuam
+guardando o `profiles.id` global) — só o **alvo da integridade
+referencial** muda, para a mesma fonte que já decide autorização
+(`company_memberships`) desde o S8-C2-C1.
+
+### 35.3 Significado final dos dois campos
+
+Representam "o profile que efetuou a ação, provado por ter tido (em
+qualquer momento, inclusive hoje offboarded) uma membership na mesma
+empresa do Lead" — nunca identidade global pura (Opção A do relatório da
+auditoria, rejeitando B, C, D, E). `company_memberships` nunca apaga
+fisicamente uma linha (nenhuma RPC do projeto o faz) — por isso a
+membership histórica sustenta a autoria de um Lead para sempre, mesmo após
+offboarding, suspensão ou transferência para outra empresa.
+
+### 35.4 Offboarding e transferência não apagam autoria
+
+Offboarding: a membership perde `is_active`/`lifecycle_status='active'`
+mas a linha permanece — a FK continua satisfeita, a autoria histórica do
+Lead nunca é afetada; o usuário só perde autorização **operacional** (via
+`resolve_lead_mutation_context`), nunca a prova de autoria passada.
+Transferência A→B: a membership de A vira `offboarded` (nunca apagada) —
+Leads antigos criados em A continuam com FK válida contra essa linha
+histórica; a nova membership em B (criada ou reaproveitada de uma linha
+offboarded anterior) autoriza `create_lead`/`update_lead` em B
+normalmente, e a nova FK é satisfeita pela membership de B.
+`profiles.company_id` pode permanecer A indefinidamente sem interferir em
+nada — nem na autorização (já não lido desde o S8-C2-C1), nem agora na
+integridade referencial.
+
+### 35.5 Super Admin e audit_log inalterados
+
+`created_by_profile_id`/`updated_by_profile_id` continuam `NULL` para
+Super Admin (decisão do S8-C2-C1, §34.3 — Super Admin nunca tem
+`company_memberships`, por desenho; nenhuma membership artificial foi
+criada). `NULL` satisfaz qualquer FK trivialmente. A autoria real do
+Super Admin continua exclusivamente em `audit_log.actor_profile_id`.
+
+### 35.6 Hard delete bloqueado
+
+Nova política: `ON DELETE RESTRICT` (nunca `SET NULL`/`CASCADE`) — mesmo
+padrão já usado por `leads_company_seller_fk`/`leads_company_stage_fk`/
+`sellers_membership_company_fk` neste mesmo schema. Uma tentativa de
+apagar fisicamente uma `company_memberships` referenciada por qualquer
+Lead falha imediatamente. Nenhuma RPC do projeto apaga `company_
+memberships` hoje — a política é defesa em profundidade contra uma
+exclusão manual/futura, nunca um caminho operacional real. `ON UPDATE`
+permanece implícito (`NO ACTION`), idêntico às demais FKs compostas de
+`leads` — `company_id`/`profile_id` de uma membership são imutáveis após
+a criação (trigger de consistência do S1), então a cláusula nunca é
+exercitada na prática.
+
+### 35.7 Validação de dados preexistentes
+
+A migration valida, antes de alterar qualquer constraint, que todo
+`created_by_profile_id`/`updated_by_profile_id` não nulo já existente
+possui uma linha correspondente em `company_memberships(company_id,
+profile_id)` — se não, a migration falha fechada com
+`authorship_membership_backfill_required` (contagem sanitizada, nenhum
+dado pessoal). Localmente, `public.leads` está vazio (seed não cria
+nenhum lead) — a validação passa trivialmente, sem necessidade de
+backfill.
+
+### 35.8 Escopo preservado
+
+Nenhuma RPC alterada (`create_lead`/`update_lead`/
+`check_lead_phone_duplicate`/`resolve_lead_mutation_context` continuam
+exatamente como o S8-C2-C1 publicou). Nenhuma coluna adicionada ou
+removida. `public.profiles`/`public.company_memberships` sem alteração de
+schema. `UNIQUE(company_id, profile_id)` (já existente desde o S1) não é
+recriada nem alterada. `database.types.ts` sem diff — a mudança de alvo
+da FK não altera coluna, tipo ou assinatura nenhuma; o único efeito
+colateral seria a metade descritiva `Relationships.referencedRelation`
+(usada por PostgREST embedding), confirmado sem nenhum consumidor real no
+código (`created_by_profile_id`/`updated_by_profile_id` só são lidos como
+coluna escalar, nunca via embedding) — deixar essa metadata desatualizada
+é inerte, não regenerado nesta etapa. Nenhuma operação remota executada.
+
+**O S8-C2-C2 só se desbloqueia com esta etapa publicada e validada. M1-E
+E4 continua pausado.**
