@@ -845,7 +845,7 @@ export type Database = {
         }[]
       }
       check_lead_phone_duplicate: {
-        Args: { p_phone: string }
+        Args: { p_company_id?: string; p_phone: string }
         Returns: {
           lead_archived: boolean
           lead_id: string
@@ -937,6 +937,7 @@ export type Database = {
       create_lead: {
         Args: {
           p_car: string
+          p_company_id?: string
           p_name: string
           p_payment_preference?: string
           p_phone: string
@@ -1303,6 +1304,16 @@ export type Database = {
           retry_after_seconds: number
         }[]
       }
+      resolve_lead_mutation_context: {
+        Args: { p_company_id?: string; p_read_only?: boolean }
+        Returns: {
+          actor_kind: string
+          actor_profile_id: string
+          actor_seller_id: string
+          company_status: Database["public"]["Enums"]["company_status"]
+          resolved_company_id: string
+        }[]
+      }
       suspend_membership: {
         Args: { p_membership_id: string; p_note: string }
         Returns: {
@@ -1371,6 +1382,7 @@ export type Database = {
       update_lead: {
         Args: {
           p_car: string
+          p_company_id?: string
           p_expected_version: number
           p_lead_id: string
           p_name: string
