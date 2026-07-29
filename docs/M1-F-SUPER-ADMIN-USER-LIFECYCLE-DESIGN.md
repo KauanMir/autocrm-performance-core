@@ -4769,3 +4769,197 @@ operação remota executada.
 
 **O S8-C2-C2 (frontend de create/update/duplicidade) só se desbloqueia
 com esta subetapa publicada e validada. M1-E E4 continua pausado.**
+
+## 37. Implementação do S8-C2-C2 — frontend platform de create, update e duplicidade
+
+Esta seção registra a implementação (não mais planejamento) do
+frontend de criação/edição/verificação de duplicidade de Leads na
+superfície platform do Super Admin. §0–§36 não foram alterados.
+
+### 37.1 Escopo
+
+Conecta a superfície comercial platform (S8-C2-B2) às quatro RPCs já
+publicadas e validadas (`create_lead`/`update_lead`/
+`check_lead_phone_duplicate`, S8-C2-C1/AUTH-A1;
+`list_platform_sellers_for_company`, S8-C2-C2-SELLERS-B1). Exclusivo
+de Super Admin — Manager/Seller permanecem 100% nas telas legadas
+(`LeadService`/`StoreAdapter`), sem nenhuma alteração. Nenhuma
+migration, RLS, RPC, grant ou `database.types.ts` alterados nesta
+etapa. Nenhum move/drag, atribuição de vendedor pós-criação,
+arquivamento/desarquivamento ou nova timeline — permanecem
+indisponíveis em qualquer combinação de flags/status.
+
+### 37.2 Feature flag WRITE
+
+`NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_WRITE` (`lib/flags.ts`,
+`isSuperAdminCommercialWriteEnabled()`), OFF por padrão, mesmo
+contrato de `resolveFlag`/override de desenvolvimento
+(`autocrm_ff_super_admin_commercial_write`) das demais flags. Só o
+valor bruto da própria flag — a combinação "WRITE só é EFETIVA quando
+READ também está ligada" é decisão do chamador
+(`canMutateCommercialWorkspace`), nunca desta função, mesmo padrão já
+usado por `isUserLifecycleEnabled()`/`isActiveUsersEnabled()`.
+Independente de todas as outras flags.
+
+### 37.3 Capability de mutation
+
+`canMutateCommercialWorkspace(input)` (`lib/capabilities.ts`) —
+capability PRÓPRIA, nunca uma ampliação de
+`canAccessCommercialWorkspace` (que só decide se o workspace de
+LEITURA existe). `true` somente quando **todas** as condições valem
+simultaneamente: `actor.platformRole === 'super_admin'`;
+`readEnabled && writeEnabled`; `selectedCompanyStatus` não nulo
+(nenhuma empresa selecionada nunca é inferida); status `'ativa'` ou
+`'implantacao'` (mesma matriz já aprovada para as RPCs de mutation no
+S8-C2-C1 — `'suspensa'`/`'cancelada'` sempre `false`, mesmo com as
+duas flags ligadas). `profile.is_active` não é checado (mesmo
+raciocínio de `canManageInvites`: um `User` inativo nunca existe em
+memória).
+
+### 37.4 Data layer — Sellers
+
+`fetchPlatformSellers(companyId)` (`lib/commercial/repository.ts`)
+chama `list_platform_sellers_for_company` — nunca `public.sellers`
+direto. Hook `usePlatformSellers` (`lib/hooks/usePlatformSellers.ts`),
+mesmo contrato `enabled`/Rules-of-Hooks dos hooks platform existentes.
+Query key própria (`platformCommercialQueryKeys.sellers(companyId)` —
+`['company', companyId, 'commercial-sellers', 'platform']`), nunca
+compartilhada com `leadsRoot`/`stages`. `seller_id` é identidade **por
+empresa** (achado da S8-C2-C2-SELLERS-B1: `transfer_membership` cria
+uma linha `sellers` nova na empresa destino) — a troca de `companyId`
+já invalida a query por si só (key diferente); os formulários de
+create/edit adicionalmente limpam a seleção quando o Seller escolhido
+some da lista recarregada.
+
+### 37.5 Data layer — create/update
+
+`createPlatformLead`/`updatePlatformLead` (`lib/commercial/
+repository.ts`) chamam `create_lead`/`update_lead` com `p_company_id`
+sempre o valor explícito recebido por parâmetro — nunca um fallback
+implícito. `update_lead` envia **somente** os campos reais do seu
+contrato (`name`/`phone`/`car`/`temperature`/`payment_preference`/
+`source`/`expected_version`) — nenhum `seller_id`/etapa/
+`archived_at`/timeline (a RPC nem os aceita; decisão #8 do S8-C2-C2:
+editar nunca move Etapa nem atribui Vendedor). Hooks
+`useCreatePlatformLead`/`useUpdatePlatformLead`
+(`lib/hooks/`) — `useMutation` sem retry automático (nenhuma das duas
+RPCs é idempotente/seguramente reexecutável às cegas). Cada hook
+recebe um `isContextStillValid()` resolvido pelo chamador (formulário)
+e verificado **imediatamente antes** de enviar a RPC — se a empresa
+mudou nesse intervalo, a RPC nunca é chamada. `onSuccess` invalida
+somente `leadsActive(companyId capturado)` (nunca `leadsArchived`:
+`update_lead` recusa com `lead_archived` qualquer Lead já arquivado,
+então a lista arquivada nunca é afetada).
+
+### 37.6 Data layer — duplicidade
+
+`checkPlatformLeadPhoneDuplicate(companyId, phone)`
+(`lib/commercial/repository.ts`) chama `check_lead_phone_duplicate`
+sempre com `p_company_id` explícito. Hook
+`useCheckPlatformLeadPhoneDuplicate` — deliberadamente um
+`useMutation` imperativo, nunca `useQuery`: o telefone é PII e nunca
+vira parte de uma query key persistida no cache. `check_lead_phone_
+duplicate` não tem parâmetro de autoexclusão do próprio Lead — o
+formulário de edição resolve isso pulando a checagem quando o
+telefone não mudou (o próprio Lead nunca seria encontrado buscando o
+valor NOVO contra o `phone_digits` ainda ANTIGO no banco; quando o
+telefone muda, a busca pelo valor novo estruturalmente nunca encontra
+o próprio Lead, então nenhuma exclusão explícita é necessária). O
+`status` retornado (`'accessible'`/`'restricted'`/`'none'`) é usado
+apenas como `status !== 'none'` — `lead_id`/`lead_name`/
+`lead_archived` da resposta **nunca** são lidos pelo frontend (decisão
+§9: dado de outro Lead nunca é revelado); a mensagem exibida é sempre
+a genérica "Já existe um Lead com este telefone nesta empresa.".
+
+### 37.7 Formulários platform (create/edit)
+
+`PlatformLeadCreateModal`/`PlatformLeadEditModal`
+(`components/commercial/`) — formulários PRÓPRIOS, reaproveitando
+apenas os componentes visuais puros e independentes de modelo já
+aprovados (`FlowShell`/`FField`/`Segmented`/`LBtn`), nunca os
+formulários mock (`Flows2`/`Flows3`) nem `LeadService`. Create expõe
+somente campos reais de `create_lead` (`name`/`phone`/`car`
+obrigatórios; `temperature`/`payment_preference`/`source`/Seller
+opcionais — etapa inicial sempre resolvida pelo servidor, nunca
+escolhida na UI). Edit expõe somente campos reais de `update_lead` —
+sem Seller/Etapa/arquivamento. Empresa exibida no cabeçalho
+(`eyebrow`), nunca editável dentro do formulário. `company`/`lead` são
+capturados via prop no momento de abertura (o componente pai só monta
+o modal com a empresa/Lead correntes); um `useEffect` fecha o modal
+imediatamente se `selectedCompanyId` (lido ao vivo do contexto) deixar
+de bater com a empresa capturada.
+
+### 37.8 Proteção de contexto durante a mutation
+
+Cada modal mantém um `useRef` atualizado via `useEffect` com o
+`selectedCompanyId` mais recente do `CommercialCompanyContext`
+(closures assíncronas não veem re-renders). Imediatamente antes de
+chamar `createLead`/`updateLead`, o formulário verifica
+`liveCompanyIdRef.current === company.id`; se mudou, a chamada é
+abortada sem enviar a RPC. Dentro do próprio hook de mutation, o mesmo
+`isContextStillValid()` é reavaliado antes do `mutationFn` chamar o
+repository — dupla checagem, nunca confiança single-point. Como as
+query keys já são inteiramente particionadas por `companyId`
+(`platformCommercialQueryKeys`), uma resposta tardia jamais escreve no
+cache da empresa errada mesmo se a UI já tiver mudado de contexto —
+a opção escolhida (mais simples e já suficiente) foi nunca bloquear o
+seletor de empresa, e sim fechar o formulário aberto quando a empresa
+muda, decisão registrada aqui por ser a mais simples que preserva
+segurança total.
+
+### 37.9 Integração visual
+
+`CommercialWorkspaceHeader` ganhou a prop `readOnly` (default `true`,
+preserva o comportamento do B2) — o selo "Modo comercial — somente
+leitura" só aparece quando `readOnly` é `true`. `PlatformCommercial
+ClientsView`/`PlatformCommercialPipelineView` calculam `canMutate`
+via `canMutateCommercialWorkspace` a cada render e passam `readOnly=
+!canMutate`; com `canMutate` verdadeiro, o `PageHead` ganha o botão
+"Novo Lead" (via a prop `actions`, sem componente novo) e
+`PlatformLeadDetails` ganha uma ação "Editar" (nova prop `canMutate`/
+`onEdit`, default `false`/`undefined` — preserva 100% o comportamento
+original quando omitida). Nenhum hook de escrita (`usePlatformSellers`
+com `authorized: true`, `useCreatePlatformLead`, `useUpdatePlatformLead`)
+é montado incondicionalmente fora do fluxo dos modais — eles só existem
+dentro de `PlatformLeadCreateModal`/`PlatformLeadEditModal`, que só
+são renderizados quando `canMutate` é verdadeiro.
+
+### 37.10 Erros
+
+`getPlatformCommercialErrorMessage` (`lib/commercial/errors.ts`) —
+tradutor único e centralizado dos códigos estáveis das quatro RPCs
+(`company_required`/`company_not_found`/`company_read_only`/
+`forbidden`/`initial_stage_missing`/`seller_not_found`/
+`lead_not_found`/`lead_archived`/`stale_write`/`invalid_phone`) mais
+os erros LOCAIS dos hooks (autorização/contexto obsoleto,
+pré-verificados antes de qualquer chamada de rede). Nenhum componente
+compara `detail.message` bruto; nenhuma mensagem expõe SQL, UUID ou
+stack.
+
+### 37.11 Manager e Seller
+
+Nenhuma linha de `LeadService`/`StoreAdapter`/`Flows2`/`Flows3`/
+`FlowVerCliente` foi tocada. As flags WRITE/READ não são consultadas
+em nenhum ponto do caminho legado. `ScreenClientesLegacy`/
+`ScreenAndamentoLegacy` permanecem exatamente como no S8-C2-B2.
+
+### 37.12 Validação local
+
+Revalidação SQL pura (nenhum arquivo `supabase/` tocado nesta etapa):
+40 migrations, SQL **45 arquivos/2316 testes**, idêntico ao estado
+oficial anterior (`supabase db reset` + `supabase test db`,
+`Result: PASS`). TypeScript: **118 arquivos, 1808/1808** (108/1699 +
+10 arquivos novos/109 testes novos: flag WRITE, capability, Sellers/
+create/update/duplicidade no repository e nos hooks, tradutor de
+erros, formulários create/edit, integração visual nas duas views,
+ação Editar em `PlatformLeadDetails`). Build verde, 8/8 páginas.
+
+### 37.13 Escopo preservado
+
+Nenhuma migration, RLS, grant, `audit_log` ou `database.types.ts`
+alterados. Nenhum componente mock modificado. `S8-C2-D1`/`S8-D`/M1-E
+E4 continuam não iniciados/pausados. Nenhuma operação remota
+executada.
+
+**O S8-C2-C2 (frontend de create/update/duplicidade) está completo.
+S8-C2-D1/S8-D permanecem não iniciados. M1-E E4 continua pausado.**
