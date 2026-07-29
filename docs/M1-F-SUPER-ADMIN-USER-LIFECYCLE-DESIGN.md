@@ -5723,3 +5723,175 @@ padrão. Manager/Seller intactos.
 **O S8-C2 (acesso comercial do Super Admin) está formalmente fechado.
 S8-D está desbloqueado, mas não iniciado. M1-E E4 continua pausado**
 até o fechamento formal do S8 (S8-F).
+
+## 42. S8-D1 — remoção de `User.companyId` e migração da navegação
+
+Após a auditoria S8-D-A0 (catálogo completo dos consumidores restantes
+de `profiles.company_id`/`role`/`seller_id` legados), esta seção
+implementa o primeiro corte do S8-D: a remoção do campo `companyId` do
+tipo `User` autenticado e a migração da lista-base de navegação para
+`platformRole`/`activeMembership.role`.
+
+### 42.1 Decisões humanas congeladas (revisão do S8-D-A0)
+
+1. `User.companyId` é removido do tipo — nenhum consumidor runtime real
+   foi encontrado na auditoria (só testes o preenchiam).
+2. `AuthService._loadProfile` para de selecionar/popular `company_id`
+   de `profiles` — `activeMembership` (via `_loadActiveMembership`,
+   já correta desde o M1-F S4-F1) continua sendo a única fonte de
+   empresa do `User`.
+3. Todas as fixtures/mocks de teste que preenchiam `User.companyId`
+   são atualizadas para removê-lo, sem perder cobertura real.
+4. A lista-base de navegação (`allowedNavIds`, `components/App.tsx`)
+   migra de `NAV_ROLES[user.role]` para `platformRole` (Super Admin) /
+   `activeMembership.role` (Manager/Seller) — `profiles.role` legado
+   deixa de influenciar a navegação, mesmo isolado.
+5. Comentários/documentação desatualizados citando `companyId` como
+   fonte legítima de `User` são corrigidos.
+6. Preservado sem alteração: `User.role`, `User.sellerId`, todos os
+   módulos M0 locais (`SellerService`, os cinco `_filtered*` de
+   `lib/services.ts`, `LeadService`, `StoreAdapter`, `Flows2.tsx`,
+   corpos legados de `ScreensOps`/`ScreensBiz`), a ponte
+   `update_membership_role` → `profiles.role` (S5-C), a infraestrutura
+   de bridge do M1-E (`lib/leads/bridge.ts`, `useLeads`,
+   `remoteSnapshot.ts` — já aceitam `companyId` explícito por
+   parâmetro, nunca leem `User.companyId`), e todo SQL/RPC/RLS/grants/
+   schema/`database.types.ts` (nenhuma alteração de banco nesta etapa).
+7. `MembershipLifecycleTargetUser.company_id` e `CreateInviteActor`/
+   atores de UI equivalentes são tipos distintos de `User` (o alvo
+   administrado, não o ator autenticado) — fora de escopo, intocados.
+
+### 42.2 Revalidação prévia — sem achados novos
+
+Releitura de `lib/data.ts` (`User`, `NAV_ROLES`), `lib/services.ts`
+(`_loadProfile`/`_loadActiveMembership`), `lib/supabase/types.ts`
+(`ProfileRow`) e `components/App.tsx` (`allowedNavIds`) confirmou o
+estado descrito na auditoria S8-D-A0: `activeMembership` já é
+resolvida corretamente e de forma independente de `company_id`;
+nenhuma capability (`lib/capabilities.ts`) lê `User.role`/`companyId`
+desde o S8-B1; a bridge do M1-E já recebe `companyId` como parâmetro
+explícito. Nenhum consumidor runtime real de `User.companyId` foi
+encontrado além das fixtures de teste já catalogadas.
+
+### 42.3 Implementação
+
+**`lib/data.ts`**: campo `companyId: string | null` removido de
+`User` (com seu JSDoc `@deprecated`); comentário de `platformRole`
+ajustado (deixa de mencionar `companyId`). `NAV_ROLES` não foi
+alterado — só a forma de **selecionar** a lista-base mudou.
+
+**`lib/services.ts`** (`_loadProfile`): `company_id` removido do
+`.select(...)` de `profiles` e do objeto `User` retornado.
+`_loadActiveMembership` intocada.
+
+**`lib/supabase/types.ts`** (`ProfileRow`): `company_id` removido do
+tipo manual — a coluna física continua existindo no banco (reservada
+ao S8-E), só deixa de compor a leitura do profile autenticado.
+
+**`components/App.tsx`** (`allowedNavIds`): reescrita para decidir a
+lista-base por `platformRole === 'super_admin'` (base =
+`NAV_ROLES.admin` menos os ids comerciais, sempre — corrige uma
+inconsistência pré-existente em que o Super Admin, a depender do
+`profiles.role` legado do fixture/seed, podia ficar sem `resultados`)
+→ senão `activeMembership.role === 'manager'` → `NAV_ROLES.manager` →
+senão `activeMembership.role === 'seller'` → `NAV_ROLES.seller` →
+senão (nem Super Admin, nem membership ativa — ex.: usuário
+desligado/suspenso) → somente `['home']`. As adições condicionais
+already existentes (`clientes`/`andamento` comerciais, `ajustes` via
+`canAccessStageSettings`/`canManageInvites`, `empresas` via
+`canAccessPlatformAdmin`) não foram tocadas.
+
+### 42.4 Fixtures e testes atualizados
+
+`companyId` removido de todas as fixtures que simulavam `User`
+autenticado (15 arquivos): `tests/leads/serviceSeam.test.ts`,
+`tests/integration/stagePermissionsFlow.test.tsx`,
+`tests/navigation/appCacheIdentity.test.tsx`,
+`tests/navigation/commercialWorkspaceAccess.test.tsx`,
+`tests/navigation/platformAdminAccess.test.tsx`,
+`tests/navigation/settingsAccess.test.tsx`,
+`tests/screens/ScreenAjustesStages.test.tsx`,
+`tests/screens/ScreenAjustesInvites.test.tsx`,
+`tests/screens/ScreenAjustesUserLifecycle.test.tsx`,
+`tests/screens/ScreenAjustesUserEmailEdit.test.tsx`,
+`tests/screens/ScreenAjustesActiveUsers.test.tsx`,
+`tests/screens/ScreenEmpresas.test.tsx`,
+`tests/screens/ScreenAndamento.test.tsx`,
+`tests/integration/remoteStagesKanban.test.tsx`,
+`tests/integration/remoteStagesReorder.test.tsx`. Em todos os casos,
+`activeMembership.companyId` (legítimo) foi preservado — só o
+`companyId` solto no nível de `User` foi removido.
+
+Três testes de `tests/leads/serviceSeam.test.ts` e três de
+`tests/screens/ScreenAjustesStages.test.tsx` existiam especificamente
+para provar que um `companyId` legado, quando presente e divergente da
+`activeMembership`, era ignorado como fallback. Com o campo removido
+do tipo, esse cenário deixou de ser representável — a garantia passou
+a ser do próprio sistema de tipos. Os testes foram ajustados para
+manter a parte da asserção que continua real e útil (ex.: "sem
+`activeMembership` ⇒ `remote_leads_invalid_context`", "Super Admin sem
+`activeMembership` ⇒ `companyId` nulo"), removendo apenas a premissa
+do `companyId` legado divergente; um caso
+(`serviceSeam.test.ts`, "companyId legado DIFERENTE da membership")
+tornou-se totalmente redundante com os testes de troca de identidade
+já existentes no mesmo arquivo e foi removido, com um comentário
+explicando o motivo.
+
+Três fixtures `user('admin')` em `tests/navigation/settingsAccess.test.tsx`
+(arquivo do M1-D, anterior ao modelo de `platformRole`/membership)
+representavam um "admin" com acesso total incondicional — o
+equivalente moderno dessa identidade é o Super Admin via `platformRole`,
+nunca `role` isolado; os três testes afetados foram atualizados para
+usar um novo helper `superAdminUser()` (`{ ...user('admin'),
+platformRole: 'super_admin' }`), preservando a asserção original ("vê
+Ajustes independente da flag").
+
+### 42.5 Testes novos
+
+`tests/services/authService.test.ts`: novo teste confirmando que o
+`User` retornado por `AuthService.login` não possui a propriedade
+`companyId`, mesmo com `PROFILE_BASE.company_id` presente no mock cru
+do profile (prova que a coluna, mesmo se devolvida pelo banco, nunca
+chega a compor o `User`).
+
+`tests/navigation/legacyProfileDivergence.test.tsx` (novo arquivo):
+cobre os dois cenários de "profile legado divergente" — (1)
+`platformRole=null`, `activeMembership.role='seller'`,
+`profiles.role='admin'` (legado, deliberadamente errado) ⇒ navegação
+de Seller (sem `Resultados`, sem `Ajustes`); (2) `platformRole=
+'super_admin'`, `profiles.role='seller'` (legado, deliberadamente
+errado) ⇒ navegação de Super Admin (com `Resultados` e `Ajustes`).
+`Resultados` é o sinal escolhido por estar presente na base de
+Manager/Super Admin e ausente da base de Seller (`NAV_ROLES`,
+`lib/data.ts`).
+
+### 42.6 Validação completa
+
+TypeScript: `npx tsc --noEmit` — zero erros da classe
+`'companyId' does not exist in type 'User'` (as 22 ocorrências
+restantes são erros pré-existentes e não relacionados: tuplas em
+`tests/api/invites/invites.validate.test.ts`, `Pick<User,...>` em
+`tests/capabilities.test.ts`, `@ts-expect-error` não usado em
+`tests/invites/fragment.test.ts`, propriedades de
+`AdaptPipelineStagesResult` em `tests/pipeline/adapter.test.ts` —
+nenhum tocado, fora de escopo). `npm run test:run`: **1927/1927 PASS**
+(127 arquivos; 1925 + 2 novos). `npm run build`: verde, 8/8 páginas
+(nenhuma flag nova nesta etapa — não exigiu matriz de builds). SQL:
+`supabase db reset` + `supabase test db` — **43 migrations, 48
+arquivos, 2478/2478 PASS**, exatamente inalterado em relação ao S8-C2-E
+(§41.10), confirmando **zero alteração de banco** nesta etapa.
+
+### 42.7 Escopo preservado
+
+Nenhuma migration, nenhuma alteração em RPC/RLS/grants/schema,
+nenhuma alteração em `database.types.ts`, nenhuma operação Supabase
+remota, nenhum arquivo `.env` modificado, nenhuma flag ativada.
+`User.role`/`User.sellerId` intactos; módulos M0 (`SellerService`,
+`_filtered*`, `LeadService`, `StoreAdapter`, `Flows2.tsx`, corpos
+legados de `ScreensOps`/`ScreensBiz`) intactos; bridge do M1-E
+(`lib/leads/bridge.ts`, `useLeads`, `remoteSnapshot.ts`) intacta, ainda
+não montada em `App.tsx`; ponte `update_membership_role` →
+`profiles.role` intacta.
+
+**O S8-D1 está concluído. S8-D2 está desbloqueado, mas não iniciado.
+M1-E E4 continua pausado** até o fechamento formal do S8 (S8-F).
