@@ -5,8 +5,6 @@
 // devem DERIVAR de Database, como PipelineStageRow abaixo.
 import type { Database } from './database.types';
 
-export type UserRole = 'admin' | 'manager' | 'seller';
-
 export interface CompanyRow {
   id: string;
   name: string;
@@ -19,23 +17,20 @@ export interface CompanyRow {
 
 export interface ProfileRow {
   id: string; // = auth.users.id
-  // M1-F S8-D1: company_id removido deste tipo — _loadProfile() não
-  // seleciona mais essa coluna (zero consumidor runtime de User.companyId,
-  // confirmado por auditoria S8-D-A0/S8-D1). A coluna física
-  // `profiles.company_id` continua existindo no banco (reservada ao S8-E),
-  // só não faz mais parte da leitura do profile autenticado.
+  // M1-F S8-D1/S8-D2-A: company_id/role/seller_id removidos deste tipo —
+  // _loadProfile() não seleciona mais nenhuma dessas colunas (zero
+  // consumidor runtime de User.companyId/role/sellerId, confirmado por
+  // auditoria S8-D-A0/S8-D1/S8-D2-A). As 3 colunas físicas continuam
+  // existindo no banco (reservadas ao S8-E), só deixaram de compor a
+  // leitura do profile autenticado.
   name: string;
   email: string;
-  role: UserRole;
-  // text, não uuid — casa com sellers.id (ver nota em supabase/migrations,
-  // M1-B mantém os ids de vendedor do seed localStorage por enquanto).
-  seller_id: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  // M1-F S1/S3-B: platform_role é independente de role — só 'super_admin'
-  // ou null, nunca lido como autoridade real no frontend (ver lib/data.ts
-  // User.platformRole).
+  // M1-F S1/S3-B: platform_role é independente do papel empresarial — só
+  // 'super_admin' ou null, nunca lido como autoridade real no frontend (ver
+  // lib/data.ts User.platformRole).
   platform_role: Database['public']['Enums']['platform_role'] | null;
 }
 

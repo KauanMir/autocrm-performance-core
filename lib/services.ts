@@ -54,24 +54,40 @@ let _cachedUser: User | null = null;
 // filtrar por profile_id no cliente era redundante E quebrava a
 // permissão. Sem esse filtro (só is_active=true, coluna concedida), a
 // consulta funciona exatamente como pretendido.
-async function _loadActiveMembership(): Promise<{ companyId: string; role: 'manager' | 'seller' } | null> {
+// M1-F S8-D2-A: sellerId resolvido pela fonte segura já publicada
+// (current_profile_seller_id_for_company, migration m1f_s2_02) — nunca
+// profiles.seller_id. Só Seller chama a RPC (Manager nunca tem seller
+// próprio, por definição — economiza a chamada); erro/ausência de linha
+// falha fechado para null, nunca inventa um id nem lança (mesmo padrão de
+// falha silenciosa já usado para a própria membership abaixo).
+async function _loadActiveMembershipSellerId(companyId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('current_profile_seller_id_for_company', {
+    p_target_company_id: companyId,
+  });
+  if (error || !data) return null;
+  return data;
+}
+
+async function _loadActiveMembership(): Promise<{ companyId: string; role: 'manager' | 'seller'; sellerId: string | null } | null> {
   const { data, error } = await supabase
     .from('company_memberships')
     .select('company_id, role, is_active')
     .eq('is_active', true)
     .maybeSingle<CompanyMembershipRow>();
   if (error || !data) return null;
-  return { companyId: data.company_id, role: data.role };
+  const sellerId = data.role === 'seller' ? await _loadActiveMembershipSellerId(data.company_id) : null;
+  return { companyId: data.company_id, role: data.role, sellerId };
 }
 
 async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise<User | null> {
-  // M1-F S8-D1: company_id removido desta seleção — User.companyId não
-  // existe mais no tipo (zero consumidor runtime confirmado por auditoria,
-  // S8-D-A0). activeMembership (abaixo) continua sendo a única fonte de
-  // empresa para qualquer decisão real.
+  // M1-F S8-D1/S8-D2-A: company_id/role/seller_id removidos desta seleção —
+  // nenhum dos três existe mais no tipo User (zero consumidor runtime
+  // confirmado por auditoria, S8-D-A0/S8-D2-A). activeMembership (abaixo)
+  // continua sendo a única fonte de empresa/papel/vendedor para qualquer
+  // decisão real.
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, name, email, role, seller_id, is_active, platform_role')
+    .select('id, name, email, is_active, platform_role')
     .eq('id', authUserId)
     .single<ProfileRow>();
   if (error || !data || !data.is_active) return null;
@@ -80,8 +96,6 @@ async function _loadProfile(authUserId: string, fallbackEmail?: string): Promise
     id: data.id,
     name: data.name,
     email: data.email || fallbackEmail || '',
-    role: data.role,
-    sellerId: data.seller_id,
     platformRole: data.platform_role,
     activeMembership,
   };
@@ -152,17 +166,28 @@ export const AuthService = {
     return !!_cachedUser;
   },
 
-  currentRole(): 'admin' | 'manager' | 'seller' | null {
-    return _cachedUser ? _cachedUser.role : null;
+  // M1-F S8-D2-A: papel empresarial atual — antes lia User.role legado
+  // (profiles.role), agora vem exclusivamente de activeMembership.role
+  // (nunca 'admin', que nunca existiu nesse campo).
+  currentRole(): 'manager' | 'seller' | null {
+    return _cachedUser?.activeMembership?.role ?? null;
   },
 
+  // Super Admin é a identidade moderna que substitui o "admin" legado —
+  // isAdmin() era `currentRole() === 'admin'` (profiles.role), o que hoje
+  // seria sempre false (activeMembership.role nunca é 'admin'). platformRole
+  // é o sinal real e correto, mesmo padrão já usado em toda capability.
   isAdmin(): boolean {
-    return AuthService.currentRole() === 'admin';
+    return AuthService.isPlatformSuperAdmin();
   },
 
+  // Correção de consistência (mesma classe do achado de navegação do
+  // S8-D1): sob o profiles.role legado, se Super Admin passava aqui
+  // dependia de um valor arbitrário/inconsistente de seed. Super Admin
+  // (via platformRole) OU Manager com membership ativa agora decide de
+  // forma determinística — Seller nunca passa, exatamente como antes.
   isManager(): boolean {
-    const r = AuthService.currentRole();
-    return r === 'manager' || r === 'admin';
+    return AuthService.isPlatformSuperAdmin() || AuthService.currentRole() === 'manager';
   },
 
   // Fixed while rewriting this function for M1-B: the old version returned
@@ -227,42 +252,62 @@ const StoreAdapter = {
 };
 
 // ── Role-aware filter functions ───────────────────────────────────────
+// M1-F S8-D2-A: escopo local M0 (Tasks/Visits/Deals/Sales/Leads) por
+// identidade ATUAL — nunca profiles.role/seller_id legados. Super Admin
+// (platformRole) e Manager (activeMembership.role==='manager') veem tudo,
+// exatamente como sempre. Seller vê só o próprio recorte
+// (activeMembership.sellerId); sem cadastro válido de Seller na empresa,
+// falha fechado ('none') — nunca reaparece como "vê todos" (decisão
+// humana S8-D2-A #8). Sem platformRole e sem membership ativa (ex.:
+// desligado/suspenso) também falha fechado — role legado isolado nunca
+// reabre acesso, mesmo raciocínio já aplicado à navegação no S8-D1.
+function _currentSellerScope(): { sellerId: string } | 'all' | 'none' {
+  const u = AuthService.getCurrentUser();
+  if (u?.platformRole === 'super_admin') return 'all';
+  const m = u?.activeMembership;
+  if (m?.role === 'manager') return 'all';
+  if (m?.role === 'seller') return m.sellerId ? { sellerId: m.sellerId } : 'none';
+  return 'none';
+}
 
 function _filteredLeads(): Lead[] {
-  const u = AuthService.getCurrentUser();
+  const scope = _currentSellerScope();
   const all = StoreAdapter.getLeads();
-  if (u?.role === 'seller' && u.sellerId) return all.filter(l => l.sellerId === u.sellerId);
-  return all;
+  if (scope === 'all') return all;
+  if (scope === 'none') return [];
+  return all.filter(l => l.sellerId === scope.sellerId);
 }
 
 function _filteredVisits(): Visit[] {
-  const u = AuthService.getCurrentUser();
+  const scope = _currentSellerScope();
   const all = StoreAdapter.getVisits();
-  if (u?.role === 'seller' && u.sellerId) return all.filter(v => v.sellerId === u.sellerId);
-  return all;
+  if (scope === 'all') return all;
+  if (scope === 'none') return [];
+  return all.filter(v => v.sellerId === scope.sellerId);
 }
 
 function _filteredDeals(): Deal[] {
-  const u = AuthService.getCurrentUser();
+  const scope = _currentSellerScope();
   const all = StoreAdapter.getDeals();
-  if (u?.role === 'seller' && u.sellerId) return all.filter(d => d.sellerId === u.sellerId);
-  return all;
+  if (scope === 'all') return all;
+  if (scope === 'none') return [];
+  return all.filter(d => d.sellerId === scope.sellerId);
 }
 
 function _filteredSales(): Sale[] {
-  const u = AuthService.getCurrentUser();
+  const scope = _currentSellerScope();
   const all = StoreAdapter.getSales();
-  if (u?.role === 'seller' && u.sellerId) return all.filter(s => s.sellerId === u.sellerId);
-  return all;
+  if (scope === 'all') return all;
+  if (scope === 'none') return [];
+  return all.filter(s => s.sellerId === scope.sellerId);
 }
 
 function _filteredTasks(): Task[] {
-  const u = AuthService.getCurrentUser();
+  const scope = _currentSellerScope();
   const all = StoreAdapter.getTasks();
-  if (u?.role === 'seller' && u.sellerId) {
-    return all.filter(t => !t.assignedTo || t.assignedTo === u.sellerId);
-  }
-  return all;
+  if (scope === 'all') return all;
+  if (scope === 'none') return [];
+  return all.filter(t => !t.assignedTo || t.assignedTo === scope.sellerId);
 }
 
 // ── Lead Health Engine ──────────────────────────────────────────────────
@@ -544,10 +589,15 @@ export const TaskService = {
 export const SellerService = {
   getAll: () => getStore().sellers,
   getById: (id: string) => getStore().sellers.find(s => s.id === id) ?? null,
+  // M1-F S8-D2-A: sellerId vem exclusivamente de activeMembership.sellerId
+  // (nunca profiles.seller_id) — null para Manager, Super Admin, Seller sem
+  // linha válida em sellers, ou qualquer sessão sem identidade empresarial
+  // atual (decisão humana S8-D2-A: sem platformRole/membership ⇒ null,
+  // nunca reaproveita histórico).
   getCurrentSeller: () => {
-    const u = AuthService.getCurrentUser();
-    if (!u?.sellerId) return null;
-    return getStore().sellers.find(s => s.id === u.sellerId) ?? null;
+    const sellerId = AuthService.getCurrentUser()?.activeMembership?.sellerId;
+    if (!sellerId) return null;
+    return getStore().sellers.find(s => s.id === sellerId) ?? null;
   },
 };
 

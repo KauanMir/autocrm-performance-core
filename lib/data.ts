@@ -31,35 +31,28 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  /** @deprecated M1-F S8-A0/S8-B1: legado (`profiles.role`). Nenhuma
-   * autorização nova pode ler este campo — capabilities de Ajustes/Etapas/
-   * reorder já migraram para `platformRole`/`activeMembership.role`
-   * (S8-B1); consumidores restantes são compatibilidade M0 (filtros locais
-   * de Tasks/Visits/Deals/Sales em `lib/services.ts`). Permanece no tipo
-   * até zero consumidor runtime restar (§28.5/§28.10 do design). */
-  role: 'admin' | 'manager' | 'seller';
-  /** @deprecated M1-F S8-A0: legado (`profiles.seller_id`). Só serve hoje
-   * como bridge para o store local/mock de Sellers (`SellerService`,
-   * compatibilidade M0) — nunca autorização empresarial. Fronteira própria,
-   * condicionada à migração desses módulos locais (§28.6 do design). */
-  sellerId: string | null;
-  // M1-F S3-B: platform_role da profile (independente de `role` — um Super
-  // Admin não tem empresa, por design). Opcional (não `| null` obrigatório)
-  // de propósito: dezenas de fixtures de teste pré-existentes constroem
-  // User sem este campo — undefined e null são equivalentes em todo check
-  // (`=== 'super_admin'`), então tornar obrigatório só quebraria testes
-  // sem relação nenhuma com o S3-B, sem ganho de segurança real (a
+  // M1-F S3-B: platform_role da profile (independente do papel empresarial
+  // — um Super Admin não tem empresa, por design). Opcional (não `| null`
+  // obrigatório) de propósito: dezenas de fixtures de teste pré-existentes
+  // constroem User sem este campo — undefined e null são equivalentes em
+  // todo check (`=== 'super_admin'`), então tornar obrigatório só quebraria
+  // testes sem relação nenhuma com o S3-B, sem ganho de segurança real (a
   // autoridade nunca foi este campo, sempre RLS/is_platform_super_admin()
   // no banco). null para todo usuário comum carregado via _loadProfile.
   platformRole?: 'super_admin' | null;
-  // M1-F S4-F1: membership ATIVA em company_memberships (nunca profiles.role
-  // legado) — carregada junto do profile em _loadProfile(). null quando não
-  // há membership ativa (Super Admin nunca tem, por design; qualquer conta
-  // sem vínculo de empresa ativo também). Presença do objeto já implica
-  // is_active=true (a consulta em _loadProfile filtra por isso) — não repete
-  // o booleano aqui. Opcional pelo mesmo motivo de platformRole: fixtures de
-  // teste pré-existentes constroem User sem este campo.
-  activeMembership?: { companyId: string; role: 'manager' | 'seller' } | null;
+  // M1-F S4-F1/S8-D2-A: membership ATIVA em company_memberships (nunca
+  // profiles.role/seller_id legados) — carregada junto do profile em
+  // _loadProfile(). null quando não há membership ativa (Super Admin nunca
+  // tem, por design; qualquer conta sem vínculo de empresa ativo também).
+  // Presença do objeto já implica is_active=true (a consulta em
+  // _loadProfile filtra por isso) — não repete o booleano aqui. `sellerId`
+  // é o `sellers.id` real ligado à membership via
+  // `current_profile_seller_id_for_company()` (nunca `profiles.seller_id`)
+  // — null para Manager (por definição) e para Seller sem linha válida em
+  // `sellers` (nunca inventado, nunca um fallback). Opcional pelo mesmo
+  // motivo de platformRole: fixtures de teste pré-existentes constroem
+  // User sem este campo.
+  activeMembership?: { companyId: string; role: 'manager' | 'seller'; sellerId: string | null } | null;
 }
 
 // LEGACY — kept only so a couple of display-name lookups (FlowVerCliente's
