@@ -987,12 +987,6 @@ export type Database = {
         Args: never
         Returns: Database["public"]["Enums"]["company_role"]
       }
-      current_profile_company_id: { Args: never; Returns: string }
-      current_profile_role: {
-        Args: never
-        Returns: Database["public"]["Enums"]["user_role"]
-      }
-      current_profile_seller_id: { Args: never; Returns: string }
       current_profile_seller_id_for_company: {
         Args: { p_target_company_id: string }
         Returns: string
@@ -1017,7 +1011,6 @@ export type Database = {
           profile_is_active: boolean
         }[]
       }
-      is_manager_or_admin: { Args: never; Returns: boolean }
       is_manager_or_platform: {
         Args: { p_target_company_id: string }
         Returns: boolean
