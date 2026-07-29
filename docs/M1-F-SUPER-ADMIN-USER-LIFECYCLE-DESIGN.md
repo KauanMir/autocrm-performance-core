@@ -5525,3 +5525,201 @@ nova criada. Nenhuma operação remota executada.
 **S8-C2-D2 está completo. S8-C2-E (auditoria integrada e fechamento do
 C2) está desbloqueado. S8-D permanece não iniciado. M1-E E4 continua
 pausado** até o fechamento formal do S8 (S8-F).
+
+## 41. Fechamento do S8-C2 — acesso comercial do Super Admin
+
+Esta seção fecha formalmente o S8-C2 (§31–§40) após auditoria integrada
+do sistema completo. Nenhum código de aplicação foi alterado nesta
+etapa — apenas um teste pgTAP integrado, um teste TypeScript integrado
+e esta documentação. §0–§40 não foram alterados.
+
+### 41.1 Subetapas concluídas
+
+S8-C2-A0/A1/A2 (auditoria e congelamento, §31); S8-C2-B1/B2 (leitura
+comercial, backend e frontend, §32/§33); S8-C2-C1/C2 (create/update/
+duplicidade + Sellers, backend e frontend, §34/§36/§37) — incluindo
+S8-C2-C1-AUTH-A1 (autoria de `leads` por membership histórica, §35);
+S8-C2-D1/D2 (as seis mutations restantes, backend e frontend, §38/§40)
+— incluindo S8-C2-D1-TIMELINE-AUTH-A1 (autoria da timeline por
+membership histórica, §39); S8-C2-E (esta seção, auditoria integrada e
+fechamento).
+
+### 41.2 Arquitetura final
+
+**RPCs de leitura (5)**: `list_commercial_companies`,
+`list_platform_leads_for_company`, `list_platform_lead_timeline`,
+`list_pipeline_stages_for_company`, `list_platform_sellers_for_company`
+— nenhuma grava `audit_log`.
+
+**RPCs de mutation (9)**: `create_lead`, `update_lead`,
+`check_lead_phone_duplicate` (leitura controlada, nunca audita),
+`move_lead_to_stage`, `apply_lead_event`, `assign_lead_seller`,
+`archive_lead`, `unarchive_lead`, `add_lead_timeline_entry` — todas
+recebem `p_company_id uuid DEFAULT NULL`, todas resolvem ator/empresa
+via `resolve_lead_mutation_context` (Super Admin: empresa explícita;
+Manager/Seller: `current_membership_company_id()`/
+`current_membership_role()`, `p_company_id` do cliente sempre
+ignorado). Confirmado por auditoria integrada ao vivo (§41.4): das 9,
+apenas `create_lead`/`update_lead`/`add_lead_timeline_entry` produzem
+efeito colateral fora de `public.leads` (`created_by`/`updated_by`/
+`actor_profile_id`); `move`/`event`/`assign`/`archive`/`unarchive`
+afetam somente a própria linha de `leads`.
+
+**Contexto comercial**: `CommercialCompanyContext`
+(`selectedCompanyId`/`contextEpoch`), montado uma única vez em
+`App.tsx`, nunca localStorage/sessionStorage/URL. **Capabilities**:
+`canAccessCommercialWorkspace` (leitura) / `canMutateCommercialWorkspace`
+(mutation, exclusiva de Super Admin, exige READ+WRITE+empresa
+ativa/implantacao). **Flags**: `NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_READ`/
+`_WRITE`, ambas `false` por padrão, únicas a gatear a superfície
+platform — confirmado que nenhuma outra combinação de código depende
+delas.
+
+### 41.3 Auditoria de dependências legadas — zero encontradas
+
+Busca direta em `components/commercial/*`, `lib/commercial/*` e todos
+os hooks/repositories platform por `profiles.company_id`/`role`/
+`seller_id`, os 4 helpers legados, `User.companyId`/`role`/`sellerId`,
+`LeadService`/`StoreAdapter`, `useCompanyScopeFilter`/`companyFilterId`,
+`localStorage`/`sessionStorage`: **zero ocorrências operacionais** —
+todas as menções encontradas são comentários explicando o que
+**não** é usado (documentação do próprio código). `App.tsx`
+(`allowedNavIds`/`COMMERCIAL_NAV_IDS`) e `ScreensOps.tsx` (switch
+`ScreenClientes`/`ScreenAndamento`, correção do achado 1 em
+`ScreenAndamentoLegacy`) revalidados linha a linha — exatamente como
+publicados no S8-C2-B2, nenhuma regressão.
+
+### 41.4 Auditoria integrada do backend — fluxo transacional ao vivo
+
+Executado localmente (transação com rollback, nenhum dado persistido)
+o fluxo completo de Super Admin em empresa ativa: listar empresas
+(5, incluindo suspensa/cancelada) → Stages/Sellers reais → criar Lead
+sem Seller → checar duplicidade → editar → mover etapa → atribuir
+Seller → aplicar evento → adicionar timeline manual → arquivar →
+confirmar na lista `archived=true` → desarquivar → confirmar de volta
+em `archived=false`. Resultado: **zero falhas, zero achado crítico**.
+`audit_log` do fluxo continha exatamente as 7 mutations de Super Admin
+em `entity_type='lead'` + 1 em `entity_type='lead_timeline_entry'`,
+todas com `actor_profile_id` real, `company_id` correto,
+`created_by_profile_id`/`updated_by_profile_id`/`actor_profile_id`
+empresariais `null`.
+
+Cross-company (Lead/Stage/Seller/timeline de A operados com contexto de
+B, ou vice-versa): todas as quatro tentativas falharam fechado
+(`lead_not_found`/`stage_not_found`/`seller_not_found`), nenhuma
+revelando a existência do recurso na outra empresa. Empresa em
+implantação: create/move funcionam para Super Admin. Suspensa/
+cancelada: leitura funciona, `create_lead` nega com `company_read_only`.
+Manager: `create_lead`/`move_lead_to_stage` chamados com `p_company_id`
+apontando explicitamente para OUTRA empresa (B) — ambos ignoraram o
+parâmetro e operaram corretamente na empresa da própria membership (A);
+autoria (`created_by_profile_id`) preservada como o profile real. Seller:
+autoatribuído na criação; `assign_lead_seller`/`archive_lead` negados
+com `forbidden`, mesmo no próprio Lead. Ao final: zero timelines órfãs,
+zero `audit_log` órfãos.
+
+Adversarial de PII: uma segunda rodada injetou deliberadamente um nome
+completo sensível, um telefone alternativo e um "CPF" fictício no
+`name`/`phone`/`label`/`detail` de um Lead e de uma entrada de timeline
+manual — nenhum desses valores apareceu em `before_data`/`after_data`
+de nenhuma linha de `audit_log` gerada (confirmado por busca textual
+`ilike` direta sobre as colunas). O conteúdo real permanece
+exclusivamente em `public.leads`/`public.lead_timeline_entries`, nunca
+duplicado no `audit_log`.
+
+Transferência/offboarding: comportamento já revalidado exaustivamente
+pelos testes 43/46 (S8-C2-C1-AUTH-A1/S8-C2-D1-TIMELINE-AUTH-A1) —
+não repetido aqui; nenhuma regressão encontrada na leitura desses
+testes durante esta auditoria.
+
+### 41.5 Novo teste SQL integrado
+
+`47_m1f_s8c2e_commercial_end_to_end.sql` — reproduz em pgTAP o fluxo
+acima como um único cenário coerente (não repete as asserções
+unitárias de 41–46): fluxo feliz completo de Super Admin em empresa
+ativa com auditoria de `audit_log` (contagem exata de ações, ator real,
+zero PII via busca textual), cross-company nas quatro entidades,
+matriz de status (implantação permitida, suspensa/cancelada
+`company_read_only` com leitura histórica preservada), Manager
+(`p_company_id` de outra empresa ignorado, autoria real), Seller
+(autoatribuição, `assign`/`archive` sempre `forbidden`), atomicidade
+(zero timelines/`audit_log` órfãos). Nenhum teste antigo alterado.
+
+### 41.6 Novo teste TypeScript integrado
+
+`tests/commercial/PlatformCommercialEndToEnd.test.tsx` — monta a árvore
+REAL (`CommercialCompanyProvider` + `PlatformCommercialClientsView` +
+todos os hooks reais), mockando somente `supabase.rpc` (fronteira de
+rede) com um dataset mutável que reflete o efeito de cada mutation —
+prova a fiação completa do sistema (não cada peça isolada, já coberta
+pelos testes unitários existentes). Cobre: fluxo completo (selecionar
+empresa → abrir Lead → mover → atribuir Seller real → aplicar evento →
+timeline manual → arquivar → aba Arquivados → desarquivar → volta para
+Ativos), nenhuma chamada usando `profile_id`/`membership_id` no lugar
+de `seller_id`; troca de empresa fecha o detalhe e nunca reaproveita
+dado da empresa anterior; matriz de flags a nível de componente real
+(READ+WRITE+suspensa: leitura funciona, nenhuma ação; WRITE=false:
+leitura funciona, nenhuma ação). Matriz de flags a nível de navegação
+(READ off) já coberta por
+`tests/navigation/commercialWorkspaceAccess.test.tsx` (existente,
+revalidado sem alteração); matriz da capability pura já coberta por
+`tests/capabilities.test.ts` (existente, revalidado sem alteração) —
+não duplicadas.
+
+### 41.7 Três builds — matriz de flags via variável de processo
+
+Nenhum arquivo `.env` alterado; flags passadas somente no ambiente do
+próprio comando (`NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_READ`/`_WRITE`).
+Build 1 (ausente/`false`, padrão do repositório), Build 2 (`READ=true`,
+`WRITE=false`), Build 3 (`READ=true`, `WRITE=true`) — os três verdes,
+8/8 páginas cada. A combinação `READ=false`/`WRITE=true` (WRITE nunca
+efetiva sem READ) não exigiu build própria — já demonstrada pela
+capability pura (`tests/capabilities.test.ts`) e pelo próprio código
+(`allowedNavIds` só considera a flag WRITE dentro do ramo já gateado
+por READ).
+
+### 41.8 PII e cache — confirmação final
+
+`audit_log`: zero PII completa em qualquer ação do fluxo integrado
+(§41.4). Query keys platform: todas particionadas por `companyId` +
+segmento `'platform'` (`leadsActive`/`leadsArchived`/`leadTimeline`/
+`stages`/`sellers`), nenhuma contém telefone/nome/conteúdo de timeline.
+Troca de empresa: cancela queries da empresa anterior, fecha detalhe/
+modais (via reset de estado local nos componentes platform),
+incrementa `contextEpoch`, nunca usa `resetQueryCache()` global.
+Logout/troca de identidade continua usando o reset já existente
+(`useQueryCacheIdentity`/`resetQueryCache`), intocado.
+
+### 41.9 Riscos residuais — transferidos ao S8-F, nenhum bloqueia o fechamento local
+
+Migrations M1-F ainda não aplicadas remotamente (validação de dados de
+produção pendente antes do rollout); as duas flags permanecem `false`
+em produção até rollout controlado; ausência de paginação nas listagens
+de Leads; ausência de realtime; drag and drop no Kanban não
+implementado (decisão deliberada, §40.6); Manager/Seller continuam
+inteiramente no modelo mock M0, aguardando M1-E E4; monitoramento do
+volume de `audit_log` em produção ainda não instrumentado; smoke test
+real só é possível após um rollout controlado com a flag READ ligada
+para um subconjunto de Super Admins. Nenhum destes riscos, isoladamente
+ou em conjunto, impede o fechamento **local** do S8-C2 — todos são
+responsabilidade do S8-F (fechamento formal do S8) ou de etapas
+futuras (M1-E E4).
+
+### 41.10 Validação completa
+
+SQL: 43 migrations (inalterado), 48 arquivos, **2478/2478 PASS** (2440
++ 38 novos). TypeScript: 126 arquivos, **1925/1925 PASS** (1921 + 4
+novos). Três builds verdes, 8/8 páginas cada. Nenhuma migration
+aplicada remotamente. Nenhuma operação Supabase remota. Nenhum arquivo
+`.env` modificado.
+
+### 41.11 Escopo preservado
+
+Nenhum código de aplicação alterado (nenhum componente, hook,
+repository, capability, query key, flag ou RPC). Nenhuma migration.
+Nenhuma alteração em `database.types.ts`. Nenhuma flag ativada por
+padrão. Manager/Seller intactos.
+
+**O S8-C2 (acesso comercial do Super Admin) está formalmente fechado.
+S8-D está desbloqueado, mas não iniciado. M1-E E4 continua pausado**
+até o fechamento formal do S8 (S8-F).
