@@ -38,4 +38,11 @@ export const platformCommercialQueryKeys = {
 
   stages: (companyId: string) =>
     ['company', requireId(companyId, 'companyId'), 'pipeline-stages', 'platform'] as const,
+
+  // M1-F S8-C2-C2 — Seller picker (list_platform_sellers_for_company).
+  // Raiz própria, nunca compartilhada com leadsRoot/stages — troca de
+  // empresa invalida só o que precisa, sem tocar Leads/etapas já
+  // carregados.
+  sellers: (companyId: string) =>
+    ['company', requireId(companyId, 'companyId'), 'commercial-sellers', 'platform'] as const,
 };

@@ -104,6 +104,46 @@ export function canAccessCommercialWorkspace(user: CommercialWorkspaceCapability
   return role === 'manager' || role === 'seller';
 }
 
+// M1-F S8-C2-C2 — mutation comercial (create/update/duplicidade de Leads):
+// capability PRÓPRIA, nunca uma ampliação de canAccessCommercialWorkspace
+// (que só decide se o WORKSPACE existe — leitura). Exclusiva de Super
+// Admin: Manager/Seller nunca usam esta capability platform (continuam
+// integralmente nas telas legadas, com seus próprios contratos locais).
+//
+// Contrato (§37 do design): true somente quando TODAS as condições valem
+// simultaneamente — platformRole==='super_admin'; readEnabled (a UI só
+// pode mostrar a superfície platform com a flag READ ligada, mesmo padrão
+// já usado pelo B2); writeEnabled (a flag WRITE em si — "WRITE só é
+// EFETIVA quando READ também está ligada" é justamente readEnabled &&
+// writeEnabled aqui, nunca uma leitura cruzada de flag dentro de
+// lib/flags.ts); selectedCompanyStatus não nulo (nenhuma empresa
+// selecionada = nenhuma mutation possível, nunca inferida); status
+// 'ativa'/'implantacao' (mesma matriz já aprovada para as RPCs de
+// mutation no S8-C2-C1 — 'suspensa'/'cancelada' sempre false, mesmo com
+// as duas flags ligadas).
+//
+// profile.is_active NÃO é checado aqui de propósito — mesmo raciocínio já
+// documentado em canManageInvites: um User inativo nunca existe em
+// memória (_loadProfile retorna null antes de montar o User), então esta
+// função nunca é chamada com um.
+export type CommercialMutationCapabilityUser = Pick<User, 'platformRole'> | null | undefined;
+
+export type CommercialMutationCapabilityInput = {
+  actor: CommercialMutationCapabilityUser;
+  readEnabled: boolean;
+  writeEnabled: boolean;
+  // null = nenhuma empresa selecionada ainda (selectedCompanyId null) —
+  // nunca inferida a partir de outro estado.
+  selectedCompanyStatus: 'implantacao' | 'ativa' | 'suspensa' | 'cancelada' | null;
+};
+
+export function canMutateCommercialWorkspace(input: CommercialMutationCapabilityInput): boolean {
+  if (input.actor?.platformRole !== 'super_admin') return false;
+  if (!input.readEnabled || !input.writeEnabled) return false;
+  if (input.selectedCompanyStatus === null) return false;
+  return input.selectedCompanyStatus === 'ativa' || input.selectedCompanyStatus === 'implantacao';
+}
+
 // M1-F S6-F — ciclo de vida empresarial de usuários (suspender/reativar/
 // desligar/transferir). Ator resolvido pelo chamador (nunca lido de
 // AuthService aqui, mesmo padrão do restante deste arquivo): Super Admin
