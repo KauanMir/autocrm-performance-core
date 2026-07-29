@@ -83,7 +83,7 @@ vi.mock('@/components/flows/FlowLayer', () => ({ FlowLayer: () => null }));
 import { App } from '@/components/App';
 
 function user(role: User['role'], platformRole: 'super_admin' | null = null): User {
-  return { id: `u-${role}-${platformRole ?? 'none'}`, name: role, email: `${role}@a.com`, role, sellerId: null, companyId: platformRole ? null : 'company-a', platformRole };
+  return { id: `u-${role}-${platformRole ?? 'none'}`, name: role, email: `${role}@a.com`, role, sellerId: null, platformRole };
 }
 
 async function renderApp(initial: User | null) {

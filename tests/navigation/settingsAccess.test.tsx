@@ -76,7 +76,14 @@ vi.mock('@/components/flows/FlowLayer', () => ({ FlowLayer: () => null }));
 import { App } from '@/components/App';
 
 function user(role: User['role']): User {
-  return { id: `u-${role}`, name: role, email: `${role}@a.com`, role, sellerId: null, companyId: 'company-a' };
+  return { id: `u-${role}`, name: role, email: `${role}@a.com`, role, sellerId: null };
+}
+
+// M1-F S8-D1: NAV_ROLES[user.role] deixou de existir — o equivalente
+// moderno do antigo fixture "admin" (M1-D, role legado com acesso total
+// incondicional) é o Super Admin via platformRole, nunca role sozinho.
+function superAdminUser(): User {
+  return { ...user('admin'), platformRole: 'super_admin' };
 }
 
 async function renderApp(initial: User | null) {
@@ -108,13 +115,13 @@ beforeEach(() => {
 });
 
 describe('menu Ajustes por role e flag', () => {
-  it('admin vê Ajustes com flag OFF e com flag ON', async () => {
-    await renderApp(user('admin'));
+  it('Super Admin vê Ajustes com flag OFF e com flag ON', async () => {
+    await renderApp(superAdminUser());
     expect(screen.getByText('Ajustes')).toBeInTheDocument();
 
-    switchUser(user('admin'));
+    switchUser(superAdminUser());
     m.flag.current = true;
-    switchUser(user('admin'));
+    switchUser(superAdminUser());
     expect(screen.getByText('Ajustes')).toBeInTheDocument();
   });
 
@@ -172,7 +179,7 @@ describe('M1-F S4-F1: "Ajustes" via canManageInvites, independente da flag de Et
   });
 
   it('Super Admin (platformRole=super_admin) vê Ajustes mesmo com a flag de Etapas OFF e sem membership', async () => {
-    const superAdmin: User = { ...user('seller'), companyId: null, platformRole: 'super_admin' };
+    const superAdmin: User = { ...user('seller'), platformRole: 'super_admin' };
     await renderApp(superAdmin);
     expect(screen.getByText('Ajustes')).toBeInTheDocument();
   });
@@ -185,8 +192,8 @@ describe('M1-F S4-F1: "Ajustes" via canManageInvites, independente da flag de Et
 });
 
 describe('troca de usuário com tela Ajustes aberta', () => {
-  it('admin → manager com flag OFF: acesso removido imediatamente (volta para home)', async () => {
-    await renderApp(user('admin'));
+  it('Super Admin → manager com flag OFF: acesso removido imediatamente (volta para home)', async () => {
+    await renderApp(superAdminUser());
     fireEvent.click(screen.getByText('Ajustes'));
     expect(screen.getByTestId('screen-ajustes')).toBeInTheDocument();
 
@@ -196,11 +203,11 @@ describe('troca de usuário com tela Ajustes aberta', () => {
     expect(screen.queryByText('Ajustes')).toBeNull();
   });
 
-  it('admin → manager com membership ATIVA, flag ON: mantém somente o acesso permitido (Ajustes segue acessível)', async () => {
+  it('Super Admin → manager com membership ATIVA, flag ON: mantém somente o acesso permitido (Ajustes segue acessível)', async () => {
     // M1-F S8-B1: fixture desatualizado — manager real precisa de
     // activeMembership (role legado isolado nunca concede nada).
     m.flag.current = true;
-    await renderApp(user('admin'));
+    await renderApp(superAdminUser());
     fireEvent.click(screen.getByText('Ajustes'));
     expect(screen.getByTestId('screen-ajustes')).toBeInTheDocument();
 

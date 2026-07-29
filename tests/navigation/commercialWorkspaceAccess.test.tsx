@@ -90,7 +90,6 @@ function user(role: User['role'], platformRole: 'super_admin' | null = null, act
     email: `${role}@a.com`,
     role,
     sellerId: null,
-    companyId: platformRole ? null : 'company-a',
     platformRole,
     activeMembership,
   };

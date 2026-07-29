@@ -69,7 +69,7 @@ import { App } from '@/components/App';
 
 function user(role: User['role'], id: string, companyId: string): User {
   return {
-    id, name: role, email: `${role}@a.com`, role, sellerId: null, companyId,
+    id, name: role, email: `${role}@a.com`, role, sellerId: null,
     activeMembership: { companyId, role: role === 'seller' ? 'seller' : 'manager' },
   };
 }
