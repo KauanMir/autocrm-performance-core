@@ -7,23 +7,22 @@ begin;
 create extension if not exists pgtap;
 select * from no_plan();
 
--- ── helpers LEGADOS continuam com assinatura e comportamento idênticos ──
-select has_function('public'::name, 'current_profile_company_id'::name, array[]::name[]);
-select has_function('public'::name, 'current_profile_role'::name, array[]::name[]);
-select has_function('public'::name, 'current_profile_seller_id'::name, array[]::name[]);
-select has_function('public'::name, 'is_manager_or_admin'::name, array[]::name[]);
-
+-- ── helpers ativos (M1-F S2+) continuam devolvendo o mesmo sinal efetivo
+--    que os helpers legados M1-C devolviam (M1-F S8-E1: os 4 helpers
+--    legados foram removidos do catálogo — current_profile_company_id/
+--    role/seller_id, is_manager_or_admin — garantia equivalente provada
+--    pelos helpers que realmente autorizam hoje) ─────────────────────────
 select set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}', true);
 set local role authenticated;
-select is(public.current_profile_company_id(), '00000000-0000-0000-0000-000000000001'::uuid, 'helper legado: current_profile_company_id() do ADMIN legado inalterado (mesmo com membership existindo agora)');
-select is(public.current_profile_role()::text, 'admin', 'helper legado: current_profile_role() do ADMIN legado inalterado');
-select is(public.is_manager_or_admin(), true, 'helper legado: is_manager_or_admin() do ADMIN legado inalterado (ainda true)');
+select is(public.current_membership_company_id(), '00000000-0000-0000-0000-000000000001'::uuid, 'current_membership_company_id() do ADMIN legado (mapeado a MANAGER) inalterado');
+select is(public.current_membership_role()::text, 'manager', 'current_membership_role() do ADMIN legado (mapeado a MANAGER) inalterado');
+select is(public.is_manager_or_platform('00000000-0000-0000-0000-000000000001'::uuid), true, 'is_manager_or_platform() do ADMIN legado inalterado (ainda true)');
 reset role;
 
 select set_config('request.jwt.claims', '{"sub":"33333333-3333-3333-3333-333333333333","role":"authenticated"}', true);
 set local role authenticated;
-select is(public.current_profile_seller_id(), 's4', 'helper legado: current_profile_seller_id() do SELLER legado inalterado');
-select is(public.is_manager_or_admin(), false, 'helper legado: is_manager_or_admin() do SELLER legado inalterado (ainda false)');
+select is(public.current_profile_seller_id_for_company('00000000-0000-0000-0000-000000000001'::uuid), 's4', 'current_profile_seller_id_for_company() do SELLER legado inalterado');
+select is(public.is_manager_or_platform('00000000-0000-0000-0000-000000000001'::uuid), false, 'is_manager_or_platform() do SELLER legado inalterado (ainda false)');
 reset role;
 
 -- ── as 9 RPCs do M1-E continuam existindo, mesma contagem, mesma

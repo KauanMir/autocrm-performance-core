@@ -55,12 +55,14 @@ select has_column('public'::name, 'profiles'::name, 'role'::name,
 select has_function('public'::name, 'accept_invite'::name, array['text']::name[],
   'accept_invite continua existindo, intocado nesta etapa');
 
--- helpers legados M1-C continuam existindo, sem serem removidos (decisão
--- humana #11) — mas sem nenhum consumidor ativo (auditoria S8-D2-B).
-select has_function('public'::name, 'current_profile_role'::name, array[]::name[],
-  'helper legado current_profile_role continua existindo (não removido nesta etapa)');
-select has_function('public'::name, 'is_manager_or_admin'::name, array[]::name[],
-  'helper legado is_manager_or_admin continua existindo (não removido nesta etapa)');
+-- M1-F S8-E1: os helpers legados M1-C (current_profile_role,
+-- is_manager_or_admin, current_profile_company_id, current_profile_
+-- seller_id) foram removidos fisicamente do catálogo numa etapa
+-- posterior — cobertura completa da remoção em
+-- 49_m1f_s8e1_drop_legacy_profile_helpers.sql. No momento do S8-D2-B
+-- (esta migration) eles ainda existiam, sem nenhum consumidor ativo
+-- (auditoria S8-D2-B) — essa garantia intermediária não é mais o estado
+-- atual do catálogo, por isso não é mais afirmada aqui.
 
 -- ══════════════════════════════════════════════════════════════════════
 -- FIXTURES
@@ -189,10 +191,12 @@ select is(
 -- profiles.role='seller' no ator Super Admin (fixture deliberada, linha
 -- 1) nunca interferiu na autorizacao — a chamada acima (secoes 2-4) so
 -- funcionou porque platform_role='super_admin', nunca por causa do role
--- legado. current_profile_role()/is_manager_or_admin() (helpers legados,
--- ainda existentes) continuam lendo profiles.role, mas nenhuma policy/RPC
--- ativa os consulta — comprovado empiricamente pela ausencia de qualquer
+-- legado. No momento desta migration, current_profile_role()/
+-- is_manager_or_admin() (helpers legados) ainda existiam no catálogo e
+-- continuavam lendo profiles.role, mas nenhuma policy/RPC ativa os
+-- consultava — comprovado empiricamente pela ausencia de qualquer
 -- policy/funcao no catalogo ativo que os referencie (auditoria S8-D2-B).
+-- Removidos fisicamente numa etapa posterior (S8-E1).
 set local role authenticated;
 select pg_temp.as_user('f8d10000-0000-0000-0000-000000000004'); -- Manager Target: profiles.role legado='manager', platform_role=null
 select is(

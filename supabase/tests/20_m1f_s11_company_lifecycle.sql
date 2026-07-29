@@ -375,10 +375,9 @@ select is((select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.
     'apply_lead_event','assign_lead_seller','archive_lead','unarchive_lead',
     'add_lead_timeline_entry','check_lead_phone_duplicate')), 9, 'as 9 RPCs do M1-E continuam existindo, sem duplicata');
 
-select has_function('public'::name, 'current_profile_company_id'::name, array[]::name[]);
-select has_function('public'::name, 'current_profile_role'::name, array[]::name[]);
-select has_function('public'::name, 'current_profile_seller_id'::name, array[]::name[]);
-select has_function('public'::name, 'is_manager_or_admin'::name, array[]::name[]);
+-- M1-F S8-E1: os 4 helpers legados (current_profile_company_id/role/
+-- seller_id, is_manager_or_admin) foram removidos do catálogo —
+-- cobertura da remoção em 49_m1f_s8e1_drop_legacy_profile_helpers.sql.
 
 select is(
   (select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'leads'),
