@@ -6428,3 +6428,179 @@ intactos. Nenhuma operação Supabase remota.
 `profiles.company_id`/`role`/`seller_id`) está desbloqueado, mas não
 iniciado. S8-F não iniciado. M1-E E4 continua pausado** até o
 fechamento formal do S8.
+
+## 46. S8-E2 — remoção da identidade empresarial legada de profiles
+
+Segundo e último corte do S8-E: remove fisicamente as 3 colunas
+legadas de `profiles` (`company_id`/`role`/`seller_id`). `platform_role`
+permanece como identidade global da plataforma; empresa e cargo
+empresarial passam a existir exclusivamente em `company_memberships`;
+a identidade de Seller passa a existir exclusivamente em
+`public.sellers`, ligada à membership.
+
+### 46.1 Decisões humanas congeladas
+
+1. Remover fisicamente `profiles.company_id`/`role`/`seller_id`.
+2. Nenhum alias, view ou coluna deprecated substituta.
+3. Nenhum campo substituto dentro de `profiles`.
+4. Empresa e cargo empresarial existem só em `company_memberships`.
+5. Identidade de Seller existe só em `public.sellers`, ligada à
+   membership.
+6. `platform_role` permanece em `profiles` como identidade global.
+7. `accept_invite` é atualizado para não inserir `company_id`/`role`
+   em `profiles`.
+8. Assinatura pública de `accept_invite` permanece idêntica.
+9. Comportamento do convite (validação, senha própria, criação/
+   atualização segura do profile, membership, role correta, Seller
+   quando aplicável, lifecycle, `audit_log`, consumo, idempotência,
+   atomicidade, erros, grants) continua idêntico.
+10. Nenhum backfill.
+11. Nenhuma cópia dos valores antigos para outro campo.
+12. Migrations históricas não são alteradas.
+13. Seed local e fixtures atuais atualizados só porque as colunas
+    deixam de existir.
+14. Frontend de aplicação não é alterado.
+15. Nenhuma operação Supabase remota.
+16. M1-E E4 continua pausado até o S8-F.
+
+### 46.2 Achado bloqueante durante a auditoria — resolvido com decisão humana
+
+A auditoria (busca em `prosrc` de toda função ativa) encontrou um
+segundo leitor real de `profiles.role`, além de `accept_invite`:
+`update_membership_role` gravava `'profile_role', v_target_profile.role`
+em `before_data`/`after_data` do `audit_log` — correção do próprio
+S8-D2-B, que passou a mostrar o valor real (nunca mais sincronizado)
+em vez de um valor esperado. Essa leitura deixaria de compilar com a
+coluna removida. Pausado explicitamente (condição de PARE da tarefa:
+"função ativa além de `accept_invite` ainda lê uma das três colunas")
+até decisão humana. **Decisão**: remover a chave `profile_role` por
+completo de `before_data`/`after_data` — nenhuma chave substituta,
+nenhum valor hipotético/`null`/vazio. O `audit_log` passa a registrar
+somente efeitos reais da operação (`company_role`, estado do Seller).
+A Migration 1 desta etapa passa a redefinir **duas** funções
+(`accept_invite` e `update_membership_role`), não uma — ambas com o
+único propósito de parar todo leitor/escritor ativo das 3 colunas antes
+do `DROP COLUMN` da Migration 2. Nenhuma outra RPC foi tocada.
+
+### 46.3 Auditoria final das três colunas
+
+No estado ATIVO do catálogo (não em migrations históricas): `company_id`
+tinha `profiles_company_id_fkey` (→ `companies`), índice
+`profiles_company_id_idx` e a `UNIQUE` composta `profiles_company_id_uidx`
+(`company_id, id`) — confirmado **órfã**, nenhuma FK externa a referencia
+mais (as FKs de autoria de `leads`/`lead_timeline_entries` já apontam
+para `company_memberships(company_id, profile_id)` desde o
+S8-C2-C1-AUTH-A1/S8-C2-D1-TIMELINE-AUTH-A1). `seller_id` tinha
+`profiles_seller_id_fkey` (→ `sellers`) e índice `profiles_seller_id_idx`
+— confirmado **zero leitor e zero escritor** em qualquer função ativa
+(nem mesmo `accept_invite`, que nunca populou essa coluna). `role`
+tinha só a constraint `NOT NULL` (sem índice/FK próprios) — escritor
+único era `accept_invite` (a sincronização de `update_membership_role`
+já havia sido removida no S8-D2-B); leitor único remanescente era o
+`audit_log` de `update_membership_role` (§46.2). Zero policy, trigger
+ou view referencia qualquer uma das 3 colunas. O enum `user_role`
+(tipo da coluna `role`) fica órfão após a remoção — decisão de manter
+o tipo (não solicitado pela tarefa; descartar tipos além do
+explicitamente pedido seria escopo além do combinado) registrada como
+risco residual menor, não bloqueante.
+
+### 46.4 Migration 1 — parar os escritores/leitores ativos
+
+`accept_invite`: o `INSERT` em `profiles` perde as colunas
+`company_id`/`role` — passa a inserir só `(id, name, email, is_active)`.
+Nenhuma outra linha da função é tocada — a criação de
+`company_memberships`/`sellers` já dependia inteiramente de
+`v_invite.company_id`/`v_invite.role_kind`, nunca de colunas de
+`profiles`.
+
+`update_membership_role`: `before_data`/`after_data` do `audit_log`
+perdem a chave `profile_role`; nenhuma outra chave, variável ou
+comportamento tocado. `v_target_profile` continua sendo selecionada/
+travada (ainda necessária para `is_active`/`platform_role`/auto-
+alteração/nome do Seller) — só o acesso a `.role` desaparece.
+
+### 46.5 Migration 2 — remover as colunas
+
+Ordem: `DROP CONSTRAINT`/`DROP INDEX` exclusivos primeiro
+(`profiles_company_id_fkey`, `profiles_seller_id_fkey`,
+`profiles_company_id_idx`, `profiles_company_id_uidx`,
+`profiles_seller_id_idx`), depois os 3 `DROP COLUMN`. Sem `CASCADE`,
+sem `IF EXISTS` — falha alto se o catálogo não bater com o auditado.
+
+### 46.6 Semântica final
+
+Convite de Manager/Seller: profile criado só com dados globais
+(`id`/`name`/`email`/`is_active`); `company_memberships` grava
+empresa/cargo; Seller criado/religado em `public.sellers`, ligado ao
+`membership_id`. Convite de Super Admin: profile global +
+`platform_role='super_admin'`, sem `company_memberships`. Transferência/
+suspensão/offboarding: comportamento inalterado (já dependiam só de
+`company_memberships`/`sellers`). Super Admin: `platform_role`
+continua a única identidade global.
+
+### 46.7 Testes
+
+30 arquivos que inseriam/liam/afirmavam as 3 colunas em `profiles`
+corrigidos (autorizado pela tarefa): fixtures substituídas por profile
+global + `company_memberships` + `sellers` ligado à membership; nenhuma
+garantia de segurança removida, só a fonte trocada. `audit_log` de
+`update_membership_role` revalidado sem a chave `profile_role` (§46.2)
+em `33_m1f_s5c_update_membership_role.sql` e
+`48_m1f_s8d2b_stop_profile_role_sync.sql` (este último reescrito por
+completo — sua premissa original, comparar `profiles.role` antes/depois,
+deixou de existir). `49_m1f_s8e1_drop_legacy_profile_helpers.sql` e
+`39_m1f_s8c1a_profiles_sellers_access.sql` tiveram suas asserções de
+catálogo (que afirmavam a existência das 3 colunas "reservada para uma
+etapa posterior") invertidas para afirmar a ausência final. Diversos
+arquivos continham a seção "LEGADO DIVERGENTE" (prova de que
+`profiles.company_id`/`role`/`seller_id` divergentes nunca autorizavam
+nada) — sem campo legado para divergir, essas seções foram reduzidas à
+cobertura real que sobra: resolução exclusivamente via
+`company_memberships`/`sellers`.
+
+**Desvio do escopo original, decidido e não pausado**:
+`11_m1f_s1_backfill.sql` e `15_m1f_s2_catchup.sql` foram **removidos**,
+não corrigidos. Ambos reexecutavam literalmente a lógica histórica de
+backfill/catch-up (`DO $$ ... FOR v_profile IN SELECT id, company_id,
+role, ... FROM public.profiles WHERE company_id IS NOT NULL ... $$`)
+contra fixtures sintéticas — com as 3 colunas fisicamente removidas do
+catálogo, esse bloco deixa de compilar e não existe reformulação que
+preserve a intenção original (validar um backfill que só rodou uma vez,
+em produção, contra dados que já não têm onde existir). A migration
+histórica que essa lógica testava (`m1f_s1_02`/`m1f_s2_01`) não foi
+tocada — a garantia de comportamento em produção não foi enfraquecida,
+só a possibilidade de testá-la de novo, o que deixou de fazer sentido.
+
+Novo arquivo `50_m1f_s8e2_drop_profile_legacy_columns.sql` (36
+asserções): catálogo (3 colunas ausentes, as 7 finais presentes,
+FKs/índices antigos ausentes, nenhuma view/coluna substituta, enum
+`user_role` órfão mas não dropado); `accept_invite` para Manager/Seller/
+Super Admin sem as colunas antigas; profile existente aceitando um
+segundo convite sem nenhuma escrita empresarial em `profiles`;
+identidade via membership/Seller/`platform_role`; transferência;
+autoria de leads; regressão do catálogo de RPCs/policies.
+
+### 46.8 Validação completa
+
+SQL: `supabase db reset` (47 migrations aplicadas) + `supabase test db`
+— **49 arquivos, 2513 testes, 100% PASS** (51 arquivos previstos
+inicialmente; 2 removidos por impossibilidade estrutural, 1 novo
+adicionado — ver desvio registrado em §46.7). `npx tsc --noEmit`: 22
+erros pré-existentes, exatamente a mesma baseline antes e depois da
+regeneração de `database.types.ts` (zero frontend tocado). `npm run
+test:run`: 128 arquivos, 1950 testes, 100% PASS. `npm run build`: 8/8
+páginas, verde. `database.types.ts`: regenerado — `profiles`
+Row/Insert/Update perdem `company_id`/`role`/`seller_id`,
+`Relationships` perde `profiles_company_id_fkey`/`profiles_seller_id_fkey`;
+nenhuma outra mudança.
+
+### 46.9 Escopo preservado
+
+Nenhum frontend alterado. `User`/`ActiveMembership`/`AuthService`
+intocados. `company_memberships`/`sellers` intactos. Nenhuma policy/RLS
+alterada além do já registrado. Nenhuma operação Supabase remota.
+
+**O S8-E está formalmente concluído** (S8-E1: remoção dos 4 helpers
+legados; S8-E2: remoção física das 3 colunas legadas de `profiles`).
+**S8-F está desbloqueado, mas não iniciado. M1-E E4 continua pausado**
+até o fechamento formal do S8-F.
