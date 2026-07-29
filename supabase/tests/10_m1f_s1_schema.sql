@@ -221,8 +221,8 @@ select fk_ok('public', 'leads', array['company_id','updated_by_profile_id'],
              'public', 'company_memberships', array['company_id','profile_id'],
              'leads.updated_by_profile_id referencia company_memberships (autoria sustentada pela membership historica, S8-C2-C1-AUTH-A1)');
 select fk_ok('public', 'lead_timeline_entries', array['company_id','actor_profile_id'],
-             'public', 'profiles', array['company_id','id'],
-             'lead_timeline_entries.actor_profile_id ainda referencia profiles diretamente');
+             'public', 'company_memberships', array['company_id','profile_id'],
+             'lead_timeline_entries.actor_profile_id referencia membership historica da empresa (S8-C2-D1-TIMELINE-AUTH-A1)');
 select fk_ok('public', 'leads', array['company_id','seller_id'],
              'public', 'sellers', array['company_id','id'],
              'leads.seller_id ainda referencia sellers diretamente (nao redirecionado para membership)');
