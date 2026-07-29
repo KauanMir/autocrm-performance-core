@@ -50,9 +50,7 @@ const ADMIN: User = {
   id: 'user-1',
   name: 'Admin Teste',
   email: 'admin@teste.dev',
-  role: 'admin',
-  sellerId: null,
-  activeMembership: { companyId: 'company-a', role: 'manager' },
+  activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
 };
 
 function leadRow(overrides: Partial<LeadRow> = {}): LeadRow {
@@ -188,8 +186,8 @@ describe('seam — flag ON lê somente o snapshot remoto', () => {
     setSnapshotFor(ADMIN_OWNER, [leadRow({ id: 'r-admin' })]);
 
     vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
-      ...ADMIN, id: 'user-seller-1', role: 'seller', sellerId: 's1',
-      activeMembership: { companyId: 'company-a', role: 'seller' },
+      ...ADMIN, id: 'user-seller-1',
+      activeMembership: { companyId: 'company-a', role: 'seller', sellerId: 's1' },
     });
     const caught = ((): unknown => {
       try { LeadService.getAll(); } catch (e) { return e; }
@@ -205,8 +203,8 @@ describe('seam — flag ON lê somente o snapshot remoto', () => {
   it('troca seller A → seller B da mesma empresa não reutiliza snapshot', () => {
     setSnapshotFor({ companyId: 'company-a', identityKey: 'user-seller-1' }, [leadRow({ id: 'r-a' })]);
     vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
-      ...ADMIN, id: 'user-seller-2', role: 'seller', sellerId: 's2',
-      activeMembership: { companyId: 'company-a', role: 'seller' },
+      ...ADMIN, id: 'user-seller-2',
+      activeMembership: { companyId: 'company-a', role: 'seller', sellerId: 's2' },
     });
     expect(() => LeadService.getAll()).toThrow('remote_leads_snapshot_unavailable');
   });
@@ -232,7 +230,7 @@ describe('seam — flag ON lê somente o snapshot remoto', () => {
 
   it('M1-F S8-B2: Super Admin sem activeMembership não ganha empresa por acidente ⇒ remote_leads_invalid_context', () => {
     vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
-      ...ADMIN, role: 'seller', platformRole: 'super_admin', activeMembership: null,
+      ...ADMIN, platformRole: 'super_admin', activeMembership: null,
     });
     expect(() => LeadService.getAll()).toThrow('remote_leads_invalid_context');
   });

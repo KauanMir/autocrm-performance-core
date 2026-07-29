@@ -83,13 +83,13 @@ vi.mock('@/components/flows/FlowLayer', () => ({ FlowLayer: () => null }));
 
 import { App } from '@/components/App';
 
-function user(role: User['role'], platformRole: 'super_admin' | null = null, activeMembership: User['activeMembership'] = null): User {
+// M1-F S8-D2-A: `label` só nomeia id/name/email — User não carrega mais
+// papel algum próprio; identidade real vem de platformRole/activeMembership.
+function user(label: string, platformRole: 'super_admin' | null = null, activeMembership: User['activeMembership'] = null): User {
   return {
-    id: `u-${role}-${platformRole ?? 'none'}`,
-    name: role,
-    email: `${role}@a.com`,
-    role,
-    sellerId: null,
+    id: `u-${label}-${platformRole ?? 'none'}`,
+    name: label,
+    email: `${label}@a.com`,
     platformRole,
     activeMembership,
   };
@@ -145,17 +145,17 @@ describe('menu Clientes/Andamento — Super Admin', () => {
 describe('menu Clientes/Andamento — Manager/Seller (nenhuma mudança de comportamento)', () => {
   it('Manager sempre vê Clientes/Andamento, independente da flag comercial do Super Admin', async () => {
     m.flag.current = false;
-    await renderApp(user('manager', null, { companyId: 'company-a', role: 'manager' }));
+    await renderApp(user('manager', null, { companyId: 'company-a', role: 'manager', sellerId: null }));
     expect(screen.getByText('Clientes')).toBeInTheDocument();
     expect(screen.getByText('Em progresso')).toBeInTheDocument();
 
     m.flag.current = true;
-    switchUser(user('manager', null, { companyId: 'company-a', role: 'manager' }));
+    switchUser(user('manager', null, { companyId: 'company-a', role: 'manager', sellerId: null }));
     expect(screen.getByText('Clientes')).toBeInTheDocument();
   });
 
   it('Seller sempre vê Clientes/Andamento, independente da flag', async () => {
-    await renderApp(user('seller', null, { companyId: 'company-a', role: 'seller' }));
+    await renderApp(user('seller', null, { companyId: 'company-a', role: 'seller', sellerId: null }));
     expect(screen.getByText('Clientes')).toBeInTheDocument();
     expect(screen.getByText('Em progresso')).toBeInTheDocument();
   });
@@ -168,7 +168,7 @@ describe('troca de usuário com tela comercial aberta', () => {
     fireEvent.click(screen.getByText('Clientes'));
     await waitFor(() => expect(screen.getByTestId('screen-clientes')).toBeInTheDocument());
 
-    switchUser(user('manager', null, { companyId: 'company-a', role: 'manager' }));
+    switchUser(user('manager', null, { companyId: 'company-a', role: 'manager', sellerId: null }));
     // Manager sempre tem 'clientes' via NAV_ROLES legado (nenhuma mudança de
     // comportamento) — a tela permanece montada, nunca cai em home.
     expect(screen.getByTestId('screen-clientes')).toBeInTheDocument();

@@ -109,8 +109,10 @@ function mockSelect() {
   m.from.mockReturnValue({ select });
 }
 
-function user(role: User['role'], id = `u-${role}`): User {
-  return { id, name: role, email: `${role}@a.com`, role, sellerId: null };
+// M1-F S8-D2-A: `label` só nomeia id/name/email — User não carrega mais
+// papel algum próprio.
+function user(label: string, id = `u-${label}`): User {
+  return { id, name: label, email: `${label}@a.com` };
 }
 
 // M1-F S7-B — helper DIRECIONADO (não altera o `user()` genérico, usado por
@@ -119,9 +121,9 @@ function user(role: User['role'], id = `u-${role}`): User {
 // caminho agora depende de activeMembership.companyId em ScreensBiz.tsx —
 // sem fallback para o companyId legado. Mapeamento idêntico ao backfill
 // real do M1-F S1 (admin/manager -> membership role 'manager').
-function userWithActiveMembership(role: User['role'], companyId = 'company-a', id = `u-${role}`): User {
-  const membershipRole: 'manager' | 'seller' = role === 'seller' ? 'seller' : 'manager';
-  return { ...user(role, id), activeMembership: { companyId, role: membershipRole } };
+function userWithActiveMembership(label: string, companyId = 'company-a', id = `u-${label}`): User {
+  const membershipRole: 'manager' | 'seller' = label === 'seller' ? 'seller' : 'manager';
+  return { ...user(label, id), activeMembership: { companyId, role: membershipRole, sellerId: null } };
 }
 
 async function renderApp(initial: User | null) {

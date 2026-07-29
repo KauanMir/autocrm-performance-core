@@ -87,11 +87,12 @@ beforeEach(() => {
   m.flag.current = false;
   m.localNames.current = LOCAL_NAMES;
   m.leads.current = [lead('l1', 'Carlos Andrade', 'Novo'), lead('l2', 'Juliana Prado', 'Qualificado')];
-  // M1-F S8-C2-B2/S8-D1: companyId do pipeline vem exclusivamente de
-  // activeMembership.companyId — User não tem mais companyId legado algum.
+  // M1-F S8-C2-B2/S8-D1/S8-D2-A: companyId do pipeline vem exclusivamente de
+  // activeMembership.companyId — User não tem mais role/sellerId/companyId
+  // legados algum.
   m.user.current = {
-    id: 'user-1', role: 'admin', sellerId: null, name: 'Admin', email: 'a@a.com',
-    activeMembership: { companyId: 'company-a', role: 'manager' },
+    id: 'user-1', name: 'Admin', email: 'a@a.com',
+    activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
   };
 });
 
@@ -207,7 +208,7 @@ describe('integração Kanban — flag ON, outros estados', () => {
 
     m.user.current = {
       ...m.user.current, id: 'user-2',
-      activeMembership: { companyId: 'company-b', role: 'manager' },
+      activeMembership: { companyId: 'company-b', role: 'manager', sellerId: null },
     };
     mockQuery({ data: [], error: null });
     renderWithQueryClient(<ScreenAndamento go={() => {}} />, shared);

@@ -67,10 +67,12 @@ vi.mock('@/components/flows/FlowLayer', () => ({ FlowLayer: () => null }));
 
 import { App } from '@/components/App';
 
-function user(role: User['role'], id: string, companyId: string): User {
+// M1-F S8-D2-A: `label` só nomeia id/name/email e decide o role da
+// membership simulada — User não carrega mais papel algum próprio.
+function user(label: string, id: string, companyId: string): User {
   return {
-    id, name: role, email: `${role}@a.com`, role, sellerId: null,
-    activeMembership: { companyId, role: role === 'seller' ? 'seller' : 'manager' },
+    id, name: label, email: `${label}@a.com`,
+    activeMembership: { companyId, role: label === 'seller' ? 'seller' : 'manager', sellerId: null },
   };
 }
 

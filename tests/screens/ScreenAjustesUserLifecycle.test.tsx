@@ -81,8 +81,8 @@ function pipelineResult(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-const SUPER_ADMIN_USER = { id: 'u-sa', name: 'Super', email: 'sa@test.local', role: 'seller', sellerId: null, platformRole: 'super_admin', activeMembership: null };
-const MANAGER_USER = { id: 'u-mgr', name: 'Manager', email: 'mgr@test.local', role: 'manager', sellerId: null, platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' } };
+const SUPER_ADMIN_USER = { id: 'u-sa', name: 'Super', email: 'sa@test.local', platformRole: 'super_admin', activeMembership: null };
+const MANAGER_USER = { id: 'u-mgr', name: 'Manager', email: 'mgr@test.local', platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
 
 beforeEach(() => {
   m.user.current = null;

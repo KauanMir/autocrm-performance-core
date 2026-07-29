@@ -18,8 +18,8 @@ import {
 // Fixtures não incluem mais `role` (as funções nem o leem) — só os dois
 // campos que agora decidem: platformRole e activeMembership.
 const superAdmin = { platformRole: 'super_admin', activeMembership: null } as const;
-const activeManager = { platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' } } as const;
-const activeSeller = { platformRole: null, activeMembership: { companyId: 'company-a', role: 'seller' } } as const;
+const activeManager = { platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } } as const;
+const activeSeller = { platformRole: null, activeMembership: { companyId: 'company-a', role: 'seller', sellerId: null } } as const;
 const managerNoMembership = { platformRole: null, activeMembership: null } as const;
 
 describe('canAccessFullSettings — M1-F S8-B1', () => {
@@ -147,7 +147,7 @@ describe('canReorderPipelineStages — M1-F S8-B1', () => {
   it('Manager SEM membership ativa não pode reordenar', () => expect(canReorderPipelineStages(managerNoMembership)).toBe(false));
   it('Seller com membership ativa não pode reordenar', () => expect(canReorderPipelineStages(activeSeller)).toBe(false));
   it('companyId legado nunca é lido como autorização (a capability nem aceita o campo)', () => {
-    const withStaleCompanyId = { platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' } } as const;
+    const withStaleCompanyId = { platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } } as const;
     expect(canReorderPipelineStages(withStaleCompanyId)).toBe(true); // autoridade real é activeMembership.role, nunca companyId
   });
 });
@@ -158,7 +158,7 @@ describe('canManageInvites — M1-F S4-F1', () => {
   });
 
   it('Manager com membership ATIVA (activeMembership.role=manager): true', () => {
-    expect(canManageInvites({ platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' } })).toBe(true);
+    expect(canManageInvites({ platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } })).toBe(true);
   });
 
   it('Manager INATIVO (membership suspensa): false — _loadActiveMembership já filtra is_active=true, então uma membership inativa chega aqui como activeMembership=null', () => {
@@ -166,7 +166,7 @@ describe('canManageInvites — M1-F S4-F1', () => {
   });
 
   it('Seller (activeMembership.role=seller): false', () => {
-    expect(canManageInvites({ platformRole: null, activeMembership: { companyId: 'company-a', role: 'seller' } })).toBe(false);
+    expect(canManageInvites({ platformRole: null, activeMembership: { companyId: 'company-a', role: 'seller', sellerId: null } })).toBe(false);
   });
 
   it('Auth user sem profile/membership (activeMembership undefined): false', () => {
@@ -189,9 +189,9 @@ describe('canManageInvites — M1-F S4-F1', () => {
   });
 
   it('o objeto do usuário não é modificado', () => {
-    const user = Object.freeze({ platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' as const } });
+    const user = Object.freeze({ platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' as const, sellerId: null } });
     canManageInvites(user);
-    expect(user).toEqual({ platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' } });
+    expect(user).toEqual({ platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } });
   });
 });
 

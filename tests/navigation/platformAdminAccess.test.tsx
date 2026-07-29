@@ -82,8 +82,10 @@ vi.mock('@/components/flows/FlowLayer', () => ({ FlowLayer: () => null }));
 
 import { App } from '@/components/App';
 
-function user(role: User['role'], platformRole: 'super_admin' | null = null): User {
-  return { id: `u-${role}-${platformRole ?? 'none'}`, name: role, email: `${role}@a.com`, role, sellerId: null, platformRole };
+// M1-F S8-D2-A: `label` só nomeia id/name/email — User não carrega mais
+// papel algum próprio.
+function user(label: string, platformRole: 'super_admin' | null = null): User {
+  return { id: `u-${label}-${platformRole ?? 'none'}`, name: label, email: `${label}@a.com`, platformRole };
 }
 
 async function renderApp(initial: User | null) {

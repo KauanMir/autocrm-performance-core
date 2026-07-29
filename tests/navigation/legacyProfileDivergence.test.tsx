@@ -1,13 +1,13 @@
-// M1-F S8-D1: allowedNavIds (components/App.tsx) deixou de ler
-// NAV_ROLES[user.role] — a lista-base de navegação passa a vir
-// exclusivamente de platformRole (Super Admin) ou activeMembership.role
-// (Manager/Seller), nunca do profiles.role legado isolado.
-//
-// Estes testes cobrem exatamente os dois cenários de "profile legado
-// divergente" citados na tarefa: um profiles.role desatualizado/errado
-// não deve influenciar a navegação quando platformRole/activeMembership
-// dizem outra coisa. 'Resultados' é o sinal mais simples: está na base do
-// Manager e do Super Admin, mas NUNCA na do Seller (lib/data.ts NAV_ROLES).
+// M1-F S8-D1/S8-D2-A: allowedNavIds (components/App.tsx) deixou de ler
+// NAV_ROLES[user.role] — a lista-base de navegação vem exclusivamente de
+// platformRole (Super Admin) ou activeMembership.role (Manager/Seller).
+// User.role foi removido do tipo no S8-D2-A — o cenário original de
+// "profiles.role legado divergente" deixou de ser representável (nada
+// além de platformRole/activeMembership decide mais nada). Os dois testes
+// abaixo mantêm o que continua real: platformRole/activeMembership.role
+// são a ÚNICA fonte da lista-base, cada uma isoladamente. 'Resultados' é o
+// sinal mais simples: está na base do Manager e do Super Admin, mas NUNCA
+// na do Seller (lib/data.ts NAV_ROLES).
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -70,25 +70,21 @@ async function renderApp(initial: User) {
   await waitFor(() => expect(screen.queryByText('Carregando…')).toBeNull());
 }
 
-describe('navegação: profiles.role legado divergente nunca decide a lista-base', () => {
-  it('platformRole=null, activeMembership.role=seller, profiles.role="admin" (legado divergente) ⇒ nav de Seller (sem Resultados, sem Ajustes)', async () => {
+describe('navegação: platformRole/activeMembership.role decidem isoladamente a lista-base', () => {
+  it('platformRole=null, activeMembership.role=seller ⇒ nav de Seller (sem Resultados, sem Ajustes)', async () => {
     const user: User = {
       id: 'u-1', name: 'Divergente', email: 'div@a.com',
-      role: 'admin', // legado, deliberadamente errado
-      sellerId: null,
       platformRole: null,
-      activeMembership: { companyId: 'company-a', role: 'seller' },
+      activeMembership: { companyId: 'company-a', role: 'seller', sellerId: null },
     };
     await renderApp(user);
     expect(screen.queryByText('Resultados')).toBeNull();
     expect(screen.queryByText('Ajustes')).toBeNull();
   });
 
-  it('platformRole=super_admin, profiles.role="seller" (legado divergente) ⇒ nav de Super Admin (com Resultados e Ajustes)', async () => {
+  it('platformRole=super_admin, sem activeMembership ⇒ nav de Super Admin (com Resultados e Ajustes)', async () => {
     const user: User = {
       id: 'u-2', name: 'Divergente', email: 'div2@a.com',
-      role: 'seller', // legado, deliberadamente errado
-      sellerId: null,
       platformRole: 'super_admin',
       activeMembership: null,
     };

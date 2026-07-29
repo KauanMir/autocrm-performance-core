@@ -82,7 +82,7 @@ function pipelineResult(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-const SUPER_ADMIN_USER = { id: 'u-sa', name: 'Super', email: 'sa@test.local', role: 'seller', sellerId: null, platformRole: 'super_admin', activeMembership: null };
+const SUPER_ADMIN_USER = { id: 'u-sa', name: 'Super', email: 'sa@test.local', platformRole: 'super_admin', activeMembership: null };
 
 beforeEach(() => {
   m.user.current = SUPER_ADMIN_USER;

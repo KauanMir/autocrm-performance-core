@@ -100,7 +100,7 @@ function dragTo(fromTestId: string, toTestId: string) {
 }
 
 beforeEach(() => {
-  m.user.current = { id: 'user-1', role: 'admin', sellerId: null, name: 'Admin', email: 'a@a.com' };
+  m.user.current = { id: 'user-1', name: 'Admin', email: 'a@a.com' };
   m.getStages.mockReturnValue(LOCAL_NAMES);
   m.usePipelineStages.mockReturnValue(pipelineResult({
     source: 'local', remoteStagesEnabled: false, queryEnabled: false,
@@ -207,9 +207,10 @@ describe('ScreenAjustes/Etapas — caminho remoto (flag ON)', () => {
   });
 
   it('seller: acesso negado, nenhuma linha de etapa e hook recebe canReorder=false', () => {
-    // platformRole explicitamente limpo — um Seller nunca é Super Admin
-    // (evita fixture estruturalmente impossível, §28.5 do design).
-    m.user.current = { ...m.user.current, role: 'seller', platformRole: null };
+    // platformRole explicitamente limpo, sem activeMembership — um Seller
+    // sem capability alguma (User não carrega mais role/sellerId próprios,
+    // §28.5 do design).
+    m.user.current = { ...m.user.current, platformRole: null };
     const reorder = reorderResult();
     m.useReorderStages.mockReturnValue(reorder);
     render(<ScreenAjustes go={() => {}} />);
@@ -293,8 +294,7 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
     // "somente Etapas" deixou de ser um estado alcançável por um Manager real.
     m.user.current = {
       ...m.user.current,
-      role: 'manager',
-      activeMembership: { companyId: 'company-a', role: 'manager' },
+      activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
     };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
     const reorder = reorderResult();
@@ -324,7 +324,8 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
   });
 
   it('manager flag OFF: acesso negado, sem Etapas local, sem reorder algum', () => {
-    m.user.current = { ...m.user.current, role: 'manager' };
+    // Sem platformRole/activeMembership (fixture-base do describe) — nenhuma
+    // capability concede acesso.
     const reorder = reorderResult();
     m.useReorderStages.mockReturnValue(reorder);
     render(<ScreenAjustes go={() => {}} />); // pipeline default = local/flag OFF
@@ -348,8 +349,7 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
     m.user.current = {
       ...m.user.current,
       platformRole: null,
-      role: 'manager',
-      activeMembership: { companyId: 'company-a', role: 'manager' },
+      activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
     };
     view.rerender(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Dados da loja')).toBeNull();
@@ -363,8 +363,7 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
     // alcançável.
     m.user.current = {
       ...m.user.current,
-      role: 'manager',
-      activeMembership: { companyId: 'company-a', role: 'manager' },
+      activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
     };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
     const reorder = reorderResult();
@@ -375,8 +374,7 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
 
     m.user.current = {
       ...m.user.current,
-      role: 'seller',
-      activeMembership: { companyId: 'company-a', role: 'seller' },
+      activeMembership: { companyId: 'company-a', role: 'seller', sellerId: null },
     };
     view.rerender(<ScreenAjustes go={() => {}} />);
     expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
@@ -396,8 +394,7 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
   it('Manager com membership ATIVA (role=manager) vê Usuários mesmo com flag de Etapas OFF, mas NÃO vê Empresa/Etapas', () => {
     m.user.current = {
       ...m.user.current,
-      role: 'manager',
-      activeMembership: { companyId: 'company-a', role: 'manager' },
+      activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
     };
     render(<ScreenAjustes go={() => {}} />);
 
@@ -410,8 +407,7 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
   it('Manager com membership ATIVA + flag de Etapas ON: vê Usuários E Etapas, mas nunca Empresa', () => {
     m.user.current = {
       ...m.user.current,
-      role: 'manager',
-      activeMembership: { companyId: 'company-a', role: 'manager' },
+      activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
     };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
     render(<ScreenAjustes go={() => {}} />);
@@ -421,8 +417,8 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     expect(screen.queryByText('Empresa')).toBeNull();
   });
 
-  it('Manager com membership INATIVA (activeMembership null): sem acesso a Usuários — legado profiles.role="manager" sozinho não concede nada', () => {
-    m.user.current = { ...m.user.current, role: 'manager', activeMembership: null };
+  it('Manager com membership INATIVA (activeMembership null): sem acesso a Usuários — sem identidade empresarial, nenhuma capability concede nada', () => {
+    m.user.current = { ...m.user.current, activeMembership: null };
     render(<ScreenAjustes go={() => {}} />);
 
     expect(screen.queryByText('Usuários')).toBeNull();
@@ -438,7 +434,6 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     // precisamente o gap que a migração fecha (§28.3 do design).
     m.user.current = {
       ...m.user.current,
-      role: 'seller',
       platformRole: 'super_admin',
       activeMembership: null,
     };
@@ -452,8 +447,7 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
   it('Seller (activeMembership.role=seller) nunca vê Usuários nem nenhum outro controle administrativo', () => {
     m.user.current = {
       ...m.user.current,
-      role: 'seller',
-      activeMembership: { companyId: 'company-a', role: 'seller' },
+      activeMembership: { companyId: 'company-a', role: 'seller', sellerId: null },
     };
     render(<ScreenAjustes go={() => {}} />);
 
@@ -466,7 +460,7 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
   it('Super Admin (canAccessFullSettings) vê Empresa+Usuários+Etapas juntos', () => {
     // M1-F S8-B1: fixture desatualizado — canAccessFullSettings migrou de
     // role='admin' (legado) para platformRole='super_admin'.
-    m.user.current = { ...m.user.current, role: 'admin', platformRole: 'super_admin', activeMembership: null };
+    m.user.current = { ...m.user.current, platformRole: 'super_admin', activeMembership: null };
     render(<ScreenAjustes go={() => {}} />);
 
     expect(screen.getByText('Empresa')).toBeInTheDocument();
@@ -475,11 +469,11 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
   });
 
   it('troca Manager-sem-membership → Manager-com-membership-ativa: Usuários aparece imediatamente, Empresa continua nunca aparecendo', () => {
-    m.user.current = { ...m.user.current, role: 'manager', activeMembership: null };
+    m.user.current = { ...m.user.current, activeMembership: null };
     const view = render(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Usuários')).toBeNull();
 
-    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-a', role: 'manager' } };
+    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
     view.rerender(<ScreenAjustes go={() => {}} />);
     expect(screen.getByText('Usuários')).toBeInTheDocument();
     expect(screen.queryByText('Empresa')).toBeNull();
@@ -496,7 +490,7 @@ describe('ScreenAjustes — M1-F S7-B/S8-D1: companyId deriva exclusivamente de 
   it('activeMembership presente: os dois hooks recebem companyId da membership', () => {
     m.user.current = {
       ...m.user.current,
-      activeMembership: { companyId: 'company-real', role: 'manager' },
+      activeMembership: { companyId: 'company-real', role: 'manager', sellerId: null },
     };
     render(<ScreenAjustes go={() => {}} />);
     expect(m.usePipelineStages).toHaveBeenLastCalledWith(
@@ -524,7 +518,6 @@ describe('ScreenAjustes — M1-F S7-B/S8-D1: companyId deriva exclusivamente de 
   it('Super Admin sem activeMembership: companyId é null (Super Admin nunca tem empresa própria)', () => {
     m.user.current = {
       ...m.user.current,
-      role: 'seller',
       platformRole: 'super_admin',
       activeMembership: null,
     };
@@ -538,12 +531,12 @@ describe('ScreenAjustes — M1-F S7-B/S8-D1: companyId deriva exclusivamente de 
   });
 
   it('mudança de membership de empresa A para empresa B (transferência) atualiza os dois hooks', () => {
-    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-a', role: 'manager' } };
+    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
     const view = render(<ScreenAjustes go={() => {}} />);
     expect(m.usePipelineStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: 'company-a' }));
     expect(m.useReorderStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: 'company-a' }));
 
-    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-b', role: 'manager' } };
+    m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-b', role: 'manager', sellerId: null } };
     view.rerender(<ScreenAjustes go={() => {}} />);
     expect(m.usePipelineStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: 'company-b' }));
     expect(m.useReorderStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: 'company-b' }));

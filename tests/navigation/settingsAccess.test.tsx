@@ -75,8 +75,12 @@ vi.mock('@/components/flows/FlowLayer', () => ({ FlowLayer: () => null }));
 
 import { App } from '@/components/App';
 
-function user(role: User['role']): User {
-  return { id: `u-${role}`, name: role, email: `${role}@a.com`, role, sellerId: null };
+// M1-F S8-D2-A: User não carrega mais papel algum — `label` só nomeia
+// id/name/email para diferenciar fixtures nos testes; identidade real vem
+// de platformRole/activeMembership, adicionados por chamador quando o
+// cenário exige.
+function user(label: string): User {
+  return { id: `u-${label}`, name: label, email: `${label}@a.com` };
 }
 
 // M1-F S8-D1: NAV_ROLES[user.role] deixou de existir — o equivalente
@@ -136,7 +140,7 @@ describe('menu Ajustes por role e flag', () => {
     // User.role para activeMembership.role/platformRole; um manager real
     // sempre tem membership ativa (role legado isolado nunca concede nada).
     m.flag.current = true;
-    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager' } };
+    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
     await renderApp(managerAtivo);
     expect(screen.getByText('Ajustes')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Ajustes'));
@@ -168,7 +172,7 @@ describe('menu Ajustes por role e flag', () => {
 
 describe('M1-F S4-F1: "Ajustes" via canManageInvites, independente da flag de Etapas', () => {
   it('manager com membership ATIVA vê Ajustes com a flag de Etapas OFF (canManageInvites libera, não precisa da flag)', async () => {
-    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager' } };
+    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
     await renderApp(managerAtivo);
     expect(screen.getByText('Ajustes')).toBeInTheDocument();
   });
@@ -185,7 +189,7 @@ describe('M1-F S4-F1: "Ajustes" via canManageInvites, independente da flag de Et
   });
 
   it('seller nunca vê Ajustes, mesmo com activeMembership.role=seller preenchido', async () => {
-    const sellerComMembership: User = { ...user('seller'), activeMembership: { companyId: 'company-a', role: 'seller' } };
+    const sellerComMembership: User = { ...user('seller'), activeMembership: { companyId: 'company-a', role: 'seller', sellerId: null } };
     await renderApp(sellerComMembership);
     expect(screen.queryByText('Ajustes')).toBeNull();
   });
@@ -211,7 +215,7 @@ describe('troca de usuário com tela Ajustes aberta', () => {
     fireEvent.click(screen.getByText('Ajustes'));
     expect(screen.getByTestId('screen-ajustes')).toBeInTheDocument();
 
-    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager' } };
+    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
     switchUser(managerAtivo);
     // Manager com flag ON mantém a tela Ajustes (a restrição às abas internas
     // é responsabilidade da própria ScreenAjustes, testada à parte).
@@ -224,7 +228,7 @@ describe('troca de usuário com tela Ajustes aberta', () => {
     // activeMembership para o cenário inicial ("Ajustes aberto") ser
     // alcançável; a transição para seller continua removendo o acesso.
     m.flag.current = true;
-    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager' } };
+    const managerAtivo: User = { ...user('manager'), activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
     await renderApp(managerAtivo);
     fireEvent.click(screen.getByText('Ajustes'));
     expect(screen.getByTestId('screen-ajustes')).toBeInTheDocument();
