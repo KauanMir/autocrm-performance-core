@@ -116,13 +116,12 @@ async function settled(queryClient: { isFetching: () => number }) {
 beforeEach(() => {
   m.flag.current = true;
   m.localNames.current = LOCAL_NAMES;
-  // M1-F S7-B: todo teste deste arquivo representa o MESMO admin
+  // M1-F S7-B/S8-D1: todo teste deste arquivo representa o MESMO admin
   // empresarial autenticado, com acesso real à Empresa A (nenhum cenário
-  // aqui testa ausência de membership) — fixture desatualizado, corrigido
-  // para incluir activeMembership (companyId agora vem exclusivamente
-  // dela em ScreensBiz.tsx, nunca do legado companyId).
+  // aqui testa ausência de membership) — companyId vem exclusivamente de
+  // activeMembership (User não tem mais companyId legado algum).
   m.user.current = {
-    id: 'user-1', companyId: 'company-a', role: 'admin', sellerId: null, name: 'Admin', email: 'a@a.com',
+    id: 'user-1', role: 'admin', sellerId: null, name: 'Admin', email: 'a@a.com',
     activeMembership: { companyId: 'company-a', role: 'manager' },
   };
 });

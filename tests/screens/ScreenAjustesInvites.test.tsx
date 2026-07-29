@@ -86,26 +86,26 @@ function openUsuarios() {
 
 describe('ScreenAjustes — quem vê a área Usuários (M1-F S4-F2/S4-F3)', () => {
   it('Super Admin ativo vê a lista de convites', () => {
-    m.user.current = { id: 'u-sa', name: 'Super', email: 'sa@test.local', role: 'seller', sellerId: null, companyId: null, platformRole: 'super_admin', activeMembership: null };
+    m.user.current = { id: 'u-sa', name: 'Super', email: 'sa@test.local', role: 'seller', sellerId: null, platformRole: 'super_admin', activeMembership: null };
     openUsuarios();
     expect(screen.getByTestId('invite-list-stub')).toBeInTheDocument();
   });
 
   it('Manager com membership ATIVA vê a lista de convites', () => {
-    m.user.current = { id: 'u-mgr', name: 'Manager', email: 'mgr@test.local', role: 'manager', sellerId: null, companyId: 'company-a', platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' } };
+    m.user.current = { id: 'u-mgr', name: 'Manager', email: 'mgr@test.local', role: 'manager', sellerId: null, platformRole: null, activeMembership: { companyId: 'company-a', role: 'manager' } };
     openUsuarios();
     expect(screen.getByTestId('invite-list-stub')).toBeInTheDocument();
   });
 
   it('Seller não vê a aba Usuários, logo nunca vê a lista', () => {
-    m.user.current = { id: 'u-sel', name: 'Seller', email: 'sel@test.local', role: 'seller', sellerId: 's1', companyId: 'company-a', platformRole: null, activeMembership: { companyId: 'company-a', role: 'seller' } };
+    m.user.current = { id: 'u-sel', name: 'Seller', email: 'sel@test.local', role: 'seller', sellerId: 's1', platformRole: null, activeMembership: { companyId: 'company-a', role: 'seller' } };
     render(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Usuários')).toBeNull();
     expect(screen.queryByTestId('invite-list-stub')).toBeNull();
   });
 
   it('Manager com membership INATIVA não vê a aba Usuários nem a lista', () => {
-    m.user.current = { id: 'u-mgr2', name: 'Manager', email: 'mgr2@test.local', role: 'manager', sellerId: null, companyId: 'company-a', platformRole: null, activeMembership: null };
+    m.user.current = { id: 'u-mgr2', name: 'Manager', email: 'mgr2@test.local', role: 'manager', sellerId: null, platformRole: null, activeMembership: null };
     render(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Usuários')).toBeNull();
     expect(screen.queryByTestId('invite-list-stub')).toBeNull();
@@ -121,7 +121,7 @@ describe('ScreenAjustes — quem vê a área Usuários (M1-F S4-F2/S4-F3)', () =
     // inviteActor={kind:'super_admin'} (nunca null). O cenário real
     // remanescente é mais forte: role legado isolado agora fica sem
     // nenhum acesso, nem a aba aparece.
-    m.user.current = { id: 'u-admin', name: 'Admin', email: 'admin@test.local', role: 'admin', sellerId: null, companyId: 'company-a', platformRole: null, activeMembership: null };
+    m.user.current = { id: 'u-admin', name: 'Admin', email: 'admin@test.local', role: 'admin', sellerId: null, platformRole: null, activeMembership: null };
     render(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Usuários')).toBeNull();
     expect(screen.queryByTestId('invite-list-stub')).toBeNull();
@@ -142,10 +142,9 @@ describe('ScreenAjustes — actor repassado a InviteList', () => {
     expect(m.inviteListProps.current.userId).toBe('u-sa');
   });
 
-  it('Manager: actor.companyId vem de activeMembership, nunca de companyId legado', () => {
+  it('Manager: actor.companyId vem de activeMembership', () => {
     m.user.current = {
       id: 'u-mgr', name: 'Manager', email: 'mgr@test.local', role: 'manager', sellerId: null,
-      companyId: 'company-LEGADO-diferente', // deve ser ignorado
       platformRole: null,
       activeMembership: { companyId: 'company-membership-real', role: 'manager' },
     };

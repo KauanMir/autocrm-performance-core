@@ -88,7 +88,7 @@ function renderScreen() {
 
 beforeEach(() => {
   m.leads.current = [lead('l1', 'Carlos Andrade', 'Novo'), lead('l2', 'Juliana Prado', 'Qualificado')];
-  m.user.current = { id: 'user-1', companyId: 'company-a', role: 'admin', sellerId: null, name: 'Admin', email: 'a@a.com' };
+  m.user.current = { id: 'user-1', role: 'admin', sellerId: null, name: 'Admin', email: 'a@a.com' };
   m.getStages.mockReturnValue(LOCAL_NAMES);
   m.usePipelineStages.mockReturnValue(localHookResult());
 });

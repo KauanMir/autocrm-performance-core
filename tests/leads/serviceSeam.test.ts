@@ -45,15 +45,13 @@ vi.mock('@/lib/flags', async (importOriginal) => {
 // representa o MESMO admin empresarial autenticado, com acesso real à
 // Empresa A (nenhum cenário aqui testa ausência de membership por padrão;
 // os que testam isso de propósito sobrescrevem activeMembership
-// explicitamente). companyId legado mantido de propósito em alguns
-// overrides para provar que deixou de ser lido.
+// explicitamente).
 const ADMIN: User = {
   id: 'user-1',
   name: 'Admin Teste',
   email: 'admin@teste.dev',
   role: 'admin',
   sellerId: null,
-  companyId: 'company-a',
   activeMembership: { companyId: 'company-a', role: 'manager' },
 };
 
@@ -219,25 +217,22 @@ describe('seam — flag ON lê somente o snapshot remoto', () => {
     expect(() => LeadService.getAll()).toThrow('remote_leads_invalid_context');
   });
 
-  it('M1-F S8-B2: companyId legado presente mas SEM membership ativa ⇒ remote_leads_invalid_context (legado nunca é fallback)', () => {
+  it('M1-F S8-B2: usuário SEM membership ativa ⇒ remote_leads_invalid_context', () => {
     vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
-      ...ADMIN, companyId: 'company-a', activeMembership: null,
+      ...ADMIN, activeMembership: null,
     });
     expect(() => LeadService.getAll()).toThrow('remote_leads_invalid_context');
   });
 
-  it('M1-F S8-B2: companyId legado DIFERENTE da membership ativa ⇒ usa a membership, nunca o legado', () => {
-    setSnapshotFor(ADMIN_OWNER, [leadRow({ id: 'r1' })]);
-    vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
-      ...ADMIN, companyId: 'company-legacy-stale', activeMembership: { companyId: 'company-a', role: 'manager' },
-    });
-    const all = LeadService.getAll();
-    expect(all.map((l) => l.id)).toEqual(['r1']);
-  });
+  // M1-F S8-D1: User.companyId legado foi removido do tipo — o cenário
+  // "companyId legado diferente da membership ativa" deixou de ser
+  // representável (nada além de activeMembership.companyId existe mais para
+  // resolver a empresa). Esta prova ficou redundante com os testes de troca
+  // de identidade acima (linhas 187/207) e foi removida.
 
-  it('M1-F S8-B2: Super Admin sem activeMembership não ganha empresa via companyId legado ⇒ remote_leads_invalid_context', () => {
+  it('M1-F S8-B2: Super Admin sem activeMembership não ganha empresa por acidente ⇒ remote_leads_invalid_context', () => {
     vi.spyOn(AuthService, 'getCurrentUser').mockReturnValue({
-      ...ADMIN, role: 'seller', companyId: 'company-legacy-stale', platformRole: 'super_admin', activeMembership: null,
+      ...ADMIN, role: 'seller', platformRole: 'super_admin', activeMembership: null,
     });
     expect(() => LeadService.getAll()).toThrow('remote_leads_invalid_context');
   });

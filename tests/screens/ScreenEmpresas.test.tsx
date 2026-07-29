@@ -65,7 +65,7 @@ function createResult(over: Partial<Record<string, unknown>> = {}) {
 
 beforeEach(() => {
   m.flag.current = true;
-  m.user.current = { id: 'u1', name: 'Super', email: 'super@a.com', role: 'admin', sellerId: null, companyId: null, platformRole: 'super_admin' };
+  m.user.current = { id: 'u1', name: 'Super', email: 'super@a.com', role: 'admin', sellerId: null, platformRole: 'super_admin' };
   m.useCompanies.mockReturnValue(companiesResult());
   m.useCreateCompany.mockReturnValue(createResult());
   m.createCompanyMock.mockReset();
@@ -80,13 +80,13 @@ describe('ScreenEmpresas — autorização visual', () => {
   });
 
   it('não renderiza nada para ADMIN legado (platformRole null), mesmo com a flag ON', () => {
-    m.user.current = { id: 'u2', name: 'Admin', email: 'a@a.com', role: 'admin', sellerId: null, companyId: 'company-a', platformRole: null };
+    m.user.current = { id: 'u2', name: 'Admin', email: 'a@a.com', role: 'admin', sellerId: null, platformRole: null };
     const { container } = render(<ScreenEmpresas />);
     expect(container).toBeEmptyDOMElement();
   });
 
   it('não renderiza nada para Manager/Seller', () => {
-    m.user.current = { id: 'u3', name: 'Manager', email: 'm@a.com', role: 'manager', sellerId: null, companyId: 'company-a', platformRole: null };
+    m.user.current = { id: 'u3', name: 'Manager', email: 'm@a.com', role: 'manager', sellerId: null, platformRole: null };
     const { container } = render(<ScreenEmpresas />);
     expect(container).toBeEmptyDOMElement();
   });

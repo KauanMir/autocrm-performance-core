@@ -100,7 +100,7 @@ function dragTo(fromTestId: string, toTestId: string) {
 }
 
 beforeEach(() => {
-  m.user.current = { id: 'user-1', companyId: 'company-a', role: 'admin', sellerId: null, name: 'Admin', email: 'a@a.com' };
+  m.user.current = { id: 'user-1', role: 'admin', sellerId: null, name: 'Admin', email: 'a@a.com' };
   m.getStages.mockReturnValue(LOCAL_NAMES);
   m.usePipelineStages.mockReturnValue(pipelineResult({
     source: 'local', remoteStagesEnabled: false, queryEnabled: false,
@@ -439,7 +439,6 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     m.user.current = {
       ...m.user.current,
       role: 'seller',
-      companyId: null,
       platformRole: 'super_admin',
       activeMembership: null,
     };
@@ -493,11 +492,10 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
 // do componente (Rules of Hooks) — não é preciso navegar para a aba Etapas
 // para inspecionar os argumentos recebidos.
 
-describe('ScreenAjustes — M1-F S7-B: companyId deriva de activeMembership, nunca do legado', () => {
-  it('activeMembership presente: os dois hooks recebem companyId da membership, mesmo com companyId legado DIFERENTE', () => {
+describe('ScreenAjustes — M1-F S7-B/S8-D1: companyId deriva exclusivamente de activeMembership', () => {
+  it('activeMembership presente: os dois hooks recebem companyId da membership', () => {
     m.user.current = {
       ...m.user.current,
-      companyId: 'company-legacy-stale',
       activeMembership: { companyId: 'company-real', role: 'manager' },
     };
     render(<ScreenAjustes go={() => {}} />);
@@ -509,10 +507,9 @@ describe('ScreenAjustes — M1-F S7-B: companyId deriva de activeMembership, nun
     );
   });
 
-  it('activeMembership ausente (null): companyId é null — o legado currentUser.companyId NUNCA é usado como fallback', () => {
+  it('activeMembership ausente (null): companyId é null', () => {
     m.user.current = {
       ...m.user.current,
-      companyId: 'company-legacy-stale',
       activeMembership: null,
     };
     render(<ScreenAjustes go={() => {}} />);
@@ -524,11 +521,10 @@ describe('ScreenAjustes — M1-F S7-B: companyId deriva de activeMembership, nun
     );
   });
 
-  it('Super Admin sem activeMembership: companyId é null (nunca ganha empresa via legado)', () => {
+  it('Super Admin sem activeMembership: companyId é null (Super Admin nunca tem empresa própria)', () => {
     m.user.current = {
       ...m.user.current,
       role: 'seller',
-      companyId: 'company-legacy-stale',
       platformRole: 'super_admin',
       activeMembership: null,
     };
@@ -553,7 +549,7 @@ describe('ScreenAjustes — M1-F S7-B: companyId deriva de activeMembership, nun
     expect(m.useReorderStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: 'company-b' }));
   });
 
-  it('membership suspensa/desligada (activeMembership null) não fornece empresa ativa, mesmo com companyId legado presente', () => {
+  it('membership suspensa/desligada (activeMembership null) não fornece empresa ativa', () => {
     m.user.current = { ...m.user.current, activeMembership: null };
     render(<ScreenAjustes go={() => {}} />);
     expect(m.usePipelineStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: null }));

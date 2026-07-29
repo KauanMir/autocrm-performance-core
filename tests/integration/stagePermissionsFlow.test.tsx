@@ -110,7 +110,7 @@ function mockSelect() {
 }
 
 function user(role: User['role'], id = `u-${role}`): User {
-  return { id, name: role, email: `${role}@a.com`, role, sellerId: null, companyId: 'company-a' };
+  return { id, name: role, email: `${role}@a.com`, role, sellerId: null };
 }
 
 // M1-F S7-B — helper DIRECIONADO (não altera o `user()` genérico, usado por
@@ -201,7 +201,7 @@ describe('fluxo de permissões — acesso por role e flag', () => {
     // logo abaixo — os dois papéis não podem mais coexistir num único ator.
     m.flag.current = true;
     mockSelect();
-    const superAdmin: User = { ...user('seller'), companyId: null, platformRole: 'super_admin' };
+    const superAdmin: User = { ...user('seller'), platformRole: 'super_admin' };
     await renderApp(superAdmin);
     fireEvent.click(navAjustes()!);
     expect(screen.getByRole('button', { name: 'Empresa' })).toBeInTheDocument();

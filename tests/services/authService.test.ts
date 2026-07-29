@@ -91,6 +91,19 @@ describe('AuthService.login — carrega activeMembership junto do profile', () =
     expect(user?.activeMembership).toEqual({ companyId: 'company-a', role: 'manager' });
   });
 
+  it('M1-F S8-D1: User retornado não possui companyId (legado removido do tipo e da leitura do profile)', async () => {
+    mockProfile();
+    mockMembership({ company_id: 'company-a', role: 'manager', is_active: true });
+
+    const user = await AuthService.login('fixture@exemplo.test', 'senha-qualquer');
+
+    expect(user).not.toBeNull();
+    expect(user).not.toHaveProperty('companyId');
+    // PROFILE_BASE.company_id continua no mock (coluna física ainda existe no
+    // banco), mas _loadProfile não a seleciona mais — provando que mesmo
+    // presente na resposta bruta, ela nunca chega a compor o User.
+  });
+
   it('Super Admin sem nenhuma membership: activeMembership = null (nunca lança, nunca inventa)', async () => {
     mockProfile({ platform_role: 'super_admin', company_id: null });
     mockMembership(null);
