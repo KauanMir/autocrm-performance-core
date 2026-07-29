@@ -43,6 +43,12 @@ describe('platformCommercialQueryKeys — estrutura exata', () => {
       'company', 'company-a', 'pipeline-stages', 'platform',
     ]);
   });
+
+  it('sellers: ["company", companyId, "commercial-sellers", "platform"]', () => {
+    expect(platformCommercialQueryKeys.sellers('company-a')).toEqual([
+      'company', 'company-a', 'commercial-sellers', 'platform',
+    ]);
+  });
 });
 
 describe('platformCommercialQueryKeys — isolamento do caminho RLS de Manager/Seller', () => {
@@ -68,6 +74,13 @@ describe('platformCommercialQueryKeys — isolamento do caminho RLS de Manager/S
   it('companies: raiz própria, nunca "platform-admin" (dataset de useCompanies, exclui cancelada)', () => {
     expect(platformCommercialQueryKeys.companies('user-1')[0]).toBe('platform-commercial');
   });
+
+  it('sellers: raiz própria, nunca compartilhada com leadsRoot/stages da mesma empresa', () => {
+    expect(platformCommercialQueryKeys.sellers('company-a'))
+      .not.toEqual(platformCommercialQueryKeys.leadsRoot('company-a'));
+    expect(platformCommercialQueryKeys.sellers('company-a'))
+      .not.toEqual(platformCommercialQueryKeys.stages('company-a'));
+  });
 });
 
 describe('platformCommercialQueryKeys — isolamento entre empresas/leads', () => {
@@ -92,6 +105,11 @@ describe('platformCommercialQueryKeys — isolamento entre empresas/leads', () =
     expect(platformCommercialQueryKeys.companies('user-a'))
       .not.toEqual(platformCommercialQueryKeys.companies('user-b'));
   });
+
+  it('sellers: empresas diferentes nunca colidem', () => {
+    expect(platformCommercialQueryKeys.sellers('company-a'))
+      .not.toEqual(platformCommercialQueryKeys.sellers('company-b'));
+  });
 });
 
 describe('platformCommercialQueryKeys — entradas inválidas', () => {
@@ -102,6 +120,7 @@ describe('platformCommercialQueryKeys — entradas inválidas', () => {
       expect(() => platformCommercialQueryKeys.leadsActive(invalid as unknown as string)).toThrow(/companyId/);
       expect(() => platformCommercialQueryKeys.leadsArchived(invalid as unknown as string)).toThrow(/companyId/);
       expect(() => platformCommercialQueryKeys.stages(invalid as unknown as string)).toThrow(/companyId/);
+      expect(() => platformCommercialQueryKeys.sellers(invalid as unknown as string)).toThrow(/companyId/);
       expect(() => platformCommercialQueryKeys.leadTimeline('company-a', invalid as unknown as string)).toThrow(/leadId/);
     }
   });

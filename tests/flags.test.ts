@@ -11,6 +11,7 @@ import {
   isUserLifecycleEnabled,
   isCompanySelectorEnabled,
   isSuperAdminCommercialReadEnabled,
+  isSuperAdminCommercialWriteEnabled,
   REMOTE_LEADS_DEV_OVERRIDE_KEY,
   REMOTE_STAGES_DEV_OVERRIDE_KEY,
   PLATFORM_ADMIN_DEV_OVERRIDE_KEY,
@@ -19,6 +20,7 @@ import {
   USER_LIFECYCLE_DEV_OVERRIDE_KEY,
   COMPANY_SELECTOR_DEV_OVERRIDE_KEY,
   SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY,
+  SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY,
 } from '@/lib/flags';
 
 const ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_STAGES';
@@ -105,6 +107,16 @@ function setSuperAdminCommercialReadEnv(nodeEnv: string, flagValue?: string) {
     vi.stubEnv(SUPER_ADMIN_COMMERCIAL_READ_ENV_KEY, undefined as unknown as string);
   } else {
     vi.stubEnv(SUPER_ADMIN_COMMERCIAL_READ_ENV_KEY, flagValue);
+  }
+}
+
+const SUPER_ADMIN_COMMERCIAL_WRITE_ENV_KEY = 'NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_WRITE';
+function setSuperAdminCommercialWriteEnv(nodeEnv: string, flagValue?: string) {
+  vi.stubEnv('NODE_ENV', nodeEnv);
+  if (flagValue === undefined) {
+    vi.stubEnv(SUPER_ADMIN_COMMERCIAL_WRITE_ENV_KEY, undefined as unknown as string);
+  } else {
+    vi.stubEnv(SUPER_ADMIN_COMMERCIAL_WRITE_ENV_KEY, flagValue);
   }
 }
 
@@ -1193,5 +1205,100 @@ describe('isolamento da flag comercial do Super Admin em relação às demais', 
     vi.stubEnv(SUPER_ADMIN_COMMERCIAL_READ_ENV_KEY, 'true');
     expect(isActiveUsersEnabled()).toBe(false);
     expect(isSuperAdminCommercialReadEnabled()).toBe(true);
+  });
+});
+
+// M1-F S8-C2-C2 — mutation comercial do Super Admin. Só o valor bruto da
+// própria flag — a combinação "WRITE só é EFETIVA quando READ também está
+// ligada" é decisão do chamador (canMutateCommercialWorkspace), nunca desta
+// função, então os testes abaixo cobrem SÓ o comportamento isolado da flag.
+describe('isSuperAdminCommercialWriteEnabled — valor do ambiente', () => {
+  it('variável ausente ⇒ false (OFF por padrão)', () => {
+    setSuperAdminCommercialWriteEnv('production');
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(false);
+  });
+
+  it('"false" ⇒ false', () => {
+    setSuperAdminCommercialWriteEnv('production', 'false');
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(false);
+  });
+
+  it('"true" ⇒ true', () => {
+    setSuperAdminCommercialWriteEnv('production', 'true');
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(true);
+  });
+
+  it('valores inválidos ⇒ false', () => {
+    for (const invalid of ['1', 'yes', 'on', '', 'enabled']) {
+      setSuperAdminCommercialWriteEnv('production', invalid);
+      expect(isSuperAdminCommercialWriteEnabled()).toBe(false);
+    }
+  });
+
+  it('comparação é estrita e case-sensitive ("TRUE"/"True" não ativam)', () => {
+    for (const invalid of ['TRUE', 'True', ' true', 'true ']) {
+      setSuperAdminCommercialWriteEnv('production', invalid);
+      expect(isSuperAdminCommercialWriteEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('isSuperAdminCommercialWriteEnabled — development (override via localStorage)', () => {
+  it('env false + override "true" ⇒ true', () => {
+    setSuperAdminCommercialWriteEnv('development', 'false');
+    window.localStorage.setItem(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY, 'true');
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(true);
+  });
+
+  it('env true + override "false" ⇒ false', () => {
+    setSuperAdminCommercialWriteEnv('development', 'true');
+    window.localStorage.setItem(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY, 'false');
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(false);
+  });
+
+  it('override ausente ⇒ usa o env', () => {
+    setSuperAdminCommercialWriteEnv('development', 'true');
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(true);
+
+    setSuperAdminCommercialWriteEnv('development', 'false');
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(false);
+  });
+});
+
+describe('isSuperAdminCommercialWriteEnabled — production (localStorage ignorado)', () => {
+  it('override "true" com env false ⇒ continua false', () => {
+    setSuperAdminCommercialWriteEnv('production', 'false');
+    window.localStorage.setItem(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY, 'true');
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(false);
+  });
+});
+
+describe('isolamento da flag WRITE comercial do Super Admin em relação às demais (incl. READ)', () => {
+  it('a chave de override é distinta de todas as outras, inclusive READ', () => {
+    expect(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY).toBe('autocrm_ff_super_admin_commercial_write');
+    expect(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY).not.toBe(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY).not.toBe(COMPANY_SELECTOR_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY).not.toBe(REMOTE_STAGES_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY).not.toBe(REMOTE_LEADS_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY).not.toBe(PLATFORM_ADMIN_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY).not.toBe(ACTIVE_USERS_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY).not.toBe(USER_EMAIL_EDIT_DEV_OVERRIDE_KEY);
+    expect(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY).not.toBe(USER_LIFECYCLE_DEV_OVERRIDE_KEY);
+  });
+
+  it('env/override de WRITE nunca afeta READ (e vice-versa) — flags totalmente independentes', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(SUPER_ADMIN_COMMERCIAL_READ_ENV_KEY, 'true');
+    vi.stubEnv(SUPER_ADMIN_COMMERCIAL_WRITE_ENV_KEY, 'false');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(true);
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(false);
+
+    window.localStorage.setItem(SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY, 'true');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(true);
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(true);
+
+    window.localStorage.setItem(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY, 'false');
+    expect(isSuperAdminCommercialReadEnabled()).toBe(false);
+    expect(isSuperAdminCommercialWriteEnabled()).toBe(true);
   });
 });

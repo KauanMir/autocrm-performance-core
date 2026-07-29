@@ -6,9 +6,11 @@ import {
   canReorderPipelineStages,
   canManageInvites,
   canAccessCommercialWorkspace,
+  canMutateCommercialWorkspace,
   membershipLifecycleCapabilities,
   type MembershipLifecycleActor,
   type MembershipLifecycleTargetRow,
+  type CommercialMutationCapabilityInput,
 } from '@/lib/capabilities';
 
 // M1-F S8-B1: as três capabilities abaixo migraram de User.role (legado)
@@ -77,6 +79,65 @@ describe('canAccessCommercialWorkspace — M1-F S8-C2-B2', () => {
     // A própria assinatura não aceita flag alguma; este teste documenta a
     // garantia por ausência de parâmetro (nada a "ligar/desligar" aqui).
     expect(canAccessCommercialWorkspace.length).toBe(1);
+  });
+});
+
+describe('canMutateCommercialWorkspace — M1-F S8-C2-C2', () => {
+  function input(overrides: Partial<CommercialMutationCapabilityInput> = {}): CommercialMutationCapabilityInput {
+    return {
+      actor: { platformRole: 'super_admin' },
+      readEnabled: true,
+      writeEnabled: true,
+      selectedCompanyStatus: 'ativa',
+      ...overrides,
+    };
+  }
+
+  it('Super Admin + READ + WRITE + empresa ativa: true', () => {
+    expect(canMutateCommercialWorkspace(input({ selectedCompanyStatus: 'ativa' }))).toBe(true);
+  });
+
+  it('Super Admin + READ + WRITE + empresa em implantacao: true', () => {
+    expect(canMutateCommercialWorkspace(input({ selectedCompanyStatus: 'implantacao' }))).toBe(true);
+  });
+
+  it('empresa suspensa: false mesmo com as duas flags ligadas', () => {
+    expect(canMutateCommercialWorkspace(input({ selectedCompanyStatus: 'suspensa' }))).toBe(false);
+  });
+
+  it('empresa cancelada: false mesmo com as duas flags ligadas', () => {
+    expect(canMutateCommercialWorkspace(input({ selectedCompanyStatus: 'cancelada' }))).toBe(false);
+  });
+
+  it('nenhuma empresa selecionada (null): false, nunca inferida', () => {
+    expect(canMutateCommercialWorkspace(input({ selectedCompanyStatus: null }))).toBe(false);
+  });
+
+  it('readEnabled=false: false, mesmo com writeEnabled=true e empresa ativa', () => {
+    expect(canMutateCommercialWorkspace(input({ readEnabled: false }))).toBe(false);
+  });
+
+  it('writeEnabled=false: false, mesmo com readEnabled=true e empresa ativa', () => {
+    expect(canMutateCommercialWorkspace(input({ writeEnabled: false }))).toBe(false);
+  });
+
+  it('readEnabled=false e writeEnabled=false: false', () => {
+    expect(canMutateCommercialWorkspace(input({ readEnabled: false, writeEnabled: false }))).toBe(false);
+  });
+
+  it('Manager com membership ativa: false — capability exclusiva de Super Admin', () => {
+    expect(canMutateCommercialWorkspace(input({ actor: { platformRole: null } }))).toBe(false);
+  });
+
+  it('actor null/undefined: false', () => {
+    expect(canMutateCommercialWorkspace(input({ actor: null }))).toBe(false);
+    expect(canMutateCommercialWorkspace(input({ actor: undefined }))).toBe(false);
+  });
+
+  it('todas as combinações de status não-mutáveis com as duas flags ligadas', () => {
+    (['suspensa', 'cancelada', null] as const).forEach((status) => {
+      expect(canMutateCommercialWorkspace(input({ selectedCompanyStatus: status }))).toBe(false);
+    });
   });
 });
 
