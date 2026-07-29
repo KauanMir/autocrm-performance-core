@@ -5330,3 +5330,198 @@ executada.
 **O risco estrutural registrado em §38.11 está fechado. S8-C2-D2 só se
 desbloqueia com esta etapa publicada e validada. M1-E E4 continua
 pausado** até o fechamento formal do S8 (S8-F).
+
+## 40. Implementação do S8-C2-D2 — mutations comerciais restantes no frontend platform
+
+Esta seção registra a implementação (não mais planejamento) do frontend
+platform das seis RPCs restantes de mutation de Leads
+(`move_lead_to_stage`/`apply_lead_event`/`assign_lead_seller`/
+`archive_lead`/`unarchive_lead`/`add_lead_timeline_entry`), fechando o
+S8-C2-D iniciado no backend (§38/§39). §0–§39 não foram alterados.
+Nenhuma migration, RPC, RLS, grant, FK ou `database.types.ts` tocados
+nesta etapa; nenhuma operação remota executada.
+
+### 40.1 Data layer
+
+`lib/commercial/repository.ts` ganhou seis funções
+(`movePlatformLeadToStage`/`applyPlatformLeadEvent`/
+`assignPlatformLeadSeller`/`archivePlatformLead`/`unarchivePlatformLead`/
+`addPlatformLeadTimelineEntry`), mesmo padrão de `createPlatformLead`/
+`updatePlatformLead`: `p_company_id` sempre o valor explícito recebido
+por parâmetro, erro sanitizado por operação
+(`PlatformCommercialError`), nenhum `supabase.from` direto. Seis hooks
+novos em `lib/hooks/` (`useMovePlatformLead`/
+`useApplyPlatformLeadEvent`/`useAssignPlatformLeadSeller`/
+`useArchivePlatformLead`/`useUnarchivePlatformLead`/
+`useAddPlatformLeadTimelineEntry`) — mesmo contrato de
+`useCreatePlatformLead`/`useUpdatePlatformLead`: `authorized` resolvido
+pelo chamador (`canMutateCommercialWorkspace`, reaproveitada sem
+duplicação), `isContextStillValid()` verificado imediatamente antes de
+cada RPC, sem retry automático (nenhuma das seis é seguramente
+reexecutável às cegas). `lib/commercial/errors.ts` ganhou seis novos
+códigos estáveis e as mensagens locais correspondentes, mais duas novas
+entradas no tradutor central (`stage_not_found`/`invalid_event`) — o
+`stale_write` existente foi mantido com sua redação original (mensagem
+compartilhada com create/update, não alterada).
+
+### 40.2 Achado de contrato — nenhuma das seis RPCs escreve timeline automática
+
+Auditoria direta das migrations (`20260729140000`/`20260729150000`,
+S8-C2-D1) confirmou que **nenhuma** das seis RPCs, exceto
+`add_lead_timeline_entry`, insere em `lead_timeline_entries` — `move_
+lead_to_stage`/`apply_lead_event`/`assign_lead_seller`/`archive_lead`/
+`unarchive_lead` só afetam `public.leads`. Por isso a invalidação de
+cache de cada hook segue exatamente o efeito real: `move`/`event`/
+`assign` invalidam somente `leadsActive`; `archive`/`unarchive`
+invalidam `leadsActive` **e** `leadsArchived`; `add_lead_timeline_entry`
+invalida **somente** a `leadTimeline(companyId, leadId)` específica,
+nunca as listas de Leads. Nenhuma key nova foi necessária em
+`lib/commercial/queryKeys.ts` — as cinco já existentes (`leadsActive`/
+`leadsArchived`/`leadTimeline`/`stages`/`sellers`) cobrem integralmente
+as seis mutations.
+
+### 40.3 `p_seller_id` — limitação do gerador de tipos, não da RPC
+
+`assign_lead_seller` aceita `p_seller_id = null` para remover o vendedor
+(contrato confirmado no pgTAP do S8-C2-D1), mas `supabase gen types`
+marca esse parâmetro como `string` obrigatório (o gerador não reflete
+nullability de parâmetros de função, só de colunas de tabela — mesma
+limitação já observada para `p_successor_profile_id`/`p_successor_id`
+em `offboard_manager`/`transfer_membership`, pré-existente). Resolvido
+com um cast local em `assignPlatformLeadSeller`
+(`input.sellerId as unknown as string`), documentado no próprio
+arquivo — nenhuma edição manual de `database.types.ts`.
+
+### 40.4 Registry de eventos comerciais
+
+`lib/commercial/leadEventRegistry.ts` — inventário direto dos 18
+valores reais de `lead_event_type`; nenhum inventado, nenhum
+renomeado. `payloadFields` é `[]` em toda entrada: a assinatura real de
+`apply_lead_event` não aceita nenhum campo além do próprio tipo do
+evento, então nenhum dos 18 eventos exigiu uma decisão de produto
+pendente ou formulário adicional. `group` (`contato`/`visita`/
+`proposta`/`venda`) é deduzido do prefixo do próprio nome do enum
+(`call_outcome_*`/`visit_*`, incluindo `visit_result_*`/`deal_*`/
+`sale_*`) — nenhuma classificação nova. `label`/`description`
+reaproveitam o vocabulário real já publicado no mapeamento evento →
+health/labels/estágio (`alert_label`) da migration do S8-C2-D1 — nenhum
+texto de produto inventado.
+
+### 40.5 Contexto — `contextEpoch`
+
+`CommercialCompanyContext` ganhou `contextEpoch: number`, incrementado
+a cada troca real de empresa (mesmo gatilho do `cancelQueries` já
+existente) e a cada troca de identidade. Aditivo — `selectedCompanyId`/
+`setSelectedCompanyId` inalterados, nenhum consumidor existente
+quebrado. Motivo: a comparação simples de `companyId` (já usada por
+`PlatformLeadCreateModal`/`PlatformLeadEditModal` desde o S8-C2-C2) não
+detecta uma troca A→B→A enquanto uma mutation está pendente (o valor
+final é igual ao inicial); o epoch captura esse caso. `PlatformLeadDetails`
+usa os dois em conjunto (`liveCompanyIdRef`/`liveContextEpochRef`,
+comparados contra o valor capturado no momento de montagem) antes de
+cada uma das seis RPCs.
+
+### 40.6 Detalhe do Lead — ações conectadas
+
+`components/commercial/PlatformLeadActions.tsx` (novo): cinco widgets
+puros e apresentacionais, sem hook de rede próprio —
+`PlatformLeadStageMenu`, `PlatformLeadSellerMenu`,
+`PlatformLeadArchiveControl`, `PlatformLeadEventMenu`,
+`PlatformLeadTimelineForm`. `PlatformLeadDetails.tsx` passou a orquestrar
+os seis hooks (`authorized: canMutate`) e a passar callbacks para os
+widgets. Regras aplicadas:
+
+- Seletor de etapa explícito (obrigatório, §6 do pedido): lista as
+  etapas reais da empresa (`stages`, nova prop opcional, retrocompatível
+  — omissão preserva o comportamento somente leitura anterior), exclui a
+  etapa atual da lista de destino. **Drag and drop no Kanban não foi
+  implementado nesta etapa** — decisão deliberada, dentro da preferência
+  explícita do pedido pela "primeira versão" (mutation pessimista,
+  bloquear novo movimento durante pendência) e da natureza opcional do
+  drag ("pode ser implementado somente quando... tecnicamente seguro");
+  o requisito obrigatório (seletor explícito) está integralmente
+  entregue, e o Kanban somente leitura do B2 permanece exatamente como
+  publicado (nenhum card `draggable`, nenhum handler de drop, em
+  qualquer combinação de flags/status).
+- Seller picker: usa exclusivamente `list_platform_sellers_for_company`
+  (via `usePlatformSellers`, `authorized: canMutate` — nunca montado
+  fora do modo mutável); envia `seller_id` real ou `null`, nunca
+  `profile_id`/`membership_id`/nome. Vendedor atribuído que não aparece
+  mais na lista recarregada mostra "Vendedor anterior ou indisponível"
+  (nunca um nome inventado) — mesmo espírito de `leadDisplay.ts`.
+- Arquivamento/desarquivamento: confirmação visual em duas etapas
+  (clique no botão → confirmação explícita → só então a RPC), ações
+  desabilitadas enquanto qualquer mutation do Lead está pendente
+  (`anyPending`). Nenhuma exclusão definitiva de Lead foi criada.
+- Eventos comerciais: menu agrupado pelo registry (§40.4); nenhum evento
+  exigiu payload extra, então nenhum formulário por evento foi
+  necessário.
+- Timeline manual: formulário próprio (label obrigatório, detail
+  opcional) — `icon`/`color` são campos reais aceitos pela RPC, fixados
+  para uma entrada manual do Super Admin (`'message'`/`'#3B82F6'`,
+  decisão de produto registrada em `PlatformLeadActions.tsx`) em vez de
+  expor os dois campos técnicos brutos ao usuário; nenhuma tradução do
+  conteúdo para o modelo mock. Submit vazio bloqueado (label em branco
+  desabilita o botão).
+- Todas as ações (exceto Editar/timeline) somem quando o Lead está
+  arquivado, exceto o próprio controle de arquivamento, que vira
+  "Desarquivar". Nenhuma ação aparece quando `canMutate=false`
+  (`readOnly`/empresa suspensa-cancelada/flags desligadas) —
+  comportamento idêntico ao B2/C2 original.
+- Feedback: sem biblioteca de toast (nenhuma existe no projeto —
+  confirmado por auditoria de `package.json`/código; introduzir uma
+  seria escopo além do pedido) — reaproveitado o MESMO padrão de banner
+  inline já usado por `PlatformLeadCreateModal`/`PlatformLeadEditModal`
+  (`role="alert"` para erro), estendido com um banner de sucesso
+  (`role="status"`) igualmente inline, sempre com a mensagem traduzida
+  por `getPlatformCommercialErrorMessage` — nunca o erro cru.
+
+### 40.7 Sem atualização otimista
+
+Nenhuma das seis mutations escreve no cache do TanStack Query
+antecipando o resultado — todas usam `invalidateQueries` após sucesso
+(refetch), mesmo padrão de `useCreatePlatformLead`/`useUpdatePlatformLead`.
+Nenhum card do Kanban se move, nenhum vendedor muda localmente, nenhuma
+entrada de timeline aparece antes da confirmação do servidor.
+
+### 40.8 Manager e Seller
+
+Nenhum arquivo mock (`LeadService`/`StoreAdapter`/`Flows2`/`Flows3`/
+`FlowVerCliente`/`ScreensOps.tsx`) foi tocado. As seis RPCs continuam
+exclusivas da árvore platform (Super Admin) — Manager/Seller permanecem
+100% nas telas legadas, sem nenhuma mudança de comportamento.
+
+### 40.9 Achado fora do escopo inicial — teste antigo desatualizado pela mensagem de erro
+
+Ao rodar a suíte, `tests/commercial/errors.test.ts` (existente) e
+`tests/components/commercial/PlatformLeadDetails.test.tsx` (existente)
+precisaram de ajuste: o primeiro porque uma tentativa inicial de reescrever
+a mensagem de `stale_write` (para o texto sugerido no pedido desta etapa)
+quebraria a asserção já publicada para `create_lead`/`update_lead` —
+revertido para o texto original, já aprovado, sem necessidade de duas
+mensagens diferentes para o mesmo código estável; o segundo porque
+`PlatformLeadDetails` passou a chamar `useCommercialCompanyContext`/
+`usePlatformSellers`/seis hooks de mutation, exigindo mocks novos no
+teste já existente (nenhuma asserção antiga removida, apenas estendida
+com a cobertura das novas ações — arquivo diretamente responsável por
+testar o componente desta etapa, dentro do escopo autorizado de "testes
+TypeScript").
+
+### 40.10 Validação completa
+
+TypeScript: **125 arquivos, 1921/1921** (1808 + 113 novos: repository,
+seis hooks, registry, `CommercialCompanyContext`/`errors` estendidos,
+`PlatformLeadDetails`/`PlatformLeadActions`). Build verde, 8/8 páginas.
+SQL revalidado sem nenhuma alteração: 43 migrations, 47 arquivos,
+2440/2440.
+
+### 40.11 Escopo preservado
+
+Nenhuma migration, RPC, RLS, grant, FK ou `database.types.ts` alterados.
+Nenhum componente mock tocado. Nenhuma das duas flags
+(`NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_READ`/`_WRITE`) alterada ou
+nova criada. Nenhuma operação remota executada.
+
+**S8-C2-D2 está completo. S8-C2-E (auditoria integrada e fechamento do
+C2) está desbloqueado. S8-D permanece não iniciado. M1-E E4 continua
+pausado** até o fechamento formal do S8 (S8-F).
