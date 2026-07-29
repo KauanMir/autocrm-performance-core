@@ -135,6 +135,7 @@ export function PlatformCommercialPipelineView({ userId, platformRole }: Platfor
           lead={selectedLead}
           companyId={selectedCompanyId}
           stagesById={stagesQuery.stagesById}
+          stages={stagesQuery.stages}
           onClose={() => setSelectedLeadId(null)}
           canMutate={canMutate}
           onEdit={() => { setEditingLeadId(selectedLead.id); setSelectedLeadId(null); }}

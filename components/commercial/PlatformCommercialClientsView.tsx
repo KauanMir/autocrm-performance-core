@@ -180,6 +180,7 @@ export function PlatformCommercialClientsView({ userId, platformRole }: Platform
           lead={selectedLead}
           companyId={selectedCompanyId}
           stagesById={stagesQuery.stagesById}
+          stages={stagesQuery.stages}
           onClose={() => setSelectedLeadId(null)}
           canMutate={canMutate}
           onEdit={() => { setEditingLeadId(selectedLead.id); setSelectedLeadId(null); }}
