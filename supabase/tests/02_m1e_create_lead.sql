@@ -6,13 +6,24 @@ select * from no_plan();
 -- ── fixtures ────────────────────────────────────────────────────────────
 -- Empresa C SEM estagio 'new' (para initial_stage_missing) e seller s3
 -- desativado na empresa A (para seller_not_found por inatividade).
-insert into public.companies (id, name) values ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Empresa C Teste');
+-- M1-F S8-C2-C1: status explícito 'ativa' (o default da coluna é
+-- 'implantacao', que a nova resolve_lead_mutation_context nega para
+-- Manager/Seller — precisa estar 'ativa' para o teste alcançar a checagem
+-- de estágio inicial, que é o que este arquivo quer exercitar).
+insert into public.companies (id, name, status) values ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Empresa C Teste', 'ativa');
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at) values
   ('00000000-0000-0000-0000-000000000000', 'c1111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'adminc@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'd1111111-1111-1111-1111-111111111111', 'authenticated', 'authenticated', 'inativo@test.local', now(), now(), now());
 insert into public.profiles (id, company_id, name, email, role, is_active) values
   ('c1111111-1111-1111-1111-111111111111', 'cccccccc-cccc-cccc-cccc-cccccccccccc', 'Admin C', 'adminc@test.local', 'admin', true),
   ('d1111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-000000000001', 'Inativo', 'inativo@test.local', 'seller', false);
+-- M1-F S8-C2-C1: create_lead agora deriva a empresa de
+-- current_membership_company_id(), nunca mais de profiles.company_id —
+-- Admin C precisa de uma membership real (legado 'admin' ->
+-- company_memberships.role='manager', mesmo mapeamento do backfill do
+-- M1-F S1, já usado em 01_m1e_grants_rls.sql).
+insert into public.company_memberships (company_id, profile_id, role, is_active) values
+  ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'c1111111-1111-1111-1111-111111111111', 'manager', true);
 update public.sellers set is_active = false where id = 's3';
 
 -- ── seller: autoatribuicao obrigatoria ──────────────────────────────────
