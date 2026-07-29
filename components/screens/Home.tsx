@@ -16,7 +16,8 @@ const DEFAULT_SELLER = {
 
 function getCompetition(sellers: any[]) {
   const currentUser = AuthService.getCurrentUser();
-  const me = (currentUser?.sellerId ? SellerService.getById(currentUser.sellerId) : null)
+  const sellerId = currentUser?.activeMembership?.sellerId;
+  const me = (sellerId ? SellerService.getById(sellerId) : null)
     ?? SellerService.getAll()[0]
     ?? DEFAULT_SELLER;
   const meIdx = sellers.findIndex((s: any) => s.id === me.id);
@@ -143,7 +144,7 @@ function RankingList({ sellers, active, comp }: any) {
         <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--txt-lo)' }}>{sellers.length} vendedores</span>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
-        {(sellers as any[]).map((s: any, i: number) => <RankingRow key={s.id} s={s} pos={i + 1} active={active} leader={i === 0} me={s.id === (AuthService.getCurrentUser()?.sellerId ?? null)} target={comp && s.id === (comp.rivalAhead && comp.rivalAhead.id)} />)}
+        {(sellers as any[]).map((s: any, i: number) => <RankingRow key={s.id} s={s} pos={i + 1} active={active} leader={i === 0} me={s.id === (AuthService.getCurrentUser()?.activeMembership?.sellerId ?? null)} target={comp && s.id === (comp.rivalAhead && comp.rivalAhead.id)} />)}
       </div>
     </div>
   );

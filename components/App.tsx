@@ -113,10 +113,16 @@ function PlaceholderScreen({ title }: { title: string }) {
 
 function Rail({ current, go, currentUser }: { current: string; go: (id: string) => void; currentUser: User }) {
   const allowedIds = allowedNavIds(currentUser);
-  const seller = currentUser.sellerId ? SellerService.getById(currentUser.sellerId) : null;
+  // M1-F S8-D2-A: sellerId vem de activeMembership.sellerId (nunca
+  // User.sellerId legado, removido do tipo). 'Administrador' agora é
+  // platformRole==='super_admin' (o "admin" legado deixou de existir como
+  // conceito de papel — mesmo padrão já usado no restante do app).
+  const seller = currentUser.activeMembership?.sellerId
+    ? SellerService.getById(currentUser.activeMembership.sellerId)
+    : null;
   const displayTeam = seller?.team
     ? `Vendedor · ${seller.team}`
-    : currentUser.role === 'admin' ? 'Administrador' : 'Gerente';
+    : currentUser.platformRole === 'super_admin' ? 'Administrador' : 'Gerente';
   // Live count (RBAC-filtered by TaskService.getAll itself) — replaces the
   // hardcoded badge:3 that never moved regardless of real pendências (M0-K2).
   const lateTasks = TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length;

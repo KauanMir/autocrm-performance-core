@@ -87,7 +87,7 @@ function ScreenClientesLegacy({ go }: any) {
   useStore();
   const allLeads = LeadService.getAll(); // already RBAC-scoped: seller sees only their own here
   const currentUser = AuthService.getCurrentUser();
-  const isSeller = currentUser?.role === 'seller';
+  const isSeller = currentUser?.activeMembership?.role === 'seller';
   const sellers = SellerService.getAll();
   const [sellerFilter, setSellerFilter] = useState<string>('Todos');
   const leads = (!isSeller && sellerFilter !== 'Todos')
@@ -128,7 +128,8 @@ function ScreenClientesLegacy({ go }: any) {
 // dentro do MESMO componente). Super Admin + flag comercial ON monta a
 // superfície platform (somente leitura, dados reais); qualquer outro caso
 // (Manager/Seller, ou Super Admin com a flag OFF) monta o corpo legado
-// intacto. currentUser.role legado NUNCA decide este switch.
+// intacto. `User.role` legado nem existe mais no tipo — nunca decidiu
+// este switch.
 export function ScreenClientes({ go }: any) {
   const currentUser = AuthService.getCurrentUser();
   const isSuperAdmin = currentUser?.platformRole === 'super_admin';
@@ -209,7 +210,7 @@ function ScreenAndamentoLegacy({ go }: any) {
   useStore();
   const allLeads = LeadService.getAll(); // seller already RBAC-scoped to their own leads here
   const currentUser = AuthService.getCurrentUser();
-  const isSeller = currentUser?.role === 'seller';
+  const isSeller = currentUser?.activeMembership?.role === 'seller';
   const sellers = SellerService.getAll();
   // Manager/admin see everyone by default and narrow by seller — a seller
   // never sees this control at all, since LeadService.getAll() already

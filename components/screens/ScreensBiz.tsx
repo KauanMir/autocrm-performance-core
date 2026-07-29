@@ -260,7 +260,7 @@ function Bar({ label, pct, value, tone }: { label: string; pct: number; value: s
 // narrowed by hand here to just the seller's own row (M0-K3.1, correção 6).
 function exportResultadosCSV() {
   const user = AuthService.getCurrentUser();
-  const isSeller = user?.role === 'seller';
+  const isSeller = user?.activeMembership?.role === 'seller';
   const esc = (v: any) => {
     const s = v === null || v === undefined || v === '' ? '-' : String(v);
     return `"${s.replace(/"/g, '""')}"`;
@@ -285,7 +285,7 @@ function exportResultadosCSV() {
   };
 
   const allSellers = SellerService.getAll();
-  const sellers = isSeller ? allSellers.filter((s: any) => s.id === user?.sellerId) : allSellers;
+  const sellers = isSeller ? allSellers.filter((s: any) => s.id === user?.activeMembership?.sellerId) : allSellers;
   rows.push('Vendedores');
   rows.push(row(['Nome', 'Vendas', 'Receita', 'Leads', 'Visitas', 'Conversão']));
   sellers.forEach((s: any) => rows.push(row([s.name, s.sales, s.revenue, s.leads, s.visits, s.conv + '%'])));

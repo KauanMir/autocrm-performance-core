@@ -22,13 +22,13 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
   const [f, setF] = useState({ nome: '', tel: '', origem: 'Showroom', car: '', pay: 'Financiamento', urg: 'Quente' });
   const set = (k: string, v: any) => setF(s => ({ ...s, [k]: v }));
   const user = AuthService.getCurrentUser();
-  const isSeller = user?.role === 'seller';
+  const isSeller = user?.activeMembership?.role === 'seller';
   const allSellers = SellerService.getAll();
   // A seller's own leads are always theirs; a manager/admin has no sellerId of
   // their own and must pick who the lead actually belongs to — never fall
   // back to the acting manager (same product rule as FlowRegistrarVenda).
-  const [assignedSellerId, setAssignedSellerId] = useState<string | null>(isSeller ? (user?.sellerId ?? null) : null);
-  const finalSellerId = isSeller ? (user?.sellerId ?? null) : assignedSellerId;
+  const [assignedSellerId, setAssignedSellerId] = useState<string | null>(isSeller ? (user?.activeMembership?.sellerId ?? null) : null);
+  const finalSellerId = isSeller ? (user?.activeMembership?.sellerId ?? null) : assignedSellerId;
   const finalSeller = finalSellerId ? allSellers.find((s: any) => s.id === finalSellerId) : null;
   const steps = ['Quem é', 'O que procura', 'Revisão'];
   const canNext = step === 0 ? !!(f.nome && f.tel && (isSeller || finalSellerId)) : step === 1 ? f.car : true;
@@ -220,7 +220,7 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
       time: finalTime,
       status: VISIT_STATUS.SCHEDULED,
       seller: lead?.seller || user?.name || '—',
-      sellerId: lead?.sellerId ?? user?.sellerId ?? null,
+      sellerId: lead?.sellerId ?? user?.activeMembership?.sellerId ?? null,
       leadId: lead?.id ?? null,
       note: note.trim() || undefined,
     });
@@ -468,7 +468,7 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
       status: needsApproval ? DEAL_STATUS.APPROVAL : DEAL_STATUS.OPEN,
       last: 'Agora',
       seller: lead.seller || user?.name || '—',
-      sellerId: lead.sellerId ?? user?.sellerId ?? null,
+      sellerId: lead.sellerId ?? user?.activeMembership?.sellerId ?? null,
       leadId: lead.id,
     });
     LeadService.addToTimeline(lead.id, { icon: 'handshake', c: '#E8CE72', t: 'Proposta criada', d: `${finalCar} · ${fmt(finalV)}` });
@@ -665,7 +665,7 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   const [blocked, setBlocked] = useState(false);
 
   const user = AuthService.getCurrentUser();
-  const isSeller = user?.role === 'seller';
+  const isSeller = user?.activeMembership?.role === 'seller';
   const storeSellers = SellerService.getAll();
   // A seller's sale is always theirs. A manager/admin has no sellerId of
   // their own — the sale must be attributed to a real Seller, never to the
@@ -673,9 +673,9 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   // Pre-select the lead's own seller when one is picked; otherwise the
   // manager must choose — never silently falls back to currentUser.
   const [assignedSellerId, setAssignedSellerId] = useState<string | null>(
-    isSeller ? (user?.sellerId ?? null) : (deal?.sellerId ?? lead?.sellerId ?? null),
+    isSeller ? (user?.activeMembership?.sellerId ?? null) : (deal?.sellerId ?? lead?.sellerId ?? null),
   );
-  const finalSellerId = isSeller ? (user?.sellerId ?? null) : assignedSellerId;
+  const finalSellerId = isSeller ? (user?.activeMembership?.sellerId ?? null) : assignedSellerId;
   const finalSeller = finalSellerId ? storeSellers.find((s: any) => s.id === finalSellerId) ?? null : null;
 
   const [doneSeller, setDoneSeller] = useState<any>(null);
@@ -881,16 +881,16 @@ export function FlowNovaPendencia({ payload, close }: any) {
   const types: [string, string][] = [['Ligar', 'phone'], ['Visita', 'calendar'], ['Follow-up', 'refresh'], ['Proposta', 'handshake'], ['Documento', 'doc']];
 
   const user = AuthService.getCurrentUser();
-  const isSeller = user?.role === 'seller';
+  const isSeller = user?.activeMembership?.role === 'seller';
   const allSellers = SellerService.getAll();
   // Seller creates a task for themself. Manager/admin has no sellerId of
   // their own — an avulsa task must never save with assignedTo null (that's
   // what let it silently show up for every seller, Correção 4, M0-K4.1). If
   // it came from a lead, pre-select that lead's own seller.
   const [assignedSellerId, setAssignedSellerId] = useState<string | null>(
-    isSeller ? (user?.sellerId ?? null) : (payload.lead?.sellerId ?? null),
+    isSeller ? (user?.activeMembership?.sellerId ?? null) : (payload.lead?.sellerId ?? null),
   );
-  const finalSellerId = isSeller ? (user?.sellerId ?? null) : assignedSellerId;
+  const finalSellerId = isSeller ? (user?.activeMembership?.sellerId ?? null) : assignedSellerId;
   const finalSeller = finalSellerId ? allSellers.find((s: any) => s.id === finalSellerId) : null;
   const isCustomWhen = when === 'Personalizado';
   const finalWhen = isCustomWhen ? customWhen.trim() : when;
@@ -1022,7 +1022,7 @@ export function FlowCriarAcompanhamento({ payload, close }: any) {
           when,
           // Task vinda de um lead: vendedor responsável é o dono do lead, não
           // o gestor que abriu o acompanhamento (Correção 4).
-          assignedTo: lead?.sellerId ?? user?.sellerId ?? null,
+          assignedTo: lead?.sellerId ?? user?.activeMembership?.sellerId ?? null,
           note: note || '',
         });
         setDone(true);
