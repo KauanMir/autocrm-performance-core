@@ -704,6 +704,7 @@ export type Database = {
       add_lead_timeline_entry: {
         Args: {
           p_color: string
+          p_company_id?: string
           p_detail?: string
           p_icon: string
           p_label: string
@@ -730,6 +731,7 @@ export type Database = {
       }
       apply_lead_event: {
         Args: {
+          p_company_id?: string
           p_event_type: Database["public"]["Enums"]["lead_event_type"]
           p_lead_id: string
         }
@@ -764,7 +766,11 @@ export type Database = {
         }
       }
       archive_lead: {
-        Args: { p_expected_version: number; p_lead_id: string }
+        Args: {
+          p_company_id?: string
+          p_expected_version: number
+          p_lead_id: string
+        }
         Returns: {
           alert_label: string | null
           archived_at: string | null
@@ -797,6 +803,7 @@ export type Database = {
       }
       assign_lead_seller: {
         Args: {
+          p_company_id?: string
           p_expected_version: number
           p_lead_id: string
           p_seller_id: string
@@ -1149,6 +1156,7 @@ export type Database = {
       }
       move_lead_to_stage: {
         Args: {
+          p_company_id?: string
           p_expected_version?: number
           p_lead_id: string
           p_stage_id: string
@@ -1355,7 +1363,11 @@ export type Database = {
         }[]
       }
       unarchive_lead: {
-        Args: { p_expected_version: number; p_lead_id: string }
+        Args: {
+          p_company_id?: string
+          p_expected_version: number
+          p_lead_id: string
+        }
         Returns: {
           alert_label: string | null
           archived_at: string | null
