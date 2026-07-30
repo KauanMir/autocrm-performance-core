@@ -1237,6 +1237,105 @@ Platform/`selectedCompanyId` nestes arquivos — confirmado por grep, como
 em toda etapa anterior do M1-E. E4-C (regressão final, builds, fechamento
 formal do E4) segue desbloqueado, ainda não iniciado.
 
+### 15.6 E4-C — Regressão final e fechamento formal do E4
+
+Auditoria de encerramento (somente leitura + testes finais, zero código de
+aplicação alterado): confirma que a cadeia completa de create/update/
+duplicidade do E4 — E4-A0 (auditoria)/E4-A1 (assignable sellers + exclusão
+de duplicidade)/E4-B1 (data layer/hooks/capabilities)/E4-B2 (conexão de
+UI) — está consistente, sem caminho híbrido, sem vazamento de capability
+para E5/E6, e sem regressão no caminho local ou na superfície Platform.
+
+**Esclarecimento de produto (fronteira arquitetural, registrado
+formalmente aqui — nenhuma implementação nova)**: a autoatribuição do
+Seller em `create_lead` (§6.1, decisão original do M1-E) significa
+exclusivamente que o **cadastro continua manual** — Seller abre "Novo
+Lead", digita os dados do cliente e o backend atribui esse Lead a si
+mesmo; a regra existe para impedir que um Seller atribua o Lead a outro
+colega, nunca para simular captação automática. Manager cadastra
+manualmente e escolhe um Seller operacional ou deixa sem vendedor. Não
+existe, nesta fase, nenhuma integração com Meta (Facebook/Instagram/
+WhatsApp) ou qualquer outra fonte externa. Uma futura ingestão automática
+de Leads (webhooks, APIs, tokens) será um **módulo inteiramente separado**,
+que nunca deve fingir que um Lead capturado automaticamente foi criado por
+um Seller humano — Leads de integração precisarão de autoria/origem
+próprias (nunca o `actorRole='seller'` deste módulo), entrarão sem Seller
+ou por uma regra explícita futura (fila/rodízio/campanha/plantão), e
+exigirão decisão de produto e RPC próprias. Nenhum campo, `actor_kind`,
+token ou API dessa integração futura é implementado aqui — só a fronteira
+é registrada.
+
+**Matriz final de capabilities do E4** (confirmada por
+`tests/leads/mutationCapabilities.test.ts`, inalterada desde o E4-B1):
+
+| Ator | canCreate | canEditDetails | canApplyEvents/canMoveStage/canAssignSeller/canArchive |
+|---|---|---|---|
+| Local (qualquer role, flag OFF) | comportamento antigo integral (não passa por `LeadMutationCapabilities`) | idem | idem |
+| Manager operacional (remoto) | true | true | false |
+| Seller operacional, `sellerId` válido (remoto) | true | true | false |
+| Seller sem `sellerId` (remoto) | false | false | false |
+| Super Admin | false (usa superfície Platform) | false | false |
+| Sem membership/suspenso/offboarded/profile inativo | false | false | false |
+| `remote_misconfigured` (flag ligada, Stages não) | false | false | false |
+
+Capabilities continuam sendo controle de **interface** — a autoridade real
+permanece em RLS/grants/RPC (`resolve_lead_mutation_context`), nunca
+substituída por esta matriz.
+
+**Mapas de dado confirmados por leitura direta do código**:
+
+```
+CREATE MANAGER:  tela → useCurrentCompanyAssignableSellers (E4-A1)
+                      → useLeadDuplicateGuard (debounce/submit)
+                      → useCreateLead (actorRole='manager', sellerId opcional)
+                      → create_lead (sem p_company_id)
+                      → invalidateQueries(leadQueryKeys.active) → bridge → tela
+
+CREATE SELLER:   tela → useLeadDuplicateGuard
+                      → useCreateLead (actorRole='seller', sem campo sellerId no tipo)
+                      → create_lead (sem p_seller_id — backend autoatribui)
+                      → invalidateQueries(leadQueryKeys.active) → bridge → tela
+
+UPDATE:          tela → lead.version (LeadModel, presente desde a leitura remota)
+                      → useLeadDuplicateGuard (excludeLeadId = lead.id)
+                      → useUpdateLead (expectedVersion obrigatório)
+                      → update_lead (sem p_company_id/p_seller_id/p_stage_id)
+                      → invalidateQueries(active + detail) → bridge → tela
+```
+
+Nenhum caminho híbrido existe: `dataSource` (`lib/leads/leadFlowContext.ts`)
+nunca mistura local e remoto na mesma renderização — cada flow é
+inteiramente roteado para `*Local` (corpo original intocado) ou `*Remote`
+(hooks do E4-A1/B1) antes de qualquer campo ser exibido.
+
+**Lacunas de cobertura fechadas nesta etapa** (testes adicionados a
+arquivos existentes, nenhum arquivo de aplicação tocado): proteção contra
+duplo submit verificada no nível do *flow* (não só do hook — dois cliques
+seguidos em "Criar cliente"/"Salvar alterações" nunca disparam duas
+chamadas RPC); troca de identidade com formulário aberto verificada no
+nível do *flow* (não só do hook — `rerender` com `AuthService.
+getCurrentUser()` mudando fecha o formulário sem sucesso, sem invalidar a
+empresa nova); dois códigos de erro adicionais de `update_lead`
+(`lead_archived`, `forbidden`) confirmados com a mensagem sanitizada
+correta. Demais garantias (§16 abaixo) já estavam cobertas pelos testes do
+E4-A1/B1/B2 — nenhum teste duplicado foi criado.
+
+**Validação final**: TSC 22 erros preexistentes (inalterado); TypeScript
+148 arquivos/2190 testes (+6 sobre o E4-B2, só as lacunas acima); SQL
+inalterado (51 arquivos/2601 testes, 49 migrations, zero migration nesta
+etapa); 4 builds verdes (padrão, local, `remote_misconfigured`, remoto
+efetivo). Super Admin confirmado intacto por grep (zero import cruzado)
+e pela suíte Platform completa continuando verde.
+
+**E4 formalmente encerrado.** `create_lead`/`update_lead`/
+`check_lead_phone_duplicate` estão implementados, testados e conectados à
+UI de Manager/Seller, com caminho local 100% preservado e superfície
+Platform intocada. **E5 (Kanban remoto — `move_lead_to_stage` — e Health
+Engine — `apply_lead_event`) fica oficialmente desbloqueado, ainda não
+iniciado.** E6 (`assign_lead_seller`/`archive_lead`/`unarchive_lead`) e E7
+(timeline remota, fallbacks `[0]`, regressão total, rollout) permanecem
+igualmente fora deste módulo.
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
@@ -1348,6 +1447,32 @@ Plano de rollback: desligar `NEXT_PUBLIC_FF_REMOTE_LEADS` (o caminho local
 permanece 100% funcional em qualquer fase); dados remotos nunca são apagados;
 migrations nunca são revertidas destrutivamente; commits pequenos permitem
 revert cirúrgico.
+
+**Riscos residuais registrados no fechamento do E4 (E4-C, sem esconder):**
+
+- E5 (`move_lead_to_stage` remoto, Kanban com drag, Health Engine/
+  `apply_lead_event`) ainda não implementado — Kanban remoto permanece
+  somente leitura.
+- E6 (`assign_lead_seller`, `archive_lead`/`unarchive_lead`, visualização
+  de arquivados) ainda não implementado.
+- E7 (timeline remota manual, correção dos fallbacks locais `getAll()[0]`,
+  regressão total 2×, rollout) ainda não implementado.
+- As migrations do M1-E (incluindo E4-A1) permanecem **somente locais** —
+  nenhuma foi aplicada no Supabase remoto nesta fase.
+- `NEXT_PUBLIC_FF_REMOTE_LEADS`/`NEXT_PUBLIC_FF_REMOTE_STAGES` permanecem
+  **desligadas** em qualquer ambiente publicado; toda a validação do E4 foi
+  feita localmente, com as flags ligadas apenas durante builds/testes.
+- Nenhum smoke test manual em produção/staging remoto foi executado —
+  pendente para quando o rollout (E8) for planejado.
+- A futura integração com Meta/outras fontes de captação automática de
+  Leads (§15.6) permanece inteiramente fora de escopo — nenhum desenho de
+  API, webhook, token ou `actor_kind` de integração existe ainda.
+- Mutations já autorizadas pelo backend não possuem rollback client-side
+  por mudança de UI/identidade (`identity_changed` impede o efeito visual
+  incorreto, mas nunca desfaz a escrita já concluída no servidor) — decisão
+  de design já registrada no E4-B1, não um bug pendente.
+- Baseline do TSC: 22 erros preexistentes, sempre nos mesmos 4 arquivos,
+  não introduzidos nem agravados por nenhuma etapa do M1-E.
 
 ## 18. Critérios objetivos de "M1-E pronto"
 
@@ -1512,3 +1637,16 @@ Intocados: SQL/migrations/`database.types.ts`/RPC/RLS/grants,
 `SellerService`, componentes Platform/`lib/commercial/*`,
 `components/App.tsx`, `lib/flags.ts`, `.env*`. Nenhuma flag ativada;
 nenhuma operação Supabase remota.
+
+**E4-C** (§15.6) — auditoria de encerramento, somente documentação e
+testes finais:
+
+- `tests/flows/FlowNovoCliente.test.tsx` (+3 testes: duplo submit, troca de
+  identidade com formulário aberto)
+- `tests/flows/FlowEditarCliente.test.tsx` (+3 testes: dois códigos de erro
+  adicionais de `update_lead`, duplo submit, troca de identidade)
+
+Nenhum arquivo de aplicação alterado nesta subetapa (zero código de
+produção no diff) — somente `docs/M1-E-DESIGN.md` e os dois arquivos de
+teste acima. **E4 formalmente encerrado. E5 desbloqueado, ainda não
+iniciado.**
