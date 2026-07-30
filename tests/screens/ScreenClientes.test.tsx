@@ -234,22 +234,40 @@ describe('ScreenClientes — remote_active, sucesso', () => {
     expect(screen.queryByText('Carlos Andrade')).toBeNull(); // nenhum dado local vaza
   });
 
-  it('cards remotos são readOnly: nenhuma ação de mutation rápida aparece', () => {
+  // M1-E E5-B2-A2: Ligar agora deixou de depender de canApplyEvents — usa
+  // canLogCallOutcome + posse do Lead (Manager operacional: qualquer Lead
+  // da empresa). Visita/Proposta/Acompanhar seguem sempre fora (E7).
+  it('cards remotos: Ligar agora aparece para Manager operacional; Visita continua ausente (canApplyEvents ainda false)', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(
       screenState('remote_active', {
         leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'amber')] },
       }),
     );
     renderScreen();
-    expect(screen.queryByText('Ligar agora')).toBeNull();
+    expect(screen.getByText('Ligar agora')).toBeInTheDocument();
     expect(screen.queryByText('Visita')).toBeNull();
+  });
+
+  it('card remoto: Seller sem posse do Lead (sellerId diferente) não vê Ligar agora', () => {
+    m.user.current = {
+      id: 'user-2', name: 'Vendedor', email: 's@a.com',
+      activeMembership: { companyId: 'company-a', role: 'seller', sellerId: 's-outro' },
+    };
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', {
+        leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'amber', 's1')] },
+      }),
+    );
+    renderScreen();
+    expect(screen.queryByText('Ligar agora')).toBeNull();
   });
 
   // M1-E E4-B2: LeadCard passou a propagar capabilities (não mais o
   // booleano readOnly) — canCreate/canEditDetails true (E4). M1-E E5-B1:
   // canMoveStage também true para este Manager operacional (Kanban remoto
-  // conectado); eventos/atribuir/arquivar seguem sempre false até E5-B2/E6.
-  it('abrir o card chama __openFlow com capabilities granulares (canCreate/canEditDetails/canMoveStage true, resto false)', () => {
+  // conectado). M1-E E5-B2-A2: canLogCallOutcome também true; eventos/
+  // atribuir/arquivar seguem sempre false até E5-B2-B/E6.
+  it('abrir o card chama __openFlow com capabilities granulares (canCreate/canEditDetails/canMoveStage/canLogCallOutcome true, resto false)', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(
       screenState('remote_active', {
         leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'amber')] },
@@ -263,6 +281,7 @@ describe('ScreenClientes — remote_active, sucesso', () => {
         canEditDetails: true,
         canApplyEvents: false,
         canMoveStage: true,
+        canLogCallOutcome: true,
         canAssignSeller: false,
         canArchive: false,
       },

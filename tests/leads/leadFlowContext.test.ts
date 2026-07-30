@@ -69,12 +69,12 @@ describe('resolveLeadFlowContext — dataSource', () => {
 });
 
 describe('resolveLeadFlowContext — capabilities delegadas', () => {
-  it('Manager operacional em remote_ready: canCreate/canEditDetails/canMoveStage true (E5-B1)', () => {
+  it('Manager operacional em remote_ready: canCreate/canEditDetails/canMoveStage/canLogCallOutcome true (E5-B1/E5-B2-A2)', () => {
     mocks.isRemoteLeadsEnabled.mockReturnValue(true);
     mocks.isRemoteStagesEnabled.mockReturnValue(true);
     const ctx = resolveLeadFlowContext(manager());
     expect(ctx.capabilities).toEqual({
-      canCreate: true, canEditDetails: true, canMoveStage: true,
+      canCreate: true, canEditDetails: true, canMoveStage: true, canLogCallOutcome: true,
       canApplyEvents: false, canAssignSeller: false, canArchive: false,
     });
   });
