@@ -2023,6 +2023,104 @@ identidade) diretamente.
 
 **E6-B2-A formalmente concluído. E6-B2-B desbloqueado, ainda não iniciado.**
 
+### 15.14 E6-B2-B — Lista de Leads arquivados e restauração remota (concluído)
+
+Conecta, somente para Manager: `useArchivedLeads`, uma área "Arquivados" na
+tela de Clientes, detalhe read-only de Lead arquivado, confirmação de
+restauração e `useUnarchiveLead`. Nenhuma migration/hook/repository do
+E6-B1 alterado; nenhuma timeline; nenhuma escrita manual em snapshot/bridge.
+
+**Arquitetura Ativos/Arquivados** (`ScreenClientesLegacy`,
+`components/screens/ScreensOps.tsx`): toggle "Ativos"/"Arquivados" com
+`data-testid="clientes-area-toggle"`, visível **somente** quando
+`capabilities.canArchive` é `true` — a MESMA capability que já controla
+Alterar responsável/Arquivar Lead (E6-B2-A), nunca uma checagem nova
+paralela. `useArchivedLeads` é chamado sempre (Rules of Hooks, mesmo padrão
+de `usePipelineStages`/`useCurrentCompanySellerLabels`/`useLeads` dentro de
+`useRemoteLeadsScreenState`) — o próprio hook já gateia Manager-only/
+`remote_ready` internamente, então mesmo que o estado local `clientsArea`
+pudesse ser manipulado, a query nunca dispara para Seller (dupla barreira:
+UI nunca mostra o toggle E o hook nunca habilita a query — nunca dependeu
+só da RLS devolver lista vazia).
+
+**Adaptação dos dados**: `useArchivedLeads` retorna `LeadRow[]` cru (E6-B1,
+por desenho — nenhuma adaptação antecipada). Esta etapa reaproveita
+`adaptLeadRows` (`lib/leads/adapter.ts`, intocado) com os MESMOS índices já
+resolvidos pela tela para os Leads ativos: `pipeline.byId` (catálogo de
+etapas, permanente — achado do E6-A1: nenhuma etapa é removida/desativada)
+e `sellerLabels.sellersById` (catálogo HISTÓRICO de Sellers,
+`useCurrentCompanySellerLabels`/E3-A1 — nunca o catálogo operacional/
+assignable, que excluiria propositalmente Sellers inativos e esconderia o
+nome histórico de quem arquivou um Lead atribuído a alguém desligado).
+Estados da lista (`arquivados-skeleton`/`arquivados-state-error`/
+`arquivados-state-empty`/`arquivados-state-lead-config-error`/
+`arquivados-list`) reaproveitam os MESMOS estados de Stage já computados
+para Ativos (`stagesConfigError`/`stagesBlockingError`/`stagesEmpty`/
+`stagesLoading` — o catálogo de etapas é compartilhado entre as duas
+áreas), evitando uma segunda árvore de decisão divergente.
+
+**Detalhe read-only** (`FlowVerClienteArquivado`, novo em
+`components/flows/FlowsShared.tsx`, registrado como `'ver-cliente-arquivado'`
+em `FlowLayer.tsx`): variante PEQUENA e dedicada, nunca uma reutilização
+forçada de `FlowVerCliente` — recebe o `LeadModel` já adaptado diretamente
+por `payload.lead` (produzido pela tela de Arquivados), nunca busca o Lead
+na lista ativa, nunca chama `LeadService`, nunca depende de snapshot/bridge.
+Mostra somente informações (nome, telefone, veículo, etapa, vendedor
+histórico, data de arquivamento) + fechar + "Restaurar Lead" (só quando
+`ctx.capabilities.canArchive`). Nenhuma das ações de Lead ativo (editar,
+mover, ligar, atribuir, arquivar, visita, proposta, venda, acompanhamento)
+é renderizada — não há necessidade de escondê-las via capability, porque
+elas simplesmente não existem neste componente.
+
+**Restauração** (`FlowRestaurarLead`, novo, registrado como
+`'restaurar-lead'`): autorização exclusiva via `ctx.capabilities.canArchive`
+— a MESMA capability de archive/unarchive, nunca um `canUnarchive`
+separado (decisão humana do E6-B2-B, consistente com o contrato real da
+RPC). Confirmação explícita ("Restaurar este Lead? Ele voltará às listas
+ativas mantendo a etapa e o responsável anteriores.", nunca menção a "item
+excluído" — o Lead nunca foi excluído) + `useUnarchiveLead`. Payload exato:
+`leadId`/`expectedVersion`, nunca `companyId`/`restoreStageId`/`sellerId`/
+`stageId` — reafirma o achado do E6-A1 (contrato real de `unarchive_lead`
+preserva `stage_id`/`seller_id` existentes, sem nenhum parâmetro de etapa de
+restauração). RPC idempotente (Lead já ativo) tratada como sucesso normal.
+Mesmo padrão de identidade (`useCloseRemoteCallFlowOnIdentityChange`),
+`expectedVersion` obrigatório, sem mutation otimista, sem retry automático
+dos demais flows deste arquivo.
+
+**Modelo de flow único**: navegação Arquivados → `FlowVerClienteArquivado`
+→ `FlowRestaurarLead` → sucesso → `close()` volta direto à tela (nunca ao
+detalhe intermediário) — mesma razão estrutural do E6-B2-A (nunca há pilha
+de flows). Após a restauração, `useUnarchiveLead` já invalida
+`leadQueryKeys.active` e `leadQueryKeys.archived` (E6-B1, intocado) — o
+Lead desaparece de Arquivados e reaparece em Ativos/Kanban pela consulta
+remota real, sem nenhuma escrita manual em lista/snapshot/bridge.
+
+**Seller**: nunca vê o toggle, nunca consulta `useArchivedLeads` (gate
+duplo, UI+hook), nunca vê "Restaurar Lead" no detalhe (mesmo que acessado
+programaticamente — `ctx.capabilities.canArchive` é sempre `false` fora de
+Manager operacional em `remote_ready`).
+
+**Caminho local, E6-B2-A e Kanban**: preservados integralmente — nenhum
+arquivo de mutation/capability do E6-B1/E6-B2-A alterado; nenhum arquivado
+entra na bridge/snapshot/StoreAdapter/Kanban.
+
+**Validação final**: TSC 22 erros preexistentes (inalterado); TypeScript
+165 → 167 arquivos (+2: `FlowVerClienteArquivado.test.tsx`,
+`FlowRestaurarLead.test.tsx`) / 2503 → 2543 testes (+40); SQL inalterado (51
+arquivos/2601 testes, 49 migrations, zero migration nesta etapa); 4 builds
+verdes (padrão, OFF/OFF, ON/OFF misconfigured, ON/ON efetivo). Nenhuma
+operação Supabase remota; nenhuma flag ativada em produção.
+
+**Riscos residuais explícitos** (nenhum novo): E7/E8 permanecem pendentes;
+**verificação manual completa em navegador (smoke test) fica formalmente
+reservada ao E6-C** — cobrindo Manager arquivar → abrir Arquivados →
+restaurar → Lead voltar ao Kanban → Seller não ver Arquivados —, ainda não
+realizada nesta etapa nem em nenhuma etapa anterior do E6; a cobertura
+desta etapa confia inteiramente nos 40 testes automatizados novos.
+
+**E6-B2-B formalmente concluído. E6-C (regressão final e fechamento formal
+do E6) desbloqueado, ainda não iniciado.**
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
