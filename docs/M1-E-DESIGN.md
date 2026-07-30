@@ -274,6 +274,73 @@ update_lead(
 - Não aceita urgency, labels de health, stage, seller, archived nem
   `value_amount` — cada um tem RPC própria ou não é editável no M1-E.
 
+**Correção pós-M1-F (E4-A0/E4-A1):** as assinaturas de `create_lead` e
+`update_lead` acima são as **originais** (`20260719202010_m1e_03_lead_rpcs.sql`),
+publicadas antes do M1-F. `profiles.role`/`profiles.seller_id` — que essas
+duas RPCs liam diretamente — foram removidas em
+`20260729200000_m1f_s8e2b_drop_profile_legacy_columns.sql`. Antes do drop,
+`20260729110000_m1f_s8c2c1_lead_create_update_duplicate_commercial.sql` já
+havia feito `DROP FUNCTION` + `CREATE FUNCTION` das duas (e de
+`check_lead_phone_duplicate`, §6.9) com identidade nova — Postgres trata um
+parâmetro a mais como assinatura diferente, não como `CREATE OR REPLACE` da
+mesma função. As assinaturas **realmente vigentes** ganham um parâmetro
+final `p_company_id uuid default null`:
+
+```sql
+create_lead(
+  p_name               text,
+  p_phone              text,
+  p_car                text,
+  p_seller_id          text             default null,
+  p_temperature        lead_temperature default null,
+  p_payment_preference text             default null,
+  p_source             text             default null,
+  p_company_id         uuid             default null
+) returns public.leads
+
+update_lead(
+  p_lead_id            uuid,
+  p_expected_version   integer,
+  p_name               text,
+  p_phone              text,
+  p_car                text,
+  p_temperature        lead_temperature default null,
+  p_payment_preference text             default null,
+  p_source             text             default null,
+  p_company_id         uuid             default null
+) returns public.leads
+```
+
+Toda a autorização passa agora por `resolve_lead_mutation_context(p_company_id,
+p_read_only default false)` (`20260729100000_m1f_s8c2c1_lead_mutation_context_resolver.sql`,
+nunca exposta a `authenticated` — só chamada internamente por RPCs
+`SECURITY DEFINER`): deriva sempre de `auth.uid()` via
+`current_membership_company_id()`/`current_membership_role()` (Manager/
+Seller) ou `is_platform_super_admin()` (Super Admin), nunca mais lê
+`profiles.role`/`profiles.seller_id`.
+
+- **Manager/Seller**: `p_company_id` é **100% ignorado** pelo resolver — a
+  empresa vem sempre da membership ativa (`current_membership_company_id()`),
+  nunca do parâmetro. O frontend do M1-E (E4+) nunca deve enviar
+  `p_company_id` nestas RPCs — o parâmetro existe só para a superfície
+  Platform do Super Admin (M1-F), que sempre o envia explícito
+  (`selectedCompanyId` capturado no formulário, nunca a empresa "atual" no
+  momento da resposta).
+- **Super Admin**: `p_company_id` é obrigatório na prática (`company_required`
+  se null); `created_by_profile_id`/`updated_by_profile_id` ficam `NULL` para
+  esse ator (Super Admin nunca tem `profiles.company_id`, e as FKs de
+  auditoria de `leads` exigem mesma empresa) — autoria real preservada em
+  `audit_log`, nunca perdida.
+- O comportamento observável para Manager/Seller descrito no restante deste
+  §6.1/§6.2 (stage inicial, seller autoatribuído, `stale_write`, campos não
+  aceitos) permanece **integralmente válido** — só a identidade da função e o
+  mecanismo interno de autorização mudaram, nunca o contrato visível ao
+  caminho M1-E. `move_lead_to_stage`/`apply_lead_event`/`assign_lead_seller`
+  (`20260729140000`) e `archive_lead`/`unarchive_lead`/
+  `add_lead_timeline_entry` (`20260729150000`) também migraram para
+  `resolve_lead_mutation_context` antes do drop das colunas legadas — nenhuma
+  RPC de leads ficou lendo coluna inexistente.
+
 ### 6.3 `move_lead_to_stage`
 
 ```sql
@@ -473,6 +540,50 @@ Comportamento da interface:
   carteira." · criar mesmo assim · cancelar — sem nome, ID, vendedor ou
   quantidade. Quando houver também linhas acessíveis, a lista do caso A é
   exibida junto do aviso restrito.
+
+**Correção pós-M1-F (E4-A0) e extensão E4-A1:** a assinatura acima
+(`check_lead_phone_duplicate(p_phone text)`) é a original. A mesma migration
+`20260729110000_m1f_s8c2c1_lead_create_update_duplicate_commercial.sql`
+citada em §6.1/§6.2 fez `DROP FUNCTION`/`CREATE FUNCTION` também desta RPC,
+acrescentando `p_company_id uuid default null` (ignorado para Manager/Seller,
+obrigatório na prática para Super Admin via `resolve_lead_mutation_context(...,
+p_read_only=true)` — Super Admin pode checar duplicidade em qualquer status de
+empresa, inclusive suspensa/cancelada, nunca podendo escrever). O E4-A1
+(`20260730040000_m1e_e4a1_assignable_sellers_and_duplicate_exclusion.sql`)
+estendeu a assinatura mais uma vez, de forma aditiva, para permitir excluir o
+próprio Lead da busca durante a edição (sem isso, o formulário de edição
+acusaria o próprio registro como duplicado do seu telefone atual):
+
+```sql
+check_lead_phone_duplicate(
+  p_phone           text,
+  p_company_id      uuid default null,
+  p_exclude_lead_id uuid default null
+)
+returns table (
+  status        lead_duplicate_status,
+  lead_id       uuid,
+  lead_name     text,
+  lead_archived boolean
+)
+```
+
+- `p_exclude_lead_id` (novo, opcional, default `null`): quando informado,
+  remove **somente esse Lead** do conjunto pesquisado — a busca continua
+  escopada pela empresa já resolvida (nunca pelo ID excluído: um ID de outra
+  empresa não amplia acesso; um ID inexistente não altera o resultado nem
+  gera erro); qualquer outro Lead com o mesmo telefone continua sendo
+  retornado normalmente.
+- Todo o restante do contrato (normalização, `accessible`/`restricted`/
+  `none`, ordenação, `invalid_phone`, Manager/Seller/Super Admin, arquivados)
+  permanece **integralmente preservado** — a exclusão nunca é usada como
+  autoridade (não valida se o chamador pode acessar o Lead excluído, só o
+  remove da busca).
+- Uso pretendido (E4-B2, ainda não implementado): criação chama sem
+  `p_exclude_lead_id`; edição chama com o `leadId` do Lead em edição, nunca
+  com um filtro somente no frontend — filtrar só no cliente esconderia um
+  outro Lead duplicado sempre que a RPC devolvesse primeiro a própria linha
+  do registro em edição.
 
 ## 7. Grants finais
 
@@ -855,6 +966,71 @@ vazia silenciosa — cada um tem um `data-testid`/mensagem próprios.
 E3 formalmente concluído após esta subetapa. E4 oficial (create/update/
 duplicidade) segue desbloqueado, ainda não iniciado.
 
+### 15.3 E4-A1 — Pré-requisitos de backend para Seller picker e duplicidade na edição
+
+Auditoria prévia (M1-E E4-A0, somente leitura) confirmou dois bloqueios reais
+antes de o E4 poder conectar formulários: (1) nenhuma RPC segura devolvia ao
+Manager uma lista de Sellers **operacionais** da própria empresa para
+escolher na criação de um Lead — `list_current_company_seller_labels` (§15.1)
+é deliberadamente um catálogo histórico (inclui inativos/desvinculados, para
+resolver nomes de Leads antigos) e `list_platform_sellers_for_company` (M1-F)
+é exclusiva de Super Admin; (2) `check_lead_phone_duplicate` não tinha como
+excluir o próprio Lead da busca durante a edição, o que empurraria a exclusão
+para um filtro só no frontend — inseguro, porque esconderia qualquer *outro*
+Lead duplicado sempre que a RPC devolvesse primeiro a linha do próprio
+registro em edição.
+
+**`public.list_current_company_assignable_sellers()`** — RPC nova, sem
+parâmetros, mesmo par de helpers de `list_current_company_seller_labels`
+(`current_membership_company_id()`/`current_membership_role()`, gate de
+`companies.status = 'ativa'`):
+
+- **Manager**: Sellers da empresa resolvida que sejam simultaneamente
+  `sellers.is_active`, vinculados (`sellers.membership_id`) a uma
+  `company_memberships` com `is_active`, `lifecycle_status = 'active'` e
+  `role = 'seller'`, cujo `profiles.is_active` também seja verdadeiro — mesmo
+  filtro operacional já usado por `list_platform_sellers_for_company`, nunca
+  reinventado. Pode retornar conjunto vazio.
+- **Seller**: no máximo a própria linha operacional, resolvida via
+  `current_profile_seller_id_for_company()` (reaproveitado, nunca
+  reimplementado) — nunca enumera colegas.
+- **Super Admin**: nunca tem membership ativa — recebe o mesmo erro seguro
+  (`insufficient_privilege` / `forbidden`) de `list_current_company_seller_labels`;
+  não aceita `company_id` e não delega para `list_platform_sellers_for_company`
+  (superfícies permanecem completamente separadas).
+- Retorno estrito: `seller_id`, `name` — nenhuma outra PII. Ordenado por
+  `name, seller_id`.
+- Nenhum `SELECT` direto novo em `sellers`/`profiles`/`company_memberships`;
+  mesmo padrão de grants (`REVOKE ALL` de public/anon/authenticated + `GRANT
+  EXECUTE` só a authenticated).
+- Diferença deliberada de `list_current_company_seller_labels`: aquela é o
+  catálogo de **exibição** (nomeia Sellers de Leads existentes, inclusive
+  históricos); esta é o catálogo de **atribuição** (só quem pode legitimamente
+  receber um Lead novo). As duas convivem — nenhuma substitui a outra.
+
+**`check_lead_phone_duplicate` — extensão aditiva**: ver §6.9 (correção
+já registrada ali). `p_exclude_lead_id uuid default null` ao final da
+assinatura; chamadas existentes (só `p_phone`, `p_phone`+`p_company_id`,
+posicionais ou nomeadas) continuam válidas sem alteração.
+
+**Frontend desta subetapa** (somente leitura/catálogo, nenhuma UI conectada):
+`lib/leads/assignableSellersRepository.ts`
+(`fetchCurrentCompanyAssignableSellers`) e
+`lib/hooks/useCurrentCompanyAssignableSellers.ts` — mesmo molde de
+`sellerLabelsRepository.ts`/`useCurrentCompanySellerLabels.ts` (§15.1): sem
+parâmetro de empresa, identidade via `userId`/`companyId`/`membershipRole`
+passados pelo chamador, query key com `companyId` **e** `identityKey` (mesma
+razão do §15.1: para Seller o resultado é uma linha própria, nunca
+compartilhável entre dois Sellers da mesma empresa). Nenhum hook de
+`create`/`update`/duplicidade é criado nesta subetapa; `SellerPicker`,
+`FlowNovoCliente`, `FlowEditarCliente`, `FlowVerCliente`,
+`ScreenClientesLegacy`/`ScreenAndamentoLegacy`, capabilities granulares,
+bridge e adapter permanecem intocados — conexão de UI é E4-B2.
+
+E4-A1 conclui os pré-requisitos de backend. E4-B1 (repository/hooks de
+`create`/`update`/duplicidade + capabilities granulares) segue desbloqueado,
+ainda não iniciado.
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
@@ -1051,3 +1227,25 @@ Intocados: SQL/migrations/`database.types.ts`/RPC/RLS/grants,
 `lib/leads/sellerLabelsRepository.ts`, `lib/store.ts`, `StoreAdapter`,
 `SellerService`, `lib/flags.ts`, componentes Platform/`lib/commercial/*`,
 `components/flows/Flows2.tsx`, `.env*`.
+
+**E4-A1** (§15.3) — novos:
+
+- `supabase/migrations/20260730040000_m1e_e4a1_assignable_sellers_and_duplicate_exclusion.sql`
+- `lib/leads/assignableSellersRepository.ts`,
+  `lib/hooks/useCurrentCompanyAssignableSellers.ts`
+- `supabase/tests/52_m1e_e4a1_assignable_sellers_and_duplicate_exclusion.sql`
+- `tests/leads/assignableSellersRepository.test.ts`,
+  `tests/hooks/useCurrentCompanyAssignableSellers.test.tsx`
+
+Alterado: `lib/supabase/database.types.ts` (regenerado — nova RPC
+`list_current_company_assignable_sellers` + `p_exclude_lead_id` opcional em
+`check_lead_phone_duplicate`; `create_lead`/`update_lead` intactas).
+
+Intocados nesta subetapa: `create_lead`, `update_lead`,
+`list_current_company_seller_labels`, `list_platform_sellers_for_company`,
+`lib/leads/sellerLabelsRepository.ts`, `lib/leads/errors.ts`,
+`lib/leads/adapter.ts`, `lib/leads/bridge.ts`, `lib/capabilities.ts`,
+`SellerPicker`, `FlowNovoCliente`, `FlowEditarCliente`, `FlowVerCliente`,
+`ScreenClientesLegacy`, `ScreenAndamentoLegacy`, `components/App.tsx`,
+`StoreAdapter`, `SellerService`, superfícies Platform/`lib/commercial/*`,
+`.env*`. Nenhuma flag ativada; nenhuma operação Supabase remota.
