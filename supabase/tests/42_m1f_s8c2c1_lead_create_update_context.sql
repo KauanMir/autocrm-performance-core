@@ -158,11 +158,18 @@ select ok(
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.proname = 'update_lead'),
   'update_lead: p_company_id e o ultimo parametro, com default');
-select ok(
-  (select pg_get_function_arguments(p.oid) like '%p_company_id uuid DEFAULT NULL::uuid'
+-- M1-E E4-A1 (autorizado, 2026-07-30): p_company_id deixou de ser o ULTIMO
+-- parametro por design (p_exclude_lead_id foi acrescentado depois dele,
+-- 20260730040000_m1e_e4a1_assignable_sellers_and_duplicate_exclusion.sql).
+-- A garantia de compatibilidade que importa é outra: p_company_id preserva
+-- posicao (2o parametro), tipo e DEFAULT NULL; p_exclude_lead_id aparece
+-- depois, tambem com DEFAULT NULL — string exata observada no catalogo.
+select is(
+  (select pg_get_function_arguments(p.oid)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.proname = 'check_lead_phone_duplicate'),
-  'check_lead_phone_duplicate: p_company_id e o ultimo parametro, com default');
+  'p_phone text, p_company_id uuid DEFAULT NULL::uuid, p_exclude_lead_id uuid DEFAULT NULL::uuid',
+  'check_lead_phone_duplicate: p_company_id preserva posicao/tipo/default (2o parametro); p_exclude_lead_id (E4-A1) vem depois, tambem com DEFAULT NULL');
 
 select is(
   (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
