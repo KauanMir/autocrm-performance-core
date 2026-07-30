@@ -10,6 +10,7 @@ import type { ProfileRow, CompanyMembershipRow } from './supabase/types';
 import { isRemoteLeadsEnabled } from './flags';
 import { getRemoteLeadSnapshot, type RemoteLeadSnapshot } from './leads/remoteSnapshot';
 import { RemoteLeadsError } from './leads/errors';
+import { assertLocalCommercialDataAllowed } from './leads/localCommercialAccess';
 
 // ── AuthService — Supabase Auth + profiles (M1-B) ───────────────────────
 // Login/logout/session now talk to Supabase Auth for real; the old
@@ -478,23 +479,45 @@ export const LeadService = {
 };
 
 // ── VisitService ──────────────────────────────────────────────────────
+// M1-E E5-B2-A1: Visit não tem company_id nem backend remoto (auditoria
+// E5-B2-A0) — assertLocalCommercialDataAllowed SEMPRE antes de qualquer
+// acesso ao StoreAdapter, nunca depois. Falha fechada em remote_ready E
+// remote_misconfigured — nunca só em um dos dois.
 
 export const VisitService = {
-  create: (data: VisitInput)                    => StoreAdapter.addVisit(data),
-  update: (id: string, changes: Partial<Visit>) => StoreAdapter.updateVisit(id, changes),
-  getAll: ()                                    => _filteredVisits(),
+  create: (data: VisitInput) => {
+    assertLocalCommercialDataAllowed('VisitService.create');
+    return StoreAdapter.addVisit(data);
+  },
+  update: (id: string, changes: Partial<Visit>) => {
+    assertLocalCommercialDataAllowed('VisitService.update');
+    return StoreAdapter.updateVisit(id, changes);
+  },
+  getAll: (): Visit[] => {
+    assertLocalCommercialDataAllowed('VisitService.getAll');
+    return _filteredVisits();
+  },
 };
 
 // ── DealService ───────────────────────────────────────────────────────
+// M1-E E5-B2-A1: mesmo isolamento do VisitService — Deal não tem
+// company_id nem backend remoto.
 
 export const DealService = {
-  create: (data: DealInput) => StoreAdapter.addDeal({ ...data, createdByUserId: AuthService.getCurrentUser()?.id ?? null }),
-  update: (id: string, changes: Partial<Deal>) => StoreAdapter.updateDeal(id, changes),
+  create: (data: DealInput) => {
+    assertLocalCommercialDataAllowed('DealService.create');
+    return StoreAdapter.addDeal({ ...data, createdByUserId: AuthService.getCurrentUser()?.id ?? null });
+  },
+  update: (id: string, changes: Partial<Deal>) => {
+    assertLocalCommercialDataAllowed('DealService.update');
+    return StoreAdapter.updateDeal(id, changes);
+  },
   // Only manager/admin may decide — this is the actual mutation boundary, so
   // it re-checks the role instead of trusting that the UI already hid the
   // buttons for a Seller (Correção 1, M0-K4.1: a Seller could otherwise
   // approve their own high-discount proposal by calling the flow directly).
   approve: (id: string) => {
+    assertLocalCommercialDataAllowed('DealService.approve');
     if (!AuthService.isManager()) return;
     StoreAdapter.updateDeal(id, {
       status: DEAL_STATUS.APPROVED,
@@ -503,6 +526,7 @@ export const DealService = {
     });
   },
   reject: (id: string) => {
+    assertLocalCommercialDataAllowed('DealService.reject');
     if (!AuthService.isManager()) return;
     StoreAdapter.updateDeal(id, {
       status: DEAL_STATUS.REJECTED,
@@ -510,10 +534,15 @@ export const DealService = {
       rejectedAt: new Date().toISOString(),
     });
   },
-  getAll: () => _filteredDeals(),
+  getAll: () => {
+    assertLocalCommercialDataAllowed('DealService.getAll');
+    return _filteredDeals();
+  },
 };
 
 // ── SaleService ───────────────────────────────────────────────────────
+// M1-E E5-B2-A1: mesmo isolamento do VisitService/DealService — Sale não
+// tem company_id nem backend remoto.
 
 export const SaleService = {
   // A Lead can have only one *active* Sale at a time (active = any status
@@ -523,6 +552,7 @@ export const SaleService = {
   // already-SOLD check kept from M0-K4.1. Returns false and creates
   // nothing when blocked.
   create: (data: SaleInput): boolean => {
+    assertLocalCommercialDataAllowed('SaleService.create');
     if (data.leadId) {
       const hasActiveSale = StoreAdapter.getSales().some(
         s => s.leadId === data.leadId && s.status !== SALE_STATUS.CANCELED,
@@ -550,11 +580,14 @@ export const SaleService = {
   // timeline. No-ops (returns false) if already canceled, so seller.sales
   // is never decremented twice for the same sale.
   cancel: (id: string): boolean => {
-    // Cancelamento reverte health e timeline do LEAD (mutação indireta) — em
-    // modo remoto é bloqueado ANTES de tocar qualquer coisa, para nunca
-    // deixar venda cancelada com lead intacto. SaleService.create não toca
-    // leads e permanece livre.
-    _assertLocalLeadWriteAllowed('SaleService.cancel');
+    // M1-E E5-B2-A1: substituiu _assertLocalLeadWriteAllowed por
+    // assertLocalCommercialDataAllowed — mesma condição de bloqueio
+    // (resolveRemoteLeadsFlagMode() !== 'local'), agora sob o contrato
+    // central do domínio comercial local em vez de coincidir por acaso com
+    // a checagem de escrita de Lead. Cancelamento também reverte health e
+    // timeline do LEAD (mutação indireta) — bloqueado ANTES de tocar
+    // qualquer coisa, para nunca deixar venda cancelada com lead intacto.
+    assertLocalCommercialDataAllowed('SaleService.cancel');
     if (!AuthService.isManager()) return false;
     const sale = StoreAdapter.getSales().find(s => s.id === id);
     if (!sale) return false;
@@ -573,15 +606,30 @@ export const SaleService = {
     }
     return true;
   },
-  getAll: () => _filteredSales(),
+  getAll: () => {
+    assertLocalCommercialDataAllowed('SaleService.getAll');
+    return _filteredSales();
+  },
 };
 
 // ── TaskService ───────────────────────────────────────────────────────
+// M1-E E5-B2-A1: mesmo isolamento — Task não tem company_id nem backend
+// remoto. Cobre também "acompanhamento" (FlowCriarAcompanhamento/
+// FlowNovaPendencia/FlowReagendarPendencia são só Task por baixo).
 
 export const TaskService = {
-  create: (data: TaskInput)                    => StoreAdapter.addTask(data),
-  update: (id: string, changes: Partial<Task>) => StoreAdapter.updateTask(id, changes),
-  getAll: ()                                   => _filteredTasks(),
+  create: (data: TaskInput) => {
+    assertLocalCommercialDataAllowed('TaskService.create');
+    return StoreAdapter.addTask(data);
+  },
+  update: (id: string, changes: Partial<Task>) => {
+    assertLocalCommercialDataAllowed('TaskService.update');
+    return StoreAdapter.updateTask(id, changes);
+  },
+  getAll: () => {
+    assertLocalCommercialDataAllowed('TaskService.getAll');
+    return _filteredTasks();
+  },
 };
 
 // ── SellerService ─────────────────────────────────────────────────────
