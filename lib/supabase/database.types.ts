@@ -828,7 +828,11 @@ export type Database = {
         }[]
       }
       check_lead_phone_duplicate: {
-        Args: { p_company_id?: string; p_phone: string }
+        Args: {
+          p_company_id?: string
+          p_exclude_lead_id?: string
+          p_phone: string
+        }
         Returns: {
           lead_archived: boolean
           lead_id: string
@@ -1018,6 +1022,13 @@ export type Database = {
           membership_id: string
           name: string
           profile_id: string
+        }[]
+      }
+      list_current_company_assignable_sellers: {
+        Args: never
+        Returns: {
+          name: string
+          seller_id: string
         }[]
       }
       list_current_company_seller_labels: {
