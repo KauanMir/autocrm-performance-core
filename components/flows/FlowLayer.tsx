@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { FlowLigar, FlowVerCliente, FlowShell } from './FlowsShared';
+import { FlowLigar, FlowVerCliente, FlowAtribuirVendedor, FlowArquivarLead, FlowShell } from './FlowsShared';
 import {
   FlowNovoCliente, FlowEditarCliente, FlowCriarVisita, FlowConfirmarVisita,
   FlowRegistrarResultado, FlowNovaProposta, FlowAprovarProposta,
@@ -15,6 +15,8 @@ import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess'
 const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'ligar': FlowLigar,
   'ver-cliente': FlowVerCliente,
+  'atribuir-vendedor': FlowAtribuirVendedor,
+  'arquivar-lead': FlowArquivarLead,
   'novo-cliente': FlowNovoCliente,
   'editar-cliente': FlowEditarCliente,
   'criar-visita': FlowCriarVisita,

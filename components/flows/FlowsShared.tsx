@@ -11,6 +11,9 @@ import { canActorMutateLead } from '@/lib/leads/leadMutationOwnership';
 import { useApplyLeadEvent } from '@/lib/hooks/useApplyLeadEvent';
 import { mapLeadHealthEventToRemoteEventType } from '@/lib/leads/leadEventMapper';
 import { isRemoteLeadsError, type RemoteLeadsErrorCode } from '@/lib/leads/errors';
+import { useCurrentCompanyAssignableSellers } from '@/lib/hooks/useCurrentCompanyAssignableSellers';
+import { useAssignLeadSeller, isNoOpSellerAssignment } from '@/lib/hooks/useAssignLeadSeller';
+import { useArchiveLead } from '@/lib/hooks/useArchiveLead';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -212,6 +215,13 @@ export function LocalSellerPicker({ value, onPick, placeholder }: {
 // opção — decisão antiga, fora de escopo).
 export type SellerPickerItem = { id: string; name: string };
 
+// M1-E E6-B2-A — `value` aceita também `undefined`: "nenhuma escolha
+// explícita ainda" (Seller atual histórico/inativo, fora do catálogo
+// operacional — decisão humana do E6-B2-A). Mudança somente de tipo: a
+// lógica abaixo já tratava `undefined` de forma idêntica a `null` no
+// cálculo de `selected` (`value ? ... : null`) e já caía no placeholder por
+// não satisfazer `value === null` — nenhum comportamento muda para os
+// callers existentes do E4, que nunca passam `undefined`.
 export function SellerPicker({
   items,
   value,
@@ -225,7 +235,7 @@ export function SellerPicker({
   placeholder,
 }: {
   items: readonly SellerPickerItem[];
-  value: string | null;
+  value: string | null | undefined;
   onChange: (sellerId: string | null) => void;
   loading?: boolean;
   disabled?: boolean;
@@ -760,6 +770,13 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
     const d = new Date(lead.createdAt);
     return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
   })();
+  // M1-E E6-B2-A: Alterar responsável/Arquivar Lead são Manager-only,
+  // independentes de canActorMutateLead (decisão humana do E6-A0/E6-A1 —
+  // Seller é proibido de forma incondicional no backend para estas duas
+  // ações, nunca uma questão de posse do Lead). Ausência de capabilities
+  // (caminho local) nunca mostra estes botões — só existem no remoto.
+  const canAssignSeller = capabilities ? capabilities.canAssignSeller : false;
+  const canArchiveLead = capabilities ? capabilities.canArchive : false;
   const actions = [
     ...(canLigar ? [{ icon: 'phone', label: 'Ligar', flow: 'ligar', accent: '#27C75F' }] : []),
     ...(canApplyEvents ? [
@@ -771,6 +788,8 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
       { icon: 'refresh', label: 'Acompanhar', flow: 'criar-acompanhamento', accent: '#3B82F6' },
     ] : []),
     ...(canEditDetails ? [{ icon: 'edit', label: 'Editar dados', flow: 'editar-cliente', accent: '#8B8B93' }] : []),
+    ...(canAssignSeller ? [{ icon: 'users', label: 'Alterar responsável', flow: 'atribuir-vendedor', accent: '#3B82F6' }] : []),
+    ...(canArchiveLead ? [{ icon: 'inbox', label: 'Arquivar Lead', flow: 'arquivar-lead', accent: '#FF3B3B' }] : []),
   ];
   return (
     <FlowShell eyebrow="CENTRAL DO CLIENTE" title={lead.name} icon="user"
@@ -852,6 +871,265 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
             )}
           </FPanel>
         </div>
+      </div>
+    </FlowShell>
+  );
+}
+
+// Mensagens sanitizadas fixas do resultado de assign_lead_seller — mesmo
+// modelo de remoteCallOutcomeErrorMessage/remoteLeadMoveErrorMessage.
+// identity_changed nunca chega aqui (tratado antes, fecha o flow).
+function assignSellerErrorMessage(code: RemoteLeadsErrorCode | undefined): string {
+  switch (code) {
+    case 'remote_leads_mutation_seller_not_found':
+      return 'O vendedor selecionado não está mais disponível.';
+    case 'remote_leads_mutation_stale_write':
+      return 'Este Lead foi alterado por outra pessoa. Feche e abra novamente para continuar.';
+    case 'remote_leads_mutation_lead_archived':
+      return 'Este Lead foi arquivado e não pode ser reatribuído.';
+    case 'remote_leads_mutation_lead_not_found':
+      return 'Este Lead não está mais disponível.';
+    case 'remote_leads_mutation_forbidden':
+      return 'Você não possui permissão para alterar o responsável deste Lead.';
+    case 'remote_leads_mutation_company_read_only':
+      return 'Esta empresa está em modo somente leitura.';
+    default:
+      return 'Não foi possível alterar o responsável.';
+  }
+}
+
+// ── FlowAtribuirVendedor — troca/remoção de responsável, Manager-only
+// (M1-E, E6-B2-A). Autorização vem exclusivamente de
+// ctx.capabilities.canAssignSeller — NUNCA canActorMutateLead (decisão
+// humana do E6-A0/E6-A1: assign_lead_seller proíbe Seller de forma
+// incondicional no backend, não é questão de posse do Lead). Usa somente
+// useCurrentCompanyAssignableSellers (catálogo OPERACIONAL, nunca o
+// histórico list_current_company_seller_labels) + SellerPicker +
+// useAssignLeadSeller + isNoOpSellerAssignment — nunca SellerService,
+// StoreAdapter ou list_platform_sellers_for_company. ──────────────────────
+export function FlowAtribuirVendedor({ payload, close }: any) {
+  const lead = payload.lead || {};
+  const user = AuthService.getCurrentUser();
+  const ctx = resolveLeadFlowContext(user);
+  const identityKey = ctx.userId && ctx.companyId ? `${ctx.userId}:${ctx.companyId}` : null;
+  useCloseRemoteCallFlowOnIdentityChange(identityKey, close);
+
+  const currentSellerId: string | null = lead.sellerId ?? null;
+  // Nome de exibição já resolvido pelo catálogo histórico no adapter
+  // (lib/leads/adapter.ts) — nunca recalculado aqui, e nunca escondido
+  // mesmo quando o Seller está fora do catálogo operacional (decisão
+  // humana: nome histórico sempre visível, nunca "Sem vendedor" forçado).
+  const currentSellerName: string = lead.seller || '—';
+
+  const assignableSellers = useCurrentCompanyAssignableSellers({
+    userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
+  });
+  const items: SellerPickerItem[] = assignableSellers.assignableSellers.map((s) => ({ id: s.seller_id, name: s.name }));
+
+  // Cenário C (E6-B2-A §6): Seller atual fora do catálogo operacional
+  // (histórico/inativo/offboarded) — picker começa SEM escolha explícita
+  // (undefined), nunca representado como null (null = "Sem vendedor"
+  // escolhido deliberadamente, algo bem diferente de "nada escolhido
+  // ainda"). A decisão só pode ser tomada DEPOIS que o catálogo
+  // operacional carregar — enquanto `isLoading`, `assignableSellers
+  // .sellersById` está vazio e classificaria erroneamente até um Seller
+  // realmente operacional como "fora do catálogo" (falso Cenário C).
+  // `initializedRef` garante que a escolha inicial rode só uma vez, assim
+  // que o carregamento terminar — nunca recalculada depois (senão uma
+  // escolha explícita do usuário, incluindo "Sem vendedor", seria
+  // silenciosamente revertida a cada render). Visualmente inofensivo
+  // enquanto carrega: o SellerPicker prioriza o estado `loading` sobre
+  // `value` (mostra "Carregando vendedores…" e fica desabilitado).
+  const [selectedSellerId, setSelectedSellerId] = useState<string | null | undefined>(undefined);
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (initializedRef.current || assignableSellers.isLoading) return;
+    initializedRef.current = true;
+    if (currentSellerId === null) {
+      setSelectedSellerId(null);
+    } else if (assignableSellers.sellersById[currentSellerId]) {
+      setSelectedSellerId(currentSellerId);
+    } else {
+      setSelectedSellerId(undefined);
+    }
+  }, [assignableSellers.isLoading, assignableSellers.sellersById, currentSellerId]);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const assignHook = useAssignLeadSeller({
+    userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
+  });
+
+  if (!ctx.capabilities.canAssignSeller) {
+    return (
+      <FlowShell eyebrow="RESPONSÁVEL" title="Alterar responsável" icon="users" accent="#8B8B93" onClose={close}>
+        <div style={{ padding: '40px 12px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
+          Você não possui permissão para alterar o responsável deste Lead.
+        </div>
+      </FlowShell>
+    );
+  }
+
+  if (done) {
+    return (
+      <FlowShell eyebrow="RESPONSÁVEL" title="Responsável atualizado" icon="users" accent="#27C75F" onClose={close}>
+        <FlowSuccess title="Responsável atualizado com sucesso" sub={`O vendedor responsável por ${lead.name || 'este Lead'} foi atualizado.`}
+          actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      </FlowShell>
+    );
+  }
+
+  // selectedSellerId === undefined: nenhuma escolha explícita ainda — nunca
+  // permite submit, mesmo que o Seller atual pareça "sem mudança" (decisão
+  // humana: "Sem vendedor" precisa ser selecionado explicitamente).
+  const isNoOp = selectedSellerId === undefined ? true : isNoOpSellerAssignment(currentSellerId, selectedSellerId);
+  const canSubmit = Boolean(lead.id) && typeof lead.version === 'number' && !isNoOp && !submitting;
+
+  async function handleSave() {
+    if (!canSubmit || selectedSellerId === undefined || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await assignHook.assignLeadSeller({ leadId: lead.id, sellerId: selectedSellerId, expectedVersion: lead.version });
+      setDone(true);
+    } catch (err) {
+      const code = isRemoteLeadsError(err) ? err.code : undefined;
+      if (code === 'remote_leads_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(assignSellerErrorMessage(code));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <FlowShell eyebrow="RESPONSÁVEL" title={`Alterar responsável de ${(lead.name || '').split(' ')[0]}`} icon="users" accent="#3B82F6" onClose={close}
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="ghost" size="lg" onClick={close}>Cancelar</LBtn>
+        <LBtn kind="gold" size="lg" icon="check" onClick={handleSave} style={{ opacity: canSubmit ? 1 : .5 }}>
+          {submitting ? 'Salvando…' : 'Salvar'}
+        </LBtn></>}>
+      <div style={{ maxWidth: 560 }}>
+        <FPanel title="Responsável atual" icon="users" accent="#3B82F6">
+          <Info icon="user" label="Vendedor responsável" value={currentSellerName} />
+        </FPanel>
+        <div style={{ marginTop: 16 }}>
+          <SellerPicker
+            items={items}
+            value={selectedSellerId}
+            onChange={(sellerId) => { if (!submitting) setSelectedSellerId(sellerId); }}
+            loading={assignableSellers.isLoading}
+            disabled={submitting}
+            error={assignableSellers.isError ? 'Não foi possível carregar os vendedores.' : null}
+            placeholder="Selecione uma nova opção"
+          />
+        </div>
+        {submitError && (
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--red-bg, rgba(255,59,59,.08))', border: '1px solid var(--red-line, rgba(255,59,59,.3))' }}>
+            <Icon name="alert" size={18} stroke={2.2} style={{ color: 'var(--red, #FF3B3B)' }} />
+            <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{submitError}</span>
+          </div>
+        )}
+      </div>
+    </FlowShell>
+  );
+}
+
+// Mensagens sanitizadas fixas do resultado de archive_lead.
+function archiveLeadErrorMessage(code: RemoteLeadsErrorCode | undefined): string {
+  switch (code) {
+    case 'remote_leads_mutation_stale_write':
+      return 'Este Lead foi alterado por outra pessoa. Atualize os dados antes de arquivar.';
+    case 'remote_leads_mutation_lead_not_found':
+      return 'Este Lead não está mais disponível.';
+    case 'remote_leads_mutation_forbidden':
+      return 'Você não possui permissão para arquivar este Lead.';
+    case 'remote_leads_mutation_company_read_only':
+      return 'Esta empresa está em modo somente leitura.';
+    default:
+      return 'Não foi possível arquivar o Lead.';
+  }
+}
+
+// ── FlowArquivarLead — arquivamento com confirmação explícita, Manager-only
+// (M1-E, E6-B2-A). Autorização vem exclusivamente de
+// ctx.capabilities.canArchive — NUNCA canActorMutateLead (mesma razão de
+// FlowAtribuirVendedor). Não cria aba de arquivados nem chama
+// useArchivedLeads/useUnarchiveLead — só remove o Lead das listas ativas
+// via invalidation (dentro do próprio hook), sem nenhuma escrita local. ───
+export function FlowArquivarLead({ payload, close }: any) {
+  const lead = payload.lead || {};
+  const user = AuthService.getCurrentUser();
+  const ctx = resolveLeadFlowContext(user);
+  const identityKey = ctx.userId && ctx.companyId ? `${ctx.userId}:${ctx.companyId}` : null;
+  useCloseRemoteCallFlowOnIdentityChange(identityKey, close);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const archiveHook = useArchiveLead({
+    userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
+  });
+
+  if (!ctx.capabilities.canArchive) {
+    return (
+      <FlowShell eyebrow="ARQUIVAMENTO" title="Arquivar Lead" icon="inbox" accent="#8B8B93" onClose={close}>
+        <div style={{ padding: '40px 12px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
+          Você não possui permissão para arquivar este Lead.
+        </div>
+      </FlowShell>
+    );
+  }
+
+  if (done) {
+    return (
+      <FlowShell eyebrow="ARQUIVAMENTO" title="Lead arquivado" icon="inbox" accent="#27C75F" onClose={close}>
+        <FlowSuccess title="Lead arquivado com sucesso" sub={`${lead.name || 'Este Lead'} saiu das listas ativas. As informações continuam preservadas.`}
+          actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      </FlowShell>
+    );
+  }
+
+  async function handleConfirm() {
+    if (submitting || !lead.id || typeof lead.version !== 'number') return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await archiveHook.archiveLead({ leadId: lead.id, expectedVersion: lead.version });
+      setDone(true);
+    } catch (err) {
+      const code = isRemoteLeadsError(err) ? err.code : undefined;
+      if (code === 'remote_leads_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(archiveLeadErrorMessage(code));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <FlowShell eyebrow="ARQUIVAMENTO" title={`Arquivar ${(lead.name || '').split(' ')[0]}`} icon="inbox" accent="#FF3B3B" onClose={close}
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="ghost" size="lg" onClick={close}>Cancelar</LBtn>
+        <LBtn kind="danger" size="lg" icon="inbox" onClick={handleConfirm} style={{ opacity: submitting ? .5 : 1 }}>
+          {submitting ? 'Arquivando…' : 'Arquivar Lead'}
+        </LBtn></>}>
+      <div style={{ maxWidth: 560 }}>
+        <FPanel>
+          <div style={{ fontSize: 14, color: 'var(--t-700)' }}>
+            Arquivar este Lead? Ele sairá das listas ativas, mas suas informações continuarão preservadas.
+          </div>
+        </FPanel>
+        {submitError && (
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--red-bg, rgba(255,59,59,.08))', border: '1px solid var(--red-line, rgba(255,59,59,.3))' }}>
+            <Icon name="alert" size={18} stroke={2.2} style={{ color: 'var(--red, #FF3B3B)' }} />
+            <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{submitError}</span>
+          </div>
+        )}
       </div>
     </FlowShell>
   );
