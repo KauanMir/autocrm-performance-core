@@ -4,7 +4,7 @@
 // Nenhuma rede real.
 import { describe, expect, it, vi } from 'vitest';
 import type { LeadRow } from '@/lib/supabase/types';
-import { fetchActiveLeadRows } from '@/lib/leads/remoteRepository';
+import { fetchActiveLeadRows, fetchArchivedLeadRows } from '@/lib/leads/remoteRepository';
 import { isRemoteLeadsError } from '@/lib/leads/errors';
 
 const mocks = vi.hoisted(() => ({
@@ -66,6 +66,30 @@ function mockLeadsResponse(response: { data: unknown; error: unknown }): Spies {
   const select = vi.fn(() => ({ is, eq }));
   mocks.from.mockReturnValue({ select, insert, update, delete: del, eq });
   return { select, is, order1, order2, eq, insert, update, del };
+}
+
+type ArchivedSpies = {
+  select: ReturnType<typeof vi.fn>;
+  not: ReturnType<typeof vi.fn>;
+  order1: ReturnType<typeof vi.fn>;
+  order2: ReturnType<typeof vi.fn>;
+  eq: ReturnType<typeof vi.fn>;
+  insert: ReturnType<typeof vi.fn>;
+  update: ReturnType<typeof vi.fn>;
+  del: ReturnType<typeof vi.fn>;
+};
+
+function mockArchivedLeadsResponse(response: { data: unknown; error: unknown }): ArchivedSpies {
+  const eq = vi.fn();
+  const insert = vi.fn();
+  const update = vi.fn();
+  const del = vi.fn();
+  const order2 = vi.fn().mockReturnValue(Promise.resolve(response));
+  const order1 = vi.fn(() => ({ order: order2, eq }));
+  const not = vi.fn(() => ({ order: order1, eq }));
+  const select = vi.fn(() => ({ not, eq }));
+  mocks.from.mockReturnValue({ select, insert, update, delete: del, eq });
+  return { select, not, order1, order2, eq, insert, update, del };
 }
 
 describe('fetchActiveLeadRows — forma exata da consulta', () => {
@@ -133,5 +157,73 @@ describe('fetchActiveLeadRows — erros', () => {
     expect(error.detail).toEqual({ code: '42501', message: 'permission denied' });
     expect(JSON.stringify(error.detail)).not.toContain('nunca-copiar');
     expect(error.message).toBe('remote_leads_fetch_failed');
+  });
+});
+
+// M1-E E6-B1 — fetchArchivedLeadRows: mesmo padrão seguro de
+// fetchActiveLeadRows, com o filtro de arquivamento invertido.
+describe('fetchArchivedLeadRows — forma exata da consulta', () => {
+  it('from/select/not/order exatos: arquivados, ordenação estável, sem filtro de company', async () => {
+    const spies = mockArchivedLeadsResponse({ data: [leadRow({ archived_at: '2026-07-30T10:00:00+00:00' })], error: null });
+    const rows = await fetchArchivedLeadRows();
+
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+    expect(mocks.from).toHaveBeenCalledWith('leads');
+    expect(spies.select).toHaveBeenCalledWith('*');
+    expect(spies.not).toHaveBeenCalledWith('archived_at', 'is', null);
+    expect(spies.order1).toHaveBeenCalledWith('created_at', { ascending: false });
+    expect(spies.order2).toHaveBeenCalledWith('id', { ascending: true });
+    // RLS é a autoridade: nenhum .eq (company_id, seller_id, role…).
+    expect(spies.eq).not.toHaveBeenCalled();
+    expect(rows).toHaveLength(1);
+  });
+
+  it('nenhuma RPC e nenhuma operação de escrita', async () => {
+    const spies = mockArchivedLeadsResponse({ data: [], error: null });
+    await fetchArchivedLeadRows();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(spies.insert).not.toHaveBeenCalled();
+    expect(spies.update).not.toHaveBeenCalled();
+    expect(spies.del).not.toHaveBeenCalled();
+  });
+
+  it('retorno tipado preserva a ordem e o conteúdo recebidos, incluindo archived_at/version', async () => {
+    const a = leadRow({ id: 'lead-a', archived_at: '2026-07-20T10:00:00+00:00', version: 3 });
+    const b = leadRow({ id: 'lead-b', archived_at: '2026-07-29T10:00:00+00:00', version: 1 });
+    mockArchivedLeadsResponse({ data: [b, a], error: null });
+    const rows = await fetchArchivedLeadRows();
+    expect(rows.map((r) => r.id)).toEqual(['lead-b', 'lead-a']);
+    expect(rows[0].archived_at).toBe('2026-07-29T10:00:00+00:00');
+    expect(rows[1].version).toBe(3);
+  });
+
+  it('data null é lista vazia VÁLIDA (sem erro)', async () => {
+    mockArchivedLeadsResponse({ data: null, error: null });
+    await expect(fetchArchivedLeadRows()).resolves.toEqual([]);
+  });
+});
+
+describe('fetchArchivedLeadRows — erros', () => {
+  it('erro do Supabase NÃO vira lista vazia: lança remote_leads_fetch_failed', async () => {
+    mockArchivedLeadsResponse({ data: null, error: { message: 'permission denied', code: '42501' } });
+    const failure = fetchArchivedLeadRows();
+    await expect(failure).rejects.toSatisfy(
+      (e: unknown) => isRemoteLeadsError(e) && e.code === 'remote_leads_fetch_failed',
+    );
+  });
+
+  it('detail preserva somente código e mensagem — sem token/credencial/query', async () => {
+    mockArchivedLeadsResponse({
+      data: null,
+      error: {
+        message: 'permission denied',
+        code: '42501',
+        apikey: 'nunca-copiar',
+      },
+    });
+    const error = await fetchArchivedLeadRows().catch((e) => e);
+    expect(isRemoteLeadsError(error)).toBe(true);
+    expect(error.detail).toEqual({ code: '42501', message: 'permission denied' });
+    expect(JSON.stringify(error.detail)).not.toContain('nunca-copiar');
   });
 });

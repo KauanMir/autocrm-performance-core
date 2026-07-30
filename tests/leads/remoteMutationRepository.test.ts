@@ -11,6 +11,9 @@ import {
   normalizeLeadPhoneDigits,
   moveRemoteLeadToStage,
   applyRemoteLeadEvent,
+  assignRemoteLeadSeller,
+  archiveRemoteLead,
+  unarchiveRemoteLead,
 } from '@/lib/leads/remoteMutationRepository';
 import { isRemoteLeadsError } from '@/lib/leads/errors';
 
@@ -216,6 +219,144 @@ describe('applyRemoteLeadEvent', () => {
   it('data null (sem erro) é anômalo: lança generic_error, nunca retorna undefined', async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: null });
     await expect(applyRemoteLeadEvent({ leadId: 'lead-1', eventType: 'visit_confirmed' }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_generic_error' });
+  });
+});
+
+// M1-E E6-B1 — assignRemoteLeadSeller/archiveRemoteLead/unarchiveRemoteLead.
+describe('assignRemoteLeadSeller', () => {
+  const ASSIGNED = { id: 'lead-1', company_id: 'company-a', seller_id: 's2', version: 2 };
+
+  it('chama assign_lead_seller SEM p_company_id, com sellerId string', async () => {
+    mocks.rpc.mockResolvedValue({ data: ASSIGNED, error: null });
+    await assignRemoteLeadSeller({ leadId: 'lead-1', sellerId: 's2', expectedVersion: 1 });
+    expect(mocks.rpc).toHaveBeenCalledWith('assign_lead_seller', {
+      p_lead_id: 'lead-1',
+      p_seller_id: 's2',
+      p_expected_version: 1,
+    });
+    expect(mocks.rpc.mock.calls[0][1]).not.toHaveProperty('p_company_id');
+  });
+
+  it('sellerId null: envia p_seller_id null (remove o vendedor, contrato real da RPC)', async () => {
+    mocks.rpc.mockResolvedValue({ data: ASSIGNED, error: null });
+    await assignRemoteLeadSeller({ leadId: 'lead-1', sellerId: null, expectedVersion: 1 });
+    expect(mocks.rpc.mock.calls[0][1].p_seller_id).toBeNull();
+  });
+
+  it('retorna a linha real quando não há erro', async () => {
+    mocks.rpc.mockResolvedValue({ data: ASSIGNED, error: null });
+    await expect(assignRemoteLeadSeller({ leadId: 'lead-1', sellerId: 's2', expectedVersion: 1 }))
+      .resolves.toEqual(ASSIGNED);
+  });
+
+  it('seller_not_found do Supabase vira RemoteLeadsError com código namespaced', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'seller_not_found' } });
+    await expect(assignRemoteLeadSeller({ leadId: 'lead-1', sellerId: 'ghost', expectedVersion: 1 }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_seller_not_found' });
+  });
+
+  it('forbidden do Supabase (Seller tentando atribuir) vira RemoteLeadsError', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'forbidden' } });
+    await expect(assignRemoteLeadSeller({ leadId: 'lead-1', sellerId: 's2', expectedVersion: 1 }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_forbidden' });
+  });
+
+  it('stale_write do Supabase vira RemoteLeadsError com código namespaced', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'stale_write' } });
+    await expect(assignRemoteLeadSeller({ leadId: 'lead-1', sellerId: 's2', expectedVersion: 0 }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_stale_write' });
+  });
+
+  it('data null (sem erro) é anômalo: lança generic_error, nunca retorna undefined', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    await expect(assignRemoteLeadSeller({ leadId: 'lead-1', sellerId: 's2', expectedVersion: 1 }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_generic_error' });
+  });
+});
+
+describe('archiveRemoteLead', () => {
+  const ARCHIVED = { id: 'lead-1', company_id: 'company-a', archived_at: '2026-07-30T10:00:00+00:00', version: 2 };
+
+  it('chama archive_lead SEM p_company_id, apenas com leadId/expectedVersion', async () => {
+    mocks.rpc.mockResolvedValue({ data: ARCHIVED, error: null });
+    await archiveRemoteLead({ leadId: 'lead-1', expectedVersion: 1 });
+    expect(mocks.rpc).toHaveBeenCalledWith('archive_lead', {
+      p_lead_id: 'lead-1',
+      p_expected_version: 1,
+    });
+    expect(mocks.rpc.mock.calls[0][1]).not.toHaveProperty('p_company_id');
+  });
+
+  it('retorna a linha real quando não há erro', async () => {
+    mocks.rpc.mockResolvedValue({ data: ARCHIVED, error: null });
+    await expect(archiveRemoteLead({ leadId: 'lead-1', expectedVersion: 1 })).resolves.toEqual(ARCHIVED);
+  });
+
+  it('idempotente: Lead já arquivado retorna a linha, sem erro (comportamento real do backend)', async () => {
+    mocks.rpc.mockResolvedValue({ data: ARCHIVED, error: null });
+    await expect(archiveRemoteLead({ leadId: 'lead-1', expectedVersion: 99 })).resolves.toEqual(ARCHIVED);
+  });
+
+  it('forbidden do Supabase (Seller tentando arquivar) vira RemoteLeadsError', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'forbidden' } });
+    await expect(archiveRemoteLead({ leadId: 'lead-1', expectedVersion: 1 }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_forbidden' });
+  });
+
+  it('stale_write do Supabase vira RemoteLeadsError com código namespaced', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'stale_write' } });
+    await expect(archiveRemoteLead({ leadId: 'lead-1', expectedVersion: 0 }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_stale_write' });
+  });
+
+  it('data null (sem erro) é anômalo: lança generic_error, nunca retorna undefined', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    await expect(archiveRemoteLead({ leadId: 'lead-1', expectedVersion: 1 }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_generic_error' });
+  });
+});
+
+describe('unarchiveRemoteLead', () => {
+  const UNARCHIVED = { id: 'lead-1', company_id: 'company-a', archived_at: null, stage_id: 'stage-1', seller_id: 's1', version: 3 };
+
+  it('chama unarchive_lead SEM p_company_id e SEM p_restore_stage_id, apenas com leadId/expectedVersion', async () => {
+    mocks.rpc.mockResolvedValue({ data: UNARCHIVED, error: null });
+    await unarchiveRemoteLead({ leadId: 'lead-1', expectedVersion: 2 });
+    expect(mocks.rpc).toHaveBeenCalledWith('unarchive_lead', {
+      p_lead_id: 'lead-1',
+      p_expected_version: 2,
+    });
+    const args = mocks.rpc.mock.calls[0][1];
+    expect(args).not.toHaveProperty('p_company_id');
+    expect(args).not.toHaveProperty('p_restore_stage_id');
+  });
+
+  it('retorna a linha real preservando stage_id/seller_id existentes', async () => {
+    mocks.rpc.mockResolvedValue({ data: UNARCHIVED, error: null });
+    await expect(unarchiveRemoteLead({ leadId: 'lead-1', expectedVersion: 2 })).resolves.toEqual(UNARCHIVED);
+  });
+
+  it('idempotente: Lead já ativo retorna a linha, sem erro (comportamento real do backend)', async () => {
+    mocks.rpc.mockResolvedValue({ data: UNARCHIVED, error: null });
+    await expect(unarchiveRemoteLead({ leadId: 'lead-1', expectedVersion: 99 })).resolves.toEqual(UNARCHIVED);
+  });
+
+  it('forbidden do Supabase (Seller tentando restaurar) vira RemoteLeadsError', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'forbidden' } });
+    await expect(unarchiveRemoteLead({ leadId: 'lead-1', expectedVersion: 2 }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_forbidden' });
+  });
+
+  it('stale_write do Supabase vira RemoteLeadsError com código namespaced', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'stale_write' } });
+    await expect(unarchiveRemoteLead({ leadId: 'lead-1', expectedVersion: 0 }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_stale_write' });
+  });
+
+  it('data null (sem erro) é anômalo: lança generic_error, nunca retorna undefined', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    await expect(unarchiveRemoteLead({ leadId: 'lead-1', expectedVersion: 2 }))
       .rejects.toMatchObject({ code: 'remote_leads_mutation_generic_error' });
   });
 });
