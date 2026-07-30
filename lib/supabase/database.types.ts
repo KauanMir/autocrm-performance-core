@@ -1020,6 +1020,13 @@ export type Database = {
           profile_id: string
         }[]
       }
+      list_current_company_seller_labels: {
+        Args: never
+        Returns: {
+          name: string
+          seller_id: string
+        }[]
+      }
       list_inactive_company_users: {
         Args: {
           p_company_id?: string
