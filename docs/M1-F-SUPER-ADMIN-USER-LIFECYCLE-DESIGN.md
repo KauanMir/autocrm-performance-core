@@ -6604,3 +6604,211 @@ alterada além do já registrado. Nenhuma operação Supabase remota.
 legados; S8-E2: remoção física das 3 colunas legadas de `profiles`).
 **S8-F está desbloqueado, mas não iniciado. M1-E E4 continua pausado**
 até o fechamento formal do S8-F.
+
+## 47. Fechamento formal do M1-F S8
+
+Etapa final do S8: sem alteração de schema, RPC, RLS, grant, FK,
+`database.types.ts`, seed ou frontend — só auditoria, documentação e
+validação. Nenhuma operação Supabase remota em nenhum momento.
+
+### 47.0 S8-E2-COVERAGE-A1 — pré-requisito deste fechamento
+
+Antes desta etapa, uma auditoria dedicada (M1-F S8-E2-COVERAGE-A1)
+revisou assertion por assertion os dois arquivos de teste removidos
+durante o S8-E2 (`11_m1f_s1_backfill.sql`/`15_m1f_s2_catchup.sql`, 37
+assertions no total) sem decisão humana prévia — achado do processo,
+não do conteúdo. Classificação final: 22 obsoletas por design (lógica
+do backfill histórico, que nunca mais roda), 13 já cobertas por testes
+modernos (citadas ponto a ponto: `12_m1f_s1_constraints.sql`,
+`14_m1f_s1_platform_role_selfpromotion.sql`,
+`26_m1f_s4c1_invite_acceptance.sql`,
+`33_m1f_s5c_update_membership_role.sql`, `35_...`, `43_...`, `46_...`),
+2 duplicatas literais (`fk_ok` já presente em
+`10_m1f_s1_schema.sql`/`43_...`), **zero** garantia válida sem
+cobertura. Nenhum arquivo recriado, nenhum teste novo necessário,
+redução de 51 para 49 arquivos SQL confirmada legítima. Aprovado por
+decisão humana explícita antes deste fechamento.
+
+### 47.1 S8-A a S8-F — todas as sub-etapas concluídas
+
+S8-A (design/decisões congeladas), S8-B (não numerada separadamente —
+ver S8-C2-B2, leitura comercial), S8-C1 (fecha acesso direto a
+`profiles`/`sellers`, migra `pipeline_stages`), S8-C2 (workspace
+comercial do Super Admin — B2/C1/AUTH-A1/C2/D1/D1-TIMELINE-AUTH-A1/E,
+leitura e mutation completas de Leads/Pipeline/Timeline/Sellers), S8-D
+(D1: remove `User.companyId` + navegação; D2-A: remove
+`User.role`/`User.sellerId` + módulos M0 locais; D2-B: fim da
+sincronização de `profiles.role`), S8-E (E1: remove os 4 helpers
+legados M1-C; E2: remove fisicamente as 3 colunas legadas de
+`profiles`), S8-F (esta etapa: auditoria final + runbook + fechamento
+formal). Todas publicadas em `origin/main`.
+
+### 47.2 Legado TypeScript removido
+
+`User.companyId`/`User.role`/`User.sellerId` não existem mais no tipo
+(`lib/data.ts`) — confirmado por leitura direta da interface `User`
+(só `id`/`name`/`email`/`platformRole?`/`activeMembership?`).
+`NAV_ROLES[user.role]` não é mais usado para decidir navegação
+(`components/App.tsx` deriva de `platformRole`/`activeMembership.role`).
+Busca em todo o código de aplicação (`grep` recursivo, fora de
+`node_modules`) por `user.role`/`currentUser.role`/`user.companyId`/
+`currentUser.companyId`/`user.sellerId`/`currentUser.sellerId`/
+`NAV_ROLES[` confirma **zero consumidor ativo** — as únicas
+ocorrências restantes são comentários explicando o que deixou de ser
+feito (`lib/services.ts`, `lib/capabilities.ts`, `components/App.tsx`,
+`components/screens/ScreensBiz.tsx`, `components/screens/ScreensOps.tsx`,
+`lib/commercial/resolveCompanyId.ts`, `components/invites/InviteList.tsx`,
+`lib/hooks/useQueryCacheIdentity.ts`) e nomes de teste descritivos.
+
+Residual **fora do escopo do M1-F, já revisado e aceito desde o
+S8-D1**: `LegacyUserRef` (`lib/data.ts`) — um tipo de exibição do M0
+(pré-Supabase-Auth, anterior ao M1-B) usado só por dois lookups de
+"Criado por" (`FlowVerCliente`, `exportResultadosCSV`) sobre registros
+mock antigos. Tem campos `role`/`sellerId` homônimos, mas é um tipo
+diferente de `User`, nunca usado para autenticação/autorização, sem
+nenhuma ligação com `profiles`/Supabase. Não é um consumidor do
+contrato de identidade do M1-F.
+
+### 47.3 Legado SQL removido
+
+`current_profile_company_id()`, `current_profile_role()`,
+`current_profile_seller_id()`, `is_manager_or_admin()` — removidos
+fisicamente do catálogo (S8-E1). Confirmado por query direta ao
+catálogo ativo (`pg_proc`): **zero** função com esses nomes, **zero**
+policy referenciando-os (`pg_policies.qual`/`with_check`), **zero**
+função ativa com `prosrc` referenciando-os.
+
+### 47.4 Colunas removidas
+
+`profiles.company_id`/`role`/`seller_id` — removidas fisicamente
+(S8-E2). Confirmado por query direta: `public.profiles` tem
+exatamente 7 colunas (`id`, `name`, `email`, `is_active`,
+`created_at`, `updated_at`, `platform_role`). Enum `user_role`
+(tipo da antiga coluna `role`) permanece órfão no catálogo — decisão
+já registrada em §46.3, não solicitada para remoção, risco residual
+menor (§47.14).
+
+### 47.5 Identidade final
+
+Global: `profiles.platform_role` (`super_admin` ou `null`) +
+`profiles.is_active`. Empresarial: exclusivamente
+`company_memberships` (`role`, `lifecycle_status`, `is_active`).
+Seller: exclusivamente `public.sellers`, ligado via `membership_id`.
+Nenhuma dessas três camadas tem substituto ou fallback em `profiles`.
+
+### 47.6 Autoria final
+
+`leads_created_by_fk`, `leads_updated_by_fk`, `lead_timeline_actor_fk`
+— confirmadas por query direta ao catálogo — apontam as três para
+`company_memberships(company_id, profile_id)` com `ON DELETE
+RESTRICT`. Nenhuma aponta para `profiles(company_id, id)`. `audit_log`
+regista o ator real (`auth.uid()`) em toda operação, nunca um valor
+enviado pelo cliente.
+
+### 47.7 Super Admin comercial
+
+Leitura: `list_commercial_companies`/`list_platform_leads_for_company`/
+`list_platform_lead_timeline`/`list_pipeline_stages_for_company`/
+`list_platform_sellers_for_company` (5 RPCs). Mutation:
+`create_lead`/`update_lead`/`check_lead_phone_duplicate`/
+`move_lead_to_stage`/`apply_lead_event`/`assign_lead_seller`/
+`archive_lead`/`unarchive_lead`/`add_lead_timeline_entry` (9 RPCs,
+compartilhadas com Manager/Seller via `resolve_lead_mutation_context`,
+que resolve empresa por parâmetro explícito para Super Admin e por
+membership ativa para Manager/Seller). Todas confirmadas presentes no
+catálogo ativo (52 funções públicas totais, nenhum nome legado entre
+elas).
+
+### 47.8 Flags
+
+`NEXT_PUBLIC_FF_SUPER_ADMIN_COMMERCIAL_READ`/`WRITE` — ambas `false`
+por padrão (nenhuma variável de ambiente as ativa neste repositório;
+override de desenvolvimento exclusivo de `NODE_ENV==='development'`
+via `localStorage`, nunca em produção). `canMutateCommercialWorkspace()`
+(`lib/capabilities.ts`) exige `readEnabled && writeEnabled` no código
+— `WRITE` nunca é efetiva sem `READ`, independentemente da ordem de
+ativação real.
+
+### 47.9 Testes
+
+SQL: nenhum teste novo nesta etapa — a checklist de garantias finais
+(colunas/helpers legados ausentes, helpers modernos presentes, as 3
+FKs de autoria, Super Admin via `platform_role`, Manager/Seller via
+membership, Sellers via membership, as RPCs comerciais, zero policy
+com legado, zero assinatura antiga) já está coberta ponto a ponto nos
+arquivos `10`, `14`, `26`, `27`, `33`, `39`, `40`, `41`, `44`, `45`,
+`49`, `50` — um `51_...` seria duplicação, não foi criado.
+TypeScript: mesma conclusão — `tests/services/authService.test.ts`
+(User sem campos legados, `activeMembership`, `sellerId` escopado),
+`tests/services/localScopeFiltering.test.ts` (fail-closed, módulos M0
+preservados), `tests/navigation/*.test.tsx` (navegação,
+`legacyProfileDivergence`, `commercialWorkspaceAccess`,
+`settingsAccess`), `tests/flags.test.ts` (as duas flags comerciais,
+default `false`, override só em dev), `tests/commercial/
+CommercialCompanyContext.test.tsx` (`contextEpoch`),
+`tests/commercial/PlatformCommercialEndToEnd.test.tsx` (caminho
+platform separado) já cobrem a checklist — nenhum teste novo criado.
+
+### 47.10 Builds
+
+Três builds de produção (`npm run build`), variando só variável de
+processo (nunca `.env`): `READ=false/WRITE=false` (padrão real),
+`READ=true/WRITE=false`, `READ=true/WRITE=true`. As três verdes, 8/8
+páginas cada — as flags não alteram geração estática (gate acontece
+em runtime via capability, não em rota/build condicional).
+
+### 47.11 Runbook
+
+`docs/M1-F-ROLLOUT-RUNBOOK.md` — plano completo para a futura aplicação
+remota: pré-checks read-only (10 consultas, sem PII, sem credencial),
+tabela das 40 migrations M1-F (finalidade/objetos/dependências/
+validação de dados/lock/rollback lógico/smoke test/risco por
+migration — as 4 com validação de dados real e as 3 de risco alto
+destacadas: `m1f_s8c2c1auth_a1_lead_authorship_membership_fk`,
+`m1f_s8c2d1timeline_a1_actor_membership_fk`, ambas por reapontarem FK
+sobre dado potencialmente existente, e `m1f_s8e2b_drop_profile_legacy_columns`,
+por irreversibilidade física), ordem de ativação de flags (nunca
+READ+WRITE simultâneas na primeira ativação), smoke tests completos
+(Auth/Lifecycle/Comercial/Isolamento/Auditoria), 3 níveis de rollback
+(flag → flag → interrupção de migrations futuras, nunca reversão
+destrutiva improvisada). Nenhum passo do runbook foi executado.
+
+### 47.12 Nenhuma operação remota
+
+Confirmado em toda a etapa: nenhum `--linked`, nenhuma consulta ao
+Supabase remoto, nenhuma migration aplicada fora do ambiente local.
+
+### 47.13 Migrations ainda locais
+
+As 47 migrations (1 M1-B + 3 M1-C + 3 M1-E + 40 M1-F) existem somente
+no repositório e no Supabase local deste ambiente de desenvolvimento —
+nenhuma foi aplicada ao Supabase remoto em nenhum momento da linha do
+tempo do M1-F.
+
+### 47.14 Riscos residuais
+
+Nenhum escondido: (1) as 47 migrations seguem não aplicadas
+remotamente — rollout real é decisão de produto futura, com runbook
+pronto; (2) backup e pré-check são pré-requisitos do rollout, ainda
+não executados (não podem ser, sem acesso remoto); (3) as duas flags
+comerciais seguem `false`; (4) smoke test contra ambiente remoto real
+está pendente — só documentado; (5) `audit_log` precisa de
+monitoramento operacional real após o rollout (nunca testado sob
+carga de produção); (6) paginação/realtime na superfície comercial
+platform não foram implementados (fora do escopo do M1-F); (7)
+drag-and-drop de Pipeline não foi implementado para a superfície
+platform; (8) Manager/Seller continuam no caminho local M0
+(`lib/services.ts`) até o M1-E E4 — a "ponte antiga" mencionada em
+§26.11 permanece intocada de propósito; (9) baseline de 22 erros TSC
+pré-existentes, sem relação com o M1-F, confirmada idêntica antes e
+depois desta etapa; (10) rollback físico de uma migration já aplicada
+remotamente exigiria sempre uma migration corretiva aditiva — nunca
+edição/reversão de migration já publicada; (11) `user_role` (enum) e
+`LegacyUserRef` (tipo M0) seguem órfãos, ambos já registrados como
+aceitos (§46.3, §47.2), nenhum dos dois bloqueia o fechamento.
+
+### 47.15 Fechamento
+
+**M1-F S8 está formalmente fechado.** **M1-E E4 está desbloqueado** —
+pode ser iniciado como próxima etapa própria, fora do escopo desta
+tarefa; nenhum trabalho de E4 foi realizado aqui.
