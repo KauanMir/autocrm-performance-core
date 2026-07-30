@@ -1429,8 +1429,72 @@ conectar nenhuma UI:
   SQL, `database.types.ts`, `PipelineService`, `StoreAdapter` ou superfície
   Platform foi tocado.
 
-**E5-A1 formalmente encerrado. E5-B1 (conexão do Kanban) desbloqueado, ainda
-não iniciado.**
+**E5-A1 formalmente encerrado.**
+
+### 15.8 E5-B1 (conexão do movimento remoto do Kanban) — concluído
+
+Conectou `useMoveLeadToStage` ao Kanban de Manager/Seller (`PipeCard`/
+`ScreenAndamentoLegacy`, `components/screens/ScreensOps.tsx`), sem tocar em
+eventos (`canApplyEvents` continua `false`), SQL, `database.types.ts`,
+`useMoveLeadToStage`/`useApplyLeadEvent`/`remoteMutationRepository`/
+`leadEventMapper` (nenhuma incompatibilidade encontrada — nenhum precisou
+mudar), `Flows2.tsx`, `FlowsShared.tsx`, `PipelineService`, `StoreAdapter`
+ou superfície Platform.
+
+- **`resolveLeadMutationCapabilities`** (`lib/leads/mutationCapabilities.ts`):
+  `canMoveStage` ativado para Manager operacional e Seller operacional com
+  `sellerId` — mesmo gate de `canCreate`/`canEditDetails`. `canApplyEvents`/
+  `canAssignSeller`/`canArchive` seguem `false` (E5-B2/E6).
+- **`lib/leads/leadMutationOwnership.ts`**: usado sem nenhuma alteração —
+  `canActorMutateLead` já cobria exatamente o contrato necessário (Manager:
+  qualquer Lead da empresa; Seller: só o próprio, via `leadSellerId ===
+  actorSellerId`).
+- **`lib/hooks/useRemoteLeadStageMoveController.ts`** (novo): envolve
+  `useMoveLeadToStage` com o que a UI do Kanban precisa e o hook sozinho não
+  oferece — pendência **escopada por Lead** (`Set<leadId>`; Leads diferentes
+  movem ao mesmo tempo, o mesmo Lead nunca dispara duas mutations
+  simultâneas), **token por Lead** (`Record<leadId, number>`, protege contra
+  uma resposta obsoleta sobrescrever um movimento mais novo do MESMO Lead),
+  **same-stage no-op** (`isNoOpStageMove`, já existente desde o E5-A1 — sem
+  chamar a RPC, sem pendência, sem erro), e **descarte de pendência/erro na
+  troca de identidade** (`identityKey` como parâmetro; um `useEffect` limpa
+  tudo quando muda — a mutation em voo pode concluir no servidor, mas
+  `useMoveLeadToStage` já garante `identity_changed` em vez de sucesso/
+  invalidation na identidade nova; o controller só limpa o estado VISUAL).
+  `identity_changed` nunca produz erro visível (silenciosamente descartado).
+  Não busca Leads/Stages, não duplica a bridge, não faz atualização
+  otimista, não persiste nada.
+- **`PipeCard`**: `canDrag` agora exige `capabilities.canMoveStage` **E**
+  `moveAuthorized` (posse do Lead, resolvida pelo chamador via
+  `canActorMutateLead`) **E** `!isPending` — nenhum dos três sozinho
+  autoriza. Payload do drag continua sendo só o `lead.id` (mesmo mecanismo
+  local de sempre); `sourceStageId`/`targetStageId` são resolvidos no drop a
+  partir da lista remota atual (`leads.find`) e da coluna de destino
+  (`stage.id`), nunca de um objeto capturado no `dragStart`. Indicação
+  visual discreta: `LBadge` "Salvando…" enquanto pendente (reaproveitado, já
+  importado no arquivo); mensagem sanitizada por Lead
+  (`remoteLeadMoveErrorMessage`, função local ao arquivo — mesmo modelo de
+  `remoteLeadErrorMessage` em `Flows2.tsx`, deliberadamente não
+  compartilhada) para `stage_not_found`/`lead_not_found`/`lead_archived`/
+  `forbidden`/`company_read_only`; qualquer outro código cai em "Não foi
+  possível movimentar o Lead." Nenhum toast global foi criado — o projeto
+  não tem essa infraestrutura hoje, e criá-la estava fora do escopo
+  autorizado desta etapa; a confirmação visual do sucesso é o próprio card
+  reaparecendo na coluna nova (via invalidation → bridge), como já era o
+  caso no caminho local.
+- **`onDragOver`/coluna**: highlight de "sobre a coluna" deixou de ser
+  exclusivo do caminho local (`!isRemoteLeadsActive &&`) — passa a valer
+  para os dois caminhos, já que só um card com `draggable=true` (autorizado)
+  consegue gerar o evento nativo de drag.
+- **Caminho local**: intacto — `PipelineService.moveCard`, agrupamento por
+  `stage.name`, drag integral, nenhum hook remoto chamado.
+- **Caminho remoto fail-closed**: `remote_misconfigured`/identidade
+  indisponível nunca chegam a montar o grid/`PipeCard` (mesmos estados
+  dedicados do E3-B1) — nenhum drag, nenhum drop, nenhuma mutation possível
+  estruturalmente.
+
+**E5-B1 formalmente encerrado. E5-B2 (conexão dos flows de evento/Health
+Engine) desbloqueado, ainda não iniciado.**
 
 ## 16. Plano de testes
 
