@@ -668,6 +668,69 @@ dedicado, quando a base estiver estável.
 Nenhum commit gigante: cada fase é um commit (ou poucos), verde e reversível
 por flag.
 
+### 15.1 E3-A1 — Catálogo seguro de Sellers para Manager/Seller
+
+Ao retomar o E3 (leitura remota conectada às telas), a revalidação do
+contrato confirmou um bloqueio: `adaptLeadRows` (§14, `lib/leads/adapter.ts`)
+exige `context.sellersById: Record<string, { id, name }>` para resolver o
+nome exibido de cada Lead, e nenhuma fonte segura existente cobria
+Manager/Seller —
+
+- `public.sellers` não tem `SELECT` para `authenticated` (só RPCs narrow têm
+  acesso, via `SECURITY DEFINER`);
+- `list_platform_sellers_for_company(p_company_id)` (§6 do M1-F) é exclusiva
+  de Super Admin/platform e recebe `company_id` explícito — nunca usada por
+  Manager/Seller;
+- `current_profile_seller_id_for_company(p_target_company_id)` resolve
+  somente o próprio Seller do ator, nunca o catálogo da empresa;
+- `SellerService` local é mock/local storage — dado local nunca pode
+  alimentar uma tela em modo remoto (decisão do E3, item 12).
+
+A decisão humana (2026-07-30) foi criar uma RPC nova e estreita —
+`public.list_current_company_seller_labels()` — em vez de ampliar qualquer
+uma das anteriores. E3-B1 (montagem da bridge, conexão das telas) permanece
+pausado até esta subetapa ser concluída, validada e aprovada. Nenhuma
+operação Supabase remota ocorreu nesta subetapa — somente local
+(`supabase db reset`/`test db`).
+
+**Contrato final:**
+
+- Sem parâmetro: `p_company_id` não existe — a empresa é resolvida
+  inteiramente no servidor a partir de `current_membership_company_id()` /
+  `current_membership_role()` (mesmo par que `resolve_lead_mutation_context`
+  usa para Manager/Seller), nunca enviada pelo cliente.
+- Gate de status: `companies.status = 'ativa'` estrito — mesma regra da RLS
+  `leads_select` e do branch Manager/Seller de `resolve_lead_mutation_context`
+  (mais restrito que `can_access_company()`).
+- **Manager** — catálogo completo (**picker/catálogo histórico**): todas as
+  linhas de `public.sellers` da própria empresa, incluindo Sellers
+  inativos/desvinculados (`is_active=false`, `membership_id=null`) — um Lead
+  antigo pode referenciar um `seller_id` que não é mais operacional; filtrar
+  por `is_active` recriaria o próprio bloqueio (`seller_not_found` no
+  adapter). Nunca outra empresa. Ordenado por `name, id`.
+- **Seller** — **não** recebe o catálogo da empresa: recebe somente a
+  própria linha atual, via `current_profile_seller_id_for_company` (reaproveitado,
+  nunca reimplementado).
+- Retorno: exatamente `seller_id` (`public.sellers.id`) e `name`
+  (`public.sellers.name`) — nunca email/telefone/endereço/`membership_id`/
+  lifecycle/`platform_role`/credenciais. `sellers.name`/`first_name` são
+  gravados uma única vez na criação da linha (`accept_invite`/
+  `update_membership_role`) e nunca ressincronizados depois — por isso já são
+  o "nome histórico" correto, sem necessidade de juntar com `profiles`.
+- Grants: `REVOKE ALL` de `public`/`anon`/`authenticated`, depois
+  `GRANT EXECUTE` só para `authenticated` — mesmo padrão de toda RPC narrow
+  do projeto. Nenhum `SELECT` direto novo em `sellers`, `profiles` ou
+  `company_memberships`.
+- Frontend: `lib/leads/sellerLabelsRepository.ts`
+  (`fetchCurrentCompanySellerLabels`, `toSellersByIdIndex`) e
+  `lib/hooks/useCurrentCompanySellerLabels.ts` — arquivos novos e
+  autocontidos, sem alterar `lib/leads/errors.ts` (contrato de 4 códigos do
+  E3, congelado) nem `lib/leads/adapter.ts` (comportamento determinístico
+  preservado). Query key inclui `companyId` **e** `userId`/identityKey:
+  para Manager o resultado é o mesmo catálogo independente de quem pergunta,
+  mas para Seller é uma linha própria — dois Sellers da mesma empresa nunca
+  podem compartilhar uma entrada de cache.
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
@@ -829,3 +892,14 @@ Alterados:
 
 Intocados: caminho local da store (exceto o export do notify), migrations
 M1-B e M1-C, infraestrutura de cache do M1-D.
+
+**E3-A1** (§15.1) — novos, fora da lista original acima:
+
+- `supabase/migrations/20260730030000_m1e_e3a1_current_company_seller_labels.sql`
+- `lib/leads/sellerLabelsRepository.ts`,
+  `lib/hooks/useCurrentCompanySellerLabels.ts`
+- `supabase/tests/51_m1e_e3a1_current_company_seller_labels.sql`
+- `tests/leads/sellerLabelsRepository.test.ts`,
+  `tests/hooks/useCurrentCompanySellerLabels.test.tsx`
+
+Alterado: `lib/supabase/database.types.ts` (regenerado, só a nova função).
