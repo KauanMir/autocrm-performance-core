@@ -6,9 +6,36 @@ import { STAGES, TASK_STATE } from '@/lib/data';
 import { useStore } from '@/lib/store';
 import { LeadService, TaskService, PipelineService, AuthService, SellerService } from '@/lib/services';
 import { useRemoteLeadsScreenState, type RemoteLeadsScreenMode } from '@/lib/hooks/useRemoteLeadsScreenState';
+import { useRemoteLeadStageMoveController } from '@/lib/hooks/useRemoteLeadStageMoveController';
 import { resolveLeadMutationCapabilities, type LeadMutationCapabilities } from '@/lib/leads/mutationCapabilities';
+import { canActorMutateLead } from '@/lib/leads/leadMutationOwnership';
+import type { RemoteLeadsErrorCode } from '@/lib/leads/errors';
 import type { RemoteLeadsFlagMode } from '@/lib/leads/remoteLeadsMode';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
+
+// M1-E E5-B1: mensagens sanitizadas fixas do movimento remoto do Kanban —
+// mesmo modelo de remoteLeadErrorMessage (Flows2.tsx), próprio deste
+// arquivo (nunca importado de lá): nenhum UUID/SQL/RPC/payload/stack.
+// identity_changed nunca chega aqui — o controller descarta antes de
+// popular errorCodeByLead. company_required/company_not_found nunca
+// ocorrem neste caminho (Manager/Seller nunca enviam p_company_id), por
+// isso caem no genérico em vez de mensagem inventada.
+function remoteLeadMoveErrorMessage(code: RemoteLeadsErrorCode | undefined): string {
+  switch (code) {
+    case 'remote_leads_mutation_stage_not_found':
+      return 'A etapa selecionada não está mais disponível.';
+    case 'remote_leads_mutation_lead_not_found':
+      return 'Este Lead não está mais disponível.';
+    case 'remote_leads_mutation_lead_archived':
+      return 'Este Lead foi arquivado e não pode ser movimentado.';
+    case 'remote_leads_mutation_forbidden':
+      return 'Você não possui permissão para movimentar este Lead.';
+    case 'remote_leads_mutation_company_read_only':
+      return 'Esta empresa está em modo somente leitura.';
+    default:
+      return 'Não foi possível movimentar o Lead.';
+  }
+}
 
 // M1-E E4-B2: deriva o flagMode das capabilities a partir do MESMO
 // remote.mode que a tela já usa para tudo (leitura, estados, testes) — nunca
@@ -276,14 +303,20 @@ export function ScreenClientes({ go }: any) {
   return <ScreenClientesLegacy go={go} />;
 }
 
-function PipeCard({ lead, go, dragging, onDragStart, onDragEnd, capabilities }: {
+function PipeCard({ lead, go, dragging, onDragStart, onDragEnd, capabilities, moveAuthorized, isPending, errorMessage }: {
   lead: any; go: any; dragging: boolean; onDragStart: any; onDragEnd: any; capabilities?: LeadMutationCapabilities | null;
+  // M1-E E5-B1 — só significativos quando capabilities está presente (caminho remoto).
+  moveAuthorized?: boolean; isPending?: boolean; errorMessage?: string | null;
 }) {
   const u = (URG as any)[lead.urgency];
   // M1-E E4-B2: ausência de capabilities = caminho local (drag integral).
-  // Presença de capabilities = caminho remoto — canMoveStage é sempre false
-  // no E4 (mover Etapa é E5); drag permanece impossível no Kanban remoto.
-  const canDrag = capabilities ? capabilities.canMoveStage : true;
+  // M1-E E5-B1: presença de capabilities = caminho remoto — canDrag agora
+  // exige a capability genérica (canMoveStage) E a posse deste Lead
+  // específico (moveAuthorized, resolvido pelo chamador via
+  // canActorMutateLead) E que este Lead não esteja com um movimento
+  // pendente — nunca um segundo drag/drop no mesmo Lead enquanto o
+  // primeiro não confirmou.
+  const canDrag = capabilities ? (capabilities.canMoveStage && Boolean(moveAuthorized) && !isPending) : true;
   return (
     <div
       draggable={canDrag}
@@ -294,6 +327,9 @@ function PipeCard({ lead, go, dragging, onDragStart, onDragEnd, capabilities }: 
         // all, but the id is read back from lifted React state on drop, not from
         // dataTransfer.getData — some browsers restrict/lose that payload depending
         // on the drag phase, which was silently swallowing the drop (M0-K1.5, bug 1).
+        // M1-E E5-B1: payload mínimo — só o id (nenhum nome/telefone/veículo/
+        // Seller/objeto completo). No caminho remoto, sourceStageId/targetStageId
+        // são resolvidos no drop a partir da lista remota atual, nunca daqui.
         e.dataTransfer.setData('text/plain', lead.id);
         e.dataTransfer.effectAllowed = 'move';
         onDragStart(lead.id);
@@ -301,14 +337,22 @@ function PipeCard({ lead, go, dragging, onDragStart, onDragEnd, capabilities }: 
       onDragEnd={onDragEnd}
       onClick={() => (window as any).__openFlow('ver-cliente', { lead, capabilities: capabilities ?? null })} style={{
       background: 'var(--surface)', border: '1px solid var(--border)', borderLeft: `4px solid ${u.c}`,
-      borderRadius: 10, padding: 12, cursor: 'grab', boxShadow: 'var(--shadow-sm)', opacity: dragging ? 0.4 : 1,
+      borderRadius: 10, padding: 12, cursor: isPending ? 'wait' : 'grab', boxShadow: 'var(--shadow-sm)',
+      opacity: dragging ? 0.4 : isPending ? 0.7 : 1,
       transition: 'transform .12s, box-shadow .12s, opacity .12s',
     }}
       onMouseEnter={(e: any) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = 'var(--shadow-md)'; }}
       onMouseLeave={(e: any) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
         <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--t-900)' }}>{lead.name}</span>
-        {lead.urgency === 'red' && <Icon name="flame" size={15} stroke={2.4} style={{ color: 'var(--red)' }} />}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {isPending && (
+            <span data-testid={`pipe-card-pending-${lead.id}`}>
+              <LBadge tone="amber">Salvando…</LBadge>
+            </span>
+          )}
+          {lead.urgency === 'red' && <Icon name="flame" size={15} stroke={2.4} style={{ color: 'var(--red)' }} />}
+        </div>
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
         <Icon name="car" size={13} stroke={2} /> {lead.car}
@@ -317,6 +361,11 @@ function PipeCard({ lead, go, dragging, onDragStart, onDragEnd, capabilities }: 
         <Avatar name={lead.seller} size={20} />
         <span style={{ fontSize: 11.5, color: 'var(--t-500)' }}>{lead.seller.split(' ')[0]}</span>
       </div>
+      {errorMessage && (
+        <div data-testid={`pipe-card-error-${lead.id}`} style={{ fontSize: 11.5, color: 'var(--red)', marginTop: 6 }}>
+          {errorMessage}
+        </div>
+      )}
     </div>
   );
 }
@@ -385,14 +434,37 @@ function ScreenAndamentoLegacy({ go }: any) {
   const pipeline = remote.pipeline;
   const isRemoteLeadsActive = remote.mode === 'remote_active';
   const isMisconfigured = remote.mode === 'remote_misconfigured';
-  // M1-E E4-B2: capabilities granulares — canMoveStage é sempre false no
-  // E4 (mover Etapa é E5), então o drag remoto continua impossível.
-  // flagMode derivado de remote.mode (nunca resolvido de forma
-  // independente) — ver flagModeFromScreenState.
+  // M1-E E4-B2/E5-B1: capabilities granulares — canMoveStage foi ativado no
+  // E5-B1 (drag remoto conectado a move_lead_to_stage). flagMode derivado
+  // de remote.mode (nunca resolvido de forma independente) — ver
+  // flagModeFromScreenState.
   const capabilities = resolveLeadMutationCapabilities({
     flagMode: flagModeFromScreenState(remote.mode),
     profileIsActive: Boolean(currentUser),
     actor: currentUser,
+  });
+
+  // M1-E E5-B1 — identidade do ator para autorização por Lead (canActorMutateLead)
+  // e para o controller de movimento. Mesmos campos que leadFlowContext.ts já
+  // extrai do User, nunca inferidos.
+  const membershipRole: 'manager' | 'seller' | null =
+    currentUser?.activeMembership?.role === 'manager' || currentUser?.activeMembership?.role === 'seller'
+      ? currentUser.activeMembership.role
+      : null;
+  const actorSellerId = currentUser?.activeMembership?.sellerId ?? null;
+  const companyId = currentUser?.activeMembership?.companyId ?? null;
+  const userId = currentUser?.id ?? null;
+  const userIsActive = Boolean(currentUser);
+  // Muda em logout/troca de empresa/membership/transferência/suspensão —
+  // o controller descarta pendência/erro visuais antigos quando isso muda
+  // (decisão humana #15 do E5-B1).
+  const identityKey = `${userId ?? ''}:${companyId ?? ''}`;
+
+  // Chamado SEMPRE (Rules of Hooks) — nenhuma mutation real é disparada até
+  // attemptMove ser chamado a partir do drop; useMoveLeadToStage (dentro do
+  // controller) já bloqueia sem identidade operacional.
+  const moveController = useRemoteLeadStageMoveController({
+    userId, companyId, membershipRole, userIsActive, identityKey,
   });
 
   // Diagnóstico de configuração incompatível: detalhes só em development —
@@ -526,11 +598,33 @@ function ScreenAndamentoLegacy({ go }: any) {
             const isOver = overStage === stage.name;
             return (
               <div key={stage.id} data-testid={`kanban-col-${stage.code}`} data-terminal={stage.isTerminal ? 'true' : 'false'}
-                onDragOver={(e: any) => { e.preventDefault(); if (!isRemoteLeadsActive && draggedId && overStage !== stage.name) setOverStage(stage.name); }}
+                onDragOver={(e: any) => { e.preventDefault(); if (draggedId && overStage !== stage.name) setOverStage(stage.name); }}
                 onDragLeave={() => setOverStage((s: string | null) => (s === stage.name ? null : s))}
                 onDrop={(e: any) => {
                   e.preventDefault();
-                  if (!isRemoteLeadsActive && draggedId) PipelineService.moveCard(draggedId, stage.name);
+                  if (isRemoteLeadsActive) {
+                    // M1-E E5-B1 — o drag payload é só o id (ver PipeCard); o Lead
+                    // atual e o sourceStageId são resolvidos AGORA, pela lista
+                    // remota atual (nunca por um objeto capturado no dragStart).
+                    const draggedLead = draggedId ? leads.find((l: any) => l.id === draggedId) : null;
+                    if (draggedLead) {
+                      const moveAuthorized = canActorMutateLead({
+                        capability: capabilities.canMoveStage,
+                        actorRole: membershipRole,
+                        actorSellerId,
+                        leadSellerId: draggedLead.sellerId ?? null,
+                      });
+                      if (moveAuthorized && !moveController.isLeadPending(draggedLead.id)) {
+                        moveController.attemptMove({
+                          leadId: draggedLead.id,
+                          sourceStageId: draggedLead.stageId,
+                          targetStageId: stage.id,
+                        });
+                      }
+                    }
+                  } else if (draggedId) {
+                    PipelineService.moveCard(draggedId, stage.name);
+                  }
                   endDrag();
                 }}
                 style={{ background: 'var(--surface-2)', border: `1px solid ${isOver ? 'var(--gold-line)' : 'var(--border)'}`, borderRadius: 12, display: 'flex', flexDirection: 'column', minHeight: 360, transition: 'border-color .15s' }}>
@@ -540,9 +634,37 @@ function ScreenAndamentoLegacy({ go }: any) {
                   <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--t-500)', background: 'rgba(255,255,255,.06)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 8px' }}>{items.length}</span>
                 </div>
                 <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-                  {items.length ? items.map((l: any) => (
-                    <PipeCard key={l.id} lead={l} go={go} dragging={draggedId === l.id} onDragStart={setDraggedId} onDragEnd={endDrag} capabilities={isRemoteLeadsActive ? capabilities : undefined} />
-                  ))
+                  {items.length ? items.map((l: any) => {
+                    // M1-E E5-B1 — posse por Lead: Manager qualquer Lead da
+                    // empresa, Seller só o próprio (canActorMutateLead). Só
+                    // avaliado no caminho remoto — local preserva drag integral.
+                    const moveAuthorized = isRemoteLeadsActive
+                      ? canActorMutateLead({
+                          capability: capabilities.canMoveStage,
+                          actorRole: membershipRole,
+                          actorSellerId,
+                          leadSellerId: l.sellerId ?? null,
+                        })
+                      : undefined;
+                    return (
+                      <PipeCard
+                        key={l.id}
+                        lead={l}
+                        go={go}
+                        dragging={draggedId === l.id}
+                        onDragStart={setDraggedId}
+                        onDragEnd={endDrag}
+                        capabilities={isRemoteLeadsActive ? capabilities : undefined}
+                        moveAuthorized={moveAuthorized}
+                        isPending={isRemoteLeadsActive ? moveController.isLeadPending(l.id) : false}
+                        errorMessage={
+                          isRemoteLeadsActive && moveController.errorCodeByLead[l.id] !== undefined
+                            ? remoteLeadMoveErrorMessage(moveController.errorCodeByLead[l.id])
+                            : null
+                        }
+                      />
+                    );
+                  })
                     : <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--t-400)', fontSize: 12.5, textAlign: 'center', padding: 20 }}>Nenhum cliente nesta etapa</div>}
                 </div>
               </div>

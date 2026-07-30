@@ -17,9 +17,11 @@ import type { User } from '@/lib/data';
 export type LeadMutationCapabilities = {
   canCreate: boolean;
   canEditDetails: boolean;
-  // Fora do E4 — sempre false neste módulo até E5/E6 implementarem os
-  // fluxos correspondentes (apply_lead_event/move_lead_to_stage/
-  // assign_lead_seller/archive_lead/unarchive_lead).
+  // canApplyEvents/canAssignSeller/canArchive seguem fora deste módulo —
+  // sempre false até E5-B2/E6 implementarem os fluxos correspondentes
+  // (apply_lead_event/assign_lead_seller/archive_lead/unarchive_lead).
+  // canMoveStage foi ativado no E5-B1 (Kanban remoto conectado a
+  // move_lead_to_stage via useMoveLeadToStage).
   canApplyEvents: boolean;
   canMoveStage: boolean;
   canAssignSeller: boolean;
@@ -56,15 +58,18 @@ export type ResolveLeadMutationCapabilitiesInput = {
   actor: LeadMutationCapabilitiesActor;
 };
 
-// Matriz do E4 (docs/M1-E-DESIGN.md §15.4):
-//   Manager operacional                        -> canCreate + canEditDetails
-//   Seller operacional com sellerId válido      -> canCreate + canEditDetails
+// Matriz do E4 (docs/M1-E-DESIGN.md §15.4), estendida no E5-B1 (§15.8):
+//   Manager operacional                        -> canCreate + canEditDetails + canMoveStage
+//   Seller operacional com sellerId válido      -> canCreate + canEditDetails + canMoveStage
 //   Seller sem sellerId                         -> todas false
 //   Super Admin                                 -> todas false (usa Platform)
 //   sem membership/suspenso/offboarded/inativo  -> todas false
 //   modo local/remote_misconfigured             -> todas false
-// canApplyEvents/canMoveStage/canAssignSeller/canArchive permanecem SEMPRE
-// false neste módulo — pertencem a E5/E6, nunca liberados aqui.
+// canApplyEvents/canAssignSeller/canArchive permanecem SEMPRE false neste
+// módulo — pertencem a E5-B2/E6, nunca liberados aqui. canMoveStage sozinho
+// nunca autoriza mover um Lead específico: a posse (Seller só no próprio) é
+// responsabilidade de lib/leads/leadMutationOwnership.ts, combinada pelo
+// chamador — este módulo resolve só a capability genérica do ator.
 export function resolveLeadMutationCapabilities(
   input: ResolveLeadMutationCapabilitiesInput,
 ): LeadMutationCapabilities {
@@ -82,10 +87,10 @@ export function resolveLeadMutationCapabilities(
   if (!membership) return NO_LEAD_MUTATION_CAPABILITIES;
 
   if (membership.role === 'manager') {
-    return { ...NO_LEAD_MUTATION_CAPABILITIES, canCreate: true, canEditDetails: true };
+    return { ...NO_LEAD_MUTATION_CAPABILITIES, canCreate: true, canEditDetails: true, canMoveStage: true };
   }
 
   // Seller: só operacional quando o próprio sellerId está resolvido.
   if (!membership.sellerId) return NO_LEAD_MUTATION_CAPABILITIES;
-  return { ...NO_LEAD_MUTATION_CAPABILITIES, canCreate: true, canEditDetails: true };
+  return { ...NO_LEAD_MUTATION_CAPABILITIES, canCreate: true, canEditDetails: true, canMoveStage: true };
 }
