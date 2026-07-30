@@ -1575,12 +1575,76 @@ conectar nenhum evento e sem tocar `canApplyEvents`:
   `useApplyLeadEvent`, event mapper, bridge, adapter ou superfície Platform
   foi tocado. `canApplyEvents` continua `false`.
 
-**E5-B2-A1 formalmente encerrado. E5-B2-A2 (avaliação de conexão real de
-Ligação, com capability própria `canLogCallOutcome` — nunca reaproveitando
-`canApplyEvents` para liberar todas as ações de uma vez) desbloqueado, ainda
-não iniciado. Visitas, propostas, vendas e acompanhamentos permanecem
-indisponíveis no modo remoto até existirem módulos remotos estruturados
-próprios — nunca serão simulados com o Health Engine.**
+**E5-B2-A1 formalmente encerrado.**
+
+### 15.10 E5-B2-A2 (conexão remota do resultado de ligação) — concluído
+
+Conectou **somente** os 4 resultados de ligação (FlowLigar) a
+`apply_lead_event`, sem tocar em nenhum outro flow comercial, sem criar
+Task/timeline remota, e sem reaproveitar `canApplyEvents` (que continua
+`false`).
+
+- **`canLogCallOutcome`** (`lib/leads/mutationCapabilities.ts`): capability
+  aditiva, mesmo gate de `canMoveStage`/`canCreate`/`canEditDetails`
+  (Manager operacional; Seller operacional com `sellerId`). `canApplyEvents`
+  segue sempre `false` — o picker de 18 eventos continua inteiramente fora.
+- **`FlowLigar` (`components/flows/FlowsShared.tsx`) virou um router sem
+  hooks próprios**, mesmo molde de `FlowNovoCliente`/`FlowEditarCliente`:
+  `resolveLeadFlowContext(AuthService.getCurrentUser())` decide
+  `FlowLigarLocal` (corpo original, renomeado, sem nenhuma alteração
+  funcional/visual/textual) ou `FlowLigarRemote` (novo).
+- **`FlowLigarRemote`**: usa exclusivamente `useApplyLeadEvent` +
+  `mapLeadHealthEventToRemoteEventType({type:'call', outcome})` — nunca
+  `LeadService`/`TaskService`/`VisitService`/`DealService`/`SaleService`/
+  `StoreAdapter`. Autorização por Lead via `canActorMutateLead` (Manager:
+  qualquer Lead da empresa; Seller: só o próprio) antes de mostrar o
+  formulário. Payload da RPC é só `{leadId, eventType}` (dentro do próprio
+  `useApplyLeadEvent`, já aprovado no E5-A1) — nunca `companyId`/
+  `expectedVersion`/texto/objeto completo do Lead. Quatro labels honestos,
+  sem prometer objetos que não são criados: "Demonstrou interesse em
+  visita" (`call_outcome_visit`), "Solicitou proposta"
+  (`call_outcome_proposal`), "Pediu retorno" (`call_outcome_callback`),
+  "Não atendeu" (`call_outcome_no_answer`). Aviso fixo no formulário: "Nesta
+  etapa, o resultado será salvo no andamento do Lead. Tarefas e linha do
+  tempo serão disponibilizadas depois." — nunca mostrado no caminho local.
+  Sucesso reaproveita `FlowSuccess` (infraestrutura já existente no
+  projeto — nenhum sistema global de toast foi criado, decisão explícita
+  desta etapa) com o texto "Resultado da ligação registrado."; erros
+  (`forbidden`/`lead_not_found`/`lead_archived`/`company_read_only`/
+  `stage_not_found`/genérico) mostrados inline, sem fechar o flow;
+  `identity_changed` fecha o flow sem sucesso, sem detalhe da empresa
+  antiga. `retry: 0` (já no próprio hook); os 4 resultados e o botão ficam
+  desabilitados durante o envio — nenhum duplo submit possível.
+- **`FlowVerCliente`**: "Ligar" deixou de estar atrás de `canApplyEvents` —
+  agora usa `canLogCallOutcome` + `canActorMutateLead` (calculado só quando
+  `payload.capabilities` está presente; o caminho legado por
+  `payload.readOnly`, sem capabilities, preserva o agrupamento antigo,
+  nunca chama `AuthService`). Visita/Proposta/Acompanhar continuam
+  exclusivamente atrás de `canApplyEvents` (sempre `false`).
+- **`LeadCard`/`ScreenClientesLegacy`** (`components/screens/ScreensOps.tsx`):
+  mesmo padrão do `moveAuthorized` do E5-B1/`PipeCard` — o pai calcula
+  `canLigar` por Lead (`canActorMutateLead`) e passa como prop resolvida;
+  "Ligar agora" e "Visita" agora aparecem/somem de forma independente.
+  `PipeCard`/Kanban não precisaram de nenhuma mudança (não têm botão de
+  Ligar; `FlowVerCliente` resolve a própria autorização via
+  `AuthService.getCurrentUser()`, funciona igual vindo do Kanban ou da
+  lista de Clientes).
+- **`FlowLayer.tsx`**: nenhuma mudança — `'ligar'` nunca esteve no conjunto
+  de flows bloqueados do E5-B2-A1 (o roteamento local/remoto agora vive
+  dentro do próprio `FlowLigar`); os outros 9 flows comerciais continuam
+  bloqueados exatamente como antes.
+- **Caminho local**: intacto — `FlowLigarLocal` idêntico ao `FlowLigar`
+  original (texto, Task nos 2 outcomes aplicáveis, timeline, fechamento).
+- Nenhum arquivo de SQL, `lib/services.ts`, `StoreAdapter`, `store.ts`,
+  `ScreensBiz.tsx`, `Flows3.tsx`, `remoteMutationRepository`,
+  `useApplyLeadEvent`, `leadEventMapper`, `localCommercialAccess`,
+  `leadMutationOwnership.ts` ou superfície Platform foi tocado.
+
+**E5-B2-A2 formalmente encerrado. Visitas, propostas, vendas e
+acompanhamentos permanecem indisponíveis no modo remoto até existirem
+módulos remotos estruturados próprios — nunca serão simulados com o Health
+Engine. E5-C (regressão final e fechamento formal do M1-E) desbloqueado,
+ainda não iniciado.**
 
 ## 16. Plano de testes
 
