@@ -7,6 +7,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 
 const m = vi.hoisted(() => ({
   useRemoteLeadsScreenState: vi.fn(),
+  useArchivedLeads: vi.fn(),
   openFlow: vi.fn(),
   leads: { current: [] as any[] },
   user: { current: null as any },
@@ -14,6 +15,14 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks/useRemoteLeadsScreenState', () => ({
   useRemoteLeadsScreenState: m.useRemoteLeadsScreenState,
+}));
+
+// M1-E E6-B2-B — ScreenClientesLegacy chama useArchivedLeads diretamente
+// (Ativos/Arquivados); mockado aqui pelo mesmo motivo de
+// useRemoteLeadsScreenState — evita depender de QueryClientProvider real
+// neste arquivo (que testa o roteamento/estados da tela, não a query).
+vi.mock('@/lib/hooks/useArchivedLeads', () => ({
+  useArchivedLeads: m.useArchivedLeads,
 }));
 
 vi.mock('@/lib/store', () => ({ useStore: () => ({}) }));
@@ -91,6 +100,15 @@ function renderScreen() {
   return render(<ScreenClientes go={() => {}} />);
 }
 
+function archivedLeadsResult(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    queryEnabled: false, queryKey: [],
+    leads: [], isLoading: false, isFetching: false, isError: false, error: null,
+    refetch: vi.fn(),
+    ...over,
+  };
+}
+
 beforeEach(() => {
   m.leads.current = [localLead('l1', 'Carlos Andrade', 'red'), localLead('l2', 'Juliana Prado', 'green')];
   m.user.current = {
@@ -98,6 +116,7 @@ beforeEach(() => {
     activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
   };
   m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+  m.useArchivedLeads.mockReturnValue(archivedLeadsResult());
   (window as any).__openFlow = m.openFlow;
   m.openFlow.mockReset();
 });
@@ -305,5 +324,147 @@ describe('ScreenClientes — remote_active, sucesso', () => {
     fireEvent.click(screen.getByText('Rótulo Vendedor Dois'));
     expect(screen.queryByText('Ana Vitória')).toBeNull();
     expect(screen.getByText('Bruno Lima')).toBeInTheDocument();
+  });
+});
+
+// M1-E E6-B2-B — área Ativos/Arquivados. useArchivedLeads mockado (m.useArchivedLeads);
+// adaptação real (adaptLeadRows) exige pipeline.byId/sellerLabels.sellersById
+// populados nos casos de sucesso.
+function archivedLeadRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'arch-1', company_id: 'company-a', name: 'Cliente Arquivado', phone: '(11) 90000-0000',
+    phone_digits: '11900000000', car: 'Golf GTI', stage_id: 'stage-new', seller_id: 's1',
+    urgency: 'green', temperature: null, last_activity_label: null, alert_label: null,
+    payment_preference: null, value_amount: null, source: null,
+    created_by_profile_id: null, updated_by_profile_id: null,
+    archived_at: '2026-07-29T10:00:00+00:00', version: 2,
+    created_at: '2026-07-01T10:00:00+00:00', updated_at: '2026-07-29T10:00:00+00:00',
+    ...overrides,
+  };
+}
+
+const ARCHIVED_STAGE_BY_ID = { 'stage-new': { id: 'stage-new', code: 'new', name: 'Novo', sortOrder: 0, isTerminal: false } };
+const ARCHIVED_SELLER_BY_ID = { s1: { id: 's1', name: 'Ana Souza' } };
+
+describe('ScreenClientes — visibilidade do toggle Ativos/Arquivados (E6-B2-B)', () => {
+  it('Manager operacional em remote_active: toggle visível', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active'));
+    renderScreen();
+    expect(screen.getByTestId('clientes-area-toggle')).toBeInTheDocument();
+  });
+
+  it('Seller: toggle nunca aparece (canArchive sempre false)', () => {
+    m.user.current = {
+      id: 'user-2', name: 'Vendedor', email: 's@a.com',
+      activeMembership: { companyId: 'company-a', role: 'seller', sellerId: 's1' },
+    };
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active'));
+    renderScreen();
+    expect(screen.queryByTestId('clientes-area-toggle')).toBeNull();
+  });
+
+  it('remote_misconfigured: toggle nunca aparece', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_misconfigured'));
+    renderScreen();
+    expect(screen.queryByTestId('clientes-area-toggle')).toBeNull();
+  });
+
+  it('remote_unavailable_identity: toggle nunca aparece', () => {
+    // remote_unavailable_identity só ocorre de verdade quando a identidade
+    // real está incompleta (sem membership ativa) — mockar junto com um
+    // currentUser sem activeMembership reflete o único cenário real em que
+    // este modo ocorre (capabilities.canArchive também depende do mesmo
+    // currentUser, nunca só do mode mockado).
+    m.user.current = { id: 'user-3', name: 'Sem Empresa', email: 'x@a.com', activeMembership: null };
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_unavailable_identity'));
+    renderScreen();
+    expect(screen.queryByTestId('clientes-area-toggle')).toBeNull();
+  });
+
+  it('caminho local (REMOTE_LEADS=false): toggle nunca aparece', () => {
+    renderScreen();
+    expect(screen.queryByTestId('clientes-area-toggle')).toBeNull();
+  });
+});
+
+describe('ScreenClientes — lista de Arquivados (Manager)', () => {
+  it('clicar em "Arquivados" monta a lista e esconde o chrome de Ativos (Guide/filtros/grid)', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { pipeline: { byId: ARCHIVED_STAGE_BY_ID }, sellerLabels: { sellersById: ARCHIVED_SELLER_BY_ID } }),
+    );
+    m.useArchivedLeads.mockReturnValue(archivedLeadsResult({ leads: [archivedLeadRow()] }));
+    renderScreen();
+    fireEvent.click(screen.getByText('Arquivados'));
+    expect(screen.getByTestId('arquivados-list')).toBeInTheDocument();
+    expect(screen.getByText('Cliente Arquivado')).toBeInTheDocument();
+    expect(screen.queryByTestId('clientes-grid')).toBeNull();
+  });
+
+  it('loading mostra skeleton', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active'));
+    m.useArchivedLeads.mockReturnValue(archivedLeadsResult({ isLoading: true }));
+    renderScreen();
+    fireEvent.click(screen.getByText('Arquivados'));
+    expect(screen.getByTestId('arquivados-skeleton')).toBeInTheDocument();
+  });
+
+  it('lista vazia mostra "Nenhum Lead arquivado."', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active'));
+    m.useArchivedLeads.mockReturnValue(archivedLeadsResult({ leads: [] }));
+    renderScreen();
+    fireEvent.click(screen.getByText('Arquivados'));
+    expect(screen.getByTestId('arquivados-state-empty')).toHaveTextContent('Nenhum Lead arquivado.');
+  });
+
+  it('erro mostra mensagem sanitizada com retry (nunca SQL/UUID/técnico)', () => {
+    const refetch = vi.fn();
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active'));
+    m.useArchivedLeads.mockReturnValue(archivedLeadsResult({
+      isError: true, refetch, error: { code: '42501', message: 'permission denied for table leads' },
+    }));
+    renderScreen();
+    fireEvent.click(screen.getByText('Arquivados'));
+    const state = screen.getByTestId('arquivados-state-error');
+    expect(state.textContent).not.toMatch(/42501|permission denied|leads_select|SELECT/i);
+    fireEvent.click(within(state).getByText('Tentar novamente'));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('Lead com stage órfão (configuração inválida) mostra estado sanitizado, sem UUID', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { pipeline: { byId: ARCHIVED_STAGE_BY_ID }, sellerLabels: { sellersById: ARCHIVED_SELLER_BY_ID } }),
+    );
+    m.useArchivedLeads.mockReturnValue(archivedLeadsResult({ leads: [archivedLeadRow({ stage_id: 'stage-ghost' })] }));
+    renderScreen();
+    fireEvent.click(screen.getByText('Arquivados'));
+    const state = screen.getByTestId('arquivados-state-lead-config-error');
+    expect(state.textContent).not.toContain('stage-ghost');
+  });
+
+  it('clicar num item chama openFlow("ver-cliente-arquivado") com o Lead adaptado (stage/seller resolvidos)', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { pipeline: { byId: ARCHIVED_STAGE_BY_ID }, sellerLabels: { sellersById: ARCHIVED_SELLER_BY_ID } }),
+    );
+    m.useArchivedLeads.mockReturnValue(archivedLeadsResult({ leads: [archivedLeadRow()] }));
+    renderScreen();
+    fireEvent.click(screen.getByText('Arquivados'));
+    fireEvent.click(screen.getByText('Cliente Arquivado'));
+    expect(m.openFlow).toHaveBeenCalledWith('ver-cliente-arquivado', {
+      lead: expect.objectContaining({ id: 'arch-1', stage: 'Novo', seller: 'Ana Souza', sellerId: 's1' }),
+    });
+  });
+
+  it('Ativos e Arquivados nunca se misturam: Lead arquivado nunca aparece na grade de Ativos', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', {
+        leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'green')] },
+        pipeline: { byId: ARCHIVED_STAGE_BY_ID }, sellerLabels: { sellersById: ARCHIVED_SELLER_BY_ID },
+      }),
+    );
+    m.useArchivedLeads.mockReturnValue(archivedLeadsResult({ leads: [archivedLeadRow()] }));
+    renderScreen();
+    // clientsArea começa em 'ativos' — nenhum dado de arquivados vaza sem o toggle.
+    expect(screen.queryByText('Cliente Arquivado')).toBeNull();
+    expect(screen.getByText('Ana Vitória')).toBeInTheDocument();
   });
 });
