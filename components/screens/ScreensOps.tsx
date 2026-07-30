@@ -71,15 +71,25 @@ const STAGE_TONE: Record<string, string> = {
   'Em negociação': 'amber', 'Fechamento': 'green',
 };
 
-function LeadCard({ lead, go, capabilities }: { lead: any; go: any; capabilities?: LeadMutationCapabilities | null }) {
+function LeadCard({ lead, go, capabilities, canLigar }: {
+  lead: any; go: any; capabilities?: LeadMutationCapabilities | null;
+  // M1-E E5-B2-A2 — só significativo quando capabilities está presente
+  // (caminho remoto), já resolvido pelo chamador via canActorMutateLead
+  // (mesmo padrão de moveAuthorized em PipeCard/E5-B1).
+  canLigar?: boolean;
+}) {
   const u = (URG as any)[lead.urgency];
   const red = lead.urgency === 'red';
   const green = lead.urgency === 'green';
   const av = red ? 50 : green ? 36 : 42;
   // M1-E E4-B2: ausência de capabilities = caminho local (acesso integral,
-  // igual a antes desta etapa). Presença de capabilities = caminho remoto —
-  // ações rápidas de ligação/visita (eventos, E5) ficam sempre fora do E4.
-  const quickActionsHidden = capabilities ? !capabilities.canApplyEvents : false;
+  // igual a antes desta etapa). M1-E E5-B2-A2: Ligar agora deixou de
+  // depender de canApplyEvents — usa canLigar (capability + posse do
+  // Lead). Visita continua atrás de canApplyEvents (picker de 18 eventos,
+  // ainda fora do E5-B2-A2).
+  const showLigar = capabilities ? Boolean(canLigar) : true;
+  const showVisita = capabilities ? capabilities.canApplyEvents : true;
+  const quickActionsHidden = !showLigar && !showVisita;
   return (
     <div className="lift" onClick={() => (window as any).__openFlow('ver-cliente', { lead, capabilities: capabilities ?? null })} style={{
       background: red
@@ -130,12 +140,14 @@ function LeadCard({ lead, go, capabilities }: { lead: any; go: any; capabilities
 
       {/* Card itself opens Central do Cliente (M0-K3.2, correção 4) — internal
           buttons stop propagation so Ligar/Visita don't also trigger it.
-          M1-E E4-B2: no modo remoto, capabilities.canApplyEvents é sempre
-          false no E4 (eventos são E5) — as ações rápidas de mutation
-          (Ligar/Visita) somem; só a abertura do detalhe permanece. */}
+          M1-E E5-B2-A2: no modo remoto, Ligar usa canLigar (capability +
+          posse do Lead); Visita continua atrás de canApplyEvents (sempre
+          false até o picker de eventos existir) — as duas ações somem
+          independentemente uma da outra; só a abertura do detalhe é
+          garantida. */}
       <div style={{ display: 'flex', gap: 8 }} onClick={(e: any) => e.stopPropagation()}>
-        {!quickActionsHidden && <LBtn size="sm" kind={red ? 'danger' : green ? 'ghost' : 'primary'} icon="phone" style={{ flex: 1, justifyContent: 'center' }} onClick={() => (window as any).__openFlow('ligar', { lead })}>{green ? 'Ligar' : 'Ligar agora'}</LBtn>}
-        {!quickActionsHidden && !green && <LBtn size="sm" kind="ghost" icon="calendar" onClick={() => (window as any).__openFlow('criar-visita', { lead })}>Visita</LBtn>}
+        {showLigar && <LBtn size="sm" kind={red ? 'danger' : green ? 'ghost' : 'primary'} icon="phone" style={{ flex: 1, justifyContent: 'center' }} onClick={() => (window as any).__openFlow('ligar', { lead })}>{green ? 'Ligar' : 'Ligar agora'}</LBtn>}
+        {showVisita && !green && <LBtn size="sm" kind="ghost" icon="calendar" onClick={() => (window as any).__openFlow('criar-visita', { lead })}>Visita</LBtn>}
         <LBtn size="sm" kind="ghost" icon="arrowRight" style={quickActionsHidden ? { flex: 1, justifyContent: 'center' } : undefined} onClick={() => (window as any).__openFlow('ver-cliente', { lead, capabilities: capabilities ?? null })} />
       </div>
     </div>
@@ -190,6 +202,14 @@ function ScreenClientesLegacy({ go }: any) {
     profileIsActive: Boolean(currentUser),
     actor: currentUser,
   });
+  // M1-E E5-B2-A2 — identidade do ator para autorização por Lead do botão
+  // Ligar (canActorMutateLead) — mesmos campos que leadFlowContext.ts já
+  // extrai do User, nunca inferidos pelo nome do Seller.
+  const membershipRole: 'manager' | 'seller' | null =
+    currentUser?.activeMembership?.role === 'manager' || currentUser?.activeMembership?.role === 'seller'
+      ? currentUser.activeMembership.role
+      : null;
+  const actorSellerId = currentUser?.activeMembership?.sellerId ?? null;
   const [sellerFilter, setSellerFilter] = useState<string>('Todos');
   const [filter, setFilter] = useState('Todos');
 
@@ -239,7 +259,15 @@ function ScreenClientesLegacy({ go }: any) {
     } else {
       gridBody = (
         <div data-testid="clientes-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, alignItems: 'start' }}>
-          {sorted.map((l: any) => <LeadCard key={l.id} lead={l} go={go} capabilities={capabilities} />)}
+          {sorted.map((l: any) => {
+            const canLigar = canActorMutateLead({
+              capability: capabilities.canLogCallOutcome,
+              actorRole: membershipRole,
+              actorSellerId,
+              leadSellerId: l.sellerId ?? null,
+            });
+            return <LeadCard key={l.id} lead={l} go={go} capabilities={capabilities} canLigar={canLigar} />;
+          })}
         </div>
       );
     }

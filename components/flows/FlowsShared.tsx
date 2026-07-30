@@ -1,11 +1,16 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge } from '@/components/ui/kit';
-import { LeadService, TaskService, SellerService } from '@/lib/services';
+import { LeadService, TaskService, SellerService, AuthService } from '@/lib/services';
 import type { LeadHealthEvent } from '@/lib/services';
 import { USERS, TASK_STATE } from '@/lib/data';
 import type { LeadMutationCapabilities } from '@/lib/leads/mutationCapabilities';
+import { resolveLeadFlowContext, type LeadFlowContext } from '@/lib/leads/leadFlowContext';
+import { canActorMutateLead } from '@/lib/leads/leadMutationOwnership';
+import { useApplyLeadEvent } from '@/lib/hooks/useApplyLeadEvent';
+import { mapLeadHealthEventToRemoteEventType } from '@/lib/leads/leadEventMapper';
+import { isRemoteLeadsError, type RemoteLeadsErrorCode } from '@/lib/leads/errors';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -413,7 +418,21 @@ export function FlowSuccess({ icon = 'checkCircle', accent = '#27C75F', title, s
   );
 }
 
+// ── FlowLigar — router sem hooks próprios (mesmo molde de FlowNovoCliente/
+// FlowEditarCliente em Flows2.tsx: a escolha é de QUAL componente montar,
+// nunca de qual hook chamar dentro do MESMO componente). M1-E E5-B2-A2. ──
 export function FlowLigar({ payload, close, openFlow }: any) {
+  const user = AuthService.getCurrentUser();
+  const ctx = resolveLeadFlowContext(user);
+  if (ctx.dataSource === 'remote') {
+    return <FlowLigarRemote payload={payload} close={close} ctx={ctx} />;
+  }
+  return <FlowLigarLocal payload={payload} close={close} openFlow={openFlow} />;
+}
+
+// ── Caminho LOCAL: corpo original, intacto (só o nome mudou de FlowLigar
+// para FlowLigarLocal) ───────────────────────────────────────────────────
+function FlowLigarLocal({ payload, close, openFlow }: any) {
   const lead = payload.lead || LeadService.getAll()[0];
   const [phase, setPhase] = useState('ready');
   const [secs, setSecs] = useState(0);
@@ -541,6 +560,155 @@ export function FlowLigar({ payload, close, openFlow }: any) {
   );
 }
 
+const CALL_OUTCOME_REMOTE_OPTIONS: ReadonlyArray<{
+  id: 'visita' | 'proposta' | 'retorno' | 'naoatendeu'; icon: string; title: string; accent: string;
+}> = [
+  { id: 'visita', icon: 'calendar', title: 'Demonstrou interesse em visita', accent: '#27C75F' },
+  { id: 'proposta', icon: 'handshake', title: 'Solicitou proposta', accent: '#E8CE72' },
+  { id: 'retorno', icon: 'clock', title: 'Pediu retorno', accent: '#FFA31F' },
+  { id: 'naoatendeu', icon: 'phone', title: 'Não atendeu', accent: '#8B8B93' },
+];
+
+// Mesma proteção de identidade do E4-B2 (useCloseOnIdentityChange, privado
+// em Flows2.tsx) — versão própria deste arquivo, nunca importada de lá:
+// Flows2.tsx já importa DESTE arquivo, então o sentido contrário criaria um
+// ciclo de módulos. Fecha o flow sem mostrar sucesso quando a identidade
+// (empresa/membership/usuário) muda enquanto ele está aberto.
+function useCloseRemoteCallFlowOnIdentityChange(identityKey: string | null, close: () => void) {
+  const ref = useRef<string | null | 'unset'>('unset');
+  useEffect(() => {
+    if (ref.current === 'unset') { ref.current = identityKey; return; }
+    if (ref.current !== identityKey) { close(); return; }
+    ref.current = identityKey;
+  }, [identityKey, close]);
+}
+
+// Mensagens sanitizadas fixas do resultado remoto de ligação — mesmo modelo
+// de remoteLeadErrorMessage (Flows2.tsx)/remoteLeadMoveErrorMessage
+// (ScreensOps.tsx), próprio deste arquivo: nenhum UUID/SQL/RPC/payload/
+// stack. identity_changed nunca chega aqui (tratado antes, fecha o flow).
+function remoteCallOutcomeErrorMessage(code: RemoteLeadsErrorCode | undefined): string {
+  switch (code) {
+    case 'remote_leads_mutation_forbidden':
+      return 'Você não possui permissão para registrar uma ligação neste Lead.';
+    case 'remote_leads_mutation_lead_not_found':
+      return 'Este Lead não está mais disponível.';
+    case 'remote_leads_mutation_lead_archived':
+      return 'Este Lead foi arquivado e não pode receber novas atividades.';
+    case 'remote_leads_mutation_company_read_only':
+      return 'Esta empresa está em modo somente leitura.';
+    case 'remote_leads_mutation_stage_not_found':
+      return 'A etapa atual do Lead não está mais disponível.';
+    default:
+      return 'Não foi possível registrar o resultado da ligação.';
+  }
+}
+
+// ── Caminho REMOTO: somente os 4 resultados de ligação, via
+// apply_lead_event (useApplyLeadEvent + mapLeadHealthEventToRemoteEventType,
+// M1-E E5-B2-A2). Nunca chama LeadService/TaskService/VisitService/
+// DealService/SaleService/StoreAdapter — nenhuma Task, nenhuma timeline
+// (E7). Payload da RPC é somente leadId/eventType (dentro do próprio hook,
+// já aprovado no E5-A1) — nunca companyId/expectedVersion/texto/objeto
+// completo do Lead. ──────────────────────────────────────────────────────
+function FlowLigarRemote({ payload, close, ctx }: { payload: any; close: () => void; ctx: LeadFlowContext }) {
+  const lead = payload.lead || {};
+  const identityKey = ctx.userId && ctx.companyId ? `${ctx.userId}:${ctx.companyId}` : null;
+  useCloseRemoteCallFlowOnIdentityChange(identityKey, close);
+
+  const [outcome, setOutcome] = useState<'visita' | 'proposta' | 'retorno' | 'naoatendeu' | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const applyEventHook = useApplyLeadEvent({
+    userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
+  });
+
+  // Posse por Lead (Manager: qualquer Lead da empresa; Seller: só o
+  // próprio) — o backend continua sendo a autoridade final; esta checagem
+  // é só a autorização visual (mesmo padrão do E5-B1/PipeCard).
+  const authorized = canActorMutateLead({
+    capability: ctx.capabilities.canLogCallOutcome,
+    actorRole: ctx.membershipRole,
+    actorSellerId: ctx.sellerId,
+    leadSellerId: lead.sellerId ?? null,
+  });
+
+  if (!authorized) {
+    return (
+      <FlowShell eyebrow="CENTRAL DE CONTATO" title="Ligar" icon="phone" accent="#8B8B93" onClose={close}>
+        <div style={{ padding: '40px 12px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
+          Você não tem permissão para registrar uma ligação neste Lead.
+        </div>
+      </FlowShell>
+    );
+  }
+
+  if (done) {
+    return (
+      <FlowShell eyebrow="CENTRAL DE CONTATO" title="Ligação registrada" icon="phone" accent="#27C75F" onClose={close}>
+        <FlowSuccess title="Resultado da ligação registrado." sub={`O andamento de ${lead.name ?? 'este Lead'} foi atualizado.`}
+          actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      </FlowShell>
+    );
+  }
+
+  async function handleSaveOutcome() {
+    if (!outcome || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const eventType = mapLeadHealthEventToRemoteEventType({ type: 'call', outcome });
+      await applyEventHook.applyLeadEvent({ leadId: lead.id, eventType });
+      setDone(true);
+    } catch (err) {
+      const code = isRemoteLeadsError(err) ? err.code : undefined;
+      if (code === 'remote_leads_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(remoteCallOutcomeErrorMessage(code));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <FlowShell eyebrow="CENTRAL DE CONTATO" title={`Ligar para ${(lead.name || '').split(' ')[0]}`} icon="phone" accent="#27C75F" onClose={close}>
+      <div style={{ maxWidth: 720, margin: '0 auto' }}>
+        <FPanel>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Icon name="alert" size={16} stroke={2.2} style={{ color: 'var(--t-500)', flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, color: 'var(--t-500)' }}>
+              Nesta etapa, o resultado será salvo no andamento do Lead. Tarefas e linha do tempo serão disponibilizadas depois.
+            </span>
+          </div>
+        </FPanel>
+        <FPanel title="Resultado da ligação" icon="flag" accent="#27C75F" style={{ marginTop: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            {CALL_OUTCOME_REMOTE_OPTIONS.map((o) => (
+              <ChoiceTile key={o.id} icon={o.icon} title={o.title} accent={o.accent} active={outcome === o.id}
+                onClick={() => { if (!submitting) setOutcome(o.id); }} />
+            ))}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <LBtn kind="gold" size="lg" icon="check" onClick={handleSaveOutcome} style={{ width: '100%', justifyContent: 'center', opacity: outcome && !submitting ? 1 : .5 }}>
+              {submitting ? 'Salvando…' : 'Salvar resultado'}
+            </LBtn>
+          </div>
+        </FPanel>
+        {submitError && (
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--red-bg, rgba(255,59,59,.08))', border: '1px solid var(--red-line, rgba(255,59,59,.3))' }}>
+            <Icon name="alert" size={18} stroke={2.2} style={{ color: 'var(--red, #FF3B3B)' }} />
+            <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{submitError}</span>
+          </div>
+        )}
+      </div>
+    </FlowShell>
+  );
+}
+
 export function FlowVerCliente({ payload, close, openFlow }: any) {
   const lead = payload.lead || LeadService.getAll()[0];
   // M1-E E4-B2: payload.capabilities (LeadMutationCapabilities), quando
@@ -552,11 +720,34 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
   const capabilities: LeadMutationCapabilities | null = payload.capabilities ?? null;
   const legacyReadOnly = Boolean(payload.readOnly);
   const canEditDetails = capabilities ? capabilities.canEditDetails : !legacyReadOnly;
-  // M1-E E3-B1/E4-B2: leads remotos no E4 nunca liberam eventos (Ligar/
-  // Visita/Proposta/Acompanhar) — isso é E5. capabilities.canApplyEvents
-  // cobre o mesmo caso que payload.readOnly cobria (sempre false no E4
-  // remoto), mais granular quando presente.
+  // M1-E E3-B1/E4-B2: leads remotos nunca liberam Visita/Proposta/
+  // Acompanhar por completo — isso é o picker de 18 eventos, ainda fora do
+  // E5-B2-A2 (só a Ligação foi conectada). capabilities.canApplyEvents
+  // cobre o mesmo caso que payload.readOnly cobria (sempre false no
+  // caminho remoto), mais granular quando presente.
   const canApplyEvents = capabilities ? capabilities.canApplyEvents : !legacyReadOnly;
+  // M1-E E5-B2-A2: Ligar agora é independente de canApplyEvents — usa
+  // canLogCallOutcome + posse do Lead (canActorMutateLead), nunca infere
+  // propriedade pelo nome do Seller. Só calculado quando capabilities está
+  // presente (caminho remoto real) — o caminho legado (payload.readOnly,
+  // sem capabilities) preserva o agrupamento antigo (Ligar sob o mesmo
+  // booleano das demais ações), sem chamar AuthService.
+  let canLigar: boolean;
+  if (capabilities) {
+    const currentUser = AuthService.getCurrentUser();
+    const membershipRole: 'manager' | 'seller' | null =
+      currentUser?.activeMembership?.role === 'manager' || currentUser?.activeMembership?.role === 'seller'
+        ? currentUser.activeMembership.role
+        : null;
+    canLigar = canActorMutateLead({
+      capability: capabilities.canLogCallOutcome,
+      actorRole: membershipRole,
+      actorSellerId: currentUser?.activeMembership?.sellerId ?? null,
+      leadSellerId: lead.sellerId ?? null,
+    });
+  } else {
+    canLigar = canApplyEvents;
+  }
   const u = URG[lead.urgency];
   // lead.timeline is already the real record — addToTimeline() unshifts onto it
   // from Ligar/Visita/Proposta/Venda/Acompanhamento, so insertion order is
@@ -570,8 +761,8 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
     return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
   })();
   const actions = [
+    ...(canLigar ? [{ icon: 'phone', label: 'Ligar', flow: 'ligar', accent: '#27C75F' }] : []),
     ...(canApplyEvents ? [
-      { icon: 'phone', label: 'Ligar', flow: 'ligar', accent: '#27C75F' },
       { icon: 'calendar', label: 'Agendar visita', flow: 'criar-visita', accent: '#E8CE72' },
       { icon: 'handshake', label: 'Nova proposta', flow: 'nova-proposta', accent: '#E8CE72' },
       // "Acompanhamento" is one unbreakable word wider than the 88px button —
@@ -654,7 +845,7 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
               <Icon name={lead.urgency === 'red' ? 'flame' : 'phone'} size={20} stroke={2.2} style={{ color: lead.urgency === 'red' ? 'var(--red)' : 'var(--gold-ink)' }} />
               <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--t-900)' }}>{lead.alert}</span>
             </div>
-            {canApplyEvents && (
+            {canLigar && (
               <div style={{ marginTop: 12 }}>
                 <LBtn kind="gold" icon="phone" onClick={() => openFlow('ligar', { lead })} style={{ width: '100%', justifyContent: 'center' }}>Ligar agora</LBtn>
               </div>
