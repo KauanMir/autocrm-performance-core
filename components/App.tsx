@@ -8,6 +8,7 @@ import type { User } from '@/lib/data';
 import { isRemoteStagesEnabled, isPlatformAdminEnabled, isSuperAdminCommercialReadEnabled } from '@/lib/flags';
 import { canAccessStageSettings, canAccessPlatformAdmin, canManageInvites, canAccessCommercialWorkspace } from '@/lib/capabilities';
 import { useQueryCacheIdentity } from '@/lib/hooks/useQueryCacheIdentity';
+import { useLeadsRemoteBridgeLifecycle } from '@/lib/hooks/useLeadsRemoteBridgeLifecycle';
 import { CommercialCompanyProvider } from '@/lib/commercial/CommercialCompanyContext';
 import { subscribeStore } from '@/lib/store';
 import { AuthService, SellerService, TaskService } from '@/lib/services';
@@ -218,6 +219,14 @@ export function App() {
     hasActiveMembership: Boolean(currentUser?.activeMembership),
     isActive: Boolean(currentUser),
   });
+
+  // M1-E E3-B1: único ponto de montagem da bridge de Leads remotos —
+  // próximo ao ciclo de identidade acima, nunca dentro de ScreenClientes/
+  // ScreenAndamento. Nunca monta para Super Admin (sem activeMembership,
+  // por design); desmonta e limpa o snapshot sozinho em qualquer troca de
+  // identidade (logout, troca de usuário/empresa/membership, desativação da
+  // flag) — ver lib/hooks/useLeadsRemoteBridgeLifecycle.ts.
+  useLeadsRemoteBridgeLifecycle(currentUser);
 
   const go = (id: string) => {
     if (!currentUser) return;
