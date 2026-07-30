@@ -1,6 +1,7 @@
-// Testes de lib/leads/remoteMutationRepository.ts (M1-E, E4-B1). Supabase
-// mockado (rpc), sem rede real. Prova: create/update/duplicate chamam a
-// RPC certa, NUNCA enviam p_company_id, erro vira RemoteLeadsError via
+// Testes de lib/leads/remoteMutationRepository.ts (M1-E, E4-B1 + E5-A1
+// move/event). Supabase mockado (rpc), sem rede real. Prova: create/update/
+// duplicate/move/event chamam a RPC certa, NUNCA enviam p_company_id (e
+// move NUNCA envia p_expected_version), erro vira RemoteLeadsError via
 // mapRemoteLeadsMutationError, retorno tipado preservado.
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -8,6 +9,8 @@ import {
   updateRemoteLead,
   checkRemoteLeadPhoneDuplicate,
   normalizeLeadPhoneDigits,
+  moveRemoteLeadToStage,
+  applyRemoteLeadEvent,
 } from '@/lib/leads/remoteMutationRepository';
 import { isRemoteLeadsError } from '@/lib/leads/errors';
 
@@ -138,6 +141,82 @@ describe('checkRemoteLeadPhoneDuplicate', () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'invalid_phone' } });
     await expect(checkRemoteLeadPhoneDuplicate({ phone: 'abc' }))
       .rejects.toMatchObject({ code: 'remote_leads_mutation_invalid_phone' });
+  });
+});
+
+describe('moveRemoteLeadToStage', () => {
+  const MOVED = { id: 'lead-1', company_id: 'company-a', stage_id: 'stage-2', version: 2 };
+
+  it('chama move_lead_to_stage SEM p_company_id e SEM p_expected_version (LWW)', async () => {
+    mocks.rpc.mockResolvedValue({ data: MOVED, error: null });
+    await moveRemoteLeadToStage({ leadId: 'lead-1', stageId: 'stage-2' });
+    expect(mocks.rpc).toHaveBeenCalledWith('move_lead_to_stage', {
+      p_lead_id: 'lead-1',
+      p_stage_id: 'stage-2',
+    });
+    const args = mocks.rpc.mock.calls[0][1];
+    expect(args).not.toHaveProperty('p_company_id');
+    expect(args).not.toHaveProperty('p_expected_version');
+  });
+
+  it('retorna a linha real quando não há erro', async () => {
+    mocks.rpc.mockResolvedValue({ data: MOVED, error: null });
+    await expect(moveRemoteLeadToStage({ leadId: 'lead-1', stageId: 'stage-2' })).resolves.toEqual(MOVED);
+  });
+
+  it('stage_not_found do Supabase vira RemoteLeadsError com código namespaced', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'stage_not_found' } });
+    await expect(moveRemoteLeadToStage({ leadId: 'lead-1', stageId: 'stage-x' }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_stage_not_found' });
+  });
+
+  it('forbidden do Supabase vira RemoteLeadsError com código namespaced', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'forbidden' } });
+    await expect(moveRemoteLeadToStage({ leadId: 'lead-1', stageId: 'stage-2' }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_forbidden' });
+  });
+
+  it('data null (sem erro) é anômalo: lança generic_error, nunca retorna undefined', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    await expect(moveRemoteLeadToStage({ leadId: 'lead-1', stageId: 'stage-2' }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_generic_error' });
+  });
+});
+
+describe('applyRemoteLeadEvent', () => {
+  const EVENTED = { id: 'lead-1', company_id: 'company-a', stage_id: 'stage-1', urgency: 'amber', version: 2 };
+
+  it('chama apply_lead_event SEM p_company_id, com o evento tipado', async () => {
+    mocks.rpc.mockResolvedValue({ data: EVENTED, error: null });
+    await applyRemoteLeadEvent({ leadId: 'lead-1', eventType: 'visit_confirmed' });
+    expect(mocks.rpc).toHaveBeenCalledWith('apply_lead_event', {
+      p_lead_id: 'lead-1',
+      p_event_type: 'visit_confirmed',
+    });
+    expect(mocks.rpc.mock.calls[0][1]).not.toHaveProperty('p_company_id');
+  });
+
+  it('retorna a linha real quando não há erro', async () => {
+    mocks.rpc.mockResolvedValue({ data: EVENTED, error: null });
+    await expect(applyRemoteLeadEvent({ leadId: 'lead-1', eventType: 'sale_registered' })).resolves.toEqual(EVENTED);
+  });
+
+  it('lead_archived do Supabase vira RemoteLeadsError com código namespaced', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'lead_archived' } });
+    await expect(applyRemoteLeadEvent({ leadId: 'lead-1', eventType: 'visit_confirmed' }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_lead_archived' });
+  });
+
+  it('stage_not_found do Supabase (evento exige stage_code inexistente na empresa) vira código namespaced', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'stage_not_found' } });
+    await expect(applyRemoteLeadEvent({ leadId: 'lead-1', eventType: 'call_outcome_visit' }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_stage_not_found' });
+  });
+
+  it('data null (sem erro) é anômalo: lança generic_error, nunca retorna undefined', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: null });
+    await expect(applyRemoteLeadEvent({ leadId: 'lead-1', eventType: 'visit_confirmed' }))
+      .rejects.toMatchObject({ code: 'remote_leads_mutation_generic_error' });
   });
 });
 

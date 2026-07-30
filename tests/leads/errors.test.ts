@@ -22,6 +22,8 @@ describe('mapRemoteLeadsMutationError — mensagens conhecidas', () => {
     ['seller_not_found', 'remote_leads_mutation_seller_not_found'],
     ['initial_stage_missing', 'remote_leads_mutation_initial_stage_missing'],
     ['invalid_phone', 'remote_leads_mutation_invalid_phone'],
+    // M1-E E5-A1 — stage_not_found (move_lead_to_stage/apply_lead_event).
+    ['stage_not_found', 'remote_leads_mutation_stage_not_found'],
     ['stale_write', 'remote_leads_mutation_stale_write'],
   ];
 
