@@ -8,10 +8,9 @@ import type { LeadRow } from '@/lib/supabase/types';
 import { RemoteLeadsError } from '@/lib/leads/errors';
 
 // Lê os leads ATIVOS visíveis para a sessão atual (archived_at IS NULL é a
-// única condição — arquivados terão query própria quando a visualização de
-// admin/manager existir, fase E6). Ordenação estável e determinística:
-// created_at descendente com id ascendente como desempate — nunca o nome do
-// estágio como autoridade.
+// única condição). Arquivados usam fetchArchivedLeadRows, abaixo (M1-E,
+// E6-B1). Ordenação estável e determinística: created_at descendente com id
+// ascendente como desempate — nunca o nome do estágio como autoridade.
 export async function fetchActiveLeadRows(): Promise<LeadRow[]> {
   const { data, error } = await supabase
     .from('leads')
@@ -23,6 +22,31 @@ export async function fetchActiveLeadRows(): Promise<LeadRow[]> {
   if (error) {
     // Erro NUNCA vira lista vazia. Detail preserva somente código e mensagem
     // do PostgREST — sem token, sem URL, sem query.
+    throw new RemoteLeadsError('remote_leads_fetch_failed', {
+      code: typeof error.code === 'string' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined,
+    });
+  }
+
+  return (data ?? []) as unknown as LeadRow[];
+}
+
+// Lê os leads ARQUIVADOS visíveis para a sessão atual (M1-E, E6-B1) —
+// mesmo padrão seguro de fetchActiveLeadRows, com o filtro de arquivamento
+// invertido (archived_at IS NOT NULL). RLS (leads_select) só concede essa
+// visibilidade ao Manager — a cláusula do Seller sempre inclui
+// `archived_at is null`, então esta função naturalmente retorna vazio para
+// Seller sem nenhum filtro adicional aqui. Nunca alimenta remoteSnapshot ou
+// a bridge (aquele espelho é reservado à listagem ativa).
+export async function fetchArchivedLeadRows(): Promise<LeadRow[]> {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .not('archived_at', 'is', null)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true });
+
+  if (error) {
     throw new RemoteLeadsError('remote_leads_fetch_failed', {
       code: typeof error.code === 'string' ? error.code : undefined,
       message: typeof error.message === 'string' ? error.message : undefined,
