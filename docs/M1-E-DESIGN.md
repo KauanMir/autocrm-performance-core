@@ -1031,6 +1031,100 @@ E4-A1 conclui os pré-requisitos de backend. E4-B1 (repository/hooks de
 `create`/`update`/duplicidade + capabilities granulares) segue desbloqueado,
 ainda não iniciado.
 
+### 15.4 E4-B1 — Data layer, hooks e capabilities de create/update/duplicidade (sem UI)
+
+Implementa a infraestrutura TypeScript de mutation para Manager/Seller —
+nenhum formulário, tela, `SellerPicker`, `StoreAdapter` ou componente
+Platform é tocado nesta subetapa (isso é E4-B2). Molde de padrão: os hooks
+Platform (`useCreatePlatformLead`/`useUpdatePlatformLead`/
+`useCheckPlatformLeadPhoneDuplicate`, M1-F) — nunca importados ou chamados
+por este caminho, que é estruturalmente separado (Manager/Seller nunca
+enviam `p_company_id`; Super Admin nunca usa estes hooks).
+
+**`lib/leads/remoteMutationRepository.ts`** (novo, arquivo próprio — não
+altera `remoteRepository.ts`, que permanece só leitura de listagem):
+`createRemoteLead`/`updateRemoteLead`/`checkRemoteLeadPhoneDuplicate`
+chamam `create_lead`/`update_lead`/`check_lead_phone_duplicate` **sem**
+`p_company_id` — para Manager/Seller o parâmetro é sempre ignorado pelo
+resolver (§6.1/6.2/6.9), então nunca é enviado, reforçando que a autoridade
+de empresa nunca é fingida pelo cliente neste caminho (diferente da
+superfície Platform, que sempre envia `p_company_id` explícito). Seller
+nunca envia `p_seller_id` (o backend sempre autoatribui); Manager pode
+enviar um `sellerId` resolvido pelo catálogo de assignable sellers (E4-A1)
+ou `null`. Erros do Supabase passam pelo mapper aditivo de
+`lib/leads/errors.ts` (abaixo) — nunca lançados crus.
+
+**`lib/leads/errors.ts` — extensão aditiva**: os 4 códigos do E3
+(`remote_leads_fetch_failed`/`snapshot_unavailable`/`read_only`/
+`invalid_context`) permanecem intocados. Novo grupo
+`RemoteLeadsMutationErrorCode` (`remote_leads_mutation_forbidden`/
+`company_required`/`company_not_found`/`company_read_only`/
+`lead_not_found`/`lead_archived`/`seller_not_found`/
+`initial_stage_missing`/`invalid_phone`/`stale_write`/`identity_changed`/
+`generic_error`) mapeado a partir da mensagem estável que cada RPC lança
+(`raise exception '<codigo>'`) por `mapRemoteLeadsMutationError` — mensagem
+desconhecida vira sempre `generic_error` (nunca `stale_write`/`forbidden`
+por adivinhação). `detail` preserva só `code`/`message`/`operation`, nunca
+payload, telefone completo, SQL ou UUID interno.
+
+**Capabilities** (`lib/leads/mutationCapabilities.ts`, novo — módulo
+próprio, `lib/capabilities.ts` intocado): `LeadMutationCapabilities`
+(`canCreate`/`canEditDetails`/`canApplyEvents`/`canMoveStage`/
+`canAssignSeller`/`canArchive`) resolvida por
+`resolveLeadMutationCapabilities({ flagMode, profileIsActive, actor })` —
+função pura, nunca lê `.env`/flags diretamente (`flagMode` vem de
+`resolveRemoteLeadsFlagMode()`, resolvido pelo chamador). Só
+`flagMode==='remote_ready'` **e** profile ativo **e** `activeMembership`
+presente (Manager, ou Seller com `sellerId` não-nulo) habilita
+`canCreate`/`canEditDetails`; todo o resto (`canApplyEvents`/
+`canMoveStage`/`canAssignSeller`/`canArchive`) permanece `false` no E4 —
+são E5/E6. Super Admin, sem membership, suspenso/desligado (nunca populam
+`activeMembership`, por invariante já estabelecido em `canManageInvites`),
+Seller sem `sellerId` e modo `local`/`remote_misconfigured`: todas `false`.
+Capabilities são controle de **interface**, nunca substituem a autorização
+real do backend (RLS/RPC continuam a única autoridade).
+
+**Hooks** (`lib/hooks/useCreateLead.ts`/`useUpdateLead.ts`/
+`useCheckLeadPhoneDuplicate.ts`, novos): identidade por parâmetro (mesmo
+padrão de `useLeads`/`useCurrentCompanySellerLabels` — `userId`/
+`companyId`/`membershipRole`/`sellerId`/`userIsActive`, nunca importam
+`AuthService`). `useCreateLead` recebe um input discriminado por
+`actorRole` (`'manager' | 'seller'`) — a variante `seller` do tipo
+**estruturalmente não tem campo `sellerId`**, então o componente futuro
+nunca pode compilar um envio de vendedor arbitrário pelo Seller; o
+repository nunca envia `p_seller_id` para esse caminho. `retry: 0` nas
+três (nenhuma é idempotente ou tolera reenvio automático).
+`useUpdateLead` exige `expectedVersion`; nenhuma escrita otimista no cache
+(o valor exibido só muda depois da resposta real, via invalidation).
+`useCheckLeadPhoneDuplicate` é imperativo (`useMutation`, nunca
+`useQuery` — telefone é PII, nunca vira query key) e devolve
+`{ sequence, phone, phoneDigits, rows }`; expõe `getLatestSequence()`
+(função estável, não-reativa) para o E4-B2 comparar contra o `sequence` de
+uma resposta recebida e descartar respostas de uma chamada mais antiga
+(telefone já trocado no meio do debounce) — decisão sobre "criar mesmo
+assim" continua inteiramente do E4-B2, o hook nunca decide isso.
+
+**Proteção de identidade** (as três mutations): `getQueryCacheGeneration`/
+`lib/query/cacheIdentity.ts` (M1-D) capturada no INÍCIO da `mutationFn`
+(antes de chamar a RPC); depois da resposta, a geração é conferida de novo
+— se mudou (logout, troca de empresa/membership, `resetQueryCache` correu
+no meio), a mutation **lança** `remote_leads_mutation_identity_changed` em
+vez de retornar sucesso (a escrita já pode ter concluído no servidor —
+nenhuma promessa de cancelamento transacional, nunca um `AbortController`)
+e o `onSuccess` correspondente nunca roda, então nenhuma invalidation
+contamina a identidade nova. Quando a geração não mudou, `onSuccess`
+invalida `leadQueryKeys.active(companyId CAPTURADO)` (create/update) e
+`leadQueryKeys.detail(companyId, leadId)` (update, key já reservada por
+`queryKeys.ts` desde o E2, sem consumidor ainda — invalidation antecipada e
+inofensiva). Nunca um reset global do QueryClient, nunca escrita direta em
+`remoteSnapshot`/`StoreAdapter` — o fluxo permanece
+mutation→invalidate→refetch→bridge (já provado no E4-A0, §11).
+
+Nenhuma UI conectada nesta subetapa; nenhuma migration; nenhuma alteração
+em `database.types.ts`; nenhuma operação Supabase remota. E4-B2 (conectar
+formulários, `SellerPicker` remoto, UX de duplicidade/`stale_write`,
+capabilities aplicadas às telas) segue desbloqueado, ainda não iniciado.
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
@@ -1249,3 +1343,29 @@ Intocados nesta subetapa: `create_lead`, `update_lead`,
 `ScreenClientesLegacy`, `ScreenAndamentoLegacy`, `components/App.tsx`,
 `StoreAdapter`, `SellerService`, superfícies Platform/`lib/commercial/*`,
 `.env*`. Nenhuma flag ativada; nenhuma operação Supabase remota.
+
+**E4-B1** (§15.4) — novos:
+
+- `lib/leads/remoteMutationRepository.ts`
+- `lib/leads/mutationCapabilities.ts`
+- `lib/hooks/useCreateLead.ts`, `useUpdateLead.ts`,
+  `useCheckLeadPhoneDuplicate.ts`
+- `tests/leads/remoteMutationRepository.test.ts`,
+  `tests/leads/mutationCapabilities.test.ts`
+- `tests/hooks/useCreateLead.test.tsx`, `useUpdateLead.test.tsx`,
+  `useCheckLeadPhoneDuplicate.test.tsx`
+
+Alterado (aditivo): `lib/leads/errors.ts` (novo grupo
+`RemoteLeadsMutationErrorCode` + `mapRemoteLeadsMutationError`; os 4
+códigos do E3 permanecem intocados).
+
+Intocados nesta subetapa: SQL/migrations/`database.types.ts`/RPC/RLS/
+grants (nenhuma alteração de backend), `lib/leads/adapter.ts`,
+`lib/leads/remoteRepository.ts`, `lib/leads/bridge.ts`,
+`lib/leads/remoteSnapshot.ts`, `lib/leads/assignableSellersRepository.ts`,
+`lib/leads/sellerLabelsRepository.ts`, `lib/leads/queryKeys.ts`,
+`lib/capabilities.ts`, `lib/store.ts`, `StoreAdapter`, `SellerService`,
+`SellerPicker`, `FlowNovoCliente`, `FlowEditarCliente`, `FlowVerCliente`,
+`ScreenClientesLegacy`, `ScreenAndamentoLegacy`, `components/App.tsx`,
+superfícies Platform/`lib/commercial/*`, `lib/flags.ts`, `.env*`. Nenhuma
+UI conectada; nenhuma flag ativada; nenhuma operação Supabase remota.
