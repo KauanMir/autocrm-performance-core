@@ -1125,6 +1125,118 @@ em `database.types.ts`; nenhuma operação Supabase remota. E4-B2 (conectar
 formulários, `SellerPicker` remoto, UX de duplicidade/`stale_write`,
 capabilities aplicadas às telas) segue desbloqueado, ainda não iniciado.
 
+### 15.5 E4-B2 — Conexão dos formulários remotos de create/update/duplicidade
+
+Conecta a infraestrutura do E4-B1 aos formulários e telas de Manager/
+Seller. Escopo estritamente de UI: nenhuma migration, nenhuma RPC, nenhum
+`database.types.ts`, zero alteração nos hooks/repository/capabilities
+aprovados no E4-B1 (salvo o ajuste de integração previsto ali). `move_lead_
+to_stage`/`apply_lead_event`/atribuição de Seller/`archive`/`unarchive`/
+timeline manual permanecem fora (E5/E6/E7) — o Kanban remoto continua sem
+drag/drop/mudança de Stage.
+
+**Contrato de fonte** (`lib/leads/leadFlowContext.ts`, novo, função pura):
+`resolveLeadFlowContext(user: User | null)` combina
+`resolveRemoteLeadsFlagMode()` (única chamada a esse helper na camada de
+UI — nenhum componente lê `isRemoteLeadsEnabled()`/`isRemoteStagesEnabled()`
+diretamente) com `resolveLeadMutationCapabilities()` (E4-B1) e devolve
+`{ dataSource: 'local' | 'remote', capabilities, companyId, membershipRole,
+sellerId, userId, userIsActive }`. `dataSource` é `'remote'` sempre que a
+flag estiver ligada (inclusive `remote_misconfigured`/sem identidade
+operacional) — nunca `'local'` nesses casos, para nunca existir fallback
+local silencioso sob flag ON (mesmo invariante do E3); a UI distingue os
+sub-estados pelas `capabilities` (todas `false` cobre exatamente os casos
+sem permissão). Cada tela/flow que precisa da fonte chama esta função com
+o `currentUser` que já resolve (mesmo padrão já usado por
+`FlowNovoCliente`/`ScreenClientesLegacy`, que já leem `AuthService.
+getCurrentUser()`), nunca recebendo-a por payload — `FlowLayer` roteia
+flows por id sem contexto próprio, então centralizar na função pura
+(chamada nos pontos que já têm `currentUser`) é o único jeito de nunca
+espalhar a leitura da flag.
+
+**`SellerPicker` — separação em dois componentes** (`FlowsShared.tsx`):
+o componente antigo (`SellerService.getAll()` interno) foi renomeado para
+`LocalSellerPicker`, sem nenhuma mudança de comportamento — `FlowNovoCliente`
+(ramo local), `FlowRegistrarVenda` e `FlowNovaPendencia` (nunca tocados
+pelo escopo do E4) passaram a importar `LocalSellerPicker` no lugar do nome
+antigo. `SellerPicker` passou a ser presentacional: recebe `items`
+(`{id,name}[]`), `value` (`sellerId | null`), `onChange`, `loading`,
+`disabled`, `error`, `allowNone`/`noneLabel` — nunca importa
+`SellerService`, nunca faz fallback para ele. Estados: loading (trigger
+desabilitado, "Carregando vendedores…"), error (mensagem sanitizada, sem
+dropdown), vazio (só a opção "Sem vendedor", quando `allowNone`), sucesso
+(itens reais + "Sem vendedor" no topo). O formulário remoto de criação
+(Manager) alimenta este componente com `useCurrentCompanyAssignableSellers`
+(E4-A1) — nunca `list_current_company_seller_labels` (catálogo histórico,
+E3-A1) e nunca `SellerService`.
+
+**Capabilities na UI**: `FlowVerCliente` aceita `payload.capabilities`
+(`LeadMutationCapabilities | null`) — quando presente, substitui
+inteiramente a decisão antiga por `payload.readOnly` (que continua
+funcionando exatamente como antes quando `capabilities` está ausente,
+preservando 100% os callers que só passam `readOnly`, sem exigir migração
+de nenhum caller existente). Com `capabilities`: "Editar dados" aparece só
+com `canEditDetails`; Ligar/Agendar visita/Nova proposta/Acompanhar (e o
+botão inline "Ligar agora") aparecem só com `canApplyEvents` (sempre
+`false` no E4 remoto — pertencem ao E5). `LeadCard`/`PipeCard`
+(`ScreensOps.tsx`) trocam a prop `readOnly` por `capabilities` (mesmo
+padrão de fallback: `capabilities` ausente = comportamento local integral)
+— ações rápidas de ligação gated por `canApplyEvents`; `PipeCard.draggable`
+gated por `canMoveStage` (sempre `false` no E4, drag remoto continua
+impossível). `ScreenClientesLegacy` ganha um botão "Novo Lead" no ramo
+remoto, visível só quando `capabilities.canCreate`, ausente até aqui.
+
+**Formulário de criação** (`FlowNovoCliente`, `Flows2.tsx`): resolve o
+próprio `dataSource` via `resolveLeadFlowContext(AuthService.
+getCurrentUser())` (mesmo padrão do resto do arquivo). `dataSource==='local'`
+preserva o corpo original byte a byte (incluindo o `SellerPicker` renomeado
+para `LocalSellerPicker`, sem mudança de comportamento — Manager continua
+obrigado a escolher um Seller localmente, decisão de produto antiga e fora
+de escopo desta etapa). `dataSource==='remote'` e `capabilities.canCreate`
+falso: estado bloqueado (mensagem sanitizada, sem formulário). `dataSource
+==='remote'` e `canCreate` verdadeiro: formulário remoto — Manager vê
+`SellerPicker` alimentado por `useCurrentCompanyAssignableSellers` (com
+opção "Sem vendedor", diferente do local); Seller não vê nenhum picker.
+Campos: nome, telefone, veículo, temperatura, pagamento, origem — nunca
+Stage/valor/notas/urgência/arquivado. `useCreateLead` é chamado com o input
+discriminado por `actorRole` (nunca constrói `sellerId` no caminho Seller).
+Ao salvar, o UUID real retornado alimenta a Task local e a tela de sucesso
+(substitui o `'l'+Date.now()` do caminho local, que continua existindo só
+para `dataSource==='local'`).
+
+**Formulário de edição** (`FlowEditarCliente`): mesmo `resolveLeadFlowContext`
+para decidir o ramo. Remoto: `expectedVersion` vem de `lead.version`
+(`LeadModel`, sempre presente — rastreado da leitura remota, adaptador e
+snapshot até `FlowVerCliente`/`LeadCard`/`PipeCard`, nenhuma perda
+encontrada na auditoria desta etapa); Stage/Seller/valor/notas/urgência/
+arquivamento ficam **ocultos** (não apenas desabilitados) — só nome,
+telefone, veículo, temperatura, pagamento e origem aparecem. Local:
+corpo original intacto, incluindo o seletor de Etapa.
+
+**Duplicidade** (`lib/hooks/useLeadDuplicateGuard.ts`, novo — envolve
+`useCheckLeadPhoneDuplicate` do E4-B1, nunca o substitui): debounce de
+500 ms após telefone válido e estável; nova checagem obrigatória no
+submit (nunca confia só no resultado do debounce); `excludeLeadId` na
+edição; confirmação explícita vinculada a `phoneDigits` + `sequence` do
+hook base — telefone mudou, fecha formulário ou identidade mudou: a
+confirmação é descartada e uma nova checagem é exigida. `none`: segue
+direto para a mutation. `accessible`/`restricted`/erro no check: mutation
+NUNCA dispara sozinha — exige clique explícito em "Criar/Salvar mesmo
+assim". Telefone nunca entra em query key, URL, `localStorage` ou log.
+
+**`stale_write`/`identity_changed`**: mensagens sanitizadas fixas (nunca
+UUID/SQL/payload); `stale_write` mantém o formulário aberto com os dados
+digitados e nunca repete a mutation sozinho; `identity_changed` fecha/
+reseta o formulário da identidade antiga (nenhum sucesso, nenhuma
+invalidation, nenhum draft sobrevive à troca de empresa/logout/
+suspensão/transferência).
+
+Super Admin: zero import de `PlatformCommercialClientsView`/
+`PlatformCommercialPipelineView`/modais Platform/repositories/hooks
+Platform/`selectedCompanyId` nestes arquivos — confirmado por grep, como
+em toda etapa anterior do M1-E. E4-C (regressão final, builds, fechamento
+formal do E4) segue desbloqueado, ainda não iniciado.
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
@@ -1369,3 +1481,34 @@ grants (nenhuma alteração de backend), `lib/leads/adapter.ts`,
 `ScreenClientesLegacy`, `ScreenAndamentoLegacy`, `components/App.tsx`,
 superfícies Platform/`lib/commercial/*`, `lib/flags.ts`, `.env*`. Nenhuma
 UI conectada; nenhuma flag ativada; nenhuma operação Supabase remota.
+
+**E4-B2** (§15.5) — novos:
+
+- `lib/leads/leadFlowContext.ts`
+- `lib/hooks/useLeadDuplicateGuard.ts`
+- `tests/leads/leadFlowContext.test.ts`,
+  `tests/hooks/useLeadDuplicateGuard.test.tsx`
+
+Alterados:
+
+- `components/flows/FlowsShared.tsx` (`SellerPicker` original renomeado
+  para `LocalSellerPicker`; novo `SellerPicker` presentacional;
+  `FlowVerCliente` aceita `payload.capabilities`, preservando
+  `payload.readOnly` para callers existentes)
+- `components/flows/Flows2.tsx` (`FlowNovoCliente`/`FlowEditarCliente`
+  ganham o ramo remoto; `FlowRegistrarVenda`/`FlowNovaPendencia` só trocam
+  o nome do import para `LocalSellerPicker`, zero mudança de comportamento)
+- `components/screens/ScreensOps.tsx` (`LeadCard`/`PipeCard` trocam
+  `readOnly` por `capabilities`; `ScreenClientesLegacy` ganha o botão
+  "Novo Lead" remoto)
+- `tests/flows/FlowVerCliente.test.tsx`, `tests/screens/ScreenClientes.test.tsx`
+  (cobertura nova, sem remover nenhum teste existente)
+
+Intocados: SQL/migrations/`database.types.ts`/RPC/RLS/grants,
+`lib/leads/remoteMutationRepository.ts`, `useCreateLead.ts`/
+`useUpdateLead.ts`/`useCheckLeadPhoneDuplicate.ts` (E4-B1, só consumidos),
+`lib/leads/mutationCapabilities.ts`, `lib/leads/errors.ts`,
+`lib/leads/adapter.ts`, `lib/leads/bridge.ts`, `StoreAdapter`,
+`SellerService`, componentes Platform/`lib/commercial/*`,
+`components/App.tsx`, `lib/flags.ts`, `.env*`. Nenhuma flag ativada;
+nenhuma operação Supabase remota.
