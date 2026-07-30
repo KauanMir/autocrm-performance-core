@@ -7,9 +7,11 @@ import { useStore } from '@/lib/store';
 import { LeadService, TaskService, PipelineService, AuthService, SellerService } from '@/lib/services';
 import { useRemoteLeadsScreenState, type RemoteLeadsScreenMode } from '@/lib/hooks/useRemoteLeadsScreenState';
 import { useRemoteLeadStageMoveController } from '@/lib/hooks/useRemoteLeadStageMoveController';
+import { useArchivedLeads } from '@/lib/hooks/useArchivedLeads';
 import { resolveLeadMutationCapabilities, type LeadMutationCapabilities } from '@/lib/leads/mutationCapabilities';
 import { canActorMutateLead } from '@/lib/leads/leadMutationOwnership';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
+import { adaptLeadRows } from '@/lib/leads/adapter';
 import type { RemoteLeadsErrorCode } from '@/lib/leads/errors';
 import type { RemoteLeadsFlagMode } from '@/lib/leads/remoteLeadsMode';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
@@ -179,6 +181,44 @@ function ClientesGridSkeleton({ testId }: { testId: string }) {
   );
 }
 
+// M1-E E6-B2-B — item read-only da lista de Arquivados (Manager). Nunca
+// abre ações de Lead ativo (Ligar/Visita/Editar/Atribuir/Arquivar) — só
+// abre o detalhe read-only (`ver-cliente-arquivado`), que decide sozinho se
+// mostra "Restaurar Lead" (capabilities.canArchive, a mesma que governa
+// archive/unarchive — nunca canUnarchive separado).
+function ArchivedLeadRow({ lead }: { lead: any }) {
+  const archivedAtLabel = (() => {
+    if (!lead.archivedAt) return null;
+    const d = new Date(lead.archivedAt);
+    return isNaN(d.getTime()) ? null : d.toLocaleDateString('pt-BR');
+  })();
+  return (
+    <div
+      className="lift"
+      data-testid={`arquivados-item-${lead.id}`}
+      onClick={() => (window as any).__openFlow('ver-cliente-arquivado', { lead })}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', borderRadius: 12,
+        border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer',
+      }}
+    >
+      <Avatar name={lead.name} size={40} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{lead.name}</div>
+        <div style={{ display: 'flex', gap: 12, marginTop: 3, flexWrap: 'wrap', fontSize: 12, color: 'var(--t-500)' }}>
+          {lead.car && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="car" size={12} stroke={2} /> {lead.car}</span>
+          )}
+          <span style={{ padding: '2px 8px', borderRadius: 999, background: 'rgba(255,255,255,.06)' }}>{lead.stage}</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="users" size={12} stroke={2} /> {lead.seller || '—'}</span>
+          {archivedAtLabel && <span>Arquivado em {archivedAtLabel}</span>}
+        </div>
+      </div>
+      <Icon name="arrowRight" size={16} stroke={2} style={{ color: 'var(--t-400)' }} />
+    </div>
+  );
+}
+
 // M1-F S8-C2-B2: corpo LEGADO de Clientes (Manager/Seller) — extraído sem
 // nenhuma alteração funcional/visual, exportado como ScreenClientes (router,
 // zero hooks) mais abaixo. Super Admin nunca monta este componente.
@@ -210,8 +250,20 @@ function ScreenClientesLegacy({ go }: any) {
       ? currentUser.activeMembership.role
       : null;
   const actorSellerId = currentUser?.activeMembership?.sellerId ?? null;
+  // M1-E E6-B2-B — identidade para useArchivedLeads (mesmos campos que
+  // ScreenAndamentoLegacy já extrai para o controller de movimento).
+  const companyId = currentUser?.activeMembership?.companyId ?? null;
+  const userId = currentUser?.id ?? null;
+  const userIsActive = Boolean(currentUser);
   const [sellerFilter, setSellerFilter] = useState<string>('Todos');
   const [filter, setFilter] = useState('Todos');
+  // Ativos/Arquivados — Manager-only (gate real é capabilities.canArchive,
+  // calculado abaixo; Seller nunca vê o toggle, então nunca sai de
+  // 'ativos'). Chamado sempre (Rules of Hooks) — useArchivedLeads já gateia
+  // Manager-only/remote_ready internamente, então para Seller a query nunca
+  // dispara mesmo que este estado pudesse mudar.
+  const [clientsArea, setClientsArea] = useState<'ativos' | 'arquivados'>('ativos');
+  const archived = useArchivedLeads({ userId, companyId, membershipRole: currentUser?.activeMembership?.role ?? null, userIsActive });
 
   if (remote.mode !== 'local') {
     const { pipeline, sellerLabels, leads: leadsQuery } = remote;
@@ -227,6 +279,40 @@ function ScreenClientesLegacy({ go }: any) {
     const leadsLoading = isActive && !stagesLoading && !stagesConfigError && !stagesBlockingError && !stagesEmpty && !leadsConfigError && !leadsBlockingError && leadsQuery.isLoading && !leadsQuery.hasData && !leadsQuery.isEmpty;
     const leadsEmpty = isActive && !stagesLoading && !stagesConfigError && !stagesBlockingError && !stagesEmpty && !leadsConfigError && !leadsBlockingError && !leadsLoading && leadsQuery.isEmpty;
     const leadsStale = isActive && leadsQuery.isError && leadsQuery.hasData;
+
+    // M1-E E6-B2-B — área "Arquivados": só quando o Manager está realmente
+    // operacional em remote_ready (mesma condição que libera Alterar
+    // responsável/Arquivar Lead no E6-B2-A — nunca uma checagem nova
+    // paralela). Reaproveita os estados de Stage já computados acima (o
+    // catálogo de etapas é compartilhado entre Ativos e Arquivados).
+    const showArchivedArea = capabilities.canArchive;
+    let archivedBody: React.ReactNode = null;
+    if (showArchivedArea && clientsArea === 'arquivados') {
+      if (stagesConfigError) {
+        archivedBody = <KanbanStateCard testId="arquivados-state-stage-config-error">As etapas da loja não correspondem à configuração esperada.</KanbanStateCard>;
+      } else if (stagesBlockingError) {
+        archivedBody = <KanbanStateCard testId="arquivados-state-error" onRetry={() => pipeline.refetch()}>Não foi possível carregar as etapas.</KanbanStateCard>;
+      } else if (stagesEmpty) {
+        archivedBody = <KanbanStateCard testId="arquivados-state-stage-empty">Nenhuma etapa configurada para sua loja.</KanbanStateCard>;
+      } else if (stagesLoading || archived.isLoading) {
+        archivedBody = <ClientesGridSkeleton testId="arquivados-skeleton" />;
+      } else if (archived.isError) {
+        archivedBody = <KanbanStateCard testId="arquivados-state-error" onRetry={() => archived.refetch()}>Não foi possível carregar os Leads arquivados.</KanbanStateCard>;
+      } else {
+        const adaptedArchived = adaptLeadRows(archived.leads, { stagesById: pipeline.byId, sellersById: sellerLabels.sellersById });
+        if (!adaptedArchived.ok) {
+          archivedBody = <KanbanStateCard testId="arquivados-state-lead-config-error">Um ou mais Leads arquivados estão com configuração inválida.</KanbanStateCard>;
+        } else if (adaptedArchived.leads.length === 0) {
+          archivedBody = <KanbanStateCard testId="arquivados-state-empty">Nenhum Lead arquivado.</KanbanStateCard>;
+        } else {
+          archivedBody = (
+            <div data-testid="arquivados-list" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {adaptedArchived.leads.map((l) => <ArchivedLeadRow key={l.id} lead={l} />)}
+            </div>
+          );
+        }
+      }
+    }
 
     const allLeads: any[] = isActive ? [...leadsQuery.leads] : [];
     const leadsFiltered = (!isSeller && sellerFilter !== 'Todos')
@@ -272,32 +358,46 @@ function ScreenClientesLegacy({ go }: any) {
       );
     }
 
+    const showArchivedTab = clientsArea === 'arquivados' && showArchivedArea;
+
     return (
       <LightScreen>
         <PageHead title="Clientes" sub="Cada cliente mostra na cor o que precisa de você. Vermelho = aja agora."
           actions={capabilities.canCreate ? <LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('novo-cliente')}>Novo Lead</LBtn> : undefined} />
-        {showChrome && leadsStale && (
-          <div data-testid="clientes-stale-warning" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', marginBottom: 12, borderRadius: 10, background: 'var(--amber-bg, rgba(255,163,31,.08))', border: '1px solid var(--amber-line, rgba(255,163,31,.3))', color: 'var(--t-700)', fontSize: 13 }}>
-            <Icon name="alert" size={15} stroke={2.2} style={{ color: 'var(--amber)' }} />
-            <span>Não foi possível atualizar os clientes. Exibindo dados anteriores.</span>
-            <button onClick={() => leadsQuery.refetch()} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--t-700)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, textDecoration: 'underline' }}>Tentar novamente</button>
+        {showArchivedArea && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }} data-testid="clientes-area-toggle">
+            <Chip active={clientsArea === 'ativos'} onClick={() => setClientsArea('ativos')}>Ativos</Chip>
+            <Chip active={clientsArea === 'arquivados'} onClick={() => setClientsArea('arquivados')}>Arquivados</Chip>
           </div>
         )}
-        {showChrome && (
-          <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles — são os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
+        {showArchivedTab ? (
+          archivedBody
+        ) : (
+          <>
+            {showChrome && leadsStale && (
+              <div data-testid="clientes-stale-warning" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', marginBottom: 12, borderRadius: 10, background: 'var(--amber-bg, rgba(255,163,31,.08))', border: '1px solid var(--amber-line, rgba(255,163,31,.3))', color: 'var(--t-700)', fontSize: 13 }}>
+                <Icon name="alert" size={15} stroke={2.2} style={{ color: 'var(--amber)' }} />
+                <span>Não foi possível atualizar os clientes. Exibindo dados anteriores.</span>
+                <button onClick={() => leadsQuery.refetch()} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--t-700)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, textDecoration: 'underline' }}>Tentar novamente</button>
+              </div>
+            )}
+            {showChrome && (
+              <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles — são os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
+            )}
+            {showChrome && !isSeller && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                <Chip active={sellerFilter === 'Todos'} onClick={() => setSellerFilter('Todos')}>Todos</Chip>
+                {sellerLabels.sellerLabels.map((s) => <Chip key={s.seller_id} active={sellerFilter === s.seller_id} onClick={() => setSellerFilter(s.seller_id)}>{s.name}</Chip>)}
+              </div>
+            )}
+            {showChrome && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+                {CLIENT_FILTERS.map(f => <Chip key={f} active={filter === f} onClick={() => setFilter(f)}>{f === 'Atrasados' ? `Atrasados (${delayed})` : f}</Chip>)}
+              </div>
+            )}
+            {gridBody}
+          </>
         )}
-        {showChrome && !isSeller && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-            <Chip active={sellerFilter === 'Todos'} onClick={() => setSellerFilter('Todos')}>Todos</Chip>
-            {sellerLabels.sellerLabels.map((s) => <Chip key={s.seller_id} active={sellerFilter === s.seller_id} onClick={() => setSellerFilter(s.seller_id)}>{s.name}</Chip>)}
-          </div>
-        )}
-        {showChrome && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
-            {CLIENT_FILTERS.map(f => <Chip key={f} active={filter === f} onClick={() => setFilter(f)}>{f === 'Atrasados' ? `Atrasados (${delayed})` : f}</Chip>)}
-          </div>
-        )}
-        {gridBody}
       </LightScreen>
     );
   }

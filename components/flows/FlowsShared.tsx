@@ -14,6 +14,7 @@ import { isRemoteLeadsError, type RemoteLeadsErrorCode } from '@/lib/leads/error
 import { useCurrentCompanyAssignableSellers } from '@/lib/hooks/useCurrentCompanyAssignableSellers';
 import { useAssignLeadSeller, isNoOpSellerAssignment } from '@/lib/hooks/useAssignLeadSeller';
 import { useArchiveLead } from '@/lib/hooks/useArchiveLead';
+import { useUnarchiveLead } from '@/lib/hooks/useUnarchiveLead';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -1122,6 +1123,162 @@ export function FlowArquivarLead({ payload, close }: any) {
         <FPanel>
           <div style={{ fontSize: 14, color: 'var(--t-700)' }}>
             Arquivar este Lead? Ele sairá das listas ativas, mas suas informações continuarão preservadas.
+          </div>
+        </FPanel>
+        {submitError && (
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--red-bg, rgba(255,59,59,.08))', border: '1px solid var(--red-line, rgba(255,59,59,.3))' }}>
+            <Icon name="alert" size={18} stroke={2.2} style={{ color: 'var(--red, #FF3B3B)' }} />
+            <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{submitError}</span>
+          </div>
+        )}
+      </div>
+    </FlowShell>
+  );
+}
+
+// ── FlowVerClienteArquivado — detalhe READ-ONLY de Lead arquivado (M1-E,
+// E6-B2-B). Variante pequena e dedicada, nunca uma reutilização forçada de
+// FlowVerCliente: recebe o Lead JÁ ADAPTADO diretamente por payload.lead
+// (mesmo LeadModel produzido por adaptLeadRows na tela de Arquivados),
+// nunca procura o Lead na lista ativa, nunca chama LeadService, nunca
+// depende de snapshot/bridge. Oculta TODAS as ações de Lead ativo (editar,
+// mover, ligar, atribuir, arquivar, visita, proposta, venda,
+// acompanhamento) — mostra somente informações e, quando autorizado,
+// "Restaurar Lead". ─────────────────────────────────────────────────────
+export function FlowVerClienteArquivado({ payload, close, openFlow }: any) {
+  const lead = payload.lead || {};
+  const user = AuthService.getCurrentUser();
+  const ctx = resolveLeadFlowContext(user);
+  // Mesma capability que governa archive/unarchive (decisão humana do
+  // E6-B2-B: nunca canUnarchive separado) — Manager operacional em
+  // remote_ready, nunca Seller/Super Admin/misconfigured/local.
+  const canRestore = ctx.capabilities.canArchive;
+
+  const archivedAtLabel = (() => {
+    if (!lead.archivedAt) return null;
+    const d = new Date(lead.archivedAt);
+    return isNaN(d.getTime()) ? null : d.toLocaleDateString('pt-BR');
+  })();
+
+  return (
+    <FlowShell eyebrow="LEAD ARQUIVADO" title={lead.name || 'Lead arquivado'} icon="inbox" accent="#8B8B93" onClose={close}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: 22, borderRadius: 16, background: 'linear-gradient(120deg,#1b1b1f,#121214)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', marginBottom: 20, flexWrap: 'wrap' }}>
+        <Avatar name={lead.name || '—'} size={72} />
+        <div style={{ minWidth: 0 }}>
+          <div className="display" style={{ fontSize: 24, fontWeight: 800, color: '#fff' }}>{lead.name}</div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 6, flexWrap: 'wrap' }}>
+            {lead.phone && <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="phone" size={14} stroke={2} /> {lead.phone}</span>}
+            {lead.car && <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="car" size={14} stroke={2} /> {lead.car}</span>}
+            <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="flow" size={14} stroke={2} /> {lead.stage}</span>
+            <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="users" size={14} stroke={2} /> {lead.seller || '—'}</span>
+          </div>
+        </div>
+      </div>
+
+      <FPanel title="Cadastro" icon="clipboard" accent="#8B8B93">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+          <Info icon="users" label="Vendedor responsável" value={lead.seller || '—'} />
+          <Info icon="flow" label="Etapa" value={lead.stage || '—'} />
+          {archivedAtLabel && <Info icon="calendar" label="Arquivado em" value={archivedAtLabel} />}
+        </div>
+      </FPanel>
+
+      {canRestore && (
+        <div style={{ marginTop: 16 }}>
+          <LBtn kind="gold" icon="refresh" onClick={() => openFlow('restaurar-lead', { lead })} style={{ width: '100%', justifyContent: 'center' }}>
+            Restaurar Lead
+          </LBtn>
+        </div>
+      )}
+    </FlowShell>
+  );
+}
+
+// Mensagens sanitizadas fixas do resultado de unarchive_lead.
+function restoreLeadErrorMessage(code: RemoteLeadsErrorCode | undefined): string {
+  switch (code) {
+    case 'remote_leads_mutation_stale_write':
+      return 'Este Lead foi alterado por outra pessoa. Atualize os dados antes de restaurar.';
+    case 'remote_leads_mutation_lead_not_found':
+      return 'Este Lead não está mais disponível.';
+    case 'remote_leads_mutation_forbidden':
+      return 'Você não possui permissão para restaurar este Lead.';
+    case 'remote_leads_mutation_company_read_only':
+      return 'Esta empresa está em modo somente leitura.';
+    default:
+      return 'Não foi possível restaurar o Lead.';
+  }
+}
+
+// ── FlowRestaurarLead — confirmação explícita + useUnarchiveLead (M1-E,
+// E6-B2-B). Autorização vem exclusivamente de ctx.capabilities.canArchive
+// (mesma que archive_lead — nunca canUnarchive). Payload exato: leadId/
+// expectedVersion, nunca companyId/restoreStageId/sellerId/stageId — o
+// contrato real de unarchive_lead preserva stage_id/seller_id existentes
+// (achado do E6-A1: pipeline_stages não tem conceito de etapa inativa). ──
+export function FlowRestaurarLead({ payload, close }: any) {
+  const lead = payload.lead || {};
+  const user = AuthService.getCurrentUser();
+  const ctx = resolveLeadFlowContext(user);
+  const identityKey = ctx.userId && ctx.companyId ? `${ctx.userId}:${ctx.companyId}` : null;
+  useCloseRemoteCallFlowOnIdentityChange(identityKey, close);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const unarchiveHook = useUnarchiveLead({
+    userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
+  });
+
+  if (!ctx.capabilities.canArchive) {
+    return (
+      <FlowShell eyebrow="RESTAURAÇÃO" title="Restaurar Lead" icon="refresh" accent="#8B8B93" onClose={close}>
+        <div style={{ padding: '40px 12px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
+          Você não possui permissão para restaurar este Lead.
+        </div>
+      </FlowShell>
+    );
+  }
+
+  if (done) {
+    return (
+      <FlowShell eyebrow="RESTAURAÇÃO" title="Lead restaurado" icon="refresh" accent="#27C75F" onClose={close}>
+        <FlowSuccess title="Lead restaurado com sucesso" sub={`${lead.name || 'Este Lead'} voltou às listas ativas.`}
+          actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      </FlowShell>
+    );
+  }
+
+  async function handleConfirm() {
+    if (submitting || !lead.id || typeof lead.version !== 'number') return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await unarchiveHook.unarchiveLead({ leadId: lead.id, expectedVersion: lead.version });
+      setDone(true);
+    } catch (err) {
+      const code = isRemoteLeadsError(err) ? err.code : undefined;
+      if (code === 'remote_leads_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(restoreLeadErrorMessage(code));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <FlowShell eyebrow="RESTAURAÇÃO" title={`Restaurar ${(lead.name || '').split(' ')[0]}`} icon="refresh" accent="#27C75F" onClose={close}
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="ghost" size="lg" onClick={close}>Cancelar</LBtn>
+        <LBtn kind="gold" size="lg" icon="refresh" onClick={handleConfirm} style={{ opacity: submitting ? .5 : 1 }}>
+          {submitting ? 'Restaurando…' : 'Restaurar Lead'}
+        </LBtn></>}>
+      <div style={{ maxWidth: 560 }}>
+        <FPanel>
+          <div style={{ fontSize: 14, color: 'var(--t-700)' }}>
+            Restaurar este Lead? Ele voltará às listas ativas mantendo a etapa e o responsável anteriores.
           </div>
         </FPanel>
         {submitError && (

@@ -1,6 +1,9 @@
 'use client';
 import React from 'react';
-import { FlowLigar, FlowVerCliente, FlowAtribuirVendedor, FlowArquivarLead, FlowShell } from './FlowsShared';
+import {
+  FlowLigar, FlowVerCliente, FlowAtribuirVendedor, FlowArquivarLead,
+  FlowVerClienteArquivado, FlowRestaurarLead, FlowShell,
+} from './FlowsShared';
 import {
   FlowNovoCliente, FlowEditarCliente, FlowCriarVisita, FlowConfirmarVisita,
   FlowRegistrarResultado, FlowNovaProposta, FlowAprovarProposta,
@@ -17,6 +20,8 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'ver-cliente': FlowVerCliente,
   'atribuir-vendedor': FlowAtribuirVendedor,
   'arquivar-lead': FlowArquivarLead,
+  'ver-cliente-arquivado': FlowVerClienteArquivado,
+  'restaurar-lead': FlowRestaurarLead,
   'novo-cliente': FlowNovoCliente,
   'editar-cliente': FlowEditarCliente,
   'criar-visita': FlowCriarVisita,
