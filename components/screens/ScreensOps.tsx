@@ -5,7 +5,7 @@ import { Avatar, URG, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard } 
 import { STAGES, TASK_STATE } from '@/lib/data';
 import { useStore } from '@/lib/store';
 import { LeadService, TaskService, PipelineService, AuthService, SellerService } from '@/lib/services';
-import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
+import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
 import { isSuperAdminCommercialReadEnabled } from '@/lib/flags';
 import { PlatformCommercialClientsView } from '@/components/commercial/PlatformCommercialClientsView';
@@ -16,13 +16,13 @@ const STAGE_TONE: Record<string, string> = {
   'Em negociação': 'amber', 'Fechamento': 'green',
 };
 
-function LeadCard({ lead, go }: any) {
+function LeadCard({ lead, go, readOnly }: any) {
   const u = (URG as any)[lead.urgency];
   const red = lead.urgency === 'red';
   const green = lead.urgency === 'green';
   const av = red ? 50 : green ? 36 : 42;
   return (
-    <div className="lift" onClick={() => (window as any).__openFlow('ver-cliente', { lead })} style={{
+    <div className="lift" onClick={() => (window as any).__openFlow('ver-cliente', { lead, readOnly: Boolean(readOnly) })} style={{
       background: red
         ? 'linear-gradient(180deg, rgba(255,46,46,.18), rgba(255,46,46,.03)), #161618'
         : green ? 'linear-gradient(180deg, #151517, #0f0f11)'
@@ -70,12 +70,40 @@ function LeadCard({ lead, go }: any) {
       )}
 
       {/* Card itself opens Central do Cliente (M0-K3.2, correção 4) — internal
-          buttons stop propagation so Ligar/Visita don't also trigger it. */}
+          buttons stop propagation so Ligar/Visita don't also trigger it.
+          M1-E E3-B1: no modo remoto (readOnly), as ações rápidas de
+          mutation (Ligar/Visita) somem — só a abertura do detalhe
+          somente-leitura permanece (decisão 16). */}
       <div style={{ display: 'flex', gap: 8 }} onClick={(e: any) => e.stopPropagation()}>
-        <LBtn size="sm" kind={red ? 'danger' : green ? 'ghost' : 'primary'} icon="phone" style={{ flex: 1, justifyContent: 'center' }} onClick={() => (window as any).__openFlow('ligar', { lead })}>{green ? 'Ligar' : 'Ligar agora'}</LBtn>
-        {!green && <LBtn size="sm" kind="ghost" icon="calendar" onClick={() => (window as any).__openFlow('criar-visita', { lead })}>Visita</LBtn>}
-        <LBtn size="sm" kind="ghost" icon="arrowRight" onClick={() => (window as any).__openFlow('ver-cliente', { lead })} />
+        {!readOnly && <LBtn size="sm" kind={red ? 'danger' : green ? 'ghost' : 'primary'} icon="phone" style={{ flex: 1, justifyContent: 'center' }} onClick={() => (window as any).__openFlow('ligar', { lead })}>{green ? 'Ligar' : 'Ligar agora'}</LBtn>}
+        {!readOnly && !green && <LBtn size="sm" kind="ghost" icon="calendar" onClick={() => (window as any).__openFlow('criar-visita', { lead })}>Visita</LBtn>}
+        <LBtn size="sm" kind="ghost" icon="arrowRight" style={readOnly ? { flex: 1, justifyContent: 'center' } : undefined} onClick={() => (window as any).__openFlow('ver-cliente', { lead, readOnly: Boolean(readOnly) })} />
       </div>
+    </div>
+  );
+}
+
+const CLIENT_FILTERS = ['Todos', 'Atrasados', 'Novo', 'Qualificado', 'Visita agendada', 'Em negociação'];
+const URGENCY_RANK: Record<string, number> = { red: 0, amber: 1, green: 2 };
+
+function sortByUrgency(list: any[]): any[] {
+  return [...list].sort((a: any, b: any) => URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency]);
+}
+
+function filterByStageOrDelay(leads: any[], filter: string): any[] {
+  return leads.filter((l: any) => {
+    if (filter === 'Todos') return true;
+    if (filter === 'Atrasados') return l.urgency === 'red';
+    return l.stage === filter;
+  });
+}
+
+function ClientesGridSkeleton({ testId }: { testId: string }) {
+  return (
+    <div data-testid={testId} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+      {[0, 1, 2].map((i) => (
+        <div key={i} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', minHeight: 180, opacity: 0.55 }} />
+      ))}
     </div>
   );
 }
@@ -83,26 +111,108 @@ function LeadCard({ lead, go }: any) {
 // M1-F S8-C2-B2: corpo LEGADO de Clientes (Manager/Seller) — extraído sem
 // nenhuma alteração funcional/visual, exportado como ScreenClientes (router,
 // zero hooks) mais abaixo. Super Admin nunca monta este componente.
+//
+// M1-E E3-B1: com REMOTE_LEADS efetiva, este componente lê exclusivamente
+// useRemoteLeadsScreenState (Leads/Stages/Sellers reais) — nenhum
+// LeadService/SellerService/StoreAdapter é consultado nesse caminho; local
+// (REMOTE_LEADS=false) permanece 100% intacto, corpo original preservado
+// abaixo sem nenhuma alteração.
 function ScreenClientesLegacy({ go }: any) {
   useStore();
-  const allLeads = LeadService.getAll(); // already RBAC-scoped: seller sees only their own here
   const currentUser = AuthService.getCurrentUser();
   const isSeller = currentUser?.activeMembership?.role === 'seller';
-  const sellers = SellerService.getAll();
+  const remote = useRemoteLeadsScreenState(currentUser);
   const [sellerFilter, setSellerFilter] = useState<string>('Todos');
+  const [filter, setFilter] = useState('Todos');
+
+  if (remote.mode !== 'local') {
+    const { pipeline, sellerLabels, leads: leadsQuery } = remote;
+    const isActive = remote.mode === 'remote_active';
+    const showChrome = remote.mode !== 'remote_misconfigured' && remote.mode !== 'remote_unavailable_identity';
+
+    const stagesConfigError = isActive && pipeline.configError !== null;
+    const stagesBlockingError = isActive && pipeline.isError && !pipeline.hasData && !stagesConfigError;
+    const stagesEmpty = isActive && pipeline.isEmpty && !pipeline.isError && !stagesConfigError;
+    const stagesLoading = isActive && !pipeline.hasData && !stagesConfigError && !stagesBlockingError && !stagesEmpty;
+    const leadsConfigError = isActive && !stagesLoading && !stagesConfigError && !stagesBlockingError && !stagesEmpty && leadsQuery.configError !== null;
+    const leadsBlockingError = isActive && !stagesLoading && !stagesConfigError && !stagesBlockingError && !stagesEmpty && !leadsConfigError && leadsQuery.isError && !leadsQuery.hasData && !leadsQuery.isEmpty;
+    const leadsLoading = isActive && !stagesLoading && !stagesConfigError && !stagesBlockingError && !stagesEmpty && !leadsConfigError && !leadsBlockingError && leadsQuery.isLoading && !leadsQuery.hasData && !leadsQuery.isEmpty;
+    const leadsEmpty = isActive && !stagesLoading && !stagesConfigError && !stagesBlockingError && !stagesEmpty && !leadsConfigError && !leadsBlockingError && !leadsLoading && leadsQuery.isEmpty;
+    const leadsStale = isActive && leadsQuery.isError && leadsQuery.hasData;
+
+    const allLeads: any[] = isActive ? [...leadsQuery.leads] : [];
+    const leadsFiltered = (!isSeller && sellerFilter !== 'Todos')
+      ? allLeads.filter((l: any) => l.sellerId === sellerFilter)
+      : allLeads;
+    const delayed = leadsFiltered.filter((l: any) => l.urgency === 'red').length;
+    const sorted = sortByUrgency(filterByStageOrDelay(leadsFiltered, filter));
+
+    let gridBody: React.ReactNode;
+    if (remote.mode === 'remote_misconfigured') {
+      gridBody = <KanbanStateCard testId="clientes-state-misconfigured">As etapas remotas precisam estar disponíveis para carregar os Leads.</KanbanStateCard>;
+    } else if (remote.mode === 'remote_unavailable_identity') {
+      gridBody = <KanbanStateCard testId="clientes-state-disabled">Sessão indisponível. Entre novamente para ver seus clientes.</KanbanStateCard>;
+    } else if (stagesConfigError) {
+      gridBody = <KanbanStateCard testId="clientes-state-stage-config-error">As etapas da loja não correspondem à configuração esperada.</KanbanStateCard>;
+    } else if (stagesBlockingError) {
+      gridBody = <KanbanStateCard testId="clientes-state-error" onRetry={() => pipeline.refetch()}>Não foi possível carregar as etapas.</KanbanStateCard>;
+    } else if (stagesEmpty) {
+      gridBody = <KanbanStateCard testId="clientes-state-stage-empty">Nenhuma etapa configurada para sua loja.</KanbanStateCard>;
+    } else if (stagesLoading) {
+      gridBody = <ClientesGridSkeleton testId="clientes-skeleton" />;
+    } else if (leadsConfigError) {
+      gridBody = <KanbanStateCard testId="clientes-state-lead-config-error" onRetry={() => leadsQuery.refetch()}>Um ou mais clientes remotos estão com configuração inválida.</KanbanStateCard>;
+    } else if (leadsBlockingError) {
+      gridBody = <KanbanStateCard testId="clientes-state-error" onRetry={() => leadsQuery.refetch()}>Não foi possível carregar os clientes.</KanbanStateCard>;
+    } else if (leadsLoading) {
+      gridBody = <ClientesGridSkeleton testId="clientes-skeleton" />;
+    } else if (leadsEmpty) {
+      gridBody = <KanbanStateCard testId="clientes-state-empty">Nenhum cliente cadastrado ainda.</KanbanStateCard>;
+    } else {
+      gridBody = (
+        <div data-testid="clientes-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, alignItems: 'start' }}>
+          {sorted.map((l: any) => <LeadCard key={l.id} lead={l} go={go} readOnly />)}
+        </div>
+      );
+    }
+
+    return (
+      <LightScreen>
+        <PageHead title="Clientes" sub="Cada cliente mostra na cor o que precisa de você. Vermelho = aja agora." />
+        {showChrome && leadsStale && (
+          <div data-testid="clientes-stale-warning" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', marginBottom: 12, borderRadius: 10, background: 'var(--amber-bg, rgba(255,163,31,.08))', border: '1px solid var(--amber-line, rgba(255,163,31,.3))', color: 'var(--t-700)', fontSize: 13 }}>
+            <Icon name="alert" size={15} stroke={2.2} style={{ color: 'var(--amber)' }} />
+            <span>Não foi possível atualizar os clientes. Exibindo dados anteriores.</span>
+            <button onClick={() => leadsQuery.refetch()} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--t-700)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, textDecoration: 'underline' }}>Tentar novamente</button>
+          </div>
+        )}
+        {showChrome && (
+          <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles — são os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
+        )}
+        {showChrome && !isSeller && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            <Chip active={sellerFilter === 'Todos'} onClick={() => setSellerFilter('Todos')}>Todos</Chip>
+            {sellerLabels.sellerLabels.map((s) => <Chip key={s.seller_id} active={sellerFilter === s.seller_id} onClick={() => setSellerFilter(s.seller_id)}>{s.name}</Chip>)}
+          </div>
+        )}
+        {showChrome && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+            {CLIENT_FILTERS.map(f => <Chip key={f} active={filter === f} onClick={() => setFilter(f)}>{f === 'Atrasados' ? `Atrasados (${delayed})` : f}</Chip>)}
+          </div>
+        )}
+        {gridBody}
+      </LightScreen>
+    );
+  }
+
+  // ── Caminho LOCAL (REMOTE_LEADS=false): comportamento M0 inalterado ─────
+  const allLeads = LeadService.getAll(); // already RBAC-scoped: seller sees only their own here
+  const sellers = SellerService.getAll();
   const leads = (!isSeller && sellerFilter !== 'Todos')
     ? allLeads.filter((l: any) => l.sellerId === sellerFilter)
     : allLeads;
-  const [filter, setFilter] = useState('Todos');
   const delayed = leads.filter((l: any) => l.urgency === 'red').length;
-  const filters = ['Todos', 'Atrasados', 'Novo', 'Qualificado', 'Visita agendada', 'Em negociação'];
-  const list = leads.filter((l: any) => {
-    if (filter === 'Todos') return true;
-    if (filter === 'Atrasados') return l.urgency === 'red';
-    return l.stage === filter;
-  });
-  const rank: Record<string, number> = { red: 0, amber: 1, green: 2 };
-  const sorted = [...list].sort((a: any, b: any) => rank[a.urgency] - rank[b.urgency]);
+  const sorted = sortByUrgency(filterByStageOrDelay(leads, filter));
   return (
     <LightScreen>
       <PageHead title="Clientes" sub="Cada cliente mostra na cor o que precisa de você. Vermelho = aja agora." actions={<LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('novo-cliente')}>Novo cliente</LBtn>} />
@@ -114,7 +224,7 @@ function ScreenClientesLegacy({ go }: any) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
-        {filters.map(f => <Chip key={f} active={filter === f} onClick={() => setFilter(f)}>{f === 'Atrasados' ? `Atrasados (${delayed})` : f}</Chip>)}
+        {CLIENT_FILTERS.map(f => <Chip key={f} active={filter === f} onClick={() => setFilter(f)}>{f === 'Atrasados' ? `Atrasados (${delayed})` : f}</Chip>)}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, alignItems: 'start' }}>
         {sorted.map((l: any) => <LeadCard key={l.id} lead={l} go={go} />)}
@@ -139,13 +249,14 @@ export function ScreenClientes({ go }: any) {
   return <ScreenClientesLegacy go={go} />;
 }
 
-function PipeCard({ lead, go, dragging, onDragStart, onDragEnd }: any) {
+function PipeCard({ lead, go, dragging, onDragStart, onDragEnd, readOnly }: any) {
   const u = (URG as any)[lead.urgency];
   return (
     <div
-      draggable
+      draggable={!readOnly}
       data-testid={`pipe-card-${lead.id}`}
       onDragStart={(e: any) => {
+        if (readOnly) return;
         // dataTransfer.setData is required for Firefox to allow the drag to start at
         // all, but the id is read back from lifted React state on drop, not from
         // dataTransfer.getData — some browsers restrict/lose that payload depending
@@ -155,7 +266,7 @@ function PipeCard({ lead, go, dragging, onDragStart, onDragEnd }: any) {
         onDragStart(lead.id);
       }}
       onDragEnd={onDragEnd}
-      onClick={() => (window as any).__openFlow('ver-cliente', { lead })} style={{
+      onClick={() => (window as any).__openFlow('ver-cliente', { lead, readOnly: Boolean(readOnly) })} style={{
       background: 'var(--surface)', border: '1px solid var(--border)', borderLeft: `4px solid ${u.c}`,
       borderRadius: 10, padding: 12, cursor: 'grab', boxShadow: 'var(--shadow-sm)', opacity: dragging ? 0.4 : 1,
       transition: 'transform .12s, box-shadow .12s, opacity .12s',
@@ -206,17 +317,20 @@ function KanbanStateCard({ testId, children, onRetry }: { testId: string; childr
 // S8-C2-A1 (companyId agora vem de activeMembership.companyId, nunca do
 // legado profiles.company_id) — exportado como ScreenAndamento (router,
 // zero hooks) mais abaixo. Super Admin nunca monta este componente.
+//
+// M1-E E3-B1: pipeline continua vindo de useRemoteLeadsScreenState (mesmo
+// usePipelineStages de sempre, agora composto com Leads/Sellers remotos) —
+// com REMOTE_LEADS=false o comportamento é IDÊNTICO ao anterior (inclusive
+// "Stages remotos + Leads locais agrupados por name", já aprovado no M1-D).
+// Só quando REMOTE_LEADS estiver efetiva (remote.mode==='remote_active') o
+// Kanban passa a usar Leads remotos agrupados por stageId — nunca por name.
 function ScreenAndamentoLegacy({ go }: any) {
   useStore();
-  const allLeads = LeadService.getAll(); // seller already RBAC-scoped to their own leads here
   const currentUser = AuthService.getCurrentUser();
   const isSeller = currentUser?.activeMembership?.role === 'seller';
-  const sellers = SellerService.getAll();
   // Manager/admin see everyone by default and narrow by seller — a seller
-  // never sees this control at all, since LeadService.getAll() already
-  // scoped them to their own leads (M0-K3.1: dropped "Só os meus", which was
-  // either redundant for sellers or meaningless for manager/admin, who have
-  // no sellerId of their own to filter "mine" by).
+  // never sees this control at all, since leads here are already scoped to
+  // their own (local: LeadService.getAll(); remoto: RLS no backend).
   const [sellerFilter, setSellerFilter] = useState<string>('Todos');
   const [overStage, setOverStage] = useState<string | null>(null);
   // Source of truth for "which lead is being dragged" — deliberately not
@@ -230,20 +344,14 @@ function ScreenAndamentoLegacy({ go }: any) {
   // Boolean(currentUser) significa "profile ativo resolvido" — nunca um
   // true fixo. Com a flag OFF o hook devolve os mesmos names locais de
   // PipelineService.getStages() adaptados, sem nenhuma chamada remota.
-  const pipeline = usePipelineStages({
-    userId: currentUser?.id ?? null,
-    // M1-F S8-C2-B2 (achado 1 do S8-C2-A1): companyId vem exclusivamente de
-    // activeMembership.companyId — nunca do legado currentUser?.companyId
-    // (profiles.company_id), que não reflete suspensão/transferência de
-    // membership (mesma correção já aplicada ao pipeline em ScreensBiz.tsx
-    // no S7-B, e ao seam de leads remotos em lib/services.ts no S8-B2).
-    // ScreenAndamentoLegacy só monta para Manager/Seller — Super Admin nunca
-    // chega aqui, então activeMembership.companyId nunca é null por ser
-    // Super Admin (só por ausência real de membership ativa).
-    companyId: currentUser?.activeMembership?.companyId ?? null,
-    userIsActive: Boolean(currentUser),
-    localStageNames: PipelineService.getStages(),
-  });
+  //
+  // M1-E E3-B1: useRemoteLeadsScreenState chama usePipelineStages com a
+  // MESMA identidade que antes (companyId de activeMembership.companyId,
+  // nunca do legado profiles.company_id) — nenhuma mudança de contrato.
+  const remote = useRemoteLeadsScreenState(currentUser);
+  const pipeline = remote.pipeline;
+  const isRemoteLeadsActive = remote.mode === 'remote_active';
+  const isMisconfigured = remote.mode === 'remote_misconfigured';
 
   // Diagnóstico de configuração incompatível: detalhes só em development —
   // o usuário final vê apenas a mensagem amigável do estado dedicado.
@@ -254,23 +362,47 @@ function ScreenAndamentoLegacy({ go }: any) {
     }
   }, [pipeline.configError]);
 
+  // M1-E E3-B1: Leads remotos (RLS já escopada) quando o caminho remoto está
+  // efetivo; caminho local (LeadService.getAll()) em qualquer outro caso —
+  // exatamente como antes desta etapa quando REMOTE_LEADS=false.
+  const allLeads: any[] = isRemoteLeadsActive ? [...remote.leads.leads] : LeadService.getAll();
+  const sellers = isRemoteLeadsActive ? null : SellerService.getAll();
   const leads = (!isSeller && sellerFilter !== 'Todos')
     ? allLeads.filter((l: any) => l.sellerId === sellerFilter)
     : allLeads;
   const endDrag = () => { setDraggedId(null); setOverStage(null); };
 
-  // Estados exclusivos do caminho remoto (flag ON). Com source='local' nada
-  // disso aparece — o Kanban renderiza direto, como sempre.
-  const isRemote = pipeline.source === 'remote';
-  const showDisabled = isRemote && !pipeline.queryEnabled;
-  const showSkeleton = isRemote && pipeline.queryEnabled && pipeline.isLoading && !pipeline.hasData;
-  const showConfigError = isRemote && pipeline.configError !== null;
-  const showBlockingError = isRemote && pipeline.isError && !pipeline.hasData && !showConfigError;
-  const showEmpty = isRemote && pipeline.isEmpty && !pipeline.isError && !showConfigError;
-  const showStaleWarning = isRemote && pipeline.isError && pipeline.hasData;
+  // Estados do caminho remoto de STAGES (flag REMOTE_STAGES ON) — IDÊNTICOS
+  // aos de antes desta etapa; source==='remote' independe de REMOTE_LEADS.
+  const isRemoteStages = pipeline.source === 'remote';
+  const showDisabled = isRemoteStages && !pipeline.queryEnabled;
+  const showSkeleton = isRemoteStages && pipeline.queryEnabled && pipeline.isLoading && !pipeline.hasData;
+  const showConfigError = isRemoteStages && pipeline.configError !== null;
+  const showBlockingError = isRemoteStages && pipeline.isError && !pipeline.hasData && !showConfigError;
+  const showEmpty = isRemoteStages && pipeline.isEmpty && !pipeline.isError && !showConfigError;
+  const showStaleWarning = isRemoteStages && pipeline.isError && pipeline.hasData;
+
+  // Estados NOVOS, exclusivos do caminho remoto de LEADS (REMOTE_LEADS
+  // efetiva) — só avaliados depois que Stages já está saudável (o próprio
+  // useRemoteLeadsScreenState só habilita a query de Leads quando
+  // pipeline.hasData, então nenhum destes é alcançável enquanto Stages
+  // estiver em loading/erro/vazio/configError).
+  const showLeadsConfigError = isRemoteLeadsActive && remote.leads.configError !== null;
+  const showLeadsBlockingError = isRemoteLeadsActive && !showLeadsConfigError && remote.leads.isError && !remote.leads.hasData && !remote.leads.isEmpty;
+  const showLeadsSkeleton = isRemoteLeadsActive && !showLeadsConfigError && !showLeadsBlockingError && remote.leads.isLoading && !remote.leads.hasData && !remote.leads.isEmpty;
+  const showLeadsStaleWarning = isRemoteLeadsActive && remote.leads.isError && remote.leads.hasData;
 
   let body: React.ReactNode;
-  if (showDisabled) {
+  if (isMisconfigured) {
+    // REMOTE_LEADS=true e REMOTE_STAGES=false: falha fechada — nunca cai no
+    // caminho local de pipeline.source (que ficaria 'local' aqui, já que
+    // usePipelineStages também respeita a própria flag independente).
+    body = (
+      <KanbanStateCard testId="kanban-state-misconfigured">
+        As etapas remotas precisam estar disponíveis para carregar os Leads.
+      </KanbanStateCard>
+    );
+  } else if (showDisabled) {
     // Defensivo: App.tsx nunca monta telas sem currentUser ativo (mostra a
     // AuthFlow antes) — se chegar aqui, a sessão/profile ficou indisponível.
     body = (
@@ -304,6 +436,26 @@ function ScreenAndamentoLegacy({ go }: any) {
         Nenhuma etapa configurada para sua loja.
       </KanbanStateCard>
     );
+  } else if (showLeadsConfigError) {
+    body = (
+      <KanbanStateCard testId="kanban-state-leads-config-error" onRetry={() => remote.leads.refetch()}>
+        Um ou mais clientes remotos estão com configuração inválida.
+      </KanbanStateCard>
+    );
+  } else if (showLeadsBlockingError) {
+    body = (
+      <KanbanStateCard testId="kanban-state-leads-error" onRetry={() => remote.leads.refetch()}>
+        Não foi possível carregar os clientes do pipeline.
+      </KanbanStateCard>
+    );
+  } else if (showLeadsSkeleton) {
+    body = (
+      <div data-testid="kanban-leads-skeleton" style={{ display: 'grid', gridTemplateColumns: `repeat(${pipeline.stages.length}, minmax(210px, 1fr))`, gap: 14, overflowX: 'auto', paddingBottom: 8 }}>
+        {pipeline.stages.map((s: PipelineStage) => (
+          <div key={s.id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 12, minHeight: 360, opacity: 0.55 }} />
+        ))}
+      </div>
+    );
   } else {
     body = (
       <>
@@ -314,19 +466,29 @@ function ScreenAndamentoLegacy({ go }: any) {
             <button onClick={() => pipeline.refetch()} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--t-700)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, textDecoration: 'underline' }}>Tentar novamente</button>
           </div>
         )}
+        {showLeadsStaleWarning && (
+          <div data-testid="kanban-leads-stale-warning" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', marginBottom: 12, borderRadius: 10, background: 'var(--amber-bg, rgba(255,163,31,.08))', border: '1px solid var(--amber-line, rgba(255,163,31,.3))', color: 'var(--t-700)', fontSize: 13 }}>
+            <Icon name="alert" size={15} stroke={2.2} style={{ color: 'var(--amber)' }} />
+            <span>Não foi possível atualizar os clientes. Exibindo dados anteriores.</span>
+            <button onClick={() => remote.leads.refetch()} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--t-700)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, textDecoration: 'underline' }}>Tentar novamente</button>
+          </div>
+        )}
         <div data-testid="kanban-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${pipeline.stages.length}, minmax(210px, 1fr))`, gap: 14, overflowX: 'auto', paddingBottom: 8 }}>
           {pipeline.stages.map((stage: PipelineStage) => {
-            // Cards continuam vinculados pelo NAME (leads são 100% locais até
-            // a migração dos leads) — nunca por stage.id/code.
-            const items = leads.filter((l: any) => l.stage === stage.name);
+            // M1-E E3-B1: caminho remoto de Leads agrupa por stageId real —
+            // nunca por name (decisão 15). Caminho local/stages-remoto-com-
+            // leads-local continua por name, exatamente como antes.
+            const items = isRemoteLeadsActive
+              ? leads.filter((l: any) => l.stageId === stage.id)
+              : leads.filter((l: any) => l.stage === stage.name);
             const isOver = overStage === stage.name;
             return (
               <div key={stage.id} data-testid={`kanban-col-${stage.code}`} data-terminal={stage.isTerminal ? 'true' : 'false'}
-                onDragOver={(e: any) => { e.preventDefault(); if (draggedId && overStage !== stage.name) setOverStage(stage.name); }}
+                onDragOver={(e: any) => { e.preventDefault(); if (!isRemoteLeadsActive && draggedId && overStage !== stage.name) setOverStage(stage.name); }}
                 onDragLeave={() => setOverStage((s: string | null) => (s === stage.name ? null : s))}
                 onDrop={(e: any) => {
                   e.preventDefault();
-                  if (draggedId) PipelineService.moveCard(draggedId, stage.name);
+                  if (!isRemoteLeadsActive && draggedId) PipelineService.moveCard(draggedId, stage.name);
                   endDrag();
                 }}
                 style={{ background: 'var(--surface-2)', border: `1px solid ${isOver ? 'var(--gold-line)' : 'var(--border)'}`, borderRadius: 12, display: 'flex', flexDirection: 'column', minHeight: 360, transition: 'border-color .15s' }}>
@@ -337,7 +499,7 @@ function ScreenAndamentoLegacy({ go }: any) {
                 </div>
                 <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
                   {items.length ? items.map((l: any) => (
-                    <PipeCard key={l.id} lead={l} go={go} dragging={draggedId === l.id} onDragStart={setDraggedId} onDragEnd={endDrag} />
+                    <PipeCard key={l.id} lead={l} go={go} dragging={draggedId === l.id} onDragStart={setDraggedId} onDragEnd={endDrag} readOnly={isRemoteLeadsActive} />
                   ))
                     : <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--t-400)', fontSize: 12.5, textAlign: 'center', padding: 20 }}>Nenhum cliente nesta etapa</div>}
                 </div>
@@ -352,10 +514,12 @@ function ScreenAndamentoLegacy({ go }: any) {
   return (
     <LightScreen>
       <PageHead title="Em progresso" sub="Onde cada cliente está no caminho até a venda. Arraste de etapa quando avançar." />
-      {!isSeller && (
+      {!isSeller && !isMisconfigured && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
           <Chip active={sellerFilter === 'Todos'} onClick={() => setSellerFilter('Todos')}>Todos</Chip>
-          {sellers.map((s: any) => <Chip key={s.id} active={sellerFilter === s.id} onClick={() => setSellerFilter(s.id)}>{s.first}</Chip>)}
+          {isRemoteLeadsActive
+            ? remote.sellerLabels.sellerLabels.map((s) => <Chip key={s.seller_id} active={sellerFilter === s.seller_id} onClick={() => setSellerFilter(s.seller_id)}>{s.name}</Chip>)
+            : (sellers ?? []).map((s: any) => <Chip key={s.id} active={sellerFilter === s.id} onClick={() => setSellerFilter(s.id)}>{s.first}</Chip>)}
         </div>
       )}
       {body}

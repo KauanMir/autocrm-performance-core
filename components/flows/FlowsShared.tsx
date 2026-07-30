@@ -441,6 +441,10 @@ export function FlowLigar({ payload, close, openFlow }: any) {
 
 export function FlowVerCliente({ payload, close, openFlow }: any) {
   const lead = payload.lead || LeadService.getAll()[0];
+  // M1-E E3-B1: leads remotos abrem o detalhe em modo somente-leitura
+  // (decisão 16) — nenhuma ação de mutation (Ligar/Visita/Proposta/
+  // Acompanhar/Editar) fica acessível a partir daqui.
+  const readOnly = Boolean(payload.readOnly);
   const u = URG[lead.urgency];
   // lead.timeline is already the real record — addToTimeline() unshifts onto it
   // from Ligar/Visita/Proposta/Venda/Acompanhamento, so insertion order is
@@ -453,7 +457,7 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
     const d = new Date(lead.createdAt);
     return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
   })();
-  const actions = [
+  const actions = readOnly ? [] : [
     { icon: 'phone', label: 'Ligar', flow: 'ligar', accent: '#27C75F' },
     { icon: 'calendar', label: 'Agendar visita', flow: 'criar-visita', accent: '#E8CE72' },
     { icon: 'handshake', label: 'Nova proposta', flow: 'nova-proposta', accent: '#E8CE72' },
@@ -478,14 +482,16 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
             <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="users" size={14} stroke={2} /> {lead.seller || '-'}</span>
           </div>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {actions.map(a => (
-            <button key={a.label} onClick={() => openFlow(a.flow, { lead })} className="lift" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, width: 88, padding: '13px 8px', borderRadius: 13, border: '1px solid var(--border)', background: 'rgba(255,255,255,.03)', cursor: 'pointer', fontFamily: 'inherit' }}>
-              <span style={{ width: 38, height: 38, borderRadius: 11, background: `${a.accent}22`, color: a.accent, display: 'grid', placeItems: 'center' }}><Icon name={a.icon} size={19} stroke={2.1} /></span>
-              <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--t-700)', textAlign: 'center', overflowWrap: 'break-word', wordBreak: 'break-word', maxWidth: '100%' }}>{a.label}</span>
-            </button>
-          ))}
-        </div>
+        {actions.length > 0 && (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {actions.map(a => (
+              <button key={a.label} onClick={() => openFlow(a.flow, { lead })} className="lift" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, width: 88, padding: '13px 8px', borderRadius: 13, border: '1px solid var(--border)', background: 'rgba(255,255,255,.03)', cursor: 'pointer', fontFamily: 'inherit' }}>
+                <span style={{ width: 38, height: 38, borderRadius: 11, background: `${a.accent}22`, color: a.accent, display: 'grid', placeItems: 'center' }}><Icon name={a.icon} size={19} stroke={2.1} /></span>
+                <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--t-700)', textAlign: 'center', overflowWrap: 'break-word', wordBreak: 'break-word', maxWidth: '100%' }}>{a.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 20, alignItems: 'start' }}>
@@ -534,9 +540,11 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
               <Icon name={lead.urgency === 'red' ? 'flame' : 'phone'} size={20} stroke={2.2} style={{ color: lead.urgency === 'red' ? 'var(--red)' : 'var(--gold-ink)' }} />
               <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--t-900)' }}>{lead.alert}</span>
             </div>
-            <div style={{ marginTop: 12 }}>
-              <LBtn kind="gold" icon="phone" onClick={() => openFlow('ligar', { lead })} style={{ width: '100%', justifyContent: 'center' }}>Ligar agora</LBtn>
-            </div>
+            {!readOnly && (
+              <div style={{ marginTop: 12 }}>
+                <LBtn kind="gold" icon="phone" onClick={() => openFlow('ligar', { lead })} style={{ width: '100%', justifyContent: 'center' }}>Ligar agora</LBtn>
+              </div>
+            )}
           </FPanel>
         </div>
       </div>
