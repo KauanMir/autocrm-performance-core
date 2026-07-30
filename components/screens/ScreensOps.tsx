@@ -5,8 +5,21 @@ import { Avatar, URG, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard } 
 import { STAGES, TASK_STATE } from '@/lib/data';
 import { useStore } from '@/lib/store';
 import { LeadService, TaskService, PipelineService, AuthService, SellerService } from '@/lib/services';
-import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
+import { useRemoteLeadsScreenState, type RemoteLeadsScreenMode } from '@/lib/hooks/useRemoteLeadsScreenState';
+import { resolveLeadMutationCapabilities, type LeadMutationCapabilities } from '@/lib/leads/mutationCapabilities';
+import type { RemoteLeadsFlagMode } from '@/lib/leads/remoteLeadsMode';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
+
+// M1-E E4-B2: deriva o flagMode das capabilities a partir do MESMO
+// remote.mode que a tela já usa para tudo (leitura, estados, testes) — nunca
+// re-resolve a flag de ambiente de forma independente aqui. Isso é o que
+// torna `remote.mode` a única fonte da verdade (inclusive em testes que
+// mockam useRemoteLeadsScreenState diretamente, sem tocar em lib/flags).
+function flagModeFromScreenState(mode: RemoteLeadsScreenMode): RemoteLeadsFlagMode {
+  if (mode === 'local') return 'local';
+  if (mode === 'remote_misconfigured') return 'remote_misconfigured';
+  return 'remote_ready'; // remote_unavailable_identity | remote_active
+}
 import { isSuperAdminCommercialReadEnabled } from '@/lib/flags';
 import { PlatformCommercialClientsView } from '@/components/commercial/PlatformCommercialClientsView';
 import { PlatformCommercialPipelineView } from '@/components/commercial/PlatformCommercialPipelineView';
@@ -16,13 +29,17 @@ const STAGE_TONE: Record<string, string> = {
   'Em negociação': 'amber', 'Fechamento': 'green',
 };
 
-function LeadCard({ lead, go, readOnly }: any) {
+function LeadCard({ lead, go, capabilities }: { lead: any; go: any; capabilities?: LeadMutationCapabilities | null }) {
   const u = (URG as any)[lead.urgency];
   const red = lead.urgency === 'red';
   const green = lead.urgency === 'green';
   const av = red ? 50 : green ? 36 : 42;
+  // M1-E E4-B2: ausência de capabilities = caminho local (acesso integral,
+  // igual a antes desta etapa). Presença de capabilities = caminho remoto —
+  // ações rápidas de ligação/visita (eventos, E5) ficam sempre fora do E4.
+  const quickActionsHidden = capabilities ? !capabilities.canApplyEvents : false;
   return (
-    <div className="lift" onClick={() => (window as any).__openFlow('ver-cliente', { lead, readOnly: Boolean(readOnly) })} style={{
+    <div className="lift" onClick={() => (window as any).__openFlow('ver-cliente', { lead, capabilities: capabilities ?? null })} style={{
       background: red
         ? 'linear-gradient(180deg, rgba(255,46,46,.18), rgba(255,46,46,.03)), #161618'
         : green ? 'linear-gradient(180deg, #151517, #0f0f11)'
@@ -71,13 +88,13 @@ function LeadCard({ lead, go, readOnly }: any) {
 
       {/* Card itself opens Central do Cliente (M0-K3.2, correção 4) — internal
           buttons stop propagation so Ligar/Visita don't also trigger it.
-          M1-E E3-B1: no modo remoto (readOnly), as ações rápidas de
-          mutation (Ligar/Visita) somem — só a abertura do detalhe
-          somente-leitura permanece (decisão 16). */}
+          M1-E E4-B2: no modo remoto, capabilities.canApplyEvents é sempre
+          false no E4 (eventos são E5) — as ações rápidas de mutation
+          (Ligar/Visita) somem; só a abertura do detalhe permanece. */}
       <div style={{ display: 'flex', gap: 8 }} onClick={(e: any) => e.stopPropagation()}>
-        {!readOnly && <LBtn size="sm" kind={red ? 'danger' : green ? 'ghost' : 'primary'} icon="phone" style={{ flex: 1, justifyContent: 'center' }} onClick={() => (window as any).__openFlow('ligar', { lead })}>{green ? 'Ligar' : 'Ligar agora'}</LBtn>}
-        {!readOnly && !green && <LBtn size="sm" kind="ghost" icon="calendar" onClick={() => (window as any).__openFlow('criar-visita', { lead })}>Visita</LBtn>}
-        <LBtn size="sm" kind="ghost" icon="arrowRight" style={readOnly ? { flex: 1, justifyContent: 'center' } : undefined} onClick={() => (window as any).__openFlow('ver-cliente', { lead, readOnly: Boolean(readOnly) })} />
+        {!quickActionsHidden && <LBtn size="sm" kind={red ? 'danger' : green ? 'ghost' : 'primary'} icon="phone" style={{ flex: 1, justifyContent: 'center' }} onClick={() => (window as any).__openFlow('ligar', { lead })}>{green ? 'Ligar' : 'Ligar agora'}</LBtn>}
+        {!quickActionsHidden && !green && <LBtn size="sm" kind="ghost" icon="calendar" onClick={() => (window as any).__openFlow('criar-visita', { lead })}>Visita</LBtn>}
+        <LBtn size="sm" kind="ghost" icon="arrowRight" style={quickActionsHidden ? { flex: 1, justifyContent: 'center' } : undefined} onClick={() => (window as any).__openFlow('ver-cliente', { lead, capabilities: capabilities ?? null })} />
       </div>
     </div>
   );
@@ -122,6 +139,15 @@ function ScreenClientesLegacy({ go }: any) {
   const currentUser = AuthService.getCurrentUser();
   const isSeller = currentUser?.activeMembership?.role === 'seller';
   const remote = useRemoteLeadsScreenState(currentUser);
+  // M1-E E4-B2: capabilities granulares (canCreate libera o botão "Novo
+  // Lead" remoto; o restante é propagado para LeadCard/ver-cliente).
+  // flagMode derivado de remote.mode (nunca resolvido de forma
+  // independente) — ver flagModeFromScreenState.
+  const capabilities = resolveLeadMutationCapabilities({
+    flagMode: flagModeFromScreenState(remote.mode),
+    profileIsActive: Boolean(currentUser),
+    actor: currentUser,
+  });
   const [sellerFilter, setSellerFilter] = useState<string>('Todos');
   const [filter, setFilter] = useState('Todos');
 
@@ -171,14 +197,15 @@ function ScreenClientesLegacy({ go }: any) {
     } else {
       gridBody = (
         <div data-testid="clientes-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, alignItems: 'start' }}>
-          {sorted.map((l: any) => <LeadCard key={l.id} lead={l} go={go} readOnly />)}
+          {sorted.map((l: any) => <LeadCard key={l.id} lead={l} go={go} capabilities={capabilities} />)}
         </div>
       );
     }
 
     return (
       <LightScreen>
-        <PageHead title="Clientes" sub="Cada cliente mostra na cor o que precisa de você. Vermelho = aja agora." />
+        <PageHead title="Clientes" sub="Cada cliente mostra na cor o que precisa de você. Vermelho = aja agora."
+          actions={capabilities.canCreate ? <LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('novo-cliente')}>Novo Lead</LBtn> : undefined} />
         {showChrome && leadsStale && (
           <div data-testid="clientes-stale-warning" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', marginBottom: 12, borderRadius: 10, background: 'var(--amber-bg, rgba(255,163,31,.08))', border: '1px solid var(--amber-line, rgba(255,163,31,.3))', color: 'var(--t-700)', fontSize: 13 }}>
             <Icon name="alert" size={15} stroke={2.2} style={{ color: 'var(--amber)' }} />
@@ -249,14 +276,20 @@ export function ScreenClientes({ go }: any) {
   return <ScreenClientesLegacy go={go} />;
 }
 
-function PipeCard({ lead, go, dragging, onDragStart, onDragEnd, readOnly }: any) {
+function PipeCard({ lead, go, dragging, onDragStart, onDragEnd, capabilities }: {
+  lead: any; go: any; dragging: boolean; onDragStart: any; onDragEnd: any; capabilities?: LeadMutationCapabilities | null;
+}) {
   const u = (URG as any)[lead.urgency];
+  // M1-E E4-B2: ausência de capabilities = caminho local (drag integral).
+  // Presença de capabilities = caminho remoto — canMoveStage é sempre false
+  // no E4 (mover Etapa é E5); drag permanece impossível no Kanban remoto.
+  const canDrag = capabilities ? capabilities.canMoveStage : true;
   return (
     <div
-      draggable={!readOnly}
+      draggable={canDrag}
       data-testid={`pipe-card-${lead.id}`}
       onDragStart={(e: any) => {
-        if (readOnly) return;
+        if (!canDrag) return;
         // dataTransfer.setData is required for Firefox to allow the drag to start at
         // all, but the id is read back from lifted React state on drop, not from
         // dataTransfer.getData — some browsers restrict/lose that payload depending
@@ -266,7 +299,7 @@ function PipeCard({ lead, go, dragging, onDragStart, onDragEnd, readOnly }: any)
         onDragStart(lead.id);
       }}
       onDragEnd={onDragEnd}
-      onClick={() => (window as any).__openFlow('ver-cliente', { lead, readOnly: Boolean(readOnly) })} style={{
+      onClick={() => (window as any).__openFlow('ver-cliente', { lead, capabilities: capabilities ?? null })} style={{
       background: 'var(--surface)', border: '1px solid var(--border)', borderLeft: `4px solid ${u.c}`,
       borderRadius: 10, padding: 12, cursor: 'grab', boxShadow: 'var(--shadow-sm)', opacity: dragging ? 0.4 : 1,
       transition: 'transform .12s, box-shadow .12s, opacity .12s',
@@ -352,6 +385,15 @@ function ScreenAndamentoLegacy({ go }: any) {
   const pipeline = remote.pipeline;
   const isRemoteLeadsActive = remote.mode === 'remote_active';
   const isMisconfigured = remote.mode === 'remote_misconfigured';
+  // M1-E E4-B2: capabilities granulares — canMoveStage é sempre false no
+  // E4 (mover Etapa é E5), então o drag remoto continua impossível.
+  // flagMode derivado de remote.mode (nunca resolvido de forma
+  // independente) — ver flagModeFromScreenState.
+  const capabilities = resolveLeadMutationCapabilities({
+    flagMode: flagModeFromScreenState(remote.mode),
+    profileIsActive: Boolean(currentUser),
+    actor: currentUser,
+  });
 
   // Diagnóstico de configuração incompatível: detalhes só em development —
   // o usuário final vê apenas a mensagem amigável do estado dedicado.
@@ -499,7 +541,7 @@ function ScreenAndamentoLegacy({ go }: any) {
                 </div>
                 <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
                   {items.length ? items.map((l: any) => (
-                    <PipeCard key={l.id} lead={l} go={go} dragging={draggedId === l.id} onDragStart={setDraggedId} onDragEnd={endDrag} readOnly={isRemoteLeadsActive} />
+                    <PipeCard key={l.id} lead={l} go={go} dragging={draggedId === l.id} onDragStart={setDraggedId} onDragEnd={endDrag} capabilities={isRemoteLeadsActive ? capabilities : undefined} />
                   ))
                     : <div style={{ flex: 1, display: 'grid', placeItems: 'center', color: 'var(--t-400)', fontSize: 12.5, textAlign: 'center', padding: 20 }}>Nenhum cliente nesta etapa</div>}
                 </div>
