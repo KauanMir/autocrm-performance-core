@@ -16,6 +16,7 @@ import {
   VisitService,
 } from '@/lib/services';
 import { isRemoteLeadsError } from '@/lib/leads/errors';
+import { isLocalCommercialDataDisabledError } from '@/lib/leads/localCommercialAccess';
 import {
   buildRemoteLeadSnapshot,
   clearAllRemoteLeadSnapshots,
@@ -257,6 +258,11 @@ describe('seam — flag ON bloqueia toda mutação local de leads', () => {
     getStore(); // garante hydration ANTES dos spies de localStorage
   });
 
+  // M1-E E5-B2-A1: SaleService.cancel saiu desta lista — passou a usar
+  // assertLocalCommercialDataAllowed (LocalCommercialDataDisabledError,
+  // remote_commercial_local_data_disabled), não mais
+  // _assertLocalLeadWriteAllowed/RemoteLeadsError. Testado separadamente
+  // abaixo (describe "flag ON bloqueia módulos comerciais locais").
   const blockedCalls: Array<[string, () => unknown]> = [
     ['LeadService.create', () => LeadService.create({
       name: 'X', phone: '1', car: 'Y', stage: 'Novo', seller: '—', sellerId: null,
@@ -266,7 +272,6 @@ describe('seam — flag ON bloqueia toda mutação local de leads', () => {
     ['LeadService.updateHealth', () => LeadService.updateHealth('l1', { type: 'visit_confirmed' })],
     ['LeadService.addToTimeline', () => LeadService.addToTimeline('l1', { icon: 'x', c: '#fff', t: 'T' })],
     ['PipelineService.moveCard', () => PipelineService.moveCard('l1', 'Fechamento')],
-    ['SaleService.cancel', () => SaleService.cancel('sa1')],
   ];
 
   for (const [name, call] of blockedCalls) {
@@ -294,44 +299,99 @@ describe('seam — flag ON bloqueia toda mutação local de leads', () => {
   }
 });
 
-// ── D. Flag ON — outros domínios permanecem livres ───────────────────────
+// ── D. Flag ON — reorderStages e company permanecem livres ──────────────
 
-describe('seam — flag ON NÃO bloqueia domínios fora de leads', () => {
+describe('seam — flag ON NÃO bloqueia domínios fora de leads/comercial local', () => {
   beforeEach(() => {
     mocks.isRemoteLeadsEnabled.mockReturnValue(true);
   });
 
-  it('visits, deals, sales.create, tasks, reorderStages e company seguem funcionando', () => {
-    const s = getStore();
-    const visitsBefore = s.visits.length;
-    const dealsBefore = s.deals.length;
-    const salesBefore = s.sales.length;
-    const tasksBefore = s.tasks.length;
-
-    VisitService.create({
-      id: 'seam-v1', time: '10:00', client: 'C', seller: 'Marcos Silva', sellerId: 's1',
-      leadId: null, car: 'Onix', status: 'confirmada', day: 'Hoje',
-    });
-    DealService.create({
-      id: 'seam-d1', client: 'C', car: 'Onix', value: 'R$ 1', seller: 'Marcos Silva',
-      sellerId: 's1', leadId: null, status: 'aberta', last: 'hoje',
-    });
-    SaleService.create({
-      id: 'seam-sa1', client: 'C', car: 'Onix', value: 'R$ 1', seller: 'Marcos Silva',
-      sellerId: 's1', leadId: null, dealId: null, date: 'hoje', status: 'aguardando', pay: '—',
-    });
-    TaskService.create({
-      id: 'seam-t1', title: 'Ligar para C', lead: 'C', leadId: null, assignedTo: 's1',
-      when: 'hoje', prio: 'alta', state: 'hoje', note: 'seam',
-    });
+  it('reorderStages e company seguem funcionando (nunca fizeram parte do isolamento comercial)', () => {
     PipelineService.reorderStages(['Fechamento', 'Novo', 'Qualificado', 'Visita agendada', 'Em negociação']);
     CompanyService.update({ name: 'AutoCRM Teste' });
 
-    expect(getStore().visits.length).toBe(visitsBefore + 1);
-    expect(getStore().deals.length).toBe(dealsBefore + 1);
-    expect(getStore().sales.length).toBe(salesBefore + 1);
-    expect(getStore().tasks.length).toBe(tasksBefore + 1);
     expect(getStore().stages[0]).toBe('Fechamento');
     expect(getStore().company.name).toBe('AutoCRM Teste');
+  });
+});
+
+// ── E. Flag ON — módulos comerciais locais (Visit/Deal/Sale/Task) bloqueados
+// (M1-E E5-B2-A1) ─────────────────────────────────────────────────────────
+// Achado da auditoria E5-B2-A0: Visit/Deal/Sale/Task não têm company_id nem
+// backend remoto — mantê-los graváveis sob flag ON (comportamento antigo,
+// coberto no describe acima até esta etapa) arriscava registros órfãos
+// referenciando um Lead que só existe no Supabase. Bloqueados via
+// assertLocalCommercialDataAllowed, ANTES de qualquer acesso ao
+// StoreAdapter — nunca RemoteLeadsError (isRemoteLeadsError continua
+// exclusivo do domínio de Lead).
+
+describe('seam — flag ON bloqueia módulos comerciais locais (Visit/Deal/Sale/Task)', () => {
+  beforeEach(() => {
+    mocks.isRemoteLeadsEnabled.mockReturnValue(true);
+    getStore();
+  });
+
+  const blockedCommercialCalls: Array<[string, () => unknown]> = [
+    ['VisitService.create', () => VisitService.create({
+      time: '10:00', client: 'C', seller: 'Marcos Silva', sellerId: 's1',
+      leadId: null, car: 'Onix', status: 'confirmada', day: 'Hoje',
+    })],
+    ['VisitService.update', () => VisitService.update('v1', { status: 'confirmada' })],
+    ['VisitService.getAll', () => VisitService.getAll()],
+    ['DealService.create', () => DealService.create({
+      client: 'C', car: 'Onix', value: 'R$ 1', seller: 'Marcos Silva',
+      sellerId: 's1', leadId: null, status: 'aberta', last: 'hoje',
+    })],
+    ['DealService.update', () => DealService.update('d1', { last: 'hoje' })],
+    ['DealService.approve', () => DealService.approve('d1')],
+    ['DealService.reject', () => DealService.reject('d1')],
+    ['DealService.getAll', () => DealService.getAll()],
+    ['SaleService.create', () => SaleService.create({
+      client: 'C', car: 'Onix', value: 'R$ 1', seller: 'Marcos Silva',
+      sellerId: 's1', leadId: null, dealId: null, date: 'hoje', status: 'aguardando', pay: '—',
+    })],
+    ['SaleService.cancel', () => SaleService.cancel('sa1')],
+    ['SaleService.getAll', () => SaleService.getAll()],
+    ['TaskService.create', () => TaskService.create({
+      title: 'Ligar para C', lead: 'C', leadId: null, assignedTo: 's1',
+      when: 'hoje', prio: 'alta', state: 'hoje', note: 'seam',
+    })],
+    ['TaskService.update', () => TaskService.update('t1', { note: 'x' })],
+    ['TaskService.getAll', () => TaskService.getAll()],
+  ];
+
+  for (const [name, call] of blockedCommercialCalls) {
+    it(`${name} lança remote_commercial_local_data_disabled sem tocar store/localStorage/Supabase`, () => {
+      const visitsBefore = JSON.stringify(getStore().visits);
+      const dealsBefore = JSON.stringify(getStore().deals);
+      const salesBefore = JSON.stringify(getStore().sales);
+      const tasksBefore = JSON.stringify(getStore().tasks);
+      const setItem = vi.spyOn(Storage.prototype, 'setItem');
+
+      const caught = ((): unknown => {
+        try { call(); } catch (e) { return e; }
+        return null;
+      })();
+
+      expect(isLocalCommercialDataDisabledError(caught)).toBe(true);
+      if (isLocalCommercialDataDisabledError(caught)) {
+        expect(caught.code).toBe('remote_commercial_local_data_disabled');
+        expect(caught.operation).toBe(name);
+      }
+      expect(isRemoteLeadsError(caught)).toBe(false);
+      expect(JSON.stringify(getStore().visits)).toBe(visitsBefore);
+      expect(JSON.stringify(getStore().deals)).toBe(dealsBefore);
+      expect(JSON.stringify(getStore().sales)).toBe(salesBefore);
+      expect(JSON.stringify(getStore().tasks)).toBe(tasksBefore);
+      expect(setItem).not.toHaveBeenCalled();
+      expect(mocks.from).not.toHaveBeenCalled();
+      expect(mocks.rpc).not.toHaveBeenCalled();
+    });
+  }
+
+  it('DealService.approve/reject: bloqueado ANTES da checagem de role (assert sempre primeiro)', () => {
+    vi.spyOn(AuthService, 'isManager').mockReturnValue(false);
+    expect(() => DealService.approve('d1')).toThrow('remote_commercial_local_data_disabled');
+    expect(() => DealService.reject('d1')).toThrow('remote_commercial_local_data_disabled');
   });
 });
