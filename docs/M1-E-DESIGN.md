@@ -1808,6 +1808,123 @@ rollback) permanecem pendentes. **O módulo M1-E como um todo continua
 aberto** — o fechamento do E5 encerra somente o Kanban/Health Engine de
 ligação, não o M1-E completo.
 
+### 15.12 E6-A0 (auditoria), E6-A1 (cancelado) e E6-B1 (data layer) — concluídos
+
+**E6-A0 — auditoria somente leitura de `assign_lead_seller`/`archive_lead`/
+`unarchive_lead`** confirmou, por leitura direta: Seller é **proibido de
+forma incondicional** nas três (`raise exception 'forbidden'` fixo no
+backend para `actor_kind = 'seller'`, não é gate de capability — diferente
+de `canMoveStage`/`canLogCallOutcome`, onde Seller pode operar no próprio
+Lead via `canActorMutateLead`); `assign_lead_seller` exige
+`p_expected_version` sempre (nunca LWW); `archive_lead`/`unarchive_lead` são
+idempotentes (estado já alcançado retorna a linha sem novo bump de version,
+mesmo com `p_expected_version` divergente, provado por concorrência real via
+`dblink` em `supabase/tests/09_m1e_concurrency.sql`); a RLS `leads_select` já
+dá ao Manager visibilidade de Leads arquivados (Seller nunca — a cláusula do
+Seller sempre tem `archived_at is null`); `fetchActiveLeadRows` já reservava
+o filtro invertido para esta fase.
+
+Decisões humanas definitivas registradas para todo o E6 (válidas além desta
+subetapa): SOMENTE Manager pode assign/archive/unarchive — Seller nunca, nem
+via `canActorMutateLead`; "mesmo Seller" nunca deve chamar
+`assign_lead_seller` (regra de UI futura, E6-B2); `canAssignSeller`/
+`canArchive` serão Manager-only, `canArchive` cobre archive **e** unarchive
+(sem `canUnarchive` separado); Seller inativo histórico é mantido no
+restore, nunca auto-reatribuído; a aba "Arquivados" só aparece para Manager
+(decisão explícita de produto, não acidente de RLS vazio).
+
+**E6-A1 — CANCELADO.** Objetivo original: impedir `unarchive_lead` de
+restaurar um Lead numa "etapa inativa" via um novo parâmetro opcional
+`p_restore_stage_id`. Achado que motivou o cancelamento (leitura direta de
+`supabase/migrations/20260717100200_m1c_02_pipeline_stages.sql`):
+`pipeline_stages` **não tem nenhum conceito de etapa ativa/inativa** — sem
+coluna `is_active`/`archived_at`, sem policy de DELETE, sem grant de DELETE
+(negado duas vezes; o comentário original da migration já dizia "remoção de
+estágio é decisão de produto futura"). `leads.stage_id` é FK
+`ON DELETE RESTRICT` para `pipeline_stages`, o que garante estruturalmente
+que o `stage_id` de qualquer Lead sempre existe e sempre pertence à empresa
+certa. Ou seja: o cenário "Lead restaurado numa etapa que não é mais
+operacional" **não é reproduzível no schema atual** — não existe mecanismo
+(RPC, coluna, policy) capaz de tirar uma etapa de operação. Implementar a
+lógica como especificada exigiria inventar um novo conceito de schema
+(desativação de etapa) — mudança bem maior que "uma migration de
+`unarchive_lead`", afetando Kanban/tela de Ajustes/`reorder_pipeline_stages`,
+fora do escopo autorizado desta subetapa. Decisão humana: cancelar
+integralmente — nenhuma migration, nenhum `p_restore_stage_id`, nenhuma
+investigação de ciclo de vida de etapas nesta fase. **Contrato de
+`unarchive_lead` mantido exatamente como está** (mesmo `stage_id`, mesmo
+`seller_id`, idempotente quando já ativo, `expectedVersion` obrigatório
+quando arquivado). Caso essa funcionalidade de desativação de etapas seja
+criada no futuro, o comportamento de Leads vinculados deve ser decidido
+DENTRO dela (solução completa), não como ajuste isolado retroativo.
+
+**E6-B1 — data layer de atribuição, arquivamento e Leads arquivados (sem
+UI) concluído.** Nenhum botão, modal, aba visível, `FlowVerCliente` ou
+Kanban tocados; `canAssignSeller`/`canArchive` permanecem `false` em
+`lib/leads/mutationCapabilities.ts` (arquivo intocado nesta etapa).
+
+`lib/leads/remoteRepository.ts` ganhou `fetchArchivedLeadRows()` — mesmo
+padrão seguro de `fetchActiveLeadRows` (nenhum `company_id` enviado, RLS é a
+única autoridade), com o filtro invertido (`archived_at IS NOT NULL`); nunca
+alimenta `remoteSnapshot`/bridge, nunca é chamada por `LeadService.getAll()`.
+
+`lib/leads/remoteMutationRepository.ts` ganhou `assignRemoteLeadSeller`/
+`archiveRemoteLead`/`unarchiveRemoteLead` — nenhuma envia `p_company_id`
+(mesmo raciocínio das demais funções deste arquivo: Manager/Seller sempre
+derivam a empresa da membership ativa no backend); `assignRemoteLeadSeller`
+aceita `sellerId: string | null` (`null` remove o vendedor, mesmo cast
+`as unknown as string` já usado na superfície Platform, pois o gerador
+Supabase não modela nulabilidade de args); `unarchiveRemoteLead` **não**
+envia `p_restore_stage_id` (não existe no contrato real, ver E6-A1 acima).
+
+Três hooks novos em `lib/hooks/`, todos Manager-only (bloqueio ANTES da RPC,
+nunca via `canActorMutateLead`), `retry: 0`, `expectedVersion` obrigatório
+no tipo (mesmo com idempotência real no backend), sem mutation otimista,
+com a mesma proteção de identidade (geração de cache) do E4/E5:
+
+- `useAssignLeadSeller` — invalida somente `leadQueryKeys.active` (o Lead
+  não muda de lista); exporta também `isNoOpSellerAssignment(current, next)`
+  (função pura, `null === null` é no-op), reservada para a UI futura do
+  E6-B2 evitar chamar a RPC ao "trocar" para o mesmo vendedor.
+- `useArchiveLead` — invalida `active` **e** `archived` (o Lead muda de
+  lista), mesmo par de keys que `useArchivePlatformLead` na superfície
+  Platform.
+- `useUnarchiveLead` — mesmo par de invalidação de `useArchiveLead`; nunca
+  envia `p_restore_stage_id`; a restauração sempre preserva `stage_id`/
+  `seller_id` existentes (contrato mantido, ver E6-A1).
+
+`lib/hooks/useArchivedLeads.ts` (novo) — leitura remota de arquivados,
+Manager-only e só em `remote_ready` (via `resolveRemoteLeadsFlagMode()`,
+mesmo padrão de `useLeads`); key `leadQueryKeys.archived(companyId)` (já
+reservada desde o E2); `enabled=false` estrutural para Seller/Super Admin/
+sem identidade — nunca fallback local, nunca alimenta `remoteSnapshot`/
+bridge/`StoreAdapter`. Retorna `LeadRow[]` cru (sem adaptar para
+`LeadModel`) — a adaptação para exibição fica para quando a UI do E6-B2
+existir, e não foi antecipada aqui para não presumir a forma exata que a
+futura aba "Arquivados" vai precisar.
+
+Nenhum código de erro novo foi necessário: `mapRemoteLeadsMutationError` já
+cobria `forbidden`/`lead_not_found`/`lead_archived`/`seller_not_found`/
+`stale_write`/`company_read_only` (E4-B1) — todos reaproveitados sem
+alteração em `lib/leads/errors.ts`.
+
+**Validação final**: TSC 22 erros preexistentes (inalterado, mesmos 4
+arquivos); TypeScript 159 → 163 arquivos (+4: `useArchivedLeads.test.tsx`,
+`useAssignLeadSeller.test.tsx`, `useArchiveLead.test.tsx`,
+`useUnarchiveLead.test.tsx`) / 2370 → 2451 testes (+81); SQL inalterado (51
+arquivos/2601 testes, 49 migrations, zero migration nesta etapa — E6-A1 foi
+cancelado antes de qualquer escrita de SQL); nenhuma flag ativada; nenhuma
+operação Supabase remota.
+
+**Riscos residuais explícitos** (nenhum novo): E6-B2 (UI de
+atribuição/arquivamento/aba "Arquivados") continua pendente; `canAssignSeller`/
+`canArchive` continuam `false` até a UI existir; E7 (timeline remota final)
+e E8 (rollout) permanecem pendentes; se uma futura funcionalidade de
+desativação de etapas for criada, o comportamento de `unarchive_lead` diante
+de uma etapa desativada precisará ser desenhado então, não hoje.
+
+**E6-B1 formalmente concluído. E6-B2 desbloqueado, ainda não iniciado.**
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
