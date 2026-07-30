@@ -150,6 +150,73 @@ export async function applyRemoteLeadEvent(payload: ApplyRemoteLeadEventPayload)
   return data;
 }
 
+// M1-E E6-B1 — assign_lead_seller/archive_lead/unarchive_lead para
+// Manager/Seller. Contrato real confirmado na auditoria E6-A0: Seller é
+// PROIBIDO de forma incondicional nas três (raise exception 'forbidden'
+// fixo no backend, não é gate de capability) — os hooks que chamam estas
+// funções bloqueiam o mesmo ator ANTES da RPC, mas Manager-only, nunca via
+// canActorMutateLead (aquele helper é exclusivo de canMoveStage/
+// canLogCallOutcome). p_expected_version é sempre obrigatório nas três
+// (nunca LWW, diferente de move_lead_to_stage). p_restore_stage_id NÃO
+// existe no contrato real de unarchive_lead — o cenário de "etapa inativa"
+// que motivaria esse parâmetro não é reproduzível no schema atual
+// (pipeline_stages não tem conceito de ativa/inativa, achado do E6-A1,
+// docs/M1-E-DESIGN.md §15.12) — unarchive_lead preserva sempre o stage_id
+// existente.
+export type AssignRemoteLeadSellerPayload = {
+  leadId: string;
+  // null remove o vendedor (contrato real da RPC) — nunca profile_id.
+  sellerId: string | null;
+  expectedVersion: number;
+};
+
+export type ArchiveRemoteLeadPayload = {
+  leadId: string;
+  expectedVersion: number;
+};
+
+export type UnarchiveRemoteLeadPayload = {
+  leadId: string;
+  expectedVersion: number;
+};
+
+export async function assignRemoteLeadSeller(payload: AssignRemoteLeadSellerPayload): Promise<RemoteLeadRecord> {
+  const { data, error } = await supabase.rpc('assign_lead_seller', {
+    p_lead_id: payload.leadId,
+    // Gerador Supabase não modela nulabilidade de args (mesmo raciocínio da
+    // superfície Platform em lib/commercial/repository.ts) — o contrato
+    // real aceita null para remover o vendedor.
+    p_seller_id: payload.sellerId as unknown as string,
+    p_expected_version: payload.expectedVersion,
+    // p_company_id OMITIDO de propósito (ver cabeçalho do arquivo).
+  });
+  if (error) throw mapRemoteLeadsMutationError(error, 'assign_lead_seller');
+  if (!data) throw mapRemoteLeadsMutationError({ message: 'empty_response' }, 'assign_lead_seller');
+  return data;
+}
+
+export async function archiveRemoteLead(payload: ArchiveRemoteLeadPayload): Promise<RemoteLeadRecord> {
+  const { data, error } = await supabase.rpc('archive_lead', {
+    p_lead_id: payload.leadId,
+    p_expected_version: payload.expectedVersion,
+    // p_company_id OMITIDO de propósito (ver cabeçalho do arquivo).
+  });
+  if (error) throw mapRemoteLeadsMutationError(error, 'archive_lead');
+  if (!data) throw mapRemoteLeadsMutationError({ message: 'empty_response' }, 'archive_lead');
+  return data;
+}
+
+export async function unarchiveRemoteLead(payload: UnarchiveRemoteLeadPayload): Promise<RemoteLeadRecord> {
+  const { data, error } = await supabase.rpc('unarchive_lead', {
+    p_lead_id: payload.leadId,
+    p_expected_version: payload.expectedVersion,
+    // p_company_id OMITIDO de propósito (ver cabeçalho do arquivo).
+  });
+  if (error) throw mapRemoteLeadsMutationError(error, 'unarchive_lead');
+  if (!data) throw mapRemoteLeadsMutationError({ message: 'empty_response' }, 'unarchive_lead');
+  return data;
+}
+
 // Mesma normalização usada no servidor (regexp_replace(phone, '\D', '', 'g')
 // em check_lead_phone_duplicate/phone_digits) — usada aqui SOMENTE para
 // associar um resultado de duplicidade ao telefone que o gerou (comparação
