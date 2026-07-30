@@ -246,9 +246,10 @@ describe('ScreenClientes — remote_active, sucesso', () => {
   });
 
   // M1-E E4-B2: LeadCard passou a propagar capabilities (não mais o
-  // booleano readOnly) — canCreate/canEditDetails true (E4), o resto
-  // (eventos/mover Etapa/atribuir/arquivar) sempre false até E5/E6.
-  it('abrir o card chama __openFlow com capabilities granulares (canCreate/canEditDetails true, resto false)', () => {
+  // booleano readOnly) — canCreate/canEditDetails true (E4). M1-E E5-B1:
+  // canMoveStage também true para este Manager operacional (Kanban remoto
+  // conectado); eventos/atribuir/arquivar seguem sempre false até E5-B2/E6.
+  it('abrir o card chama __openFlow com capabilities granulares (canCreate/canEditDetails/canMoveStage true, resto false)', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(
       screenState('remote_active', {
         leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'amber')] },
@@ -261,7 +262,7 @@ describe('ScreenClientes — remote_active, sucesso', () => {
         canCreate: true,
         canEditDetails: true,
         canApplyEvents: false,
-        canMoveStage: false,
+        canMoveStage: true,
         canAssignSeller: false,
         canArchive: false,
       },

@@ -15,10 +15,28 @@ const m = vi.hoisted(() => ({
   getStages: vi.fn(),
   leads: { current: [] as any[] },
   user: { current: null as any },
+  attemptMove: vi.fn(),
+  isLeadPending: vi.fn((_leadId: string) => false),
+  errorCodeByLead: {} as Record<string, string | undefined>,
+  clearError: vi.fn(),
 }));
 
 vi.mock('@/lib/hooks/useRemoteLeadsScreenState', () => ({
   useRemoteLeadsScreenState: m.useRemoteLeadsScreenState,
+}));
+
+// M1-E E5-B1: ScreenAndamentoLegacy agora chama este controller
+// incondicionalmente (Rules of Hooks) — mockado aqui para isolar a
+// auditoria de wiring (autorização/payload/estados visuais) da lógica
+// interna do controller (pendência/token/troca de identidade), já coberta
+// em tests/hooks/useRemoteLeadStageMoveController.test.tsx.
+vi.mock('@/lib/hooks/useRemoteLeadStageMoveController', () => ({
+  useRemoteLeadStageMoveController: () => ({
+    attemptMove: m.attemptMove,
+    isLeadPending: m.isLeadPending,
+    errorCodeByLead: m.errorCodeByLead,
+    clearError: m.clearError,
+  }),
 }));
 
 vi.mock('@/lib/store', () => ({
@@ -132,6 +150,11 @@ beforeEach(() => {
   m.user.current = { id: 'user-1', name: 'Admin', email: 'a@a.com' };
   m.getStages.mockReturnValue(LOCAL_NAMES);
   m.useRemoteLeadsScreenState.mockReturnValue(localScreenState());
+  m.attemptMove.mockReset();
+  m.isLeadPending.mockReset();
+  m.isLeadPending.mockReturnValue(false);
+  m.errorCodeByLead = {};
+  m.clearError.mockReset();
 });
 
 // ── A. Caminho local ─────────────────────────────────────────────────────
@@ -476,5 +499,132 @@ describe('ScreenAndamento — remote_misconfigured (REMOTE_LEADS=true, REMOTE_ST
     expect(screen.queryByTestId('kanban-grid')).toBeNull();
     expect(screen.queryByText('Novo')).toBeNull(); // nenhum stage/lead local vaza
     expect(screen.queryByText('Carlos Andrade')).toBeNull();
+  });
+});
+
+// ── I. Movimento remoto do Kanban (M1-E, E5-B1) ─────────────────────────
+
+function managerUser() {
+  return { id: 'user-mgr', name: 'Gerente', email: 'g@a.com', activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
+}
+
+function sellerUser(sellerId: string | null = 's1') {
+  return { id: 'user-slr', name: 'Vendedor', email: 's@a.com', activeMembership: { companyId: 'company-a', role: 'seller', sellerId } };
+}
+
+function dragAndDrop(cardTestId: string, columnTestId: string) {
+  const card = screen.getByTestId(cardTestId);
+  fireEvent.dragStart(card, { dataTransfer: { setData: vi.fn(), effectAllowed: '' } });
+  fireEvent.drop(screen.getByTestId(columnTestId), { dataTransfer: {} });
+}
+
+describe('ScreenAndamento — remote_active: movimento remoto (E5-B1, Manager)', () => {
+  it('Manager operacional: card draggable, drop em coluna diferente chama attemptMove com leadId/sourceStageId/targetStageId corretos', () => {
+    m.user.current = managerUser();
+    m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
+      leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new', 's9')] },
+    }));
+    renderScreen();
+    expect(screen.getByTestId('pipe-card-r1')).toHaveAttribute('draggable', 'true');
+    dragAndDrop('pipe-card-r1', 'kanban-col-qualified');
+    expect(m.attemptMove).toHaveBeenCalledTimes(1);
+    expect(m.attemptMove).toHaveBeenCalledWith({ leadId: 'r1', sourceStageId: 'uuid-new', targetStageId: 'uuid-qualified' });
+    expect(m.moveCard).not.toHaveBeenCalled();
+  });
+
+  it('Manager pode mover Lead de QUALQUER Seller (nenhuma checagem de posse para Manager)', () => {
+    m.user.current = managerUser();
+    m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
+      leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new', 's9')] },
+    }));
+    renderScreen();
+    dragAndDrop('pipe-card-r1', 'kanban-col-qualified');
+    expect(m.attemptMove).toHaveBeenCalledWith(expect.objectContaining({ leadId: 'r1' }));
+  });
+});
+
+describe('ScreenAndamento — remote_active: movimento remoto (E5-B1, Seller)', () => {
+  it('Seller operacional: pode arrastar o PRÓPRIO Lead', () => {
+    m.user.current = sellerUser('s1');
+    m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
+      leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new', 's1')] },
+    }));
+    renderScreen();
+    expect(screen.getByTestId('pipe-card-r1')).toHaveAttribute('draggable', 'true');
+    dragAndDrop('pipe-card-r1', 'kanban-col-qualified');
+    expect(m.attemptMove).toHaveBeenCalledWith({ leadId: 'r1', sourceStageId: 'uuid-new', targetStageId: 'uuid-qualified' });
+  });
+
+  it('Seller operacional: NÃO pode arrastar Lead de outro Seller', () => {
+    m.user.current = sellerUser('s1');
+    m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
+      leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new', 's2')] },
+    }));
+    renderScreen();
+    expect(screen.getByTestId('pipe-card-r1')).toHaveAttribute('draggable', 'false');
+    dragAndDrop('pipe-card-r1', 'kanban-col-qualified');
+    expect(m.attemptMove).not.toHaveBeenCalled();
+  });
+
+  it('Seller operacional: NÃO pode arrastar Lead sem Seller (sellerId null)', () => {
+    m.user.current = sellerUser('s1');
+    m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
+      leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new', null)] },
+    }));
+    renderScreen();
+    expect(screen.getByTestId('pipe-card-r1')).toHaveAttribute('draggable', 'false');
+    dragAndDrop('pipe-card-r1', 'kanban-col-qualified');
+    expect(m.attemptMove).not.toHaveBeenCalled();
+  });
+
+  it('Seller sem sellerId próprio (capability false): NÃO pode arrastar nem o próprio Lead', () => {
+    m.user.current = sellerUser(null);
+    m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
+      leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new', null)] },
+    }));
+    renderScreen();
+    expect(screen.getByTestId('pipe-card-r1')).toHaveAttribute('draggable', 'false');
+  });
+});
+
+describe('ScreenAndamento — remote_active: pendência e erro visual (E5-B1)', () => {
+  it('Lead pendente: mostra indicação discreta e fica não-arrastável', () => {
+    m.user.current = managerUser();
+    m.isLeadPending.mockImplementation((leadId: string) => leadId === 'r1');
+    m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
+      leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new', 's9')] },
+    }));
+    renderScreen();
+    expect(screen.getByTestId('pipe-card-pending-r1')).toBeInTheDocument();
+    expect(screen.getByTestId('pipe-card-r1')).toHaveAttribute('draggable', 'false');
+  });
+
+  it('Lead com erro: mostra mensagem sanitizada (stage_not_found)', () => {
+    m.user.current = managerUser();
+    m.errorCodeByLead = { r1: 'remote_leads_mutation_stage_not_found' };
+    m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
+      leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new', 's9')] },
+    }));
+    renderScreen();
+    expect(screen.getByTestId('pipe-card-error-r1')).toHaveTextContent('A etapa selecionada não está mais disponível.');
+  });
+
+  it('Lead com erro forbidden: mensagem sanitizada específica', () => {
+    m.user.current = managerUser();
+    m.errorCodeByLead = { r1: 'remote_leads_mutation_forbidden' };
+    m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
+      leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new', 's9')] },
+    }));
+    renderScreen();
+    expect(screen.getByTestId('pipe-card-error-r1')).toHaveTextContent('Você não possui permissão para movimentar este Lead.');
+  });
+
+  it('sem erro para o Lead: nenhum elemento de erro renderizado', () => {
+    m.user.current = managerUser();
+    m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
+      leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new', 's9')] },
+    }));
+    renderScreen();
+    expect(screen.queryByTestId('pipe-card-error-r1')).toBeNull();
   });
 });
