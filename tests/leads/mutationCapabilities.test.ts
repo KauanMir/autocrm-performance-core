@@ -1,9 +1,11 @@
 // Testes de lib/leads/mutationCapabilities.ts (M1-E, E4-B1 + E5-B1 +
-// E5-B2-A2). Função pura — sem mocks de rede/React. Cobre a matriz
-// completa: canCreate/canEditDetails/canMoveStage/canLogCallOutcome podem
-// ser true (canMoveStage ativado no E5-B1, canLogCallOutcome no E5-B2-A2);
-// canApplyEvents/canAssignSeller/canArchive são SEMPRE false neste módulo
-// (E5-B2-B/E6).
+// E5-B2-A2 + E6-B2-A). Função pura — sem mocks de rede/React. Cobre a
+// matriz completa: canCreate/canEditDetails/canMoveStage/canLogCallOutcome
+// podem ser true (canMoveStage ativado no E5-B1, canLogCallOutcome no
+// E5-B2-A2); canAssignSeller/canArchive ativados no E6-B2-A, MAS
+// Manager-only (nunca Seller, mesmo operacional — assign_lead_seller/
+// archive_lead/unarchive_lead proíbem Seller de forma incondicional no
+// backend); canApplyEvents é SEMPRE false neste módulo (E5-B2-B).
 import { describe, expect, it } from 'vitest';
 import {
   resolveLeadMutationCapabilities,
@@ -32,9 +34,13 @@ function baseInput(
 }
 
 describe('resolveLeadMutationCapabilities — Manager operacional', () => {
-  it('canCreate, canEditDetails, canMoveStage e canLogCallOutcome true; demais false', () => {
+  it('canCreate, canEditDetails, canMoveStage, canLogCallOutcome, canAssignSeller e canArchive true; canApplyEvents false', () => {
     const result = resolveLeadMutationCapabilities(baseInput());
-    expect(result).toEqual({ ...ALL_FALSE, canCreate: true, canEditDetails: true, canMoveStage: true, canLogCallOutcome: true });
+    expect(result).toEqual({
+      ...ALL_FALSE,
+      canCreate: true, canEditDetails: true, canMoveStage: true, canLogCallOutcome: true,
+      canAssignSeller: true, canArchive: true,
+    });
   });
 });
 
@@ -89,8 +95,8 @@ describe('resolveLeadMutationCapabilities — modo de flag', () => {
   });
 });
 
-describe('resolveLeadMutationCapabilities — E5-B2-B/E6 permanecem fora deste módulo', () => {
-  it('nenhuma combinação válida libera canApplyEvents/canAssignSeller/canArchive (canMoveStage/canLogCallOutcome são os únicos ativados)', () => {
+describe('resolveLeadMutationCapabilities — canApplyEvents permanece fora deste módulo (E5-B2-B)', () => {
+  it('nenhuma combinação válida libera canApplyEvents (canMoveStage/canLogCallOutcome já ativados, canApplyEvents nunca)', () => {
     const managerResult = resolveLeadMutationCapabilities(baseInput());
     const sellerResult = resolveLeadMutationCapabilities(
       baseInput({ actor: { platformRole: null, activeMembership: { companyId: 'company-a', role: 'seller', sellerId: 's1' } } }),
@@ -99,8 +105,23 @@ describe('resolveLeadMutationCapabilities — E5-B2-B/E6 permanecem fora deste m
       expect(result.canApplyEvents).toBe(false);
       expect(result.canMoveStage).toBe(true);
       expect(result.canLogCallOutcome).toBe(true);
-      expect(result.canAssignSeller).toBe(false);
-      expect(result.canArchive).toBe(false);
     }
+  });
+});
+
+describe('resolveLeadMutationCapabilities — E6-B2-A: canAssignSeller/canArchive são Manager-only', () => {
+  it('Manager operacional: canAssignSeller e canArchive true', () => {
+    const result = resolveLeadMutationCapabilities(baseInput());
+    expect(result.canAssignSeller).toBe(true);
+    expect(result.canArchive).toBe(true);
+  });
+
+  it('Seller operacional com sellerId válido: canAssignSeller e canArchive continuam false (proibição incondicional no backend, não é questão de posse)', () => {
+    const input = baseInput({
+      actor: { platformRole: null, activeMembership: { companyId: 'company-a', role: 'seller', sellerId: 's1' } },
+    });
+    const result = resolveLeadMutationCapabilities(input);
+    expect(result.canAssignSeller).toBe(false);
+    expect(result.canArchive).toBe(false);
   });
 });
