@@ -17,13 +17,18 @@ import type { User } from '@/lib/data';
 export type LeadMutationCapabilities = {
   canCreate: boolean;
   canEditDetails: boolean;
-  // canApplyEvents/canAssignSeller/canArchive seguem fora deste módulo —
-  // sempre false até E5-B2/E6 implementarem os fluxos correspondentes
-  // (apply_lead_event/assign_lead_seller/archive_lead/unarchive_lead).
+  // canApplyEvents permanece fora deste módulo — sempre false. O picker
+  // técnico de 18 eventos nunca é liberado por inteiro; canAssignSeller/
+  // canArchive seguem fora também, até E6 implementar os fluxos
+  // correspondentes (assign_lead_seller/archive_lead/unarchive_lead).
   // canMoveStage foi ativado no E5-B1 (Kanban remoto conectado a
-  // move_lead_to_stage via useMoveLeadToStage).
+  // move_lead_to_stage via useMoveLeadToStage). canLogCallOutcome foi
+  // ativado no E5-B2-A2 (somente o resultado de ligação conectado a
+  // apply_lead_event via useApplyLeadEvent — os outros 14 eventos do
+  // enum continuam fora, nunca liberados por canApplyEvents).
   canApplyEvents: boolean;
   canMoveStage: boolean;
+  canLogCallOutcome: boolean;
   canAssignSeller: boolean;
   canArchive: boolean;
 };
@@ -33,6 +38,7 @@ const NO_LEAD_MUTATION_CAPABILITIES: LeadMutationCapabilities = {
   canEditDetails: false,
   canApplyEvents: false,
   canMoveStage: false,
+  canLogCallOutcome: false,
   canAssignSeller: false,
   canArchive: false,
 };
@@ -58,18 +64,20 @@ export type ResolveLeadMutationCapabilitiesInput = {
   actor: LeadMutationCapabilitiesActor;
 };
 
-// Matriz do E4 (docs/M1-E-DESIGN.md §15.4), estendida no E5-B1 (§15.8):
-//   Manager operacional                        -> canCreate + canEditDetails + canMoveStage
-//   Seller operacional com sellerId válido      -> canCreate + canEditDetails + canMoveStage
+// Matriz do E4 (docs/M1-E-DESIGN.md §15.4), estendida no E5-B1 (§15.8) e no
+// E5-B2-A2 (§15.9):
+//   Manager operacional                        -> canCreate + canEditDetails + canMoveStage + canLogCallOutcome
+//   Seller operacional com sellerId válido      -> canCreate + canEditDetails + canMoveStage + canLogCallOutcome
 //   Seller sem sellerId                         -> todas false
 //   Super Admin                                 -> todas false (usa Platform)
 //   sem membership/suspenso/offboarded/inativo  -> todas false
 //   modo local/remote_misconfigured             -> todas false
 // canApplyEvents/canAssignSeller/canArchive permanecem SEMPRE false neste
-// módulo — pertencem a E5-B2/E6, nunca liberados aqui. canMoveStage sozinho
-// nunca autoriza mover um Lead específico: a posse (Seller só no próprio) é
-// responsabilidade de lib/leads/leadMutationOwnership.ts, combinada pelo
-// chamador — este módulo resolve só a capability genérica do ator.
+// módulo — pertencem a E5-B2-B/E6, nunca liberados aqui. Nem canMoveStage
+// nem canLogCallOutcome sozinhos autorizam agir num Lead específico: a
+// posse (Seller só no próprio) é responsabilidade de
+// lib/leads/leadMutationOwnership.ts, combinada pelo chamador — este módulo
+// resolve só a capability genérica do ator.
 export function resolveLeadMutationCapabilities(
   input: ResolveLeadMutationCapabilitiesInput,
 ): LeadMutationCapabilities {
@@ -87,10 +95,10 @@ export function resolveLeadMutationCapabilities(
   if (!membership) return NO_LEAD_MUTATION_CAPABILITIES;
 
   if (membership.role === 'manager') {
-    return { ...NO_LEAD_MUTATION_CAPABILITIES, canCreate: true, canEditDetails: true, canMoveStage: true };
+    return { ...NO_LEAD_MUTATION_CAPABILITIES, canCreate: true, canEditDetails: true, canMoveStage: true, canLogCallOutcome: true };
   }
 
   // Seller: só operacional quando o próprio sellerId está resolvido.
   if (!membership.sellerId) return NO_LEAD_MUTATION_CAPABILITIES;
-  return { ...NO_LEAD_MUTATION_CAPABILITIES, canCreate: true, canEditDetails: true, canMoveStage: true };
+  return { ...NO_LEAD_MUTATION_CAPABILITIES, canCreate: true, canEditDetails: true, canMoveStage: true, canLogCallOutcome: true };
 }
