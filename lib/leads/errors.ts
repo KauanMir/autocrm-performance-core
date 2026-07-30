@@ -33,6 +33,13 @@ export type RemoteLeadsErrorCode =
 // (logout/troca de empresa/membership em voo). `generic_error` é o
 // fallback seguro para qualquer mensagem não reconhecida — nunca uma
 // mensagem desconhecida vira `stale_write`/`forbidden` por adivinhação.
+// M1-E E5-A1 — stage_not_found é adicionado de forma aditiva: mensagem real
+// lançada por move_lead_to_stage/apply_lead_event quando o stage_id
+// enviado (ou o stage_code exigido pelo evento) não pertence à empresa
+// resolvida (provado em supabase/tests/04_m1e_move_event.sql e
+// 45_m1f_s8c2d1_remaining_mutations.sql). Mensagem PT-BR sanitizada
+// reservada para a UI do E5-B1 (Flows2.tsx não é tocado nesta etapa):
+// "A etapa selecionada não está mais disponível."
 export type RemoteLeadsMutationErrorCode =
   | 'remote_leads_mutation_forbidden'
   | 'remote_leads_mutation_company_required'
@@ -43,6 +50,7 @@ export type RemoteLeadsMutationErrorCode =
   | 'remote_leads_mutation_seller_not_found'
   | 'remote_leads_mutation_initial_stage_missing'
   | 'remote_leads_mutation_invalid_phone'
+  | 'remote_leads_mutation_stage_not_found'
   | 'remote_leads_mutation_stale_write'
   | 'remote_leads_mutation_identity_changed'
   | 'remote_leads_mutation_generic_error';
@@ -88,6 +96,7 @@ const REMOTE_LEADS_MUTATION_BACKEND_MESSAGE_CODES: Readonly<Record<string, Remot
   seller_not_found: 'remote_leads_mutation_seller_not_found',
   initial_stage_missing: 'remote_leads_mutation_initial_stage_missing',
   invalid_phone: 'remote_leads_mutation_invalid_phone',
+  stage_not_found: 'remote_leads_mutation_stage_not_found',
   stale_write: 'remote_leads_mutation_stale_write',
 };
 

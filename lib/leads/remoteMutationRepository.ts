@@ -52,6 +52,22 @@ export type CheckRemoteLeadPhoneDuplicatePayload = {
   excludeLeadId?: string;
 };
 
+// M1-E E5-A1 — move_lead_to_stage/apply_lead_event para Manager/Seller.
+// p_expected_version é OMITIDO de propósito no move: decisão humana #1/#3 do
+// E5-A1 (drag do Kanban é sempre last-write-wins, sem optimistic locking no
+// caminho Manager/Seller — diferente do caminho Platform, que envia
+// expectedVersion quando disponível). apply_lead_event nunca aceitou esse
+// parâmetro (a RPC não tem essa coluna no contrato).
+export type MoveRemoteLeadStagePayload = {
+  leadId: string;
+  stageId: string;
+};
+
+export type ApplyRemoteLeadEventPayload = {
+  leadId: string;
+  eventType: Database['public']['Enums']['lead_event_type'];
+};
+
 // create_lead sempre retorna a linha criada quando não há erro — null é
 // anômalo (mesmo padrão de createPlatformLead/createCompanyRpc).
 export async function createRemoteLead(payload: CreateRemoteLeadPayload): Promise<RemoteLeadRecord> {
@@ -103,6 +119,35 @@ export async function checkRemoteLeadPhoneDuplicate(
   });
   if (error) throw mapRemoteLeadsMutationError(error, 'check_lead_phone_duplicate');
   return data ?? [];
+}
+
+// move_lead_to_stage sempre retorna a linha atualizada quando não há erro
+// (mesmo padrão de create_lead/update_lead) — null é anômalo.
+export async function moveRemoteLeadToStage(payload: MoveRemoteLeadStagePayload): Promise<RemoteLeadRecord> {
+  const { data, error } = await supabase.rpc('move_lead_to_stage', {
+    p_lead_id: payload.leadId,
+    p_stage_id: payload.stageId,
+    // p_expected_version OMITIDO de propósito (LWW, ver cabeçalho do tipo).
+    // p_company_id OMITIDO de propósito (ver cabeçalho do arquivo).
+  });
+  if (error) throw mapRemoteLeadsMutationError(error, 'move_lead_to_stage');
+  if (!data) throw mapRemoteLeadsMutationError({ message: 'empty_response' }, 'move_lead_to_stage');
+  return data;
+}
+
+// apply_lead_event nunca grava em lead_timeline_entries (contrato real da
+// RPC, confirmado na auditoria E5-A0) — por isso este repository nunca
+// chama add_lead_timeline_entry aqui: a solução atômica de evento+timeline
+// fica reservada ao E7 (decisão humana #5 do E5-A1).
+export async function applyRemoteLeadEvent(payload: ApplyRemoteLeadEventPayload): Promise<RemoteLeadRecord> {
+  const { data, error } = await supabase.rpc('apply_lead_event', {
+    p_lead_id: payload.leadId,
+    p_event_type: payload.eventType,
+    // p_company_id OMITIDO de propósito (ver cabeçalho do arquivo).
+  });
+  if (error) throw mapRemoteLeadsMutationError(error, 'apply_lead_event');
+  if (!data) throw mapRemoteLeadsMutationError({ message: 'empty_response' }, 'apply_lead_event');
+  return data;
 }
 
 // Mesma normalização usada no servidor (regexp_replace(phone, '\D', '', 'g')
