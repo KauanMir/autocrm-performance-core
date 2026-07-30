@@ -5,6 +5,7 @@ import { Avatar, URG, LBtn, LBadge } from '@/components/ui/kit';
 import { LeadService, TaskService, SellerService } from '@/lib/services';
 import type { LeadHealthEvent } from '@/lib/services';
 import { USERS, TASK_STATE } from '@/lib/data';
+import type { LeadMutationCapabilities } from '@/lib/leads/mutationCapabilities';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -147,7 +148,15 @@ export function LeadPicker({ value, onChange, onPick, placeholder }: {
 // language as LeadPicker: dark trigger, dark dropdown, avatar rows, visible
 // hover — just a closed list instead of type-to-search, since sellers are a
 // short, known set.
-export function SellerPicker({ value, onPick, placeholder }: {
+//
+// M1-E E4-B2: renomeado de SellerPicker para LocalSellerPicker — o caminho
+// LOCAL (SellerService.getAll() interno) precisava conviver com um
+// SellerPicker presentacional novo, alimentado por dados reais no caminho
+// remoto (assignable sellers, E4-A1), sem nunca cair de volta no
+// SellerService. Nenhuma mudança de comportamento para os callers locais
+// existentes (FlowNovoCliente ramo local, FlowRegistrarVenda,
+// FlowNovaPendencia — nenhum deles pertence ao escopo do M1-E).
+export function LocalSellerPicker({ value, onPick, placeholder }: {
   value: any; onPick: (seller: any) => void; placeholder?: string;
 }) {
   const [show, setShow] = useState(false);
@@ -177,6 +186,99 @@ export function SellerPicker({ value, onPick, placeholder }: {
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff' }}>{s.name}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--t-500)' }}>{s.team}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// M1-E E4-B2 — SellerPicker presentacional: recebe os itens por prop, nunca
+// importa SellerService, nunca faz fallback para ele. Usado exclusivamente
+// pelo caminho remoto de criação (Manager), alimentado por
+// useCurrentCompanyAssignableSellers (E4-A1) — nunca pelo catálogo
+// histórico (list_current_company_seller_labels, E3-A1). `value`/`onChange`
+// trabalham com o sellerId (string) diretamente, não com o objeto Seller
+// local — contrato mais simples e correto para dados remotos, que só têm
+// {id, name}. `allowNone` cobre a decisão de produto "Manager pode deixar o
+// Lead sem vendedor" (diferente do LocalSellerPicker, que nunca teve essa
+// opção — decisão antiga, fora de escopo).
+export type SellerPickerItem = { id: string; name: string };
+
+export function SellerPicker({
+  items,
+  value,
+  onChange,
+  loading,
+  disabled,
+  error,
+  allowNone = true,
+  noneLabel = 'Sem vendedor',
+  emptyLabel = 'Nenhum vendedor disponível no momento.',
+  placeholder,
+}: {
+  items: readonly SellerPickerItem[];
+  value: string | null;
+  onChange: (sellerId: string | null) => void;
+  loading?: boolean;
+  disabled?: boolean;
+  error?: string | null;
+  allowNone?: boolean;
+  noneLabel?: string;
+  emptyLabel?: string;
+  placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  const selected = value ? items.find((s) => s.id === value) ?? null : null;
+  const isDisabled = Boolean(disabled) || Boolean(loading) || Boolean(error);
+
+  let triggerLabel: React.ReactNode;
+  if (loading) {
+    triggerLabel = <span style={{ color: 'var(--t-400)', flex: 1 }}>Carregando vendedores…</span>;
+  } else if (error) {
+    triggerLabel = <span style={{ color: 'var(--red, #FF3B3B)', flex: 1 }}>{error}</span>;
+  } else if (selected) {
+    triggerLabel = (
+      <>
+        <Avatar name={selected.name} size={24} ring="#3B82F6" />
+        <span style={{ color: '#fff', fontWeight: 600, flex: 1 }}>{selected.name}</span>
+      </>
+    );
+  } else if (value === null && allowNone) {
+    triggerLabel = <span style={{ color: 'var(--t-400)', flex: 1 }}>{noneLabel}</span>;
+  } else {
+    triggerLabel = <span style={{ color: 'var(--t-400)', flex: 1 }}>{placeholder || 'Selecione o vendedor…'}</span>;
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 7 }}>Vendedor responsável</span>
+      <button type="button" disabled={isDisabled} onClick={() => setShow((s) => !s)}
+        style={{ ...flowField, display: 'flex', alignItems: 'center', gap: 10, cursor: isDisabled ? 'default' : 'pointer', textAlign: 'left', opacity: isDisabled ? 0.6 : 1 }}>
+        {triggerLabel}
+        {!isDisabled && <Icon name="arrowDown" size={16} stroke={2} style={{ color: 'var(--t-400)', transform: show ? 'rotate(180deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} />}
+      </button>
+      {show && !isDisabled && (
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 74, zIndex: 5, maxHeight: 280, overflowY: 'auto', background: '#1a1a1d', border: '1px solid var(--border)', borderRadius: 12, boxShadow: 'var(--shadow-lg)' }}>
+          {allowNone && (
+            <button onClick={() => { onChange(null); setShow(false); }} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
+              onMouseEnter={(e: any) => { e.currentTarget.style.background = 'rgba(255,255,255,.05)'; }}
+              onMouseLeave={(e: any) => { e.currentTarget.style.background = 'transparent'; }}>
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--t-500)' }}>{noneLabel}</span>
+            </button>
+          )}
+          {items.length === 0 && !allowNone && (
+            <div style={{ padding: '14px', fontSize: 12.5, color: 'var(--t-500)', textAlign: 'center' }}>{emptyLabel}</div>
+          )}
+          {items.map((s) => (
+            <button key={s.id} onClick={() => { onChange(s.id); setShow(false); }} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
+              onMouseEnter={(e: any) => { e.currentTarget.style.background = 'rgba(255,255,255,.05)'; }}
+              onMouseLeave={(e: any) => { e.currentTarget.style.background = 'transparent'; }}>
+              <Avatar name={s.name} size={28} ring="#3B82F6" />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff' }}>{s.name}</div>
               </div>
             </button>
           ))}
@@ -441,10 +543,20 @@ export function FlowLigar({ payload, close, openFlow }: any) {
 
 export function FlowVerCliente({ payload, close, openFlow }: any) {
   const lead = payload.lead || LeadService.getAll()[0];
-  // M1-E E3-B1: leads remotos abrem o detalhe em modo somente-leitura
-  // (decisão 16) — nenhuma ação de mutation (Ligar/Visita/Proposta/
-  // Acompanhar/Editar) fica acessível a partir daqui.
-  const readOnly = Boolean(payload.readOnly);
+  // M1-E E4-B2: payload.capabilities (LeadMutationCapabilities), quando
+  // presente, é a autoridade — substitui inteiramente a decisão antiga por
+  // payload.readOnly, que continua funcionando exatamente como antes para
+  // qualquer caller que só passe readOnly (nenhum caller existente precisa
+  // migrar). Sem os dois: comportamento local integral (todas as 5 ações),
+  // igual a antes do E3-B1.
+  const capabilities: LeadMutationCapabilities | null = payload.capabilities ?? null;
+  const legacyReadOnly = Boolean(payload.readOnly);
+  const canEditDetails = capabilities ? capabilities.canEditDetails : !legacyReadOnly;
+  // M1-E E3-B1/E4-B2: leads remotos no E4 nunca liberam eventos (Ligar/
+  // Visita/Proposta/Acompanhar) — isso é E5. capabilities.canApplyEvents
+  // cobre o mesmo caso que payload.readOnly cobria (sempre false no E4
+  // remoto), mais granular quando presente.
+  const canApplyEvents = capabilities ? capabilities.canApplyEvents : !legacyReadOnly;
   const u = URG[lead.urgency];
   // lead.timeline is already the real record — addToTimeline() unshifts onto it
   // from Ligar/Visita/Proposta/Venda/Acompanhamento, so insertion order is
@@ -457,15 +569,17 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
     const d = new Date(lead.createdAt);
     return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
   })();
-  const actions = readOnly ? [] : [
-    { icon: 'phone', label: 'Ligar', flow: 'ligar', accent: '#27C75F' },
-    { icon: 'calendar', label: 'Agendar visita', flow: 'criar-visita', accent: '#E8CE72' },
-    { icon: 'handshake', label: 'Nova proposta', flow: 'nova-proposta', accent: '#E8CE72' },
-    // "Acompanhamento" is one unbreakable word wider than the 88px button —
-    // it overflowed the box (M0-K3.2, problem 5). Shorter label + a word-break
-    // safety net so no future long label leaks the same way.
-    { icon: 'refresh', label: 'Acompanhar', flow: 'criar-acompanhamento', accent: '#3B82F6' },
-    { icon: 'edit', label: 'Editar dados', flow: 'editar-cliente', accent: '#8B8B93' },
+  const actions = [
+    ...(canApplyEvents ? [
+      { icon: 'phone', label: 'Ligar', flow: 'ligar', accent: '#27C75F' },
+      { icon: 'calendar', label: 'Agendar visita', flow: 'criar-visita', accent: '#E8CE72' },
+      { icon: 'handshake', label: 'Nova proposta', flow: 'nova-proposta', accent: '#E8CE72' },
+      // "Acompanhamento" is one unbreakable word wider than the 88px button —
+      // it overflowed the box (M0-K3.2, problem 5). Shorter label + a word-break
+      // safety net so no future long label leaks the same way.
+      { icon: 'refresh', label: 'Acompanhar', flow: 'criar-acompanhamento', accent: '#3B82F6' },
+    ] : []),
+    ...(canEditDetails ? [{ icon: 'edit', label: 'Editar dados', flow: 'editar-cliente', accent: '#8B8B93' }] : []),
   ];
   return (
     <FlowShell eyebrow="CENTRAL DO CLIENTE" title={lead.name} icon="user"
@@ -540,7 +654,7 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
               <Icon name={lead.urgency === 'red' ? 'flame' : 'phone'} size={20} stroke={2.2} style={{ color: lead.urgency === 'red' ? 'var(--red)' : 'var(--gold-ink)' }} />
               <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--t-900)' }}>{lead.alert}</span>
             </div>
-            {!readOnly && (
+            {canApplyEvents && (
               <div style={{ marginTop: 12 }}>
                 <LBtn kind="gold" icon="phone" onClick={() => openFlow('ligar', { lead })} style={{ width: '100%', justifyContent: 'center' }}>Ligar agora</LBtn>
               </div>

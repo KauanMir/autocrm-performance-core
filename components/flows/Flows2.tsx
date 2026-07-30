@@ -1,14 +1,22 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge } from '@/components/ui/kit';
 import { STAGES, VISIT_STATUS, DEAL_STATUS, SALE_STATUS, TASK_STATE } from '@/lib/data';
 import { AuthService, LeadService, VisitService, DealService, SaleService, TaskService, SellerService } from '@/lib/services';
 import {
   CARS, ORIGINS, PAYS,
-  FField, FArea, Segmented, ChoiceTile, ClientChip, LeadPicker, SellerPicker,
+  FField, FArea, Segmented, ChoiceTile, ClientChip, LeadPicker, LocalSellerPicker, SellerPicker,
   FPanel, StepRail, SummaryRow, FlowShell, FlowSuccess,
 } from './FlowsShared';
+import { useCurrentCompanyAssignableSellers } from '@/lib/hooks/useCurrentCompanyAssignableSellers';
+import { useCreateLead, type CreateLeadCallInput } from '@/lib/hooks/useCreateLead';
+import { useUpdateLead } from '@/lib/hooks/useUpdateLead';
+import { useCheckLeadPhoneDuplicate } from '@/lib/hooks/useCheckLeadPhoneDuplicate';
+import { useLeadDuplicateGuard } from '@/lib/hooks/useLeadDuplicateGuard';
+import type { RemoteLeadDuplicateRow } from '@/lib/leads/remoteMutationRepository';
+import { resolveLeadFlowContext, type LeadFlowContext } from '@/lib/leads/leadFlowContext';
+import { isRemoteLeadsError } from '@/lib/leads/errors';
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
 const TEMP_INFO: Record<string, string> = {
@@ -17,7 +25,112 @@ const TEMP_INFO: Record<string, string> = {
   Frio: 'Curioso, sem prazo definido ou decisão clara — precisa ser nutrido com menor urgência.',
 };
 
+// ── M1-E E4-B2 — utilitários compartilhados do caminho remoto ────────────
+
+// Mensagens sanitizadas fixas por código estável (nunca SQL/UUID/payload) —
+// mesmo modelo do reorder M1-D. Código desconhecido cai no genérico.
+function remoteLeadErrorMessage(code: string | undefined): string {
+  switch (code) {
+    case 'remote_leads_mutation_forbidden':
+      return 'Você não tem permissão para realizar esta ação.';
+    case 'remote_leads_mutation_company_required':
+    case 'remote_leads_mutation_company_not_found':
+    case 'remote_leads_mutation_company_read_only':
+      return 'Não foi possível concluir: sua empresa não está disponível para esta ação no momento.';
+    case 'remote_leads_mutation_lead_not_found':
+      return 'Este cliente não foi encontrado.';
+    case 'remote_leads_mutation_lead_archived':
+      return 'Este cliente está arquivado e não pode ser editado.';
+    case 'remote_leads_mutation_seller_not_found':
+      return 'O vendedor selecionado não está mais disponível. Escolha outro.';
+    case 'remote_leads_mutation_initial_stage_missing':
+      return 'Não foi possível criar o cliente: configuração de etapas incompleta.';
+    case 'remote_leads_mutation_invalid_phone':
+      return 'Telefone inválido.';
+    case 'remote_leads_mutation_stale_write':
+      return 'Este Lead foi atualizado por outra pessoa. Recarregue os dados antes de tentar novamente.';
+    case 'remote_leads_mutation_identity_changed':
+      return 'Sua empresa atual mudou. Abra o Lead novamente para continuar.';
+    default:
+      return 'Não foi possível concluir a operação. Tente novamente.';
+  }
+}
+
+// Fecha/reseta um flow remoto quando a identidade (empresa/membership/
+// usuário) muda enquanto ele está aberto (logout, troca de empresa,
+// transferência, suspensão) — nenhum draft da identidade antiga sobrevive
+// à troca (decisão §16 do E4-B2).
+function useCloseOnIdentityChange(identityKey: string | null, close: () => void) {
+  const ref = useRef<string | null | 'unset'>('unset');
+  useEffect(() => {
+    if (ref.current === 'unset') { ref.current = identityKey; return; }
+    if (ref.current !== identityKey) { close(); return; }
+    ref.current = identityKey;
+  }, [identityKey, close]);
+}
+
+function ErrorBanner({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--red-bg, rgba(255,59,59,.08))', border: '1px solid var(--red-line, rgba(255,59,59,.3))' }}>
+      <Icon name="alert" size={18} stroke={2.2} style={{ color: 'var(--red, #FF3B3B)' }} />
+      <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{children}</span>
+    </div>
+  );
+}
+
+// Aviso de duplicidade + confirmação explícita — nunca dispara a mutation
+// sozinho; "confirmLabel" (Criar/Salvar mesmo assim) é a única forma de
+// prosseguir quando há accessible/restricted/erro no check.
+function DuplicateWarningPanel({ rows, checkFailed, onConfirm, confirmLabel, busy }: {
+  rows: readonly RemoteLeadDuplicateRow[]; checkFailed: boolean; onConfirm: () => void; confirmLabel: string; busy: boolean;
+}) {
+  const accessible = rows.filter((r) => r.status === 'accessible');
+  const hasRestricted = rows.some((r) => r.status === 'restricted');
+  return (
+    <FPanel style={{ marginTop: 16, border: '1px solid var(--amber-line)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <Icon name="alert" size={18} stroke={2.2} style={{ color: 'var(--amber)' }} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-900)' }}>
+          {checkFailed ? 'Não foi possível verificar se este telefone já está cadastrado.' : 'Telefone já cadastrado'}
+        </span>
+      </div>
+      {accessible.length > 0 && (
+        <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
+          {accessible.map((r) => (
+            <li key={r.lead_id} style={{ fontSize: 13, color: 'var(--t-700)' }}>{r.lead_name}{r.lead_archived ? ' (arquivado)' : ''}</li>
+          ))}
+        </ul>
+      )}
+      {hasRestricted && (
+        <div style={{ fontSize: 13, color: 'var(--t-700)', marginBottom: 10 }}>
+          Já existe um Lead com este telefone, mas você não possui acesso aos detalhes.
+        </div>
+      )}
+      <LBtn kind="gold" size="sm" icon="check" onClick={onConfirm} style={{ opacity: busy ? 0.5 : 1 }}>{confirmLabel}</LBtn>
+    </FPanel>
+  );
+}
+
+function isValidLeadPhone(phone: string): boolean {
+  return phone.replace(/\D/g, '').length >= 8;
+}
+
+// ── FlowNovoCliente — router sem hooks próprios (mesmo molde de
+// ScreenClientes/ScreenAndamento em ScreensOps.tsx: a escolha é de QUAL
+// componente montar, nunca de qual hook chamar dentro do MESMO componente) ─
+
 export function FlowNovoCliente({ payload, close, openFlow }: any) {
+  const user = AuthService.getCurrentUser();
+  const ctx = resolveLeadFlowContext(user);
+  if (ctx.dataSource === 'remote') {
+    return <FlowNovoClienteRemote close={close} openFlow={openFlow} ctx={ctx} />;
+  }
+  return <FlowNovoClienteLocal close={close} openFlow={openFlow} />;
+}
+
+// ── Caminho LOCAL: corpo original, intacto (só o import do picker mudou de
+// nome — SellerPicker passou a ser o presentacional remoto) ──────────────
+function FlowNovoClienteLocal({ close, openFlow }: any) {
   const [step, setStep] = useState(0);
   const [f, setF] = useState({ nome: '', tel: '', origem: 'Showroom', car: '', pay: 'Financiamento', urg: 'Quente' });
   const set = (k: string, v: any) => setF(s => ({ ...s, [k]: v }));
@@ -104,7 +217,7 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
           <FField label="Telefone / WhatsApp" icon="phone" placeholder="(11) 90000-0000" value={f.tel} onChange={(e: any) => set('tel', e.target.value)} />
           {!isSeller && (
             <div style={{ marginBottom: 14 }}>
-              <SellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
+              <LocalSellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
             </div>
           )}
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '6px 0 9px' }}>Como ele chegou até você?</div>
@@ -139,7 +252,169 @@ export function FlowNovoCliente({ payload, close, openFlow }: any) {
   );
 }
 
+// ── Caminho REMOTO: Manager (assignable Sellers, "Sem vendedor" incluído)
+// e Seller (sem picker, backend autoatribui) — campos aceitos por
+// create_lead apenas: nome, telefone, veículo, temperatura, pagamento,
+// origem, sellerId (só Manager). Nunca Stage/valor/notas/urgência/
+// arquivado/companyId/expectedVersion. ──────────────────────────────────
+function FlowNovoClienteRemote({ close, openFlow, ctx }: { close: () => void; openFlow: (id: string, payload?: any) => void; ctx: LeadFlowContext }) {
+  const isSeller = ctx.membershipRole === 'seller';
+  const identityKey = ctx.userId && ctx.companyId ? `${ctx.userId}:${ctx.companyId}` : null;
+  useCloseOnIdentityChange(identityKey, close);
+
+  const [f, setF] = useState({ nome: '', tel: '', origem: 'Showroom', car: '', pay: 'Financiamento', urg: 'Quente' });
+  const [sellerId, setSellerId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ id: string } | null>(null);
+  const set = (k: string, v: any) => setF((s) => ({ ...s, [k]: v }));
+
+  const assignableSellers = useCurrentCompanyAssignableSellers({
+    userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
+  });
+  const duplicateCheck = useCheckLeadPhoneDuplicate({
+    userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
+  });
+  const duplicateGuard = useLeadDuplicateGuard({
+    phone: f.tel,
+    isPhoneValid: isValidLeadPhone(f.tel),
+    enabled: ctx.capabilities.canCreate,
+    identityKey,
+    duplicateCheck,
+  });
+  const createLeadHook = useCreateLead({
+    userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
+  });
+
+  if (!ctx.capabilities.canCreate) {
+    return (
+      <FlowShell eyebrow="NOVO ATENDIMENTO" title="Novo cliente" icon="users" accent="#E8CE72" onClose={close}>
+        <div style={{ padding: '40px 12px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
+          Você não tem permissão para criar clientes no momento.
+        </div>
+      </FlowShell>
+    );
+  }
+
+  if (created) {
+    const lead = { id: created.id, name: f.nome || 'Novo cliente' };
+    return (
+      <FlowShell eyebrow="NOVO ATENDIMENTO" title="Cliente criado" icon="users" accent="#27C75F" onClose={close}>
+        <FlowSuccess title="Cliente criado!" sub={`${f.nome} entrou na sua carteira.`}
+          actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      </FlowShell>
+    );
+  }
+
+  const canSubmitBasic = Boolean(f.nome.trim() && f.tel.trim()) && !submitting && duplicateGuard.status !== 'checking';
+
+  async function performCreate() {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const input: CreateLeadCallInput = isSeller
+        ? { actorRole: 'seller', name: f.nome, phone: f.tel, car: f.car || CARS[0], temperature: TEMP_MAP[f.urg], paymentPreference: f.pay, source: f.origem }
+        : { actorRole: 'manager', sellerId, name: f.nome, phone: f.tel, car: f.car || CARS[0], temperature: TEMP_MAP[f.urg], paymentPreference: f.pay, source: f.origem };
+      const record = await createLeadHook.createLead(input);
+      TaskService.create({
+        title: `Ligar para ${f.nome}`,
+        lead: f.nome,
+        leadId: record.id,
+        state: TASK_STATE.TODAY,
+        prio: 'alta',
+        when: 'Hoje',
+        assignedTo: isSeller ? ctx.sellerId : sellerId,
+        note: 'Primeiro contato',
+      });
+      setCreated({ id: record.id });
+    } catch (err) {
+      const code = isRemoteLeadsError(err) ? err.code : undefined;
+      if (code === 'remote_leads_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(remoteLeadErrorMessage(code));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCreateClick() {
+    if (!canSubmitBasic) return;
+    const verification = await duplicateGuard.verifyBeforeSubmit();
+    if (verification === 'proceed') await performCreate();
+  }
+
+  function handleConfirmAndCreate() {
+    duplicateGuard.confirm();
+    void performCreate();
+  }
+
+  return (
+    <FlowShell eyebrow="NOVO ATENDIMENTO" title="Novo cliente" icon="users" accent="#E8CE72" onClose={close}
+      sub="Cadastre um novo cliente. Os dados são salvos diretamente na sua empresa."
+      footer={<>
+        <div style={{ flex: 1 }} />
+        <LBtn kind="gold" size="lg" icon="check" onClick={handleCreateClick} style={{ opacity: canSubmitBasic ? 1 : .5 }}>
+          {submitting ? 'Criando…' : 'Criar cliente'}
+        </LBtn>
+      </>}>
+      <div style={{ maxWidth: 720 }}>
+        <FPanel>
+          <FField label="Nome do cliente" icon="user" placeholder="Ex.: Carlos Andrade" value={f.nome} onChange={(e: any) => set('nome', e.target.value)} />
+          <FField label="Telefone / WhatsApp" icon="phone" placeholder="(11) 90000-0000" value={f.tel} onChange={(e: any) => set('tel', e.target.value)} />
+          {!isSeller && (
+            <div style={{ marginBottom: 14 }}>
+              <SellerPicker
+                items={(assignableSellers.assignableSellers as readonly { seller_id: string; name: string }[]).map((s) => ({ id: s.seller_id, name: s.name }))}
+                value={sellerId}
+                onChange={setSellerId}
+                loading={assignableSellers.isLoading}
+                error={assignableSellers.isError ? 'Não foi possível carregar os vendedores.' : null}
+              />
+            </div>
+          )}
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '6px 0 9px' }}>Como ele chegou até você?</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+            {ORIGINS.map(([o, ic]) => <ChoiceTile key={o} icon={ic} title={o} active={f.origem === o} onClick={() => set('origem', o)} />)}
+          </div>
+        </FPanel>
+        <FPanel style={{ marginTop: 16 }}>
+          <FField label="Veículo de interesse" icon="car" placeholder="Ex.: Corolla XEI 2023, Compass Longitude, Hilux SRX…" value={f.car} onChange={(e: any) => set('car', e.target.value)} hint="Digite o modelo e versão que o cliente procura." />
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '8px 0 9px' }}>Forma de pagamento</div>
+          <div style={{ marginBottom: 18 }}><Segmented options={PAYS.map(p => p[0])} value={f.pay} onChange={v => set('pay', v)} /></div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 2 }}>Temperatura do lead</div>
+          <Segmented options={['Quente', 'Morno', 'Frio']} value={f.urg} onChange={v => set('urg', v)} accent="#FF6B3B" />
+          <div style={{ fontSize: 12, color: 'var(--t-500)', marginTop: 9, lineHeight: 1.5 }}>{TEMP_INFO[f.urg]}</div>
+        </FPanel>
+        {duplicateGuard.needsConfirmation && (
+          <DuplicateWarningPanel
+            rows={duplicateGuard.rows}
+            checkFailed={duplicateGuard.status === 'error'}
+            onConfirm={handleConfirmAndCreate}
+            confirmLabel="Criar mesmo assim"
+            busy={submitting}
+          />
+        )}
+        {submitError && <ErrorBanner>{submitError}</ErrorBanner>}
+      </div>
+    </FlowShell>
+  );
+}
+
+// ── FlowEditarCliente — mesmo molde de router sem hooks próprios ─────────
+
 export function FlowEditarCliente({ payload, close }: any) {
+  const user = AuthService.getCurrentUser();
+  const ctx = resolveLeadFlowContext(user);
+  if (ctx.dataSource === 'remote') {
+    return <FlowEditarClienteRemote payload={payload} close={close} ctx={ctx} />;
+  }
+  return <FlowEditarClienteLocal payload={payload} close={close} />;
+}
+
+// ── Caminho LOCAL: corpo original, intacto ───────────────────────────────
+function FlowEditarClienteLocal({ payload, close }: any) {
   const lead = payload.lead || {};
   const [done, setDone] = useState(false);
   const [f, setF] = useState({ nome: lead.name || '', tel: lead.phone || '', car: lead.car || CARS[0], stage: lead.stage || 'Novo', pay: lead.pay || 'Financiamento' });
@@ -172,6 +447,138 @@ export function FlowEditarCliente({ payload, close }: any) {
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Pagamento</div>
           <Segmented options={PAYS.map(p => p[0])} value={f.pay} onChange={v => set('pay', v)} />
         </FPanel>
+      </div>
+    </FlowShell>
+  );
+}
+
+// ── Caminho REMOTO: nome, telefone, veículo, temperatura, pagamento,
+// origem — Stage/Seller/valor/notas/urgência/arquivamento OCULTOS (não
+// apenas desabilitados). expectedVersion vem de lead.version (LeadModel,
+// sempre presente desde a leitura remota — auditado nesta etapa). ────────
+function FlowEditarClienteRemote({ payload, close, ctx }: { payload: any; close: () => void; ctx: LeadFlowContext }) {
+  const lead = payload.lead || {};
+  const identityKey = ctx.userId && ctx.companyId ? `${ctx.userId}:${ctx.companyId}` : null;
+  useCloseOnIdentityChange(identityKey, close);
+
+  const [f, setF] = useState({
+    nome: lead.name || '', tel: lead.phone || '', car: lead.car || CARS[0],
+    pay: lead.pay || 'Financiamento', urg: lead.temperature === 'hot' ? 'Quente' : lead.temperature === 'cold' ? 'Frio' : 'Morno',
+    origem: lead.origem || 'Showroom',
+  });
+  const set = (k: string, v: any) => setF((s) => ({ ...s, [k]: v }));
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const duplicateCheck = useCheckLeadPhoneDuplicate({
+    userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
+  });
+  const duplicateGuard = useLeadDuplicateGuard({
+    phone: f.tel,
+    isPhoneValid: isValidLeadPhone(f.tel),
+    excludeLeadId: lead.id,
+    enabled: ctx.capabilities.canEditDetails,
+    identityKey,
+    duplicateCheck,
+  });
+  const updateLeadHook = useUpdateLead({
+    userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
+  });
+
+  if (!ctx.capabilities.canEditDetails) {
+    return (
+      <FlowShell eyebrow="EDITAR CLIENTE" title="Editar cliente" icon="edit" accent="#E8CE72" onClose={close}>
+        <div style={{ padding: '40px 12px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
+          Você não tem permissão para editar este cliente no momento.
+        </div>
+      </FlowShell>
+    );
+  }
+
+  if (done) return (
+    <FlowShell eyebrow="EDITAR CLIENTE" title="Dados atualizados" icon="edit" accent="#27C75F" onClose={close}>
+      <FlowSuccess title="Dados salvos com sucesso" sub={`As informações de ${f.nome} foram atualizadas.`} actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+    </FlowShell>
+  );
+
+  const canSubmitBasic = Boolean(f.nome.trim() && f.tel.trim() && lead.id && typeof lead.version === 'number') && !submitting && duplicateGuard.status !== 'checking';
+
+  async function performUpdate() {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await updateLeadHook.updateLead({
+        leadId: lead.id,
+        expectedVersion: lead.version,
+        name: f.nome,
+        phone: f.tel,
+        car: f.car || CARS[0],
+        temperature: TEMP_MAP[f.urg],
+        paymentPreference: f.pay,
+        source: f.origem,
+      });
+      setDone(true);
+    } catch (err) {
+      const code = isRemoteLeadsError(err) ? err.code : undefined;
+      if (code === 'remote_leads_mutation_identity_changed') {
+        close();
+        return;
+      }
+      // stale_write: mantém o formulário aberto com os dados digitados,
+      // nunca repete a mutation sozinho (mensagem já cobre "recarregue").
+      setSubmitError(remoteLeadErrorMessage(code));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSaveClick() {
+    if (!canSubmitBasic) return;
+    const verification = await duplicateGuard.verifyBeforeSubmit();
+    if (verification === 'proceed') await performUpdate();
+  }
+
+  function handleConfirmAndSave() {
+    duplicateGuard.confirm();
+    void performUpdate();
+  }
+
+  return (
+    <FlowShell eyebrow="EDITAR CLIENTE" title={`Atualizar ${(lead.name || '').split(' ')[0]}`} icon="edit" accent="#E8CE72" onClose={close}
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="ghost" size="lg" onClick={close}>Cancelar</LBtn>
+        <LBtn kind="gold" size="lg" icon="check" onClick={handleSaveClick} style={{ opacity: canSubmitBasic ? 1 : .5 }}>
+          {submitting ? 'Salvando…' : 'Salvar alterações'}
+        </LBtn></>}>
+      <div style={{ maxWidth: 720 }}>
+        <FPanel>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <FField label="Nome" icon="user" value={f.nome} onChange={(e: any) => set('nome', e.target.value)} />
+            <FField label="Telefone" icon="phone" value={f.tel} onChange={(e: any) => set('tel', e.target.value)} />
+          </div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '4px 0 9px' }}>Veículo de interesse</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10, marginBottom: 18 }}>
+            {(lead.car ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 4).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={f.car === c} onClick={() => set('car', c)} />)}
+          </div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '8px 0 9px' }}>Forma de pagamento</div>
+          <div style={{ marginBottom: 18 }}><Segmented options={PAYS.map(p => p[0])} value={f.pay} onChange={(v: string) => set('pay', v)} /></div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '8px 0 9px' }}>Como ele chegou até você?</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 18 }}>
+            {ORIGINS.map(([o, ic]) => <ChoiceTile key={o} icon={ic} title={o} active={f.origem === o} onClick={() => set('origem', o)} />)}
+          </div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 2 }}>Temperatura do lead</div>
+          <Segmented options={['Quente', 'Morno', 'Frio']} value={f.urg} onChange={(v: string) => set('urg', v)} accent="#FF6B3B" />
+        </FPanel>
+        {duplicateGuard.needsConfirmation && (
+          <DuplicateWarningPanel
+            rows={duplicateGuard.rows}
+            checkFailed={duplicateGuard.status === 'error'}
+            onConfirm={handleConfirmAndSave}
+            confirmLabel="Salvar mesmo assim"
+            busy={submitting}
+          />
+        )}
+        {submitError && <ErrorBanner>{submitError}</ErrorBanner>}
       </div>
     </FlowShell>
   );
@@ -821,7 +1228,7 @@ export function FlowRegistrarVenda({ payload, close }: any) {
       <div style={{ maxWidth: 720 }}>
         {!isSeller && (
           <FPanel style={{ marginBottom: 16 }}>
-            <SellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
+            <LocalSellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
             {!finalSeller && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--amber)' }}>Selecione o vendedor responsável por esta venda.</div>}
           </FPanel>
         )}
@@ -932,7 +1339,7 @@ export function FlowNovaPendencia({ payload, close }: any) {
         </FPanel>
         {!isSeller && (
           <FPanel style={{ marginBottom: 16 }}>
-            <SellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
+            <LocalSellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
             {!finalSeller && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--amber)' }}>Selecione o vendedor responsável por esta pendência.</div>}
           </FPanel>
         )}
