@@ -9,6 +9,7 @@ import { useRemoteLeadsScreenState, type RemoteLeadsScreenMode } from '@/lib/hoo
 import { useRemoteLeadStageMoveController } from '@/lib/hooks/useRemoteLeadStageMoveController';
 import { resolveLeadMutationCapabilities, type LeadMutationCapabilities } from '@/lib/leads/mutationCapabilities';
 import { canActorMutateLead } from '@/lib/leads/leadMutationOwnership';
+import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import type { RemoteLeadsErrorCode } from '@/lib/leads/errors';
 import type { RemoteLeadsFlagMode } from '@/lib/leads/remoteLeadsMode';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
@@ -46,6 +47,20 @@ function flagModeFromScreenState(mode: RemoteLeadsScreenMode): RemoteLeadsFlagMo
   if (mode === 'local') return 'local';
   if (mode === 'remote_misconfigured') return 'remote_misconfigured';
   return 'remote_ready'; // remote_unavailable_identity | remote_active
+}
+
+// M1-E E5-B2-A1 — Barreira 1 (UI) para Pendências: Task não tem company_id
+// nem backend remoto (auditoria E5-B2-A0). Fora do modo local, a tela não
+// monta nenhuma lista local — resolvido ANTES de qualquer chamada a
+// TaskService.getAll().
+function LocalCommercialUnavailableCard() {
+  return (
+    <LCard style={{ maxWidth: 640 }}>
+      <div data-testid="local-commercial-unavailable" style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
+        Visitas, propostas, vendas e acompanhamentos serão disponibilizados após a migração deste módulo.
+      </div>
+    </LCard>
+  );
 }
 import { isSuperAdminCommercialReadEnabled } from '@/lib/flags';
 import { PlatformCommercialClientsView } from '@/components/commercial/PlatformCommercialClientsView';
@@ -748,8 +763,16 @@ function TaskRow({ task, go }: any) {
 
 export function ScreenPendencias({ go }: any) {
   useStore();
-  const tasks = TaskService.getAll();
   const [tab, setTab] = useState('Atrasadas');
+  if (!isLocalCommercialDataAllowed()) {
+    return (
+      <LightScreen>
+        <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
+        <LocalCommercialUnavailableCard />
+      </LightScreen>
+    );
+  }
+  const tasks = TaskService.getAll();
   const groups: Record<string, any[]> = {
     'Atrasadas': tasks.filter((t: any) => t.state === TASK_STATE.LATE),
     'Hoje': tasks.filter((t: any) => t.state === TASK_STATE.TODAY),

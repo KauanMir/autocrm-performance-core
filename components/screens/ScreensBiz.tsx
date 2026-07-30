@@ -13,6 +13,21 @@ import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages
 import { UsersTabSection } from '@/components/users/UsersTabSection';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
+import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
+
+// M1-E E5-B2-A1 — Barreira 1 (UI) para Visitas/Propostas/Vendas: Visit/Deal/
+// Sale não têm company_id nem backend remoto (auditoria E5-B2-A0). Fora do
+// modo local, a tela não monta nenhuma lista/contagem local — resolvido
+// ANTES de qualquer chamada a VisitService/DealService/SaleService.getAll().
+function LocalCommercialUnavailableCard() {
+  return (
+    <LCard style={{ maxWidth: 640 }}>
+      <div data-testid="local-commercial-unavailable" style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
+        Visitas, propostas, vendas e acompanhamentos serão disponibilizados após a migração deste módulo.
+      </div>
+    </LCard>
+  );
+}
 
 // Every value VISIT_STATUS can produce must have an entry here — a status
 // missing from this map is what made VisitRow crash (M0-J audit, M0-K1 fix).
@@ -65,6 +80,14 @@ function VisitRow({ v, go }: any) {
 
 export function ScreenVisitas({ go }: any) {
   useStore();
+  if (!isLocalCommercialDataAllowed()) {
+    return (
+      <LightScreen>
+        <PageHead title="Visitas" sub="A agenda do dia e o que precisa ser confirmado." />
+        <LocalCommercialUnavailableCard />
+      </LightScreen>
+    );
+  }
   const visits = VisitService.getAll();
   const KNOWN_DAYS = ['hoje', 'amanha', 'passado'];
   const groups = [
@@ -144,6 +167,14 @@ function DealRow({ d, go, approval, decided, canDecide }: any) {
 
 export function ScreenPropostas({ go }: any) {
   useStore();
+  if (!isLocalCommercialDataAllowed()) {
+    return (
+      <LightScreen>
+        <PageHead title="Propostas" sub="As negociações em aberto e o que precisa de aprovação." />
+        <LocalCommercialUnavailableCard />
+      </LightScreen>
+    );
+  }
   const deals = DealService.getAll();
   const canDecide = AuthService.isManager();
   const open = deals.filter((d: any) => d.status === DEAL_STATUS.OPEN);
@@ -186,6 +217,14 @@ const SST: Record<string, { tone: string; label: string }> = {
 
 export function ScreenVendas({ go }: any) {
   useStore();
+  if (!isLocalCommercialDataAllowed()) {
+    return (
+      <LightScreen>
+        <PageHead title="Vendas" sub="O que importa primeiro: quantas vendas você fechou." />
+        <LocalCommercialUnavailableCard />
+      </LightScreen>
+    );
+  }
   const sales = SaleService.getAll();
   const canCancel = AuthService.isManager();
   const delivered = sales.filter((s: any) => s.status === SALE_STATUS.DELIVERED).length;
@@ -338,9 +377,14 @@ function exportResultadosCSV() {
 export function ScreenResultados({ go }: any) {
   useStore();
   const top = SellerService.getAll();
+  // M1-E E5-B2-A1: a exportação combina Leads/Sellers (sempre seguros) com
+  // Vendas/Propostas/Visitas locais (Visit/Deal/Sale) — fora do modo local
+  // essas três seções não podem ser lidas, então a exportação inteira fica
+  // indisponível em vez de gerar um CSV incompleto/enganoso.
+  const canExport = isLocalCommercialDataAllowed();
   return (
     <LightScreen>
-      <PageHead title="Resultados" sub="Como a equipe está performando — em números simples." actions={<LBtn kind="ghost" icon="file" onClick={exportResultadosCSV}>Exportar</LBtn>} />
+      <PageHead title="Resultados" sub="Como a equipe está performando — em números simples." actions={canExport ? <LBtn kind="ghost" icon="file" onClick={exportResultadosCSV}>Exportar</LBtn> : undefined} />
       <LCard pad={0} style={{ overflow: 'hidden', marginBottom: 18 }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14, color: 'var(--t-900)' }}>Desempenho por vendedor — Junho</div>
         <div style={{ display: 'grid', gridTemplateColumns: '32px 1.6fr repeat(4, .8fr)', padding: '10px 18px', borderBottom: '1px solid var(--border)', fontSize: 11.5, color: 'var(--t-400)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>

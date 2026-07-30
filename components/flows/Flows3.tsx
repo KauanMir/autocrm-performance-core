@@ -9,6 +9,7 @@ import {
   FArea, Segmented, ChoiceTile,
   FPanel, FlowShell, FlowSuccess,
 } from './FlowsShared';
+import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 
 export function MiniBars({ data, accent = '#E8CE72', h = 60 }: {
   data: { l: string; v: number; hi?: boolean }[]; accent?: string; h?: number;
@@ -133,14 +134,24 @@ export function FlowPerfilVendedor({ payload, close, openFlow }: any) {
 }
 
 export function FlowNotificacoes({ payload, close, openFlow }: any) {
+  // M1-E E5-B2-A1: as duas notificações abaixo abrem flows de Visita/
+  // Proposta — nunca oferecidas fora do modo local (Visit/Deal não têm
+  // company_id nem backend remoto, auditoria E5-B2-A0). O texto estático
+  // das demais notificações deste grupo (dado de demonstração, não uma
+  // leitura real de VisitService/DealService/SaleService) permanece.
+  const localCommercialAllowed = isLocalCommercialDataAllowed();
   const groups = [
     { name: 'Urgente', tone: 'red', items: [
       { icon: 'flame', t: <span>Cliente <b>Carlos Andrade</b> está sem resposta há 3 dias</span>, when: 'há 1h', action: () => openFlow('ligar', { lead: findLead('Carlos Andrade') || LeadService.getAll()[0] }), label: 'Ligar' },
       { icon: 'target', t: <span><b>João Ferreira</b> ultrapassou você no ranking</span>, when: 'há 2h', action: () => openFlow('perfil-vendedor', { seller: SellerService.getAll()[2] }), label: 'Ver' },
-      { icon: 'calendar', t: <span>Visita de <b>Juliana Prado</b> ainda não confirmada</span>, when: 'há 3h', action: () => openFlow('confirmar-visita', { visit: VisitService.getAll().find((v: any) => v.status === 'pendente') }), label: 'Confirmar' },
+      ...(localCommercialAllowed ? [
+        { icon: 'calendar', t: <span>Visita de <b>Juliana Prado</b> ainda não confirmada</span>, when: 'há 3h', action: () => openFlow('confirmar-visita', { visit: VisitService.getAll().find((v: any) => v.status === 'pendente') }), label: 'Confirmar' },
+      ] : []),
     ]},
     { name: 'Hoje', tone: 'amber', items: [
-      { icon: 'handshake', t: <span>Nova proposta aguardando sua aprovação</span>, when: '14:20', action: () => openFlow('aprovar-proposta', { deal: DealService.getAll().find((d: any) => d.status === 'aprovacao') }), label: 'Revisar' },
+      ...(localCommercialAllowed ? [
+        { icon: 'handshake', t: <span>Nova proposta aguardando sua aprovação</span>, when: '14:20', action: () => openFlow('aprovar-proposta', { deal: DealService.getAll().find((d: any) => d.status === 'aprovacao') }), label: 'Revisar' },
+      ] : []),
       { icon: 'checkCircle', t: <span><b>Mariana Luz</b> confirmou a visita das 14:00</span>, when: '11:05' },
       { icon: 'trophy', t: <span>Venda do <b>Jeep Compass</b> registrada com sucesso</span>, when: '09:30' },
     ]},
@@ -187,9 +198,14 @@ export function FlowBusca({ payload, close, openFlow }: any) {
   const match = (s: string) => ql && s.toLowerCase().includes(ql);
   const clientes = LeadService.getAll().filter((l: any) => !ql || match(l.name) || match(l.phone) || match(l.car));
   const vendedores = SellerService.getAll().filter((s: any) => !ql || match(s.name) || match(s.team));
-  const propostas = DealService.getAll().filter((d: any) => !ql || match(d.client) || match(d.car));
-  const vendas = SaleService.getAll().filter((s: any) => !ql || match(s.client) || match(s.car));
-  const visitas = VisitService.getAll().filter((v: any) => !ql || match(v.client) || match(v.car));
+  // M1-E E5-B2-A1: Propostas/Vendas/Visitas (Deal/Sale/Visit) não têm
+  // company_id nem backend remoto (auditoria E5-B2-A0) — fora do modo
+  // local, a busca nunca consulta esses três domínios; Clientes/Vendedores
+  // (Lead/Seller) permanecem intactos nos dois modos.
+  const localCommercialAllowed = isLocalCommercialDataAllowed();
+  const propostas = localCommercialAllowed ? DealService.getAll().filter((d: any) => !ql || match(d.client) || match(d.car)) : [];
+  const vendas = localCommercialAllowed ? SaleService.getAll().filter((s: any) => !ql || match(s.client) || match(s.car)) : [];
+  const visitas = localCommercialAllowed ? VisitService.getAll().filter((v: any) => !ql || match(v.client) || match(v.car)) : [];
   const groups = [
     { name: 'Clientes', icon: 'users', items: clientes.slice(0, 4).map((l: any) => ({ title: l.name, sub: `${l.car} · ${l.phone}`, tone: l.urgency, onClick: () => openFlow('ver-cliente', { lead: l }) })) },
     { name: 'Vendedores', icon: 'trophy', items: vendedores.slice(0, 3).map((s: any) => ({ title: s.name, sub: `Equipe ${s.team} · ${s.sales} vendas`, onClick: () => openFlow('perfil-vendedor', { seller: s }) })) },
