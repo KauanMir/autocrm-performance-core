@@ -4,7 +4,9 @@
 // higienizada — nunca token, credencial, URL ou query completa.
 import type { LeadAdapterError } from '@/lib/leads/adapter';
 
-// Exatamente os 4 códigos do contrato aprovado do E3 — nenhum código extra.
+// Exatamente os 4 códigos do contrato aprovado do E3 — nenhum código extra
+// aqui; a extensão de mutation (E4-B1) vive em RemoteLeadsMutationErrorCode,
+// abaixo, e entra na união por adição, nunca por edição destes 4.
 export type RemoteLeadsErrorCode =
   // Falha de rede/RLS/Postgres na leitura remota.
   | 'remote_leads_fetch_failed'
@@ -18,7 +20,32 @@ export type RemoteLeadsErrorCode =
   // Contexto inválido para o modo remoto: sem sessão/companyId OU dados
   // remotos incompatíveis com a configuração (stage/seller órfão no adapter —
   // LeadAdapterError preservado como causa técnica em detail.adapterError).
-  | 'remote_leads_invalid_context';
+  | 'remote_leads_invalid_context'
+  | RemoteLeadsMutationErrorCode;
+
+// M1-E E4-B1 — códigos das mutations de create/update/duplicidade
+// (create_lead/update_lead/check_lead_phone_duplicate, caminho Manager/
+// Seller). Mapeados a partir das mensagens estáveis que as RPCs lançam
+// (`raise exception '<codigo>'`, docs/M1-E-DESIGN.md §6) — nunca inventados
+// além do que o backend realmente lança. `identity_changed` é o único
+// código desta lista que NUNCA vem do backend: é lançado localmente pelos
+// hooks quando a geração do cache muda entre o início e o fim da mutation
+// (logout/troca de empresa/membership em voo). `generic_error` é o
+// fallback seguro para qualquer mensagem não reconhecida — nunca uma
+// mensagem desconhecida vira `stale_write`/`forbidden` por adivinhação.
+export type RemoteLeadsMutationErrorCode =
+  | 'remote_leads_mutation_forbidden'
+  | 'remote_leads_mutation_company_required'
+  | 'remote_leads_mutation_company_not_found'
+  | 'remote_leads_mutation_company_read_only'
+  | 'remote_leads_mutation_lead_not_found'
+  | 'remote_leads_mutation_lead_archived'
+  | 'remote_leads_mutation_seller_not_found'
+  | 'remote_leads_mutation_initial_stage_missing'
+  | 'remote_leads_mutation_invalid_phone'
+  | 'remote_leads_mutation_stale_write'
+  | 'remote_leads_mutation_identity_changed'
+  | 'remote_leads_mutation_generic_error';
 
 // Causa técnica segura de um erro do Supabase: somente código e mensagem.
 export interface RemoteLeadsErrorDetail {
@@ -44,4 +71,50 @@ export class RemoteLeadsError extends Error {
 
 export function isRemoteLeadsError(error: unknown): error is RemoteLeadsError {
   return error instanceof RemoteLeadsError;
+}
+
+// M1-E E4-B1 — mapa mensagem-estável -> código namespaced. Espelha
+// exatamente as mensagens de `raise exception` de create_lead/update_lead/
+// check_lead_phone_duplicate e do resolver compartilhado
+// resolve_lead_mutation_context (docs/M1-E-DESIGN.md §6, §15.1/§15.3/§15.4)
+// — nenhum valor inventado além do que o SQL realmente lança.
+const REMOTE_LEADS_MUTATION_BACKEND_MESSAGE_CODES: Readonly<Record<string, RemoteLeadsMutationErrorCode>> = {
+  forbidden: 'remote_leads_mutation_forbidden',
+  company_required: 'remote_leads_mutation_company_required',
+  company_not_found: 'remote_leads_mutation_company_not_found',
+  company_read_only: 'remote_leads_mutation_company_read_only',
+  lead_not_found: 'remote_leads_mutation_lead_not_found',
+  lead_archived: 'remote_leads_mutation_lead_archived',
+  seller_not_found: 'remote_leads_mutation_seller_not_found',
+  initial_stage_missing: 'remote_leads_mutation_initial_stage_missing',
+  invalid_phone: 'remote_leads_mutation_invalid_phone',
+  stale_write: 'remote_leads_mutation_stale_write',
+};
+
+// Converte um erro cru do Supabase (create_lead/update_lead/
+// check_lead_phone_duplicate) num RemoteLeadsError com código namespaced e
+// detail sanitizado. Mensagem não reconhecida SEMPRE vira
+// `remote_leads_mutation_generic_error` — nunca é adivinhada como
+// `stale_write`/`forbidden`/qualquer outro código específico.
+export function mapRemoteLeadsMutationError(
+  error: { code?: unknown; message?: unknown },
+  operation: string,
+): RemoteLeadsError {
+  const rawMessage = typeof error.message === 'string' ? error.message : undefined;
+  const mappedCode = rawMessage ? REMOTE_LEADS_MUTATION_BACKEND_MESSAGE_CODES[rawMessage] : undefined;
+  return new RemoteLeadsError(mappedCode ?? 'remote_leads_mutation_generic_error', {
+    code: typeof error.code === 'string' ? error.code : undefined,
+    message: rawMessage,
+    operation,
+  });
+}
+
+// Erro LOCAL (nunca vem do backend): lançado pelos hooks de mutation quando
+// a geração do cache (lib/query/cacheIdentity.ts) muda entre o início e o
+// fim de uma mutation — logout, troca de empresa/membership, ou qualquer
+// resetQueryCache() em voo. A escrita já pode ter concluído no servidor;
+// este erro só impede que o efeito visual (invalidation, sucesso, fechar
+// modal) aterrisse na identidade errada.
+export function createIdentityChangedMutationError(operation: string): RemoteLeadsError {
+  return new RemoteLeadsError('remote_leads_mutation_identity_changed', { operation });
 }
