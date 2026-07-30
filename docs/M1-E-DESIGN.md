@@ -343,26 +343,53 @@ Seller) ou `is_platform_super_admin()` (Super Admin), nunca mais lê
 
 ### 6.3 `move_lead_to_stage`
 
+**Atualizado no M1-F (migração `20260729140000`, confirmado na auditoria
+E5-A0): assinatura real abaixo, não a original desta seção.**
+
 ```sql
 move_lead_to_stage(
   p_lead_id          uuid,
   p_stage_id         uuid,
-  p_expected_version integer default null
+  p_expected_version integer default null,
+  p_company_id       uuid default null
 ) returns public.leads
 ```
 
-- Valida lead e stage na empresa do profile; ownership (seller move somente
-  lead próprio); lead não-arquivado. Atualiza `stage_id` e
-  `updated_by_profile_id`.
+- Deriva contexto via `resolve_lead_mutation_context(p_company_id)` — mesmo
+  resolver de `create_lead`/`update_lead`. Manager/Seller nunca enviam
+  `p_company_id` (a empresa vem sempre da membership ativa; qualquer valor
+  enviado é ignorado); Super Admin sempre envia `p_company_id` explícito
+  (`company_required` se ausente) via a superfície Platform separada
+  (`useMovePlatformLead`), nunca pelo caminho deste documento.
+- Valida lead e stage na empresa resolvida; ownership (seller move somente
+  lead próprio, `forbidden` caso contrário); lead não-arquivado
+  (`lead_archived`); stage de outra empresa ou inexistente (`stage_not_found`).
+  Atualiza `stage_id` e `updated_by_profile_id`.
+- **E5-A1 (decisão humana, ver §15/E5):** o caminho Manager/Seller nunca
+  envia `p_expected_version` — drag do Kanban é sempre last-write-wins, sem
+  optimistic locking. Optimistic locking com `p_expected_version` continua
+  disponível na RPC e é usado pela superfície Platform (Super Admin).
 
 ### 6.4 `apply_lead_event`
+
+**Atualizado no M1-F (migração `20260729140000`, confirmado na auditoria
+E5-A0): assinatura real abaixo, não a original desta seção.**
 
 ```sql
 apply_lead_event(
   p_lead_id    uuid,
-  p_event_type lead_event_type
+  p_event_type lead_event_type,
+  p_company_id uuid default null
 ) returns public.leads
 ```
+
+Mesmo resolver/omissão de `p_company_id` do §6.3 para Manager/Seller. A RPC
+**nunca teve, e continua sem, parâmetro de versão** — é sempre
+last-write-wins, sem exceção, em qualquer caminho (Manager/Seller ou
+Platform). A RPC **nunca grava em `lead_timeline_entries`** (confirmado na
+auditoria E5-A0) — timeline é responsabilidade exclusiva de
+`add_lead_timeline_entry`, uma RPC separada, reservada ao E7 neste caminho
+(ver limitação conhecida abaixo e §15/E5).
 
 O cliente envia somente o lead e o tipo do evento. Urgency, labels e estágio
 são derivados no servidor a partir do mapeamento fechado abaixo — o cliente
@@ -410,12 +437,31 @@ Regras da RPC:
 - define `updated_by_profile_id`;
 - retorna a linha atualizada.
 
-Seam dos flows: a função de health que os flows já chamam hoje no
-`LeadService` permanece com a mesma assinatura pública. Com flag OFF ela
-aplica `calculateLeadHealth` na store local, como sempre; com flag ON ela
-converte o `LeadHealthEvent` atual para `lead_event_type` (achatamento puro
-descrito acima) e dispara a RPC via hook `useApplyLeadEvent`. Os call sites
-dos flows não mudam de forma.
+Seam dos flows (estado alvo, ainda não conectado — ver E5-A1/B2 abaixo): a
+função de health que os flows já chamam hoje no `LeadService` permanece com a
+mesma assinatura pública. Com flag OFF ela aplica `calculateLeadHealth` na
+store local, como sempre; com flag ON ela converte o `LeadHealthEvent` atual
+para `lead_event_type` (achatamento puro descrito acima) e dispara a RPC via
+hook `useApplyLeadEvent`. Os call sites dos flows não mudam de forma.
+
+**Status real ao fim do E5-A1:** o achatamento puro existe e está testado
+exaustivamente (`lib/leads/leadEventMapper.ts`,
+`mapLeadHealthEventToRemoteEventType`, os 18 valores do enum), assim como o
+hook `useApplyLeadEvent` (`lib/hooks/useApplyLeadEvent.ts`) e o hook de
+movimento `useMoveLeadToStage` (`lib/hooks/useMoveLeadToStage.ts`) — mas
+nenhum dos dois está conectado a `LeadService`/flows/Kanban ainda:
+`canMoveStage`/`canApplyEvents` continuam `false` em
+`resolveLeadMutationCapabilities`, `LeadService.updateHealth`/
+`addToTimeline` continuam bloqueando sob flag ON (`_assertLocalLeadWriteAllowed`)
+exatamente como antes, e `PipeCard`/`PipelineService.moveCard` não foram
+tocados. A conexão real é escopo do E5-B1 (Kanban) e E5-B2 (flows de
+evento).
+
+`FlowCriarAcompanhamento` não tem, e não terá neste momento, nenhum
+`LeadHealthEvent`/`lead_event_type` correspondente (decisão humana confirmada
+na auditoria E5-A0/E5-A1): não foi criado enum novo, não foi criada RPC nova,
+e o fluxo não foi forçado a mapear para nenhum dos 18 valores existentes —
+permanece com o comportamento local atual (sem efeito de saúde) até o E7.
 
 Limitação conhecida e aceita no M1-E: os eventos são fechados e os
 resultados são derivados no servidor, mas visitas, propostas, negociações e
@@ -1335,6 +1381,56 @@ Engine — `apply_lead_event`) fica oficialmente desbloqueado, ainda não
 iniciado.** E6 (`assign_lead_seller`/`archive_lead`/`unarchive_lead`) e E7
 (timeline remota, fallbacks `[0]`, regressão total, rollout) permanecem
 igualmente fora deste módulo.
+
+### 15.7 E5-A0 (auditoria) e E5-A1 (data layer) — concluídos
+
+**E5-A0** (somente leitura) confirmou: `move_lead_to_stage`/
+`apply_lead_event` prontos no backend (nenhum bloqueio de SQL); Manager
+opera Leads da própria empresa, Seller somente os atribuídos a ele; stage
+cross-company recusado (`stage_not_found`); movimento é last-write-wins;
+`apply_lead_event` nunca teve `expectedVersion` e nunca cria timeline; os 13
+`LeadHealthEvent` locais (18 valores expandidos) têm mapeamento remoto
+exato, provado byte-a-byte contra `supabase/tests/04_m1e_move_event.sql`;
+`FlowCriarAcompanhamento` não tem evento remoto equivalente.
+
+**E5-A1** implementou exclusivamente a infraestrutura TypeScript, sem
+conectar nenhuma UI:
+
+- `lib/leads/remoteMutationRepository.ts`: `moveRemoteLeadToStage`
+  (`p_lead_id`/`p_stage_id`, sem `p_expected_version`/`p_company_id`) e
+  `applyRemoteLeadEvent` (`p_lead_id`/`p_event_type`, sem `p_company_id`).
+- `lib/leads/errors.ts`: `stage_not_found` acrescentado de forma aditiva
+  (`remote_leads_mutation_stage_not_found`); todos os códigos anteriores
+  preservados; `stale_write` continua no contrato geral (usado por
+  `update_lead`), mas não é esperado no caminho Manager/Seller de move/event
+  (nenhum dos dois envia `p_expected_version` aqui).
+- `lib/leads/leadEventMapper.ts`: `mapLeadHealthEventToRemoteEventType`,
+  função pura exaustiva (18 valores, `never` em cada `default`
+  inalcançável), reutiliza `LeadHealthEvent` real — sem `any`, sem cast, sem
+  fallback. `FlowCriarAcompanhamento` não entra (não existe
+  `LeadHealthEvent` para ele).
+- `lib/leads/leadMutationOwnership.ts`: `canActorMutateLead`, helper puro de
+  autorização visual por Lead (Manager: qualquer Lead da empresa; Seller:
+  somente quando `leadSellerId === actorSellerId`) — preparado para o
+  E5-B1/B2, não consumido por nenhuma tela nesta etapa.
+- `lib/hooks/useMoveLeadToStage.ts` e `lib/hooks/useApplyLeadEvent.ts`:
+  mesmo padrão de `useCreateLead`/`useUpdateLead` (identidade por parâmetro,
+  `retry: 0`, proteção por geração de cache, `identity_changed` quando a
+  identidade muda em voo, invalidação exclusiva de
+  `leadQueryKeys.active(companyId capturado)`, nunca timeline, zero
+  mutation otimista). `useMoveLeadToStage` também exporta `isNoOpStageMove`
+  (helper puro, não consumido ainda — reservado ao E5-B1 para não chamar a
+  RPC quando o card é solto na própria coluna).
+- `canMoveStage`/`canApplyEvents` continuam `false` em
+  `resolveLeadMutationCapabilities` — nenhuma mudança de comportamento
+  visível. Ativação é gradual: `canMoveStage` no E5-B1 (Kanban conectado),
+  `canApplyEvents` no E5-B2 (flows de evento conectados).
+- Nenhum arquivo de UI (`ScreensOps.tsx`, `Flows2.tsx`, `FlowsShared.tsx`),
+  SQL, `database.types.ts`, `PipelineService`, `StoreAdapter` ou superfície
+  Platform foi tocado.
+
+**E5-A1 formalmente encerrado. E5-B1 (conexão do Kanban) desbloqueado, ainda
+não iniciado.**
 
 ## 16. Plano de testes
 
