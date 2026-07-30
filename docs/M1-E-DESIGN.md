@@ -1493,8 +1493,94 @@ ou superfície Platform.
   dedicados do E3-B1) — nenhum drag, nenhum drop, nenhuma mutation possível
   estruturalmente.
 
-**E5-B1 formalmente encerrado. E5-B2 (conexão dos flows de evento/Health
-Engine) desbloqueado, ainda não iniciado.**
+**E5-B1 formalmente encerrado.**
+
+### 15.9 E5-B2-A0 (auditoria) e E5-B2-A1 (isolamento fail-closed) — concluídos
+
+**E5-B2-A0** (somente leitura) auditou os efeitos colaterais de conectar
+`apply_lead_event` aos flows comerciais locais (Ligação/Visita/Proposta/
+Venda/Acompanhamento) e encontrou um **risco estrutural preexistente**, não
+introduzido por este módulo: `Visit`/`Deal`/`Sale`/`Task` (`lib/data.ts`) não
+têm `company_id` e são persistidos em chaves de `localStorage` **globais**,
+sem nenhum namespace por empresa/usuário (`lib/store.ts`) — diferente de
+`Lead`, já migrado para Supabase com RLS por empresa. O catálogo real de
+RPCs (35 funções, `database.types.ts`) não tem nenhuma equivalente para
+visita/proposta/venda/tarefa. Mantidos graváveis fora do modo local, esses
+quatro domínios arriscavam (como risco estrutural/potencial, nunca
+confirmado como vazamento real ocorrido): registros locais órfãos
+referenciando um Lead que só existe no Supabase, mistura de dados entre
+empresas no mesmo navegador, e sucesso comercial exibido sem persistência
+remota verdadeira. Achado adicional: `ScreensBiz.tsx` (Visitas/Propostas/
+Vendas) e `Flows3.tsx` (busca/notificações) já abriam esses flows e liam
+esses quatro serviços **sem nenhuma consciência do modo remoto** — um gap
+independente de `canApplyEvents` (que segue `false`).
+
+**E5-B2-A1** implementou o isolamento fail-closed em duas camadas, sem
+conectar nenhum evento e sem tocar `canApplyEvents`:
+
+- **Helper central** (`lib/leads/localCommercialAccess.ts`):
+  `isLocalCommercialDataAllowed()` (só `resolveRemoteLeadsFlagMode() ===
+  'local'` permite; `remote_ready` E `remote_misconfigured` bloqueiam
+  igualmente) e `assertLocalCommercialDataAllowed(operation)`, que lança
+  `LocalCommercialDataDisabledError`
+  (`remote_commercial_local_data_disabled`) — função pura, sem React, sem
+  identidade de empresa/usuário, sem StoreAdapter.
+- **Barreira 2 (serviços)** — `lib/services.ts`: `VisitService`
+  (create/update/getAll), `DealService` (create/update/approve/reject/
+  getAll), `SaleService` (create/cancel/getAll) e `TaskService` (create/
+  update/getAll) chamam `assertLocalCommercialDataAllowed` **sempre antes**
+  de qualquer acesso ao `StoreAdapter`, nunca depois. `SaleService.cancel`
+  trocou `_assertLocalLeadWriteAllowed` (código `remote_leads_read_only`,
+  específico de Lead) por este novo contrato central — mesma condição de
+  bloqueio, código de erro coerente com o domínio.
+- **Barreira 1 (UI)** — três frentes, cada uma resolvendo o modo ANTES de
+  chamar qualquer serviço comercial local:
+  - `components/flows/FlowLayer.tsx`: gate central por `flow.id` — os 9
+    flows comerciais (`criar-visita`, `confirmar-visita`,
+    `registrar-resultado`, `nova-proposta`, `aprovar-proposta`,
+    `registrar-venda`, `criar-acompanhamento`, `nova-pendencia`,
+    `reagendar-pendencia`) mostram um estado sanitizado ("Visitas,
+    propostas, vendas e acompanhamentos serão disponibilizados após a
+    migração deste módulo.") fora do modo local, **não importa quem chamou
+    `openFlow`** (LeadCard, ScreensBiz, Flows3, estado antigo) — a decisão
+    nunca lê o payload do flow.
+  - `components/screens/ScreensBiz.tsx`: `ScreenVisitas`/`ScreenPropostas`/
+    `ScreenVendas` mostram o mesmo estado indisponível fora do modo local,
+    sem chamar `VisitService`/`DealService`/`SaleService.getAll()`.
+    `ScreenResultados`: exportação CSV (mistura Lead/Seller seguros com
+    Sale/Deal/Visit bloqueados) fica indisponível fora do modo local; o
+    ranking de vendedores (fora dos quatro domínios) continua nos dois
+    modos.
+  - `components/screens/ScreensOps.tsx`: `ScreenPendencias` (Task) mesmo
+    tratamento — `useState` continua chamado incondicionalmente antes do
+    gate (Rules of Hooks preservadas).
+  - `components/flows/Flows3.tsx`: `FlowBusca`/`FlowNotificacoes` deixam de
+    consultar `DealService`/`SaleService`/`VisitService` fora do modo
+    local — Clientes/Vendedores (Lead/Seller) continuam pesquisáveis/
+    visíveis nos dois modos.
+- **Troca de identidade/flag em tempo real**: não foi necessário nenhum
+  código adicional de reset — `resolveRemoteLeadsFlagMode()` deriva de
+  `NEXT_PUBLIC_FF_REMOTE_LEADS`/`NEXT_PUBLIC_FF_REMOTE_STAGES`, inlined em
+  build pelo Next.js; `lib/flags.ts` já documenta que as flags "não são
+  reativas: mudar o override exige recarregar a página" — não existe
+  transição de modo local→remoto dentro de uma mesma sessão sem um reload
+  completo (que já remonta tudo). O gate depende só do modo global, nunca
+  de `activeCompany`/`selectedCompanyId`/identidade — troca de empresa
+  sozinha nunca muda o resultado de `isLocalCommercialDataAllowed()`.
+- **Caminho local**: intacto — todos os quatro serviços e as quatro
+  telas/flows continuam funcionando exatamente como antes quando
+  `REMOTE_LEADS=false`.
+- Nenhum arquivo de SQL, `database.types.ts`, `StoreAdapter`, `store.ts`,
+  `lib/data.ts`, `remoteMutationRepository`, `useMoveLeadToStage`/
+  `useApplyLeadEvent`, event mapper, bridge, adapter ou superfície Platform
+  foi tocado. `canApplyEvents` continua `false`.
+
+**E5-B2-A1 formalmente encerrado. E5-B2-A2 (avaliação de conexão real de
+Ligação, com capability própria `canLogCallOutcome` — nunca reaproveitando
+`canApplyEvents` para liberar todas as ações de uma vez) desbloqueado, ainda
+não iniciado. Visitas, propostas, vendas e acompanhamentos permanecem
+indisponíveis no modo remoto até existirem módulos remotos estruturados
+próprios — nunca serão simulados com o Health Engine.**
 
 ## 16. Plano de testes
 
