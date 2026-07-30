@@ -1643,8 +1643,170 @@ Task/timeline remota, e sem reaproveitar `canApplyEvents` (que continua
 **E5-B2-A2 formalmente encerrado. Visitas, propostas, vendas e
 acompanhamentos permanecem indisponíveis no modo remoto até existirem
 módulos remotos estruturados próprios — nunca serão simulados com o Health
-Engine. E5-C (regressão final e fechamento formal do M1-E) desbloqueado,
-ainda não iniciado.**
+Engine. E5-C (regressão final e fechamento formal do E5 — não do M1-E
+completo) desbloqueado, ainda não iniciado.**
+
+### 15.11 E5-C (regressão final e fechamento formal do E5) — concluído
+
+Etapa somente de auditoria/teste/documentação — nenhum código de aplicação
+foi alterado. Confirma, por leitura e teste, tudo que o E5 entregou do
+início (E5-A0) ao fim (E5-B2-A2):
+
+- **E5-A0**: auditoria somente leitura dos contratos reais de
+  `move_lead_to_stage`/`apply_lead_event`.
+- **E5-A1**: data layer (`remoteMutationRepository`, `useMoveLeadToStage`,
+  `useApplyLeadEvent`, `leadEventMapper`, `leadMutationOwnership`,
+  `errors.ts` com `stage_not_found`) — nenhuma UI conectada.
+- **E5-B1**: Kanban remoto conectado — `canMoveStage` ativado;
+  `useRemoteLeadStageMoveController` (pendência/token por Lead, same-stage
+  no-op, sem otimismo); `PipeCard`/`ScreenAndamentoLegacy` usam `stage.id`
+  (nunca `stage.name`) e `canActorMutateLead` para posse por Lead.
+- **E5-B2-A0**: auditoria somente leitura que encontrou o risco estrutural
+  de `Visit`/`Deal`/`Sale`/`Task` sem `company_id`/backend remoto.
+- **E5-B2-A1**: isolamento fail-closed — `localCommercialAccess`
+  (`isLocalCommercialDataAllowed`/`assertLocalCommercialDataAllowed`)
+  aplicado em toda a camada de serviços (Barreira 2) e em
+  `FlowLayer`/`ScreensBiz`/`ScreenPendencias`/`Flows3` (Barreira 1).
+- **E5-B2-A2**: `canLogCallOutcome` ativado; `FlowLigar` roteia
+  Local/Remote; `FlowLigarRemote` conecta somente os 4 outcomes de ligação
+  a `apply_lead_event`, sem Task/timeline/serviço local.
+
+**Mapa final confirmado por leitura direta do código**:
+
+```
+MOVE (Kanban):    drag → leadId (payload mínimo) → sourceStageId/
+                  targetStageId resolvidos no drop pela lista remota atual
+                  → canActorMutateLead → useMoveLeadToStage (sem
+                  expectedVersion/companyId, LWW) → move_lead_to_stage →
+                  invalidateQueries(leadQueryKeys.active) → bridge →
+                  useLeads refaz a busca → card aparece na coluna nova.
+
+CALL OUTCOME:     Lead remoto → capabilities.canLogCallOutcome →
+                  canActorMutateLead → FlowLigarRemote → outcome escolhido
+                  → mapLeadHealthEventToRemoteEventType → useApplyLeadEvent
+                  (leadId/eventType, sem companyId) → apply_lead_event →
+                  invalidateQueries(leadQueryKeys.active) → bridge → saúde
+                  do Lead atualizada na lista.
+
+ISOLAMENTO:       resolveRemoteLeadsFlagMode() !== 'local' →
+                  assertLocalCommercialDataAllowed lança ANTES de qualquer
+                  StoreAdapter (Visit/Deal/Sale/Task) → FlowLayer/
+                  ScreensBiz/ScreenPendencias nunca montam lista/flow local
+                  → nenhum caminho híbrido StoreAdapter+Supabase existe.
+```
+
+**Matriz final de capabilities confirmada** (`lib/leads/mutationCapabilities.ts`,
+testada em `tests/leads/mutationCapabilities.test.ts`):
+
+| Ator | canCreate | canEditDetails | canMoveStage | canLogCallOutcome | canApplyEvents | canAssignSeller | canArchive |
+|---|---|---|---|---|---|---|---|
+| Manager operacional | true | true | true | true | false | false | false |
+| Seller operacional (sellerId) | true | true | true | true | false | false | false |
+| Seller sem sellerId | false | false | false | false | false | false | false |
+| `remote_misconfigured` | false | false | false | false | false | false | false |
+| local | false | false | false | false | false | false | false |
+| Super Admin | false | false | false | false | false | false | false |
+| sem membership/suspenso/offboarded/inativo | false | false | false | false | false | false | false |
+
+`canMoveStage`/`canLogCallOutcome` sozinhos nunca autorizam agir num Lead
+específico — a posse (Seller só no próprio) é sempre resolvida por
+`canActorMutateLead`, combinada pelo chamador. O backend
+(`resolve_lead_mutation_context`) continua sendo a autoridade final nos
+dois casos — as capabilities são só UX/defesa de handler.
+
+**Confirmado por grep/leitura direta (nenhuma exceção encontrada)**:
+`PipelineService.moveCard` só é chamado no ramo `else if (draggedId)`
+(caminho local) de `ScreenAndamentoLegacy` — nunca no ramo remoto;
+`attemptMove`/`applyLeadEvent` sempre usam `stage.id`/`draggedLead.stageId`,
+nunca `stage.name`; `canApplyEvents: true` não existe em nenhum arquivo do
+repositório; nenhum arquivo de `lib/leads/`, `lib/hooks/use{Move,Apply}
+LeadToStage`, ou `FlowsShared.tsx` importa `lib/commercial`/
+`components/commercial` nem referencia `selectedCompanyId`;
+`add_lead_timeline_entry` não é chamada por nenhum destes arquivos (só
+citada em comentários explicando a ausência proposital).
+
+**Ausência intencional de Task/timeline no caminho remoto**: confirmada por
+teste dedicado (`tests/flows/FlowLigarRemote.test.tsx`, "nunca chama
+LeadService/TaskService/StoreAdapter local") — decisão **temporária**, não
+uma equivalência funcional completa com o caminho local (que continua
+criando Task nos outcomes "Pediu retorno"/"Não atendeu" e timeline em todo
+outcome). O rollout remoto continua bloqueado até E7 (timeline atômica) e
+E8 (rollout).
+
+**Flows comerciais que continuam bloqueados no remoto** (confirmado em
+`FlowLayer.test.tsx`, `ScreensBizCommercialIsolation.test.tsx`,
+`ScreenPendenciasCommercialIsolation.test.tsx`, `Flows3CommercialIsolation.test.tsx`):
+`FlowCriarVisita`, `FlowConfirmarVisita`, `FlowRegistrarResultado`,
+`FlowNovaProposta`, `FlowAprovarProposta`, `FlowRegistrarVenda`,
+`FlowCriarAcompanhamento`, `FlowNovaPendencia`, `FlowReagendarPendencia`, e
+o cancelamento local de venda — por botão, por tentativa programática
+direta no `FlowLayer`, por payload antigo, e pelos três pontos de entrada
+alternativos (`ScreensBiz`, `Flows3`, `ScreenPendencias`).
+
+**Lacuna real fechada nesta etapa** (nenhuma outra encontrada — inventário
+completo abaixo): `tests/flows/FlowLigarRemote.test.tsx` ganhou um novo
+`describe` cobrindo `remote_misconfigured` (`REMOTE_LEADS=true`,
+`REMOTE_STAGES=false`) contra `FlowLigar` — confirmando que o resultado
+observável é sempre "sem permissão" (capabilities todas false), nunca um
+fallback para o corpo local e nunca um crash. Esse cenário nunca havia sido
+exercitado diretamente contra o router `FlowLigar`.
+
+**Inventário de testes do E5** (nenhuma outra lacuna encontrada — cobertura
+já exaustiva, nenhum teste duplicado foi criado):
+
+| Garantia | Arquivo(s) |
+|---|---|
+| Contrato SQL move/event, LWW, autorização, status de empresa | `supabase/tests/04_m1e_move_event.sql`, `45_m1f_s8c2d1_remaining_mutations.sql` |
+| Repository/hook de move (payload, erros, identidade) | `tests/leads/remoteMutationRepository.test.ts`, `tests/hooks/useMoveLeadToStage.test.tsx` |
+| Repository/hook de evento (payload, erros, identidade) | `tests/leads/remoteMutationRepository.test.ts`, `tests/hooks/useApplyLeadEvent.test.tsx` |
+| Mapper (18 valores exaustivos) | `tests/leads/leadEventMapper.test.ts` |
+| Autorização por Lead (Manager/Seller/posse) | `tests/leads/leadMutationOwnership.test.ts` |
+| Controller de movimento (pendência, token, same-stage, identidade) | `tests/hooks/useRemoteLeadStageMoveController.test.tsx` |
+| Wiring do Kanban (autorização visual, payload, pendência, erros) | `tests/screens/ScreenAndamento.test.tsx` |
+| Capabilities (matriz completa) | `tests/leads/mutationCapabilities.test.ts`, `tests/leads/leadFlowContext.test.ts` |
+| Helper de isolamento comercial | `tests/leads/localCommercialAccess.test.ts` |
+| Serviços comerciais bloqueados (12 métodos, local preservado) | `tests/leads/serviceSeam.test.ts` |
+| Gate central de flows comerciais | `tests/flows/FlowLayer.test.tsx` |
+| Telas comerciais fail-closed (Visitas/Propostas/Vendas/CSV) | `tests/screens/ScreensBizCommercialIsolation.test.tsx` |
+| Pendências fail-closed | `tests/screens/ScreenPendenciasCommercialIsolation.test.tsx` |
+| Busca/notificações fail-closed | `tests/flows/Flows3CommercialIsolation.test.tsx` |
+| Ligação remota completa (outcomes, autorização, payload, pending, sucesso, 6 erros, identidade, local, misconfigured) | `tests/flows/FlowLigarRemote.test.tsx` |
+| Ligar independente de canApplyEvents (Clientes/Kanban) | `tests/screens/ScreenClientes.test.tsx`, `tests/screens/ScreenAndamento.test.tsx` |
+
+**Super Admin**: confirmado intacto — zero import cruzado novo em nenhum
+arquivo do E5 (`lib/commercial`/`components/commercial` nunca importados
+pelo caminho Manager/Seller), `selectedCompanyId` nunca referenciado fora
+da superfície Platform, suíte Platform completa permanece verde.
+
+**Validação final**: TSC 22 erros preexistentes (inalterado); TypeScript
+159 arquivos (inalterado — a lacuna foi adicionada a um arquivo já
+existente) / 2369 → 2370 testes (+1, só a lacuna do `remote_misconfigured`
+acima, nenhum teste duplicado); SQL inalterado (51 arquivos/2601 testes, 49
+migrations, zero migration nesta etapa); 4 builds verdes (padrão, local,
+`remote_misconfigured`, remoto efetivo).
+
+**Riscos residuais explícitos** (nenhum novo, todos já conhecidos e
+aceitos): E6 ainda precisa implementar `assign_lead_seller`/`archive_lead`/
+`unarchive_lead` e as permissões correspondentes; E7 ainda precisa da
+timeline remota final e da atomicidade evento+histórico; `Visit`/`Deal`/
+`Sale`/`Task` continuam sem backend remoto próprio; "Pediu retorno"/"Não
+atendeu" não criam Task remota; a ligação remota não cria timeline remota;
+migrations/flags continuam exclusivamente locais; o rollout remoto
+continua bloqueado até E7/E8; nenhum smoke test contra Supabase remoto foi
+realizado em nenhuma etapa do E5; a baseline de 22 erros de TSC
+preexistentes permanece (nenhum deles pertence a código tocado pelo E5).
+
+**E5 formalmente encerrado.** `move_lead_to_stage` (Kanban) e a Ligação de
+`apply_lead_event` estão implementados, testados e conectados à UI de
+Manager/Seller; o isolamento fail-closed dos módulos comerciais locais
+está em vigor; nenhuma operação Supabase remota foi realizada em nenhuma
+etapa. **E6 (`assign_lead_seller`/`archive_lead`/`unarchive_lead`) fica
+oficialmente desbloqueado, ainda não iniciado.** E7 (timeline remota final,
+atomicidade evento+histórico, fallbacks `LeadService.getAll()[0]`,
+regressão total) e E8 (rollout, migrations remotas, flags, smoke tests,
+rollback) permanecem pendentes. **O módulo M1-E como um todo continua
+aberto** — o fechamento do E5 encerra somente o Kanban/Health Engine de
+ligação, não o M1-E completo.
 
 ## 16. Plano de testes
 
