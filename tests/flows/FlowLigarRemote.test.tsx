@@ -322,3 +322,24 @@ describe('FlowLigar — caminho local intacto', () => {
     expect(m.rpc).not.toHaveBeenCalled();
   });
 });
+
+// M1-E E5-C — lacuna fechada na regressão final: REMOTE_LEADS=true com
+// REMOTE_STAGES=false (remote_misconfigured) nunca foi exercitado
+// diretamente contra FlowLigar. dataSource continua 'remote' nesse modo
+// (mesmo invariante do E3: a flag ligada nunca cai para local, mesmo
+// mal configurada) — então FlowLigarRemote monta, mas
+// resolveLeadMutationCapabilities devolve todas as capabilities false
+// (flagMode !== 'remote_ready'), logo canActorMutateLead nunca autoriza:
+// o resultado observável é o mesmo estado de "sem permissão" de um Seller
+// em Lead alheio, nunca um fallback local e nunca um crash.
+describe('FlowLigar — remote_misconfigured (REMOTE_LEADS=true, REMOTE_STAGES=false)', () => {
+  it('Manager operacional: ainda assim sem permissão (capabilities todas false), nunca cai para o corpo local', () => {
+    m.isRemoteLeadsEnabled.mockReturnValue(true);
+    m.isRemoteStagesEnabled.mockReturnValue(false);
+    renderFlow(remoteLead());
+    expect(screen.getByText('Você não tem permissão para registrar uma ligação neste Lead.')).toBeInTheDocument();
+    expect(screen.queryByText('Roteiro da ligação')).toBeNull();
+    expect(screen.queryByText('Solicitou proposta')).toBeNull();
+    expect(m.rpc).not.toHaveBeenCalled();
+  });
+});
