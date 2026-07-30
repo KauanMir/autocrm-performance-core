@@ -731,6 +731,130 @@ operação Supabase remota ocorreu nesta subetapa — somente local
   mas para Seller é uma linha própria — dois Sellers da mesma empresa nunca
   podem compartilhar uma entrada de cache.
 
+### 15.2 E3-B1 — Conexão read-only de Leads remotos às telas de Manager e Seller
+
+Conclui o E3: monta o ciclo de vida da bridge e conecta `ScreenClientesLegacy`/
+`ScreenAndamentoLegacy` (`components/screens/ScreensOps.tsx`) à infraestrutura
+já existente (E2/E3/E3-A1). Somente leitura — nenhuma migration, nenhuma
+alteração de RPC/RLS/grants, nenhuma mutation remota. Nenhuma flag foi
+ativada por esta etapa.
+
+**Fluxo final de leitura:** `auth/membership` (`AuthService.getCurrentUser()`,
+resolvido pelas próprias telas, nunca importado pelos hooks) → `stages`
+(`usePipelineStages`) → `seller labels` (`useCurrentCompanySellerLabels`,
+E3-A1) → `lead rows` (`useLeads`, que já adapta via `adaptLeadRows`) →
+bridge/snapshot (`lib/leads/bridge.ts`/`remoteSnapshot.ts`, para consumidores
+síncronos legados fora do escopo desta etapa) → telas.
+
+**Flags efetivas** (`lib/leads/remoteLeadsMode.ts`,
+`resolveRemoteLeadsFlagMode()`, puro, sem estado): `local`
+(`NEXT_PUBLIC_FF_REMOTE_LEADS=false`, qualquer valor de `REMOTE_STAGES`) →
+caminho local 100% inalterado; `remote_ready` (`REMOTE_LEADS=true` e
+`REMOTE_STAGES=true`) → caminho remoto pode ser efetivo, dependendo ainda da
+identidade do ator; `remote_misconfigured` (`REMOTE_LEADS=true` e
+`REMOTE_STAGES=false`) → falha fechada explícita (mensagem "As etapas
+remotas precisam estar disponíveis para carregar os Leads."), nenhuma
+bridge, nenhum dado local, nenhum dado remoto — nunca cai silenciosamente no
+caminho local só porque `usePipelineStages` (flag independente) resolveria
+`source:'local'` nesse cenário.
+
+**Composição central de leitura** (`lib/hooks/useRemoteLeadsScreenState.ts`):
+único hook chamado por `ScreenClientesLegacy` e `ScreenAndamentoLegacy` —
+nunca os três hooks (`usePipelineStages`/`useCurrentCompanySellerLabels`/
+`useLeads`) chamados separadamente pelas telas, evitando dois caminhos de
+adaptação. Resolve um `mode`: `local` | `remote_misconfigured` |
+`remote_unavailable_identity` (ator sem membership operacional, não é
+Manager/Seller, ou usuário global inativo — Super Admin nunca chega aqui,
+pois o router de `ScreenClientes`/`ScreenAndamento` já desvia para as
+superfícies Platform antes) | `remote_active`. `stagesReady` (passado a
+`useLeads`) exige `pipeline.hasData` (catálogo real não-vazio); `sellersReady`
+exige a busca de sellers resolvida (sucesso ou vazio, nunca durante loading
+ou erro). Os três hooks internos são **sempre** chamados (Rules of Hooks);
+cada um já teria `queryEnabled=false` sozinho se `REMOTE_LEADS` estivesse
+desligada — o modo `local` apenas garante que o resultado nunca é consumido
+pela tela.
+
+**Ciclo da bridge** (`lib/hooks/useLeadsRemoteBridgeLifecycle.ts`): único
+ponto de montagem de `startLeadsRemoteBridge` no projeto, chamado uma vez em
+`components/App.tsx`, no mesmo nível de `useQueryCacheIdentity` (próximo ao
+ciclo de identidade, nunca dentro de tela). Monta somente quando
+`remote_ready` **e** ator é Manager/Seller **e** `activeMembership`/usuário
+ativo **e** `companyId`/`identityKey` presentes — nunca para Super Admin (sem
+`activeMembership`, por design). `useEffect` com `[queryClient, bridgeActive,
+companyId, identityKey]`: qualquer mudança real (logout, troca de
+usuário/empresa/membership, desativação da flag) desmonta a anterior antes de
+montar a próxima — A→B→A é sempre tratada como 3 ciclos start/stop distintos,
+nunca reaproveitados, e o guard de geração já existente em `bridge.ts`
+protege contra resposta tardia cruzando identidade mesmo se cleanup e novo
+start colidirem no mesmo tick. `notify` fica deliberadamente ausente
+(parâmetro opcional): nenhum consumidor `useStore()` fora do escopo desta
+etapa (Pendências, Flows abertos fora do card) foi conectado a re-render
+reativo — `lib/store.ts` não foi alterado; consumidores dentro do escopo
+(Clientes/Andamento) reagem via o próprio TanStack Query/React, não via
+`useStore()`.
+
+**Clientes** (`ScreenClientesLegacy`): local usa exclusivamente
+`LeadService.getAll()`/`SellerService.getAll()`, corpo original preservado
+byte a byte. Remoto usa exclusivamente `remote.leads`/`remote.sellerLabels`
+— nunca `LeadService`/`SellerService`/`StoreAdapter`. Estados dedicados
+(`data-testid`): `clientes-state-misconfigured`, `clientes-state-disabled`,
+`clientes-state-stage-config-error`, `clientes-state-stage-empty`,
+`clientes-skeleton` (stages OU leads), `clientes-state-lead-config-error`,
+`clientes-state-error` (stages OU leads, sem cache), `clientes-state-empty`,
+`clientes-stale-warning` (erro com cache), `clientes-grid` (sucesso). Botão
+"Novo cliente" e o filtro de vendedor local (`SellerService`) desaparecem
+fora do modo local; o filtro de vendedor remoto usa `sellerLabels.sellerLabels`
+(seller_id/name reais). Cards remotos (`LeadCard readOnly`) escondem as ações
+rápidas Ligar/Visita; abrir o card sempre passa `readOnly` no payload de
+`ver-cliente`.
+
+**Pipeline** (`ScreenAndamentoLegacy`): `pipeline` agora vem de
+`remote.pipeline` (mesmo `usePipelineStages`, mesma identidade
+`activeMembership.companyId`) — com `REMOTE_LEADS=false` o comportamento é
+IDÊNTICO ao anterior a esta etapa, inclusive "Stages remotos + Leads locais
+agrupados por `stage.name`" (M1-D, já aprovado, nunca alterado). Só quando
+`remote.mode==='remote_active'` o Kanban troca para Leads remotos agrupados
+por **`stage.id` real** (nunca `stage.name` — decisão 15); nesse modo,
+`PipeCard` fica com `draggable=false`, `onDrop`/`onDragOver` nunca chamam
+`PipelineService.moveCard`. Estados novos, avaliados só depois que Stages já
+está saudável (`useRemoteLeadsScreenState` só habilita `useLeads` quando
+`pipeline.hasData`): `kanban-state-misconfigured`,
+`kanban-state-leads-config-error`, `kanban-state-leads-error`,
+`kanban-leads-skeleton`, `kanban-leads-stale-warning` — todos distintos dos
+testids já existentes de Stages (`kanban-state-error`,
+`kanban-state-config-error`, `kanban-stale-warning`), preservando a
+distinção de origem exigida (§12 desta subetapa).
+
+**Adapter rígido, sem exceção:** `adaptLeadRows`/`adaptLeadRow`
+(`lib/leads/adapter.ts`) permanecem intocados — `stage_id`/`seller_id` sem
+correspondência no índice continuam gerando `LeadAdapterError`
+(`stage_not_found`/`seller_not_found`), nunca "Etapa indisponível"
+inventada, nunca placeholder de Seller, nunca UUID exibido, nunca lista
+parcial. As telas traduzem esse erro em `clientes-state-lead-config-error`/
+`kanban-state-leads-config-error` — mensagem genérica sanitizada, sem
+`leadId`/código técnico no texto visível.
+
+**Detalhe read-only:** `FlowVerCliente` (`components/flows/FlowsShared.tsx`)
+recebe `payload.readOnly` — quando `true`, as 5 ações de mutation (Ligar,
+Agendar visita, Nova proposta, Acompanhar, Editar dados) e o botão inline
+"Ligar agora" somem inteiramente; o restante do detalhe (timeline, veículo,
+cadastro) continua visível. `LeadCard`/`PipeCard` sempre passam `readOnly` no
+payload de `ver-cliente`; `Flows2.tsx` não foi alterado (nenhum fluxo de
+mutation é alcançável a partir do detalhe read-only, então nada ali precisa
+mudar).
+
+**Super Admin:** `PlatformCommercialClientsView`/`PipelineView`,
+`CommercialCompanyContext`, `lib/commercial/*` — zero alteração, zero
+importação de qualquer símbolo novo desta etapa (confirmado por grep). A
+bridge nunca monta para Super Admin (sem `activeMembership`).
+
+**Ausência de fallback:** nenhum estado remoto (misconfigured, unavailable
+identity, loading, erro, config error) cai para dado local ou para lista
+vazia silenciosa — cada um tem um `data-testid`/mensagem próprios.
+
+E3 formalmente concluído após esta subetapa. E4 oficial (create/update/
+duplicidade) segue desbloqueado, ainda não iniciado.
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
@@ -903,3 +1027,27 @@ M1-B e M1-C, infraestrutura de cache do M1-D.
   `tests/hooks/useCurrentCompanySellerLabels.test.tsx`
 
 Alterado: `lib/supabase/database.types.ts` (regenerado, só a nova função).
+
+**E3-B1** (§15.2) — novos:
+
+- `lib/leads/remoteLeadsMode.ts`
+- `lib/hooks/useRemoteLeadsScreenState.ts`,
+  `lib/hooks/useLeadsRemoteBridgeLifecycle.ts`
+- `tests/leads/remoteLeadsMode.test.ts`,
+  `tests/hooks/useRemoteLeadsScreenState.test.tsx`,
+  `tests/hooks/useLeadsRemoteBridgeLifecycle.test.tsx`,
+  `tests/screens/ScreenClientes.test.tsx`, `tests/flows/FlowVerCliente.test.tsx`
+
+Alterados: `components/App.tsx` (montagem da bridge) ·
+`components/screens/ScreensOps.tsx` (`ScreenClientesLegacy`,
+`ScreenAndamentoLegacy`, `LeadCard`, `PipeCard`) ·
+`components/flows/FlowsShared.tsx` (`FlowVerCliente`, prop `readOnly`) ·
+`tests/screens/ScreenAndamento.test.tsx` (mock atualizado para
+`useRemoteLeadsScreenState` + cobertura nova de `remote_active`)
+
+Intocados: SQL/migrations/`database.types.ts`/RPC/RLS/grants,
+`lib/leads/adapter.ts`, `lib/leads/errors.ts`, `lib/leads/bridge.ts`,
+`lib/leads/remoteSnapshot.ts`, `lib/leads/remoteRepository.ts`,
+`lib/leads/sellerLabelsRepository.ts`, `lib/store.ts`, `StoreAdapter`,
+`SellerService`, `lib/flags.ts`, componentes Platform/`lib/commercial/*`,
+`components/flows/Flows2.tsx`, `.env*`.
