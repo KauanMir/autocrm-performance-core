@@ -1925,6 +1925,104 @@ de uma etapa desativada precisará ser desenhado então, não hoje.
 
 **E6-B1 formalmente concluído. E6-B2 desbloqueado, ainda não iniciado.**
 
+### 15.13 E6-B2-A — UI remota de atribuição e arquivamento de Leads ativos (concluído)
+
+Conecta ao detalhe remoto do Lead (`FlowVerCliente`), somente para Manager:
+alteração/remoção de Seller e arquivamento. Nenhuma aba de arquivados,
+nenhuma conexão de `useArchivedLeads`/`useUnarchiveLead`, nenhuma
+restauração — reservado para o E6-B2-B.
+
+**Capabilities ativadas** (`lib/leads/mutationCapabilities.ts`):
+`canAssignSeller`/`canArchive` passam a `true` para Manager operacional em
+`remote_ready`, permanecendo `false` para Seller (mesmo operacional com
+`sellerId`), Super Admin, `remote_misconfigured`, local, sem membership/
+inativo/suspenso/offboarded. Decisão estrutural (não é questão de posse):
+`assign_lead_seller`/`archive_lead`/`unarchive_lead` proíbem Seller de
+forma incondicional no backend (auditoria E6-A0) — por isso estas duas
+capabilities nunca passam por `lib/leads/leadMutationOwnership.ts`
+(`canActorMutateLead`), diferente de `canMoveStage`/`canLogCallOutcome`.
+Pesquisa de consumidores existentes confirmou apenas testes (nenhum botão
+não conectado seria liberado pela ativação) — capabilities e UI entraram no
+mesmo conjunto de commits.
+
+**UI**: dois novos flows em `components/flows/FlowsShared.tsx`, registrados
+em `FlowLayer.tsx` (`'atribuir-vendedor'`/`'arquivar-lead'`), abertos a
+partir de dois novos botões em `FlowVerCliente` (`actions`, gated por
+`capabilities.canAssignSeller`/`canArchive`, nunca no formulário de edição
+geral do E4, nunca inline no Kanban):
+
+- `FlowAtribuirVendedor` — autorização exclusiva via
+  `ctx.capabilities.canAssignSeller` (nunca `canActorMutateLead`); usa
+  `useCurrentCompanyAssignableSellers` (catálogo OPERACIONAL, nunca o
+  histórico `list_current_company_seller_labels`) + `SellerPicker` +
+  `useAssignLeadSeller` + `isNoOpSellerAssignment`. Estado do picker
+  `string | null | undefined` (`undefined` = nenhuma escolha explícita
+  ainda — Seller atual fora do catálogo operacional, cenário "Seller
+  desligado"; `null` = "Sem vendedor" escolhido deliberadamente): resolvido
+  por um `useEffect` que só decide a seleção inicial DEPOIS que
+  `useCurrentCompanyAssignableSellers` termina de carregar (decidir antes
+  classificaria erroneamente um Seller operacional como "fora do catálogo",
+  já que `sellersById` está vazio durante o loading — acerto encontrado e
+  corrigido durante a escrita dos testes). Nome histórico do Seller atual
+  sempre exibido em painel read-only próprio, nunca escondido mesmo quando
+  fora do catálogo operacional. Same-seller (`isNoOpSellerAssignment`)
+  desabilita Salvar sem chamar a RPC. Payload exato: `leadId`/`sellerId`/
+  `expectedVersion`, nunca `companyId`.
+- `FlowArquivarLead` — autorização exclusiva via
+  `ctx.capabilities.canArchive`; confirmação explícita ("Arquivar este
+  Lead?", nunca "excluir"/"apagar"/"remover definitivamente") + `useArchiveLead`.
+  Payload exato: `leadId`/`expectedVersion`, nunca `companyId`. RPC
+  idempotente (Lead já arquivado) tratada como sucesso normal.
+
+Ambos os flows: `expectedVersion` sempre obrigatório, sem mutation
+otimista, sem retry automático, fecham (`close()`) em vez de mostrar
+sucesso quando a identidade muda em voo (mesmo padrão de
+`useCloseRemoteCallFlowOnIdentityChange`, já existente neste arquivo desde
+o E5-B2-A2, reaproveitado sem alteração). No modelo de flow único da
+aplicação (nunca há pilha — `openFlow` sempre substitui o flow atual),
+"fechar o modal e o detalhe" é uma única chamada a `close()`: o detalhe já
+foi substituído no momento em que o flow de atribuição/arquivamento abriu.
+Por essa mesma razão estrutural, o conflito "atribuição pendente bloqueia
+arquivamento" nunca precisa de código dedicado — dois flows nunca coexistem.
+
+`SellerPicker` (`components/flows/FlowsShared.tsx`) teve o tipo de `value`
+ampliado para `string | null | undefined` — mudança SOMENTE de tipo: a
+lógica já tratava `undefined` de forma idêntica a `null` no cálculo interno
+de `selected` e já caía no placeholder por não satisfazer `value === null`;
+nenhum comportamento muda para os callers existentes do E4 (que nunca
+passam `undefined`).
+
+Nenhum código de erro novo — `mapRemoteLeadsMutationError` já cobria todos
+os casos usados (`seller_not_found`/`stale_write`/`lead_archived`/
+`lead_not_found`/`forbidden`/`company_read_only`).
+
+**Caminho Seller**: continua vendo o responsável atual como texto e as
+ações já existentes (editar, mover, ligar); nunca vê "Alterar responsável"/
+"Arquivar Lead" — tentativa programática é recusada pela própria
+`ctx.capabilities` (sempre `false` fora de Manager operacional em
+`remote_ready`), sem nenhuma checagem redundante.
+
+**Caminho local**: intocado — os dois botões só existem quando
+`capabilities` está presente (nunca no caminho local, que não passa
+`capabilities` nenhuma para `FlowVerCliente`).
+
+**Validação final**: TSC 22 erros preexistentes (inalterado); TypeScript
+163 → 165 arquivos (+2: `FlowAtribuirVendedor.test.tsx`,
+`FlowArquivarLead.test.tsx`) / 2451 → 2503 testes (+52); SQL inalterado (51
+arquivos/2601 testes, 49 migrations, zero migration nesta etapa); 4 builds
+verdes (padrão, OFF/OFF, ON/OFF misconfigured, ON/ON efetivo). Nenhuma
+operação Supabase remota; nenhuma flag ativada em produção.
+
+**Riscos residuais explícitos** (nenhum novo): E6-B2-B (aba "Arquivados",
+`useArchivedLeads`/`useUnarchiveLead` conectados, botão Restaurar) continua
+pendente; E7/E8 permanecem pendentes; verificação manual em navegador não
+foi realizada nesta etapa — a cobertura confia inteiramente nos 52 testes
+automatizados novos (TSC/Vitest/build), que exercitam cada estado da UI
+(Manager/Seller/Super Admin, os 3 cenários de Seller atual, erros, pending,
+identidade) diretamente.
+
+**E6-B2-A formalmente concluído. E6-B2-B desbloqueado, ainda não iniciado.**
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
