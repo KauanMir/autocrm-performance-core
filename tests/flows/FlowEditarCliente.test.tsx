@@ -164,3 +164,60 @@ describe('FlowEditarCliente — capabilities bloqueadas', () => {
     expect(screen.queryByText('Salvar alterações')).toBeNull();
   });
 });
+
+// M1-E E4-C — lacunas fechadas na auditoria final: mais códigos de erro de
+// update mapeados, duplo submit no nível do flow, troca de identidade
+// fechando um formulário de edição já aberto.
+describe('FlowEditarCliente — outros erros de mutation mantêm o formulário aberto', () => {
+  it('lead_archived: mensagem sanitizada específica, dados preservados', async () => {
+    mockRpc({ update_lead: () => ({ data: null, error: { code: 'P0001', message: 'lead_archived' } }) });
+    renderFlow(remoteLead());
+    fireEvent.click(screen.getByText('Salvar alterações'));
+    await waitFor(() => expect(screen.getByText('Este cliente está arquivado e não pode ser editado.')).toBeInTheDocument());
+    expect(screen.getByDisplayValue('Carlos Andrade')).toBeInTheDocument();
+  });
+
+  it('forbidden: mensagem sanitizada específica, dados preservados', async () => {
+    mockRpc({ update_lead: () => ({ data: null, error: { code: 'P0001', message: 'forbidden' } }) });
+    renderFlow(remoteLead());
+    fireEvent.click(screen.getByText('Salvar alterações'));
+    await waitFor(() => expect(screen.getByText('Você não tem permissão para realizar esta ação.')).toBeInTheDocument());
+    expect(screen.getByDisplayValue('Carlos Andrade')).toBeInTheDocument();
+  });
+});
+
+describe('FlowEditarCliente — proteção contra duplo submit', () => {
+  it('dois cliques seguidos em "Salvar alterações" nunca disparam duas chamadas a update_lead', async () => {
+    renderFlow(remoteLead());
+    const button = screen.getByText('Salvar alterações');
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByText('Dados salvos com sucesso')).toBeInTheDocument());
+    expect(m.rpc.mock.calls.filter((c) => c[0] === 'update_lead').length).toBe(1);
+  });
+});
+
+describe('FlowEditarCliente — troca de identidade com formulário aberto', () => {
+  it('empresa muda enquanto o formulário está aberto: fecha sem mostrar sucesso', async () => {
+    m.user.current = manager();
+    const lead = remoteLead();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const close = vi.fn();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <FlowEditarCliente payload={{ lead }} close={close} />
+      </QueryClientProvider>,
+    );
+
+    m.user.current = { ...manager(), activeMembership: { companyId: 'company-b', role: 'manager', sellerId: null } };
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <FlowEditarCliente payload={{ lead }} close={close} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(screen.queryByText('Dados salvos com sucesso')).toBeNull();
+    expect(m.rpc).not.toHaveBeenCalledWith('update_lead', expect.any(Object));
+  });
+});

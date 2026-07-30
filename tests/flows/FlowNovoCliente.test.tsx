@@ -228,3 +228,46 @@ describe('FlowNovoCliente — Seller sem sellerId (capabilities bloqueadas)', ()
     expect(screen.queryByPlaceholderText('Ex.: Carlos Andrade')).toBeNull();
   });
 });
+
+// M1-E E4-C — lacunas fechadas na auditoria final: duplo submit no nível do
+// flow (não só no hook) e troca de identidade fechando um formulário
+// remoto já aberto (não só a proteção dentro do hook de mutation).
+describe('FlowNovoCliente — proteção contra duplo submit', () => {
+  it('dois cliques seguidos no botão nunca disparam duas chamadas a create_lead', async () => {
+    m.user.current = manager();
+    renderFlow();
+    fireEvent.change(screen.getByPlaceholderText('Ex.: Carlos Andrade'), { target: { value: 'Novo Cliente' } });
+    fireEvent.change(screen.getByPlaceholderText('(11) 90000-0000'), { target: { value: '11999990000' } });
+    const button = screen.getByText('Criar cliente');
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByText('Cliente criado!')).toBeInTheDocument());
+    expect(m.rpc.mock.calls.filter((c) => c[0] === 'create_lead').length).toBe(1);
+  });
+});
+
+describe('FlowNovoCliente — troca de identidade com formulário aberto', () => {
+  it('empresa muda enquanto o formulário está aberto: fecha sem mostrar sucesso', async () => {
+    m.user.current = manager();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const close = vi.fn();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <FlowNovoCliente payload={{}} close={close} openFlow={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    // Troca de empresa (mesmo usuário, nova membership) — mesmo efeito de
+    // App.tsx re-renderizando FlowLayer quando currentUser muda.
+    m.user.current = manager({ activeMembership: { companyId: 'company-b', role: 'manager', sellerId: null } });
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <FlowNovoCliente payload={{}} close={close} openFlow={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(screen.queryByText('Cliente criado!')).toBeNull();
+    expect(m.rpc).not.toHaveBeenCalledWith('create_lead', expect.any(Object));
+  });
+});
