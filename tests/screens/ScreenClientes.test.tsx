@@ -245,7 +245,10 @@ describe('ScreenClientes — remote_active, sucesso', () => {
     expect(screen.queryByText('Visita')).toBeNull();
   });
 
-  it('abrir o card chama __openFlow com readOnly:true', () => {
+  // M1-E E4-B2: LeadCard passou a propagar capabilities (não mais o
+  // booleano readOnly) — canCreate/canEditDetails true (E4), o resto
+  // (eventos/mover Etapa/atribuir/arquivar) sempre false até E5/E6.
+  it('abrir o card chama __openFlow com capabilities granulares (canCreate/canEditDetails true, resto false)', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(
       screenState('remote_active', {
         leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'amber')] },
@@ -253,7 +256,16 @@ describe('ScreenClientes — remote_active, sucesso', () => {
     );
     renderScreen();
     fireEvent.click(screen.getByText('Ana Vitória'));
-    expect(m.openFlow).toHaveBeenCalledWith('ver-cliente', expect.objectContaining({ readOnly: true }));
+    expect(m.openFlow).toHaveBeenCalledWith('ver-cliente', expect.objectContaining({
+      capabilities: {
+        canCreate: true,
+        canEditDetails: true,
+        canApplyEvents: false,
+        canMoveStage: false,
+        canAssignSeller: false,
+        canArchive: false,
+      },
+    }));
   });
 
   it('filtro por vendedor usa os seller labels remotos (nunca SellerService)', () => {

@@ -384,14 +384,19 @@ describe('ScreenAndamento — remote_active: agrupamento por stageId', () => {
     expect(m.moveCard).not.toHaveBeenCalled();
   });
 
-  it('abrir um card remoto chama __openFlow com readOnly:true', () => {
+  // M1-E E4-B2: PipeCard passou a propagar capabilities (não mais o
+  // booleano readOnly) — canMoveStage sempre false no E4 (mover Etapa é
+  // E5), drag remoto continua impossível.
+  it('abrir um card remoto chama __openFlow com capabilities granulares (canMoveStage false)', () => {
     (window as any).__openFlow = vi.fn();
     m.useRemoteLeadsScreenState.mockReturnValue(remoteActiveScreenState({
       leads: { hasData: true, isEmpty: false, leads: [remoteLead('r1', 'Ana Vitória', 'uuid-new')] },
     }));
     renderScreen();
     fireEvent.click(screen.getByText('Ana Vitória'));
-    expect((window as any).__openFlow).toHaveBeenCalledWith('ver-cliente', expect.objectContaining({ readOnly: true }));
+    expect((window as any).__openFlow).toHaveBeenCalledWith('ver-cliente', expect.objectContaining({
+      capabilities: expect.objectContaining({ canMoveStage: false }),
+    }));
   });
 
   it('filtro por vendedor usa sellerLabels remotos, nunca SellerService', () => {
