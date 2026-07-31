@@ -4,10 +4,10 @@
 // em lib/commercial/leadEventRegistry.ts (18 valores de lead_event_type,
 // nenhum payload adicional aceito pela RPC).
 //
-// apply_lead_event nunca grava em lead_timeline_entries (confirmado no
-// contrato real da RPC — só atualiza urgency/labels/stage_id/version em
-// leads) — por isso só a lista de Leads ativos é invalidada, nunca a
-// timeline do Lead.
+// M1-E E7-B2-B1: apply_lead_event passou a gravar um evento automático em
+// lead_timeline_entries na mesma transação — este hook nunca escreve na
+// timeline diretamente (nunca chama add_lead_timeline_entry, nunca
+// duplica), só invalida a key Platform exata (E7-B2-B2).
 //
 // SEM retry automático — reenviar cegamente um evento após falha de rede
 // poderia aplicar o mesmo evento duas vezes (a RPC não é idempotente por
@@ -57,9 +57,12 @@ export function useApplyPlatformLeadEvent(
       }
       return applyPlatformLeadEvent(input);
     },
-    onSuccess: (_updated, input) => {
+    onSuccess: (updated, input) => {
       queryClient.invalidateQueries({
         queryKey: platformCommercialQueryKeys.leadsActive(input.companyId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: platformCommercialQueryKeys.leadTimeline(input.companyId, updated.id),
       });
     },
   });

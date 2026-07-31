@@ -83,12 +83,12 @@ describe('useApplyPlatformLeadEvent — payload e eventos reais', () => {
   });
 });
 
-describe('useApplyPlatformLeadEvent — sucesso e invalidação', () => {
-  it('invalida SOMENTE leadsActive — apply_lead_event nunca grava timeline', async () => {
+describe('useApplyPlatformLeadEvent — sucesso e invalidação (E7-B2-B2)', () => {
+  it('invalida leadsActive E leadTimeline — apply_lead_event grava evento automático desde o E7-B2-B1', async () => {
     const { hook, invalidateSpy } = setup();
     await hook.result.current.applyEvent(baseInput());
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsActive('company-a') });
-    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadTimeline('company-a', 'lead-1') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadTimeline('company-a', 'lead-1') });
   });
 });
 

@@ -102,13 +102,14 @@ describe('useMoveLeadToStage — bloqueios de identidade', () => {
   });
 });
 
-describe('useMoveLeadToStage — sucesso, invalidação e ausência de otimismo', () => {
-  it('invalida somente active(companyId capturado)', async () => {
+describe('useMoveLeadToStage — sucesso, invalidação e ausência de otimismo (E7-B2-B2)', () => {
+  it('invalida active(companyId capturado) E timeline(companyId, leadId real do retorno) — move_lead_to_stage grava evento automático desde o E7-B2-B1', async () => {
     const { hook, invalidateSpy } = setup();
     const moved = await hook.result.current.moveLeadToStage(baseInput);
     expect(moved).toEqual(MOVED);
-    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.active('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', MOVED.id) });
   });
 
   it('nenhuma escrita otimista: setQueryData nunca é chamado por este hook', async () => {

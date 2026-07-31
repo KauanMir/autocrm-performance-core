@@ -110,14 +110,15 @@ describe('useArchiveLead — bloqueios de identidade', () => {
   });
 });
 
-describe('useArchiveLead — sucesso, invalidação e ausência de otimismo', () => {
-  it('invalida active E archived(companyId capturado) — o Lead muda de lista', async () => {
+describe('useArchiveLead — sucesso, invalidação e ausência de otimismo (E7-B2-B2)', () => {
+  it('invalida active, archived E timeline(companyId, leadId) — o Lead muda de lista e grava evento automático desde o E7-B2-B1', async () => {
     const { hook, invalidateSpy } = setup();
     const archived = await hook.result.current.archiveLead(baseInput);
     expect(archived).toEqual(ARCHIVED);
-    expect(invalidateSpy).toHaveBeenCalledTimes(2);
+    expect(invalidateSpy).toHaveBeenCalledTimes(3);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.active('company-a') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.archived('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', ARCHIVED.id) });
   });
 
   it('nenhuma escrita otimista: setQueryData nunca é chamado por este hook', async () => {

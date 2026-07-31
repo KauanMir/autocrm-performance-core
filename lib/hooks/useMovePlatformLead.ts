@@ -8,9 +8,10 @@
 // quando omitida, contrato real preservado) ou optimistic locking quando
 // enviada; um retry cego reenviaria uma versão potencialmente obsoleta.
 //
-// move_lead_to_stage nunca grava em lead_timeline_entries (confirmado no
-// contrato real da RPC) — por isso só a lista de Leads ativos é invalidada,
-// nunca a timeline do Lead.
+// M1-E E7-B2-B1: move_lead_to_stage passou a gravar um evento automático em
+// lead_timeline_entries (só quando a etapa realmente muda, decidido no
+// servidor) — este hook nunca escreve na timeline diretamente, só invalida
+// a key Platform exata (E7-B2-B2) para a UI já aberta buscar o evento real.
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { platformCommercialQueryKeys } from '@/lib/commercial/queryKeys';
 import {
@@ -56,12 +57,15 @@ export function useMovePlatformLead(options: UseMovePlatformLeadOptions): UseMov
       }
       return movePlatformLeadToStage(input);
     },
-    onSuccess: (_moved, input) => {
+    onSuccess: (moved, input) => {
       // move_lead_to_stage recusa com 'lead_archived' qualquer Lead já
       // arquivado — a única lista afetada é sempre 'active' da empresa
       // capturada.
       queryClient.invalidateQueries({
         queryKey: platformCommercialQueryKeys.leadsActive(input.companyId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: platformCommercialQueryKeys.leadTimeline(input.companyId, moved.id),
       });
     },
   });

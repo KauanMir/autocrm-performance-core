@@ -52,11 +52,16 @@ export function useAssignPlatformLeadSeller(
       }
       return assignPlatformLeadSeller(input);
     },
-    onSuccess: (_updated, input) => {
+    onSuccess: (updated, input) => {
       // assign_lead_seller recusa 'lead_archived' — só Leads ativos podem
       // ser atribuídos.
       queryClient.invalidateQueries({
         queryKey: platformCommercialQueryKeys.leadsActive(input.companyId),
+      });
+      // M1-E E7-B2-B2 — assign_lead_seller grava evento automático na
+      // timeline desde o E7-B2-B1 (só quando o vendedor muda de fato).
+      queryClient.invalidateQueries({
+        queryKey: platformCommercialQueryKeys.leadTimeline(input.companyId, updated.id),
       });
     },
   });

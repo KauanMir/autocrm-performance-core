@@ -106,6 +106,11 @@ export function useUpdateLead(options: UseUpdateLeadOptions): UseUpdateLeadResul
       // observada nesta key hoje), pronta para quando um detalhe dedicado
       // existir.
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.detail(capturedCompanyId, leadId) });
+      // M1-E E7-B2-B2 — update_lead grava evento automático na timeline
+      // desde o E7-B2-B1 (mesma transação da RPC); invalida a timeline
+      // exata para a UI já aberta (RemoteLeadTimelinePanel) refletir o
+      // evento sem precisar de F5/remontagem.
+      queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, leadId) });
     },
   });
 

@@ -1,8 +1,8 @@
-// Testes de useApplyLeadEvent (M1-E, E5-A1). Supabase mockado (rpc). Cobre:
-// payload exato (sem p_company_id), evento tipado, bloqueios de identidade,
-// invalidation (active, NUNCA timeline), ausência de mutation otimista,
-// retry 0, proteção de identidade, ausência de import de LeadService/
-// StoreAdapter/add_lead_timeline_entry.
+// Testes de useApplyLeadEvent (M1-E, E5-A1 + E7-B2-B2). Supabase mockado
+// (rpc). Cobre: payload exato (sem p_company_id), evento tipado, bloqueios
+// de identidade, invalidation (active + timeline exata desde o E7-B2-B2),
+// ausência de mutation otimista, retry 0, proteção de identidade, ausência
+// de import de LeadService/StoreAdapter/add_lead_timeline_entry.
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
@@ -99,14 +99,14 @@ describe('useApplyLeadEvent — bloqueios de identidade', () => {
   });
 });
 
-describe('useApplyLeadEvent — sucesso, invalidação e ausência de timeline', () => {
-  it('invalida somente active(companyId capturado), NUNCA timeline', async () => {
+describe('useApplyLeadEvent — sucesso e invalidação (E7-B2-B2)', () => {
+  it('invalida active(companyId capturado) E timeline(companyId, leadId) — apply_lead_event grava evento automático desde o E7-B2-B1', async () => {
     const { hook, invalidateSpy } = setup();
     const result = await hook.result.current.applyLeadEvent(baseInput);
     expect(result).toEqual(EVENTED);
-    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.active('company-a') });
-    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
   });
 
   it('nenhuma escrita otimista: setQueryData nunca é chamado por este hook', async () => {

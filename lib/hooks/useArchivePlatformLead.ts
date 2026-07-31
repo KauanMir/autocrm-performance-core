@@ -46,7 +46,7 @@ export function useArchivePlatformLead(options: UseArchivePlatformLeadOptions): 
       }
       return archivePlatformLead(input);
     },
-    onSuccess: (_archived, input) => {
+    onSuccess: (archived, input) => {
       // O Lead sai de 'active' e entra em 'archived' — as duas listas da
       // empresa capturada precisam refletir a mudança.
       queryClient.invalidateQueries({
@@ -54,6 +54,11 @@ export function useArchivePlatformLead(options: UseArchivePlatformLeadOptions): 
       });
       queryClient.invalidateQueries({
         queryKey: platformCommercialQueryKeys.leadsArchived(input.companyId),
+      });
+      // M1-E E7-B2-B2 — archive_lead grava evento automático na timeline
+      // desde o E7-B2-B1 (nunca no caminho idempotente).
+      queryClient.invalidateQueries({
+        queryKey: platformCommercialQueryKeys.leadTimeline(input.companyId, archived.id),
       });
     },
   });

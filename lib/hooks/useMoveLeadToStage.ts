@@ -83,8 +83,14 @@ export function useMoveLeadToStage(options: UseMoveLeadToStageOptions): UseMoveL
 
       return { record, capturedCompanyId };
     },
-    onSuccess: ({ capturedCompanyId }) => {
+    onSuccess: ({ capturedCompanyId, record }) => {
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.active(capturedCompanyId) });
+      // M1-E E7-B2-B2 — move_lead_to_stage grava evento automático na
+      // timeline desde o E7-B2-B1 (só quando a etapa realmente muda; a RPC
+      // decide isso no servidor, nunca aqui) — invalida a timeline exata do
+      // Lead. record.id (nunca input.leadId) porque é o valor confirmado
+      // pelo servidor na mesma resposta.
+      queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, record.id) });
     },
   });
 

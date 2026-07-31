@@ -2649,6 +2649,85 @@ frontend tocado); TSC 22 erros preexistentes (inalterado); 4 builds verdes.
 `leadQueryKeys.timeline` nas 7 mutations existentes) desbloqueado, NÃO
 iniciado.**
 
+### 15.20 E7-B2-B2 — Invalidação da timeline após as 7 mutations (concluído)
+
+**Escopo**: exclusivamente frontend/hooks/query cache/testes — nenhum SQL,
+migration, RPC ou operação no Supabase (local ou remoto) nesta etapa. Os
+eventos automáticos já existiam desde o E7-B2-B1; faltava só a UI já aberta
+(`RemoteLeadTimelinePanel`) refletir o evento sem F5/remontagem.
+
+**Hooks operacionais alterados** (6 de 7): `useUpdateLead`,
+`useMoveLeadToStage`, `useApplyLeadEvent`, `useAssignLeadSeller`,
+`useArchiveLead`, `useUnarchiveLead` — cada `onSuccess` ganhou
+`queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, <id do lead confirmado pelo servidor>) })`,
+sempre depois das invalidações já existentes (`active`/`archived`/`detail`),
+nunca as substituindo. O `leadId` usado é sempre o valor devolvido pela RPC
+na mesma resposta (`record.id`, ou `leadId` já capturado no caso de
+`useUpdateLead`) — nunca um `leadId` de input não confirmado.
+
+**`useCreateLead` — decisão deliberada de NÃO invalidar**: `create_lead`
+grava evento automático ("Lead criado", E7-B2-B1), mas nenhum componente
+pode ter montado `useLeadTimeline` para um `leadId` que ainda não existia —
+a query dessa key nunca esteve em cache, então invalidá-la seria no-op puro
+(nenhum efeito, nenhum benefício). No primeiro acesso ao Lead recém-criado,
+`useLeadTimeline` monta sem cache e busca os dados reais (incluindo "Lead
+criado") no primeiro fetch. Documentado em código e travado por teste de
+regressão (`invalidateSpy` chamado exatamente 1 vez, nunca com a timeline
+key do lead criado).
+
+**Superfície Platform/Super Admin** (`lib/commercial/queryKeys.ts`,
+`platformCommercialQueryKeys`, família deliberadamente separada de
+`leadQueryKeys`): mesmo tratamento aplicado aos 6 hooks equivalentes
+(`useUpdatePlatformLead`, `useMovePlatformLead`,
+`useApplyPlatformLeadEvent`, `useAssignPlatformLeadSeller`,
+`useArchivePlatformLead`, `useUnarchivePlatformLead`), invalidando
+`platformCommercialQueryKeys.leadTimeline(companyId, leadId)` — nunca
+misturando com `leadQueryKeys.timeline`, preservando o isolamento entre as
+duas superfícies. `useCreatePlatformLead` recebeu a mesma decisão de não
+invalidar, pela mesma razão. As RPCs do Super Admin gravam a timeline com
+`actor_profile_id NULL` (E7-B2-B1); a invalidação aqui só faz a UI Platform
+buscar esse evento já gravado — nenhuma escrita nova.
+
+**Proteção de identidade preservada, sem mecanismo novo**: todas as
+mutations já capturavam a geração do cache (`getQueryCacheGeneration`)
+antes da chamada remota e revalidavam depois (`bumpQueryCacheGeneration` →
+`identity_changed`); como a invalidação da timeline vive dentro do mesmo
+`onSuccess` que as invalidações existentes, ela herda a mesma proteção sem
+qualquer alteração em `lib/query/cacheIdentity.ts` — uma troca de
+identidade em voo continua lançando `identity_changed` e nunca chega a
+invalidar nada (nem `active`/`archived`/`detail`, nem `timeline`).
+
+**Sem otimismo, sem dual-write, sem previsão de evento**: nenhum
+`setQueryData` inserindo evento fabricado, nenhum ID/label/detail
+construído no frontend, nenhuma tentativa de duplicar o mapa de eventos da
+migration SQL — a invalidação apenas marca a query como stale; o próximo
+fetch busca o evento real já gravado pela RPC.
+
+**Testes**: 7 arquivos de teste tiveram suas asserções de invalidação
+atualizadas para refletir a nova chamada (`useApplyLeadEvent.test.tsx`,
+`useApplyPlatformLeadEvent.test.tsx`, `useArchiveLead.test.tsx`,
+`useAssignLeadSeller.test.tsx`, `useMoveLeadToStage.test.tsx`,
+`useMovePlatformLead.test.tsx`, `useUnarchiveLead.test.tsx`) — essas
+asserções antes afirmavam explicitamente que a timeline nunca era
+invalidada (correto até este ponto, pois a invalidação não existia); agora
+afirmam o oposto, refletindo o comportamento novo. `useCreateLead.test.tsx`
+e `useCreatePlatformLead.test.tsx` ganharam um teste novo de regressão
+travando a decisão de NÃO invalidar. Nenhum teste de `useUpdateLead`/
+`useUpdatePlatformLead`/`useAssignPlatformLeadSeller`/
+`useArchivePlatformLead`/`useUnarchivePlatformLead` precisou de ajuste além
+da nova asserção de chamada (não havia asserção anterior de ausência).
+
+Suíte TypeScript: 175 arquivos/2641 testes (2639 + 2 testes novos de
+regressão do `create_lead`/`useCreatePlatformLead`); TSC 22 erros
+preexistentes, mesmos 4 arquivos (inalterado); 4 builds verdes (padrão,
+`REMOTE_LEADS=false`/`REMOTE_STAGES=false`,
+`REMOTE_LEADS=true`/`REMOTE_STAGES=false`,
+`REMOTE_LEADS=true`/`REMOTE_STAGES=true`). Nenhuma operação no Supabase
+local ou remoto nesta etapa (nem start/stop/reset/migration/test db).
+
+**E7-B2-B2 formalmente concluído. Pendentes: E6 (smoke manual), E7-B2-C,
+E7-C.**
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)

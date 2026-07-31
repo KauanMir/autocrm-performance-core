@@ -82,11 +82,16 @@ export function useArchiveLead(options: UseArchiveLeadOptions): UseArchiveLeadRe
 
       return { record, capturedCompanyId };
     },
-    onSuccess: ({ capturedCompanyId }) => {
+    onSuccess: ({ capturedCompanyId, record }) => {
       // O Lead sai de ativos e entra em arquivados — mesmas duas keys que a
       // superfície Platform (useArchivePlatformLead) invalida.
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.active(capturedCompanyId) });
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.archived(capturedCompanyId) });
+      // M1-E E7-B2-B2 — archive_lead grava evento automático na timeline
+      // desde o E7-B2-B1 (nunca no caminho idempotente — Lead já arquivado
+      // não regrava); invalida a timeline exata para a área Arquivados
+      // (Manager) já ler o evento real ao abrir o Lead.
+      queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, record.id) });
     },
   });
 

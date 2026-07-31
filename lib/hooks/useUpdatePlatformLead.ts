@@ -53,12 +53,20 @@ export function useUpdatePlatformLead(options: UseUpdatePlatformLeadOptions): Us
       }
       return updatePlatformLead(input);
     },
-    onSuccess: (_updated, input) => {
+    onSuccess: (updated, input) => {
       // update_lead recusa com 'lead_archived' qualquer Lead já arquivado —
       // a única lista afetada é sempre 'active' da empresa capturada, nunca
       // 'archived'.
       queryClient.invalidateQueries({
         queryKey: platformCommercialQueryKeys.leadsActive(input.companyId),
+      });
+      // M1-E E7-B2-B2 — update_lead grava evento automático na timeline
+      // desde o E7-B2-B1 (mesma transação da RPC, actor_profile_id NULL
+      // para Super Admin); invalida a timeline Platform exata
+      // (platformCommercialQueryKeys, nunca leadQueryKeys operacional —
+      // superfícies isoladas).
+      queryClient.invalidateQueries({
+        queryKey: platformCommercialQueryKeys.leadTimeline(input.companyId, updated.id),
       });
     },
   });

@@ -98,6 +98,16 @@ describe('useCreatePlatformLead — sucesso e invalidação', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsActive('company-b') });
     expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsActive('company-a') });
   });
+
+  // M1-E E7-B2-B2 — mesma decisão de useCreateLead (operacional): o Lead
+  // recém-criado nunca teve uma query de timeline montada antes de existir
+  // — invalidar seria no-op puro.
+  it('NUNCA invalida leadTimeline do Lead recém-criado (decisão: invalidação seria no-op)', async () => {
+    const { hook, invalidateSpy } = setup();
+    const created = await hook.result.current.createLead(baseInput());
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadTimeline('company-a', created.id) });
+  });
 });
 
 describe('useCreatePlatformLead — erro', () => {

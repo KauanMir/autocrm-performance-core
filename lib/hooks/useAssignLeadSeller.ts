@@ -88,10 +88,15 @@ export function useAssignLeadSeller(options: UseAssignLeadSellerOptions): UseAss
 
       return { record, capturedCompanyId };
     },
-    onSuccess: ({ capturedCompanyId }) => {
+    onSuccess: ({ capturedCompanyId, record }) => {
       // assign_lead_seller recusa Lead arquivado (lead_archived) — só a
       // lista de ativos é afetada, nunca a de arquivados.
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.active(capturedCompanyId) });
+      // M1-E E7-B2-B2 — assign_lead_seller grava evento automático na
+      // timeline desde o E7-B2-B1 (só quando o vendedor realmente muda, ver
+      // migration) — invalida a timeline exata, tanto para atribuição
+      // quanto para remoção (sellerId null).
+      queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, record.id) });
     },
   });
 

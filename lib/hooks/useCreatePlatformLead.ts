@@ -65,6 +65,13 @@ export function useCreatePlatformLead(options: UseCreatePlatformLeadOptions): Us
       queryClient.invalidateQueries({
         queryKey: platformCommercialQueryKeys.leadsActive(input.companyId),
       });
+      // M1-E E7-B2-B2 — deliberadamente SEM invalidação de
+      // platformCommercialQueryKeys.leadTimeline aqui, mesma razão de
+      // useCreateLead (caminho operacional): o Lead não existia antes desta
+      // chamada, então nenhum PlatformLeadDetails pode ter montado
+      // usePlatformLeadTimeline para este id ainda — invalidar uma key
+      // nunca observada é no-op puro. O primeiro fetch ao abrir o Lead
+      // recém-criado já busca os dados reais.
     },
   });
 

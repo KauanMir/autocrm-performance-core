@@ -130,6 +130,19 @@ describe('useCreateLead — sucesso e invalidação', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.active('company-a') });
   });
 
+  // M1-E E7-B2-B2 — decisão humana derivada do código: create_lead grava um
+  // evento automático ("Lead criado", E7-B2-B1), mas NENHUM componente pode
+  // ter montado useLeadTimeline para um leadId que ainda não existia —
+  // invalidar leadQueryKeys.timeline(companyId, id-do-lead-recém-criado)
+  // seria no-op puro (key nunca observada). O primeiro acesso ao Lead novo
+  // busca a timeline real sem cache, sem precisar de invalidação prévia.
+  it('NUNCA invalida leadQueryKeys.timeline do Lead recém-criado (decisão: invalidação seria no-op)', async () => {
+    const { hook, invalidateSpy } = setup();
+    const created = await hook.result.current.createLead(managerInput);
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', created.id) });
+  });
+
   it('nenhum StoreAdapter/reset global — só invalidateQueries com a key certa', async () => {
     const { hook, queryClient } = setup();
     const clearSpy = vi.spyOn(queryClient, 'clear');

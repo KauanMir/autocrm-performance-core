@@ -124,6 +124,16 @@ export function useCreateLead(options: UseCreateLeadOptions): UseCreateLeadResul
     },
     onSuccess: ({ capturedCompanyId }) => {
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.active(capturedCompanyId) });
+      // M1-E E7-B2-B2 — deliberadamente SEM invalidação de
+      // leadQueryKeys.timeline aqui, embora create_lead grave um evento
+      // automático ("Lead criado", E7-B2-B1): o Lead não existia antes
+      // desta chamada, então nenhum componente pode ter montado
+      // useLeadTimeline para este leadId ainda — a query dessa key nunca
+      // esteve em cache, e invalidar uma key que nunca foi observada é
+      // no-op puro (nenhum efeito, nenhum benefício). Quando o Lead recém-
+      // criado for aberto pela primeira vez, useLeadTimeline monta sem
+      // cache e busca os dados reais (incluindo "Lead criado") no primeiro
+      // fetch — sem precisar de nenhuma invalidação prévia.
     },
   });
 

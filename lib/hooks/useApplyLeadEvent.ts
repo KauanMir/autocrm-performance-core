@@ -5,11 +5,13 @@
 // idempotente (cada aplicação é um evento novo, mesmo raciocínio de
 // add_lead_timeline_entry/useApplyPlatformLeadEvent).
 //
-// apply_lead_event nunca grava em lead_timeline_entries (contrato real,
-// confirmado na auditoria E5-A0) — por isso este hook NUNCA chama
-// LeadService.addToTimeline, NUNCA chama add_lead_timeline_entry, e invalida
-// somente a lista de Leads ativos, nunca a timeline. A solução atômica de
-// evento+timeline fica reservada ao E7 (decisão humana #5 do E5-A1).
+// M1-E E7-B2-B1: apply_lead_event passou a gravar um evento automático em
+// lead_timeline_entries, na mesma transação da RPC (achado do E5-A0/decisão
+// humana #5 do E5-A1, cumprida no E7). Este hook nunca chama
+// LeadService.addToTimeline nem add_lead_timeline_entry diretamente — nunca
+// duplica a escrita feita pela RPC (dual-write proibido) — só invalida a
+// timeline (E7-B2-B2) para a UI já aberta buscar o evento real gravado pelo
+// servidor.
 //
 // eventType é tipado pelo enum real (Database['public']['Enums']
 // ['lead_event_type']) — nunca aceita texto livre. A conversão de
@@ -85,9 +87,11 @@ export function useApplyLeadEvent(options: UseApplyLeadEventOptions): UseApplyLe
 
       return { record, capturedCompanyId };
     },
-    onSuccess: ({ capturedCompanyId }) => {
-      // Nunca invalida timeline aqui — apply_lead_event não a altera.
+    onSuccess: ({ capturedCompanyId, record }) => {
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.active(capturedCompanyId) });
+      // M1-E E7-B2-B2 — apply_lead_event agora grava evento automático
+      // (E7-B2-B1); invalida a timeline exata do Lead.
+      queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, record.id) });
     },
   });
 

@@ -117,13 +117,15 @@ describe('useAssignLeadSeller — bloqueios de identidade', () => {
   });
 });
 
-describe('useAssignLeadSeller — sucesso, invalidação e ausência de otimismo', () => {
-  it('invalida somente active(companyId capturado), nunca archived', async () => {
+describe('useAssignLeadSeller — sucesso, invalidação e ausência de otimismo (E7-B2-B2)', () => {
+  it('invalida active(companyId capturado) E timeline(companyId, leadId), nunca archived — assign_lead_seller grava evento automático desde o E7-B2-B1', async () => {
     const { hook, invalidateSpy } = setup();
     const assigned = await hook.result.current.assignLeadSeller(baseInput);
     expect(assigned).toEqual(ASSIGNED);
-    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.active('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', ASSIGNED.id) });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.archived('company-a') });
   });
 
   it('nenhuma escrita otimista: setQueryData nunca é chamado por este hook', async () => {

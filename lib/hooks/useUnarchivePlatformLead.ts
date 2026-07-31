@@ -46,12 +46,17 @@ export function useUnarchivePlatformLead(
       }
       return unarchivePlatformLead(input);
     },
-    onSuccess: (_unarchived, input) => {
+    onSuccess: (unarchived, input) => {
       queryClient.invalidateQueries({
         queryKey: platformCommercialQueryKeys.leadsActive(input.companyId),
       });
       queryClient.invalidateQueries({
         queryKey: platformCommercialQueryKeys.leadsArchived(input.companyId),
+      });
+      // M1-E E7-B2-B2 — unarchive_lead grava evento automático na timeline
+      // desde o E7-B2-B1 (nunca no caminho idempotente).
+      queryClient.invalidateQueries({
+        queryKey: platformCommercialQueryKeys.leadTimeline(input.companyId, unarchived.id),
       });
     },
   });

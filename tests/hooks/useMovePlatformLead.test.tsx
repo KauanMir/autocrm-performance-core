@@ -78,14 +78,14 @@ describe('useMovePlatformLead — payload da RPC', () => {
   });
 });
 
-describe('useMovePlatformLead — sucesso e invalidação', () => {
-  it('invalida SOMENTE leadsActive da empresa capturada', async () => {
+describe('useMovePlatformLead — sucesso e invalidação (E7-B2-B2)', () => {
+  it('invalida leadsActive E leadTimeline da empresa capturada, nunca leadsArchived — move_lead_to_stage grava evento automático desde o E7-B2-B1', async () => {
     const { hook, invalidateSpy } = setup();
     const moved = await hook.result.current.moveLead(baseInput());
     expect(moved).toEqual(MOVED);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsActive('company-a') });
     expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsArchived('company-a') });
-    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadTimeline('company-a', 'lead-1') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadTimeline('company-a', 'lead-1') });
   });
 });
 

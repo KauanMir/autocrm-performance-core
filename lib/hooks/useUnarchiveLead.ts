@@ -87,9 +87,13 @@ export function useUnarchiveLead(options: UseUnarchiveLeadOptions): UseUnarchive
 
       return { record, capturedCompanyId };
     },
-    onSuccess: ({ capturedCompanyId }) => {
+    onSuccess: ({ capturedCompanyId, record }) => {
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.active(capturedCompanyId) });
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.archived(capturedCompanyId) });
+      // M1-E E7-B2-B2 — unarchive_lead grava evento automático na timeline
+      // desde o E7-B2-B1 (nunca no caminho idempotente) — invalida a
+      // timeline exata.
+      queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, record.id) });
     },
   });
 
