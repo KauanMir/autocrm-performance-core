@@ -8,6 +8,7 @@ import { AuthService, SellerService, LeadService, VisitService, DealService, Sal
 import { VISIT_STATUS, DEAL_STATUS, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
+import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
 
@@ -493,15 +494,22 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   useStore(); // subscribes to store changes for re-render — sellers read via SellerService below (Correção 9)
   // M1-E E7-A1 — chamado SEMPRE (Rules of Hooks), independente do modo;
   // useRemoteLeadsScreenState já gateia local/remote_ready/misconfigured/
-  // sem-identidade internamente. Podium/Ranking (SellerService, abaixo)
-  // permanecem intocados nesta etapa — módulo de Sellers local não migrado,
-  // corrigido no E7-B1.
+  // sem-identidade internamente.
   const leadsSummary = useHomeLeadsSummary(currentUser ?? null);
   const variant = t.podium;
-  const allSellers = SellerService.getAll();
-  const sellers = team === 'Todos' ? allSellers : allSellers.filter((s: any) => s.team === team);
+  // M1-E E7-B1 — Podium/Ranking/MinhaDisputa dependem exclusivamente do
+  // catálogo LOCAL de Sellers (getStore().sellers, sem company_id, sem
+  // backend remoto — achado do E7-A0/E7-B1). Fora do modo local nenhuma
+  // leitura acontece aqui: sem catálogo real de desempenho de vendedores, a
+  // seção inteira vira um estado indisponível explícito (nunca zero
+  // fictício, nunca o primeiro Seller local).
+  const isSellersLocal = isLocalCommercialDataAllowed();
+  const allSellers = isSellersLocal ? SellerService.getAll() : [];
+  const sellers = isSellersLocal
+    ? (team === 'Todos' ? allSellers : allSellers.filter((s: any) => s.team === team))
+    : [];
   const top3 = sellers.slice(0, 3);
-  const comp = getCompetition(allSellers);
+  const comp = isSellersLocal ? getCompetition(allSellers) : null;
 
   const podiumStage = (
     <div style={{ position: 'relative', background: 'radial-gradient(120% 80% at 50% 6%, #1d1d21 0%, #131315 48%, #0b0b0c 100%)', border: '1px solid var(--line-dark)', borderRadius: 22, padding: '0 16px 14px', height: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
@@ -535,23 +543,30 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ink-900)', position: 'relative' }}>
       <ControlBar period={period} setPeriod={setPeriod} variant={variant} setVariant={(v: string) => setTweak('podium', v)} team={team} setTeam={setTeam} />
-      <CompTicker comp={comp} />
+      {isSellersLocal && <CompTicker comp={comp} />}
 
       <div style={{ padding: '22px 26px 44px', position: 'relative' }}>
-        {narrow ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginBottom: 26 }}>
-            <div style={{ height: variant === 'A' ? 620 : variant === 'B' ? 540 : variant === 'D' ? 700 : 560 }}>{podiumStage}</div>
-            <div style={{ height: 520 }}><RankingList sellers={sellers} active={active} comp={comp} /></div>
-          </div>
+        {isSellersLocal ? (
+          narrow ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginBottom: 26 }}>
+              <div style={{ height: variant === 'A' ? 620 : variant === 'B' ? 540 : variant === 'D' ? 700 : 560 }}>{podiumStage}</div>
+              <div style={{ height: 520 }}><RankingList sellers={sellers} active={active} comp={comp} /></div>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: 'stretch', height: 'calc(100vh - 168px)', minHeight: 600, marginBottom: 26 }}>
+              {podiumStage}
+              <RankingList sellers={sellers} active={active} comp={comp} />
+            </div>
+          )
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: 'stretch', height: 'calc(100vh - 168px)', minHeight: 600, marginBottom: 26 }}>
-            {podiumStage}
-            <RankingList sellers={sellers} active={active} comp={comp} />
+          <div style={{ marginBottom: 26 }}>
+            <SectionTitle icon="trophy" tone="#D4AF37">Pódio de campeões</SectionTitle>
+            <CommercialWidgetNotice>Ranking e desempenho de vendedores serão disponibilizados após a migração deste módulo.</CommercialWidgetNotice>
           </div>
         )}
 
         <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} /></div>
-        <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>
+        {isSellersLocal && <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>}
         <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} /></div>
         <QuickActions go={go} />
       </div>

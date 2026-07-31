@@ -12,6 +12,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 
 const m = vi.hoisted(() => ({
   useRemoteLeadsScreenState: vi.fn(),
+  isLocalCommercialDataAllowed: vi.fn(),
   leadServiceGetAll: vi.fn(),
   visitServiceGetAll: vi.fn(),
   dealServiceGetAll: vi.fn(),
@@ -24,6 +25,10 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks/useRemoteLeadsScreenState', () => ({
   useRemoteLeadsScreenState: m.useRemoteLeadsScreenState,
+}));
+
+vi.mock('@/lib/leads/localCommercialAccess', () => ({
+  isLocalCommercialDataAllowed: m.isLocalCommercialDataAllowed,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -127,6 +132,11 @@ beforeEach(() => {
   m.sellerServiceGetById.mockReset().mockReturnValue(null);
   m.authGetCurrentUser.mockReset().mockReturnValue(manager());
   m.useRemoteLeadsScreenState.mockReset();
+  // Default true (equivalente a REMOTE_LEADS=false real) preserva o
+  // comportamento de todos os testes existentes, escritos antes do E7-B1 —
+  // só os testes da seção "Podium/Ranking em modo remoto" abaixo
+  // sobrescrevem para false.
+  m.isLocalCommercialDataAllowed.mockReset().mockReturnValue(true);
 });
 
 // ── A. Home local ────────────────────────────────────────────────────────
@@ -144,6 +154,59 @@ describe('Home — caminho local (REMOTE_LEADS=false)', () => {
     expect(screen.getByText('pendências atrasadas')).toBeInTheDocument();
     expect(screen.getByText('Funil de conversão')).toBeInTheDocument();
     expect(screen.getByText('Vendas')).toBeInTheDocument();
+    // M1-E E7-B1: Podium/Ranking/MinhaDisputa (SellerService) continuam
+    // aparecendo integralmente no modo local — nenhum redesign, nenhuma
+    // mudança de comportamento.
+    expect(m.sellerServiceGetAll).toHaveBeenCalled();
+    expect(screen.getByText('PÓDIO DE CAMPEÕES')).toBeInTheDocument();
+    expect(screen.getByText('Ranking completo')).toBeInTheDocument();
+    expect(screen.getByText('Minha disputa')).toBeInTheDocument();
+  });
+});
+
+// ── Podium/Ranking/MinhaDisputa em modo remoto (M1-E E7-B1) ─────────────
+// Achado do E7-A0: SellerService (catálogo local, sem company_id, sem
+// backend remoto) era chamado incondicionalmente por Home — Podium/Ranking/
+// MinhaDisputa exibiam vendedores de demonstração mesmo numa empresa
+// remota real. Corrigido nesta etapa: fora do modo local, a seção inteira
+// vira um estado indisponível explícito, sem nenhuma leitura de
+// SellerService.
+describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
+  beforeEach(() => {
+    m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
+    );
+  });
+
+  it('nunca chama SellerService.getAll/getById', () => {
+    renderHome(manager());
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
+    expect(m.sellerServiceGetById).not.toHaveBeenCalled();
+  });
+
+  it('nenhum vendedor de demonstração (DEFAULT_SELLER/catálogo local) aparece', () => {
+    renderHome(manager());
+    expect(screen.queryByText('Marcos Silva')).toBeNull();
+    expect(screen.queryByText('Ana Souza')).toBeNull();
+    expect(screen.queryByText('Equipe')).toBeNull(); // DEFAULT_SELLER.name
+  });
+
+  it('pódio/ranking somem, estado indisponível explícito aparece no lugar', () => {
+    renderHome(manager());
+    expect(screen.queryByText('PÓDIO DE CAMPEÕES')).toBeNull();
+    expect(screen.queryByText('Ranking completo')).toBeNull();
+    expect(screen.queryByText('Minha disputa')).toBeNull();
+    expect(screen.getByText('Pódio de campeões')).toBeInTheDocument();
+    expect(screen.getByText('Ranking e desempenho de vendedores serão disponibilizados após a migração deste módulo.')).toBeInTheDocument();
+  });
+
+  it('widgets de Leads remotos (fora do escopo de Sellers) continuam funcionando normalmente', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [{ id: 'r1', urgency: 'red' }] } }),
+    );
+    renderHome(manager());
+    expect(screen.getByText('leads atrasados')).toBeInTheDocument();
   });
 });
 

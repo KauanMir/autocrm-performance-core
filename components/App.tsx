@@ -372,7 +372,9 @@ export function App() {
             <TweakButton label="Ver Cadastro" onClick={() => (window as any).__reviewAuth('signup')} />
             <TweakButton label="Ver Recuperação de senha" onClick={() => (window as any).__reviewAuth('recover')} />
             <TweakButton label="Ver Onboarding" onClick={() => (window as any).__reviewAuth('onboarding')} />
-            <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
+            {isLocalCommercialDataAllowed() && (
+              <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
+            )}
             <TweakButton label="Ver Central de notificações" onClick={() => openFlow('notificacoes')} />
             <TweakButton label="Ver Busca global" onClick={() => openFlow('busca')} />
             <TweakButton label="Ver Galeria de estados" onClick={() => openFlow('estados')} />

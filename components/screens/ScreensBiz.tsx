@@ -376,11 +376,25 @@ function exportResultadosCSV() {
 
 export function ScreenResultados({ go }: any) {
   useStore();
+  // M1-E E7-B1 — Barreira 1 (UI): esta tela inteira (desempenho por
+  // vendedor, conversão por etapa, motivos de perda) depende do catálogo
+  // LOCAL de Sellers (SellerService, sem company_id, sem backend remoto —
+  // achado do E7-A0/E7-B1), reachable pelo Manager mesmo em modo remoto
+  // (NAV_ROLES.manager inclui 'resultados'). Resolvido ANTES de qualquer
+  // chamada a SellerService.getAll().
+  if (!isLocalCommercialDataAllowed()) {
+    return (
+      <LightScreen>
+        <PageHead title="Resultados" sub="Como a equipe está performando — em números simples." />
+        <LocalCommercialUnavailableCard />
+      </LightScreen>
+    );
+  }
   const top = SellerService.getAll();
-  // M1-E E5-B2-A1: a exportação combina Leads/Sellers (sempre seguros) com
-  // Vendas/Propostas/Visitas locais (Visit/Deal/Sale) — fora do modo local
-  // essas três seções não podem ser lidas, então a exportação inteira fica
-  // indisponível em vez de gerar um CSV incompleto/enganoso.
+  // M1-E E5-B2-A1: a exportação combina Leads/Sellers (sempre seguros no
+  // modo local) com Vendas/Propostas/Visitas locais (Visit/Deal/Sale) — fora
+  // do modo local essas três seções não podem ser lidas, então a exportação
+  // inteira fica indisponível em vez de gerar um CSV incompleto/enganoso.
   const canExport = isLocalCommercialDataAllowed();
   return (
     <LightScreen>

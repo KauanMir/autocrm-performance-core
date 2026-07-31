@@ -35,7 +35,23 @@ export function ProgressBar({ pct, accent = '#E8CE72' }: { pct: number; accent?:
   );
 }
 
+// M1-E E7-B1: catálogo de desempenho de vendedores (SellerService) é
+// exclusivamente local, sem company_id, sem backend remoto (achado do
+// E7-A0). Fora do modo local, nunca cair para o primeiro Seller local nem
+// para métricas fabricadas — estado explícito "Perfil indisponível", sem
+// tocar SellerService.
+function PerfilVendedorIndisponivel({ close }: { close: () => void }) {
+  return (
+    <FlowShell eyebrow="PERFIL DO VENDEDOR" title="Perfil do vendedor" icon="user" accent="#8B8B93" onClose={close}>
+      <StateCard icon="user" accent="#8B8B93" title="Perfil indisponível" sub="O desempenho de vendedores será disponibilizado após a migração deste módulo." btn={null} />
+    </FlowShell>
+  );
+}
+
 export function FlowPerfilVendedor({ payload, close, openFlow }: any) {
+  if (!isLocalCommercialDataAllowed()) {
+    return <PerfilVendedorIndisponivel close={close} />;
+  }
   const seller = payload.seller || SellerService.getAll()[0];
   const idx = SellerService.getAll().findIndex((s: any) => s.id === seller.id);
   const pos = payload.pos || idx + 1;
@@ -134,17 +150,21 @@ export function FlowPerfilVendedor({ payload, close, openFlow }: any) {
 }
 
 export function FlowNotificacoes({ payload, close, openFlow }: any) {
-  // M1-E E5-B2-A1: as duas notificações abaixo abrem flows de Visita/
-  // Proposta — nunca oferecidas fora do modo local (Visit/Deal não têm
-  // company_id nem backend remoto, auditoria E5-B2-A0). O texto estático
-  // das demais notificações deste grupo (dado de demonstração, não uma
-  // leitura real de VisitService/DealService/SaleService) permanece.
+  // M1-E E5-B2-A1: as duas notificações de Visita/Proposta abaixo nunca são
+  // oferecidas fora do modo local (Visit/Deal não têm company_id nem
+  // backend remoto, auditoria E5-B2-A0). O texto estático das demais
+  // notificações deste grupo (dado de demonstração, não uma leitura real de
+  // VisitService/DealService/SaleService) permanece.
+  //
+  // M1-E E7-B1: a notificação de ranking abaixo abre perfil-vendedor com um
+  // Seller do catálogo LOCAL (SellerService, sem company_id, sem backend
+  // remoto) — mesmo isolamento, nunca oferecida fora do modo local.
   const localCommercialAllowed = isLocalCommercialDataAllowed();
   const groups = [
     { name: 'Urgente', tone: 'red', items: [
       { icon: 'flame', t: <span>Cliente <b>Carlos Andrade</b> está sem resposta há 3 dias</span>, when: 'há 1h', action: () => openFlow('ligar', { lead: findLead('Carlos Andrade') || LeadService.getAll()[0] }), label: 'Ligar' },
-      { icon: 'target', t: <span><b>João Ferreira</b> ultrapassou você no ranking</span>, when: 'há 2h', action: () => openFlow('perfil-vendedor', { seller: SellerService.getAll()[2] }), label: 'Ver' },
       ...(localCommercialAllowed ? [
+        { icon: 'target', t: <span><b>João Ferreira</b> ultrapassou você no ranking</span>, when: 'há 2h', action: () => openFlow('perfil-vendedor', { seller: SellerService.getAll()[2] }), label: 'Ver' },
         { icon: 'calendar', t: <span>Visita de <b>Juliana Prado</b> ainda não confirmada</span>, when: 'há 3h', action: () => openFlow('confirmar-visita', { visit: VisitService.getAll().find((v: any) => v.status === 'pendente') }), label: 'Confirmar' },
       ] : []),
     ]},
@@ -197,12 +217,13 @@ export function FlowBusca({ payload, close, openFlow }: any) {
   const ql = q.trim().toLowerCase();
   const match = (s: string) => ql && s.toLowerCase().includes(ql);
   const clientes = LeadService.getAll().filter((l: any) => !ql || match(l.name) || match(l.phone) || match(l.car));
-  const vendedores = SellerService.getAll().filter((s: any) => !ql || match(s.name) || match(s.team));
-  // M1-E E5-B2-A1: Propostas/Vendas/Visitas (Deal/Sale/Visit) não têm
-  // company_id nem backend remoto (auditoria E5-B2-A0) — fora do modo
-  // local, a busca nunca consulta esses três domínios; Clientes/Vendedores
-  // (Lead/Seller) permanecem intactos nos dois modos.
+  // M1-E E5-B2-A1/E7-B1: Propostas/Vendas/Visitas (Deal/Sale/Visit) e o
+  // catálogo de Vendedores (SellerService) não têm company_id nem backend
+  // remoto (auditoria E5-B2-A0/E7-A0) — fora do modo local, a busca nunca
+  // consulta esses quatro domínios; só Clientes (Lead, com backend remoto
+  // real) permanece intacto nos dois modos.
   const localCommercialAllowed = isLocalCommercialDataAllowed();
+  const vendedores = localCommercialAllowed ? SellerService.getAll().filter((s: any) => !ql || match(s.name) || match(s.team)) : [];
   const propostas = localCommercialAllowed ? DealService.getAll().filter((d: any) => !ql || match(d.client) || match(d.car)) : [];
   const vendas = localCommercialAllowed ? SaleService.getAll().filter((s: any) => !ql || match(s.client) || match(s.car)) : [];
   const visitas = localCommercialAllowed ? VisitService.getAll().filter((v: any) => !ql || match(v.client) || match(v.car)) : [];

@@ -1,9 +1,12 @@
 // Testes de isolamento fail-closed dos módulos comerciais locais em
-// ScreensBiz.tsx (M1-E, E5-B2-A1): ScreenVisitas/ScreenPropostas/
+// ScreensBiz.tsx (M1-E, E5-B2-A1 + E7-B1): ScreenVisitas/ScreenPropostas/
 // ScreenVendas/ScreenResultados. Cobre Barreira 1 (UI) — em modo NÃO local,
 // nenhuma tela chama VisitService/DealService/SaleService.getAll(), nenhum
 // dado antigo aparece, nenhuma ação de criar/aprovar/cancelar é oferecida.
-// Em modo local, comportamento preservado integralmente.
+// ScreenResultados (E7-B1) ganhou o mesmo isolamento para SellerService
+// (catálogo local sem company_id, sem backend remoto — achado do E7-A0),
+// alcançável pelo Manager mesmo em modo remoto (NAV_ROLES.manager inclui
+// 'resultados'). Em modo local, comportamento preservado integralmente.
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -120,23 +123,29 @@ describe('ScreenVendas — isolamento por modo', () => {
   });
 });
 
-describe('ScreenResultados — exportação bloqueada fora do modo local', () => {
-  it('modo NÃO local: botão Exportar não aparece (mistura Leads/Sellers seguros com Sale/Deal/Visit bloqueados)', () => {
+describe('ScreenResultados — isolamento por modo (M1-E E7-B1)', () => {
+  // M1-E E7-B1: achado real — esta tela chamava SellerService.getAll()
+  // incondicionalmente ANTES de qualquer checagem de modo, apesar de
+  // 'resultados' estar na navegação do Manager (NAV_ROLES.manager) e
+  // portanto alcançável em modo remoto. SellerService (catálogo local, sem
+  // company_id, sem backend remoto — achado do E7-A0) precisa do mesmo
+  // isolamento Barreira 1 já aplicado a ScreenVisitas/Propostas/Vendas.
+  it('modo NÃO local: não chama SellerService.getAll, mostra estado indisponível, nenhum vendedor demo aparece', () => {
     m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    m.sellers.mockReturnValue([{ id: 's1', name: 'Marcos Silva', leads: 1, visits: 1, conv: 10, sales: 1 }]);
     render(<ScreenResultados go={() => {}} />);
+    expect(m.sellers).not.toHaveBeenCalled();
+    expect(screen.getByTestId('local-commercial-unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Marcos Silva')).toBeNull();
     expect(screen.queryByText('Exportar')).toBeNull();
   });
 
-  it('modo local: botão Exportar aparece', () => {
+  it('modo local: renderiza ranking de vendedores e botão Exportar normalmente (comportamento preservado)', () => {
     m.isLocalCommercialDataAllowed.mockReturnValue(true);
-    render(<ScreenResultados go={() => {}} />);
-    expect(screen.getByText('Exportar')).toBeInTheDocument();
-  });
-
-  it('ranking de vendedores (fora do escopo dos 4 domínios) continua renderizando nos dois modos', () => {
     m.sellers.mockReturnValue([{ id: 's1', name: 'Marcos Silva', leads: 1, visits: 1, conv: 10, sales: 1 }]);
-    m.isLocalCommercialDataAllowed.mockReturnValue(false);
     render(<ScreenResultados go={() => {}} />);
     expect(screen.getByText('Marcos Silva')).toBeInTheDocument();
+    expect(screen.getByText('Exportar')).toBeInTheDocument();
+    expect(screen.queryByTestId('local-commercial-unavailable')).toBeNull();
   });
 });

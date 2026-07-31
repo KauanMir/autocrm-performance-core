@@ -2324,6 +2324,110 @@ pendente; **E7-B2** (timeline Manager/Seller) continua pendente; **E7-C**
 
 **E7-A2 formalmente concluído. E7-B1 ainda não iniciado.**
 
+### 15.17 E7-B1 — Catálogo de vendedores seguro no modo remoto (concluído)
+
+**Problema**: o E7-A0 confirmou que o catálogo local de vendedores
+(`SellerService`/`StoreAdapter`/`getStore().sellers`, `lib/store.ts`) não
+tem `company_id`, vive em `localStorage` global e pode conter vendedores de
+demonstração — mas continuava acessível em várias superfícies mesmo com
+`NEXT_PUBLIC_FF_REMOTE_LEADS=true`. Auditoria completa desta etapa (todos os
+usos de `SellerService`/`DEFAULT_SELLER`/`getAll()[0]`/`payload.seller`)
+encontrou seis callers reais, além dos três já apontados no prompt:
+
+1. `components/screens/Home.tsx` — Podium/Ranking/`MinhaDisputa`
+   chamavam `SellerService.getAll()`/`getById()` incondicionalmente
+   (`getCompetition`, `DEFAULT_SELLER`).
+2. `components/App.tsx` — botão "Ver Perfil do vendedor" do `TweaksPanel`
+   chamava `SellerService.getAll()[0]` incondicionalmente.
+3. `components/flows/Flows3.tsx` — `FlowPerfilVendedor` caía em
+   `payload.seller || SellerService.getAll()[0]` sempre que nenhum Seller
+   era passado.
+4. `components/flows/Flows3.tsx` — `FlowNotificacoes` abria
+   `perfil-vendedor` com `SellerService.getAll()[2]` numa notificação de
+   ranking **não coberta** pelo isolamento Visita/Proposta já existente do
+   E5-B2-A1 (achado novo desta auditoria).
+5. `components/flows/Flows3.tsx` — `FlowBusca` incluía o grupo
+   "Vendedores" (`SellerService.getAll()`) sem nenhum gate, apesar do
+   comentário do E5-B2-A1 dizer erroneamente que Lead/Seller "permanecem
+   intactos nos dois modos" (achado novo).
+6. `components/screens/ScreensBiz.tsx` — `ScreenResultados` chamava
+   `SellerService.getAll()` incondicionalmente **antes** de qualquer
+   checagem de modo — bug real e mais grave: `'resultados'` está em
+   `NAV_ROLES.manager`, então um Manager alcança essa tela normalmente sob
+   `REMOTE_LEADS=true` (achado novo, sem cobertura de teste alguma antes
+   desta etapa).
+
+Protegidos e já corretos, revalidados sem alteração: `components/App.tsx`
+Rail (`SellerService.getById` atrás de `!isLocalCommercialDataAllowed()`,
+E7-A1); `components/screens/ScreensOps.tsx` (`ScreenClientesLegacy`, ramo
+local do router e `sellers = isRemoteLeadsActive ? null : ...`);
+`components/flows/Flows2.tsx` (`FlowNovoClienteLocal`, `FlowRegistrarVenda`,
+`FlowNovaPendencia` — os dois últimos bloqueados inteiros pelo
+`LOCAL_COMMERCIAL_FLOW_IDS` do `FlowLayer`, o primeiro só monta no ramo
+local do router `FlowNovoCliente`); `components/flows/FlowsShared.tsx`
+(`LocalSellerPicker`, usado exclusivamente pelos três flows acima);
+`components/auth/AuthFlow.tsx` (onboarding pré-autenticação, decisão D —
+demo estático sem nenhuma empresa/identidade real por trás, fora do escopo
+do isolamento de dados comerciais).
+
+**Correção — decisões de produto (§5)**: Home (A) esconde Podium/Ranking/
+`CompTicker`/`MinhaDisputa` inteiros fora do modo local, substituindo por
+um aviso sanitizado único ("Ranking e desempenho de vendedores serão
+disponibilizados após a migração deste módulo"), reaproveitando
+`CommercialWidgetNotice` já existente — nunca zero fictício, nunca
+`useCurrentCompanyAssignableSellers` cooptado para fabricar ranking. Rail
+(B) revalidado sem alteração. `FlowPerfilVendedor` (C) ganhou um estado
+"Perfil indisponível" dedicado (`PerfilVendedorIndisponivel`, `StateCard`
+já existente no arquivo) — mesmo recebendo `payload.seller`, permanece
+indisponível fora do modo local (não existe backend remoto de performance
+de vendedor; não é objetivo desta etapa criar um). `TweaksPanel` (D) só
+esconde o botão dependente de Seller — os demais (notificações/busca/
+estados) continuam. Super Admin (E) e `remote_misconfigured` (F): cobertos
+transitivamente por `isLocalCommercialDataAllowed()` (`resolveRemoteLeadsFlagMode()
+!== 'local'` bloqueia os dois igualmente, mesmo padrão de
+Visit/Deal/Sale/Task desde o E5-B2-A1).
+
+**Guard fail-closed do `SellerService`** (`lib/services.ts`): aplicado por
+último, depois de todos os seis callers corrigidos — `getAll`/`getById`/
+`getCurrentSeller` chamam `assertLocalCommercialDataAllowed('SellerService.<op>')`
+antes de tocar `getStore().sellers`, mesmo padrão de
+`VisitService`/`DealService`/`SaleService`/`TaskService`. Nenhum uso
+legítimo de `SellerService` sobrou em modo remoto — não foi necessário
+parar a etapa por um caso não removível.
+
+**Testes**: `tests/screens/Home.test.tsx` (+5 — Podium/Ranking somem sem
+chamar `SellerService`, nenhum `DEFAULT_SELLER`/vendedor demo aparece,
+widgets de Leads remotos continuam funcionando, modo local preservado);
+`tests/flows/Flows3CommercialIsolation.test.tsx` (+9 — `FlowBusca`
+vendedores gated nos dois modos, `FlowNotificacoes` notificação de ranking
+gated nos dois modos, `FlowPerfilVendedor` indisponível/normal nos dois
+modos, inclusive com `payload.seller` explícito); `tests/screens/
+ScreensBizCommercialIsolation.test.tsx` (`ScreenResultados` reescrito —
+o teste antigo **travava a regressão como comportamento esperado**,
+substituído pelo mesmo padrão de `ScreenVisitas`/`Propostas`/`Vendas`);
+`tests/navigation/appHomeRailRemoteGuard.test.tsx` (+asserts de
+`SellerService` não chamado em Manager/Seller/Super Admin/misconfigured/
+Rail); `tests/navigation/appTweaksPanelSellerGuard.test.tsx` (novo, 4
+testes — único arquivo do repo a NÃO mockar o `TweaksPanel` real,
+passthrough só de `useTweaks`/`TweaksPanel`); `tests/leads/serviceSeam.test.ts`
+(+2 — `SellerService` local no describe A, bloqueio fail-closed nos três
+métodos no describe E, describe/comentário renomeados para incluir
+"Seller").
+
+**Validação**: TSC 22 erros preexistentes, mesmos 4 arquivos (inalterado);
+171→172 arquivos/2574→2593 testes TS (+19); zero SQL/migration tocado; 4
+builds verdes (padrão, OFF/OFF, ON/OFF misconfigured, ON/ON efetivo).
+Nenhuma operação Supabase remota; nenhuma flag alterada; nenhuma
+capability nova concedida; mutações/cache de Leads intocados.
+
+**Riscos residuais explícitos**: smoke test manual do E6 continua
+pendente por decisão do usuário; **E7-B2** (timeline Manager/Seller)
+continua pendente; **E7-C** (regressão final do E7) continua pendente. Um
+módulo remoto completo de performance/ranking de vendedores (backend novo)
+não foi criado — decisão explícita do prompt, fora do escopo desta etapa.
+
+**E7-B1 formalmente concluído. E7-B2 ainda não iniciado.**
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)

@@ -189,6 +189,10 @@ describe('App (shell integrado) — Home/Rail sob REMOTE_LEADS=true', () => {
     expect(m.dealServiceGetAll).not.toHaveBeenCalled();
     expect(m.saleServiceGetAll).not.toHaveBeenCalled();
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
+    // M1-E E7-B1: Podium/Ranking/MinhaDisputa (SellerService, catálogo
+    // local sem company_id/backend remoto) também nunca são consultados.
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
+    expect(m.sellerServiceGetById).not.toHaveBeenCalled();
     // A classe de bug do E7-A0 era um crash total (overlay de erro,
     // desmontando a árvore inteira) — a prova mais direta de que não
     // regrediu é o shell continuar de pé com seu chrome visível.
@@ -209,6 +213,8 @@ describe('App (shell integrado) — Home/Rail sob REMOTE_LEADS=true', () => {
     expect(m.dealServiceGetAll).not.toHaveBeenCalled();
     expect(m.saleServiceGetAll).not.toHaveBeenCalled();
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
+    expect(m.sellerServiceGetById).not.toHaveBeenCalled();
   });
 
   it('Super Admin sem companyId operacional: shell monta sem crash, nenhum remote_leads_invalid_context', async () => {
@@ -225,6 +231,8 @@ describe('App (shell integrado) — Home/Rail sob REMOTE_LEADS=true', () => {
     expect(m.visitServiceGetAll).not.toHaveBeenCalled();
     expect(m.dealServiceGetAll).not.toHaveBeenCalled();
     expect(m.saleServiceGetAll).not.toHaveBeenCalled();
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
+    expect(m.sellerServiceGetById).not.toHaveBeenCalled();
   });
 
   it('janela de carregamento do snapshot (bridge ainda não populou): nenhum acesso síncrono, nenhum crash', async () => {
@@ -248,6 +256,8 @@ describe('App (shell integrado) — Home/Rail sob REMOTE_LEADS=true', () => {
     await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
+    expect(m.sellerServiceGetById).not.toHaveBeenCalled();
   });
 });
 
@@ -278,6 +288,10 @@ describe('App (shell) — Rail no caminho remoto', () => {
     renderApp();
     await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+    // M1-E E7-B1: getCompetition() (Podium/Ranking de Home) também nunca
+    // chama SellerService.getById/getAll em modo remoto.
+    expect(m.sellerServiceGetById).not.toHaveBeenCalled();
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
   });
 
   it('Seller em modo remoto: texto secundário do Rail usa o papel da identidade autenticada (sem team local)', async () => {
@@ -288,10 +302,11 @@ describe('App (shell) — Rail no caminho remoto', () => {
 
     renderApp();
     await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
-    // getCompetition() (Podium/Ranking, fora do escopo — E7-B1) continua
-    // chamando SellerService.getById para "minha disputa"; o que este teste
-    // prova é específico do Rail: o texto secundário nunca vira "Gerente"
-    // (rótulo errado para um Seller) por falta do team local em modo remoto.
+    // M1-E E7-B1: getCompetition() (Podium/Ranking de Home, fora do escopo
+    // do Rail) não chama mais SellerService.getById em modo remoto — o que
+    // este teste prova é específico do Rail: o texto secundário nunca vira
+    // "Gerente" (rótulo errado para um Seller) por falta do team local.
     expect(screen.getByText('Vendedor')).toBeInTheDocument();
+    expect(m.sellerServiceGetById).not.toHaveBeenCalled();
   });
 });

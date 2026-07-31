@@ -633,16 +633,31 @@ export const TaskService = {
 };
 
 // ── SellerService ─────────────────────────────────────────────────────
+// M1-E E7-B1: mesmo isolamento fail-closed do VisitService/DealService/
+// SaleService/TaskService — o catálogo de Sellers (getStore().sellers) não
+// tem company_id, é armazenado em localStorage GLOBAL e pode conter
+// vendedores de demonstração (achado do E7-A0). Barreira 2 (camada de
+// serviços), chamada SEMPRE antes de qualquer leitura do StoreAdapter —
+// todos os callers de UI já foram corrigidos nesta etapa (Home, TweaksPanel,
+// FlowPerfilVendedor, FlowNotificacoes, FlowBusca, ScreenResultados) para
+// nunca chegar aqui fora do modo local.
 
 export const SellerService = {
-  getAll: () => getStore().sellers,
-  getById: (id: string) => getStore().sellers.find(s => s.id === id) ?? null,
+  getAll: () => {
+    assertLocalCommercialDataAllowed('SellerService.getAll');
+    return getStore().sellers;
+  },
+  getById: (id: string) => {
+    assertLocalCommercialDataAllowed('SellerService.getById');
+    return getStore().sellers.find(s => s.id === id) ?? null;
+  },
   // M1-F S8-D2-A: sellerId vem exclusivamente de activeMembership.sellerId
   // (nunca profiles.seller_id) — null para Manager, Super Admin, Seller sem
   // linha válida em sellers, ou qualquer sessão sem identidade empresarial
   // atual (decisão humana S8-D2-A: sem platformRole/membership ⇒ null,
   // nunca reaproveita histórico).
   getCurrentSeller: () => {
+    assertLocalCommercialDataAllowed('SellerService.getCurrentSeller');
     const sellerId = AuthService.getCurrentUser()?.activeMembership?.sellerId;
     if (!sellerId) return null;
     return getStore().sellers.find(s => s.id === sellerId) ?? null;

@@ -12,6 +12,7 @@ import {
   LeadService,
   PipelineService,
   SaleService,
+  SellerService,
   TaskService,
   VisitService,
 } from '@/lib/services';
@@ -143,6 +144,15 @@ describe('seam — flag OFF preserva o comportamento local', () => {
       sellerId: 's1', leadId: null, dealId: null, date: 'hoje', status: 'aguardando', pay: '—',
     })).toBe(true);
     expect(SaleService.cancel('seam-sale-off')).toBe(true);
+  });
+
+  // M1-E E7-B1: SellerService segue o mesmo isolamento fail-closed do
+  // Visit/Deal/Sale/Task (abaixo) — cobertura local aqui, bloqueio remoto na
+  // seção E.
+  it('SellerService.getAll/getById continuam lendo a store local', () => {
+    const all = SellerService.getAll();
+    expect(all.length).toBeGreaterThan(0);
+    expect(SellerService.getById(all[0].id)).toEqual(all[0]);
   });
 });
 
@@ -315,17 +325,21 @@ describe('seam — flag ON NÃO bloqueia domínios fora de leads/comercial local
   });
 });
 
-// ── E. Flag ON — módulos comerciais locais (Visit/Deal/Sale/Task) bloqueados
-// (M1-E E5-B2-A1) ─────────────────────────────────────────────────────────
+// ── E. Flag ON — módulos comerciais locais (Visit/Deal/Sale/Task/Seller)
+// bloqueados (M1-E E5-B2-A1 + E7-B1) ─────────────────────────────────────
 // Achado da auditoria E5-B2-A0: Visit/Deal/Sale/Task não têm company_id nem
 // backend remoto — mantê-los graváveis sob flag ON (comportamento antigo,
 // coberto no describe acima até esta etapa) arriscava registros órfãos
 // referenciando um Lead que só existe no Supabase. Bloqueados via
 // assertLocalCommercialDataAllowed, ANTES de qualquer acesso ao
 // StoreAdapter — nunca RemoteLeadsError (isRemoteLeadsError continua
-// exclusivo do domínio de Lead).
+// exclusivo do domínio de Lead). SellerService (E7-B1) entrou nesta mesma
+// lista: catálogo local sem company_id, sem backend remoto (achado do
+// E7-A0) — todos os callers de UI foram corrigidos antes deste guard
+// (Home, TweaksPanel, FlowPerfilVendedor, FlowNotificacoes, FlowBusca,
+// ScreenResultados).
 
-describe('seam — flag ON bloqueia módulos comerciais locais (Visit/Deal/Sale/Task)', () => {
+describe('seam — flag ON bloqueia módulos comerciais locais (Visit/Deal/Sale/Task/Seller)', () => {
   beforeEach(() => {
     mocks.isRemoteLeadsEnabled.mockReturnValue(true);
     getStore();
@@ -358,6 +372,9 @@ describe('seam — flag ON bloqueia módulos comerciais locais (Visit/Deal/Sale/
     })],
     ['TaskService.update', () => TaskService.update('t1', { note: 'x' })],
     ['TaskService.getAll', () => TaskService.getAll()],
+    ['SellerService.getAll', () => SellerService.getAll()],
+    ['SellerService.getById', () => SellerService.getById('s1')],
+    ['SellerService.getCurrentSeller', () => SellerService.getCurrentSeller()],
   ];
 
   for (const [name, call] of blockedCommercialCalls) {
