@@ -14,6 +14,7 @@ import { CommercialCompanyProvider } from '@/lib/commercial/CommercialCompanyCon
 import { subscribeStore } from '@/lib/store';
 import { AuthService, SellerService, TaskService } from '@/lib/services';
 import { AuthFlow } from '@/components/auth/AuthFlow';
+import { AuthenticatedShellErrorBoundary } from '@/components/errors/AuthenticatedShellErrorBoundary';
 import { Home } from '@/components/screens/Home';
 import { ScreenClientes, ScreenAndamento, ScreenPendencias } from '@/components/screens/ScreensOps';
 import { ScreenVisitas, ScreenPropostas, ScreenVendas, ScreenResultados, ScreenAjustes } from '@/components/screens/ScreensBiz';
@@ -330,41 +331,56 @@ export function App() {
     return <AuthFlow view={authView} setView={setAuthView} onAuthed={enter} onSignedUp={() => setAuthView('onboarding')} />;
   }
 
+  // M1-E E7-A2 — chave de reset do AuthenticatedShellErrorBoundary abaixo:
+  // muda em logout, login de outro usuário, troca de companyId/platformRole/
+  // membershipRole (mesmos campos já usados por useQueryCacheIdentity, nunca
+  // um novo estado global). Trocar a prop `key` de um componente força o
+  // React a desmontar a instância antiga (descartando `hasError`) e montar
+  // uma instância nova — nunca preso num erro da identidade anterior.
+  const shellErrorResetKey = [
+    currentUser.id,
+    currentUser.platformRole ?? '',
+    currentUser.activeMembership?.companyId ?? '',
+    currentUser.activeMembership?.role ?? '',
+  ].join(':');
+
   return (
     // M1-F S8-C2-B2: CommercialCompanyProvider montado UMA vez aqui, acima da
     // troca de tela — assim a seleção do Super Admin sobrevive à navegação
     // entre Clientes/Andamento (Provider compartilhado), e é limpa sozinha
     // quando currentUser.id muda (login/logout/troca de usuário).
     <CommercialCompanyProvider identityKey={currentUser.id}>
-      <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-        <Rail current={effectiveCurrent} go={go} currentUser={currentUser} />
-        <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
-          {effectiveCurrent === 'home'
-            ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />
-            : (Cur ? <Cur go={go} t={t} /> : <PlaceholderScreen title={navItem?.label} />)}
-        </main>
+      <AuthenticatedShellErrorBoundary key={shellErrorResetKey}>
+        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+          <Rail current={effectiveCurrent} go={go} currentUser={currentUser} />
+          <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
+            {effectiveCurrent === 'home'
+              ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />
+              : (Cur ? <Cur go={go} t={t} /> : <PlaceholderScreen title={navItem?.label} />)}
+          </main>
 
-        <TweaksPanel>
-          <TweakSection label="Pódio (tela inicial)" />
-          <TweakRadio label="Estilo do pódio" value={t.podium} options={['A', 'B', 'C', 'D']} onChange={(v: string) => setTweak('podium', v)} />
-          <div style={{ fontSize: 11.5, color: '#9aa1ac', padding: '0 2px 8px', lineHeight: 1.5 }}>A · Pódio — B · Líder — C · Galeria — D · Campeão (fotos reais)</div>
-          <TweakToggle label="Animações (coroa, partículas, brilho)" value={t.anim} onChange={(v: boolean) => setTweak('anim', v)} />
-          <TweakSection label="Métricas" />
-          <TweakToggle label="Mostrar receita (discreto)" value={t.showRevenue} onChange={(v: boolean) => setTweak('showRevenue', v)} />
-          <TweakButton label="Reproduzir animação de entrada" onClick={() => setAnimKey(k => k + 1)} />
-          <TweakSection label="Telas novas (revisão)" />
-          <TweakButton label="Ver Login" onClick={() => (window as any).__reviewAuth('login')} />
-          <TweakButton label="Ver Cadastro" onClick={() => (window as any).__reviewAuth('signup')} />
-          <TweakButton label="Ver Recuperação de senha" onClick={() => (window as any).__reviewAuth('recover')} />
-          <TweakButton label="Ver Onboarding" onClick={() => (window as any).__reviewAuth('onboarding')} />
-          <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
-          <TweakButton label="Ver Central de notificações" onClick={() => openFlow('notificacoes')} />
-          <TweakButton label="Ver Busca global" onClick={() => openFlow('busca')} />
-          <TweakButton label="Ver Galeria de estados" onClick={() => openFlow('estados')} />
-        </TweaksPanel>
+          <TweaksPanel>
+            <TweakSection label="Pódio (tela inicial)" />
+            <TweakRadio label="Estilo do pódio" value={t.podium} options={['A', 'B', 'C', 'D']} onChange={(v: string) => setTweak('podium', v)} />
+            <div style={{ fontSize: 11.5, color: '#9aa1ac', padding: '0 2px 8px', lineHeight: 1.5 }}>A · Pódio — B · Líder — C · Galeria — D · Campeão (fotos reais)</div>
+            <TweakToggle label="Animações (coroa, partículas, brilho)" value={t.anim} onChange={(v: boolean) => setTweak('anim', v)} />
+            <TweakSection label="Métricas" />
+            <TweakToggle label="Mostrar receita (discreto)" value={t.showRevenue} onChange={(v: boolean) => setTweak('showRevenue', v)} />
+            <TweakButton label="Reproduzir animação de entrada" onClick={() => setAnimKey(k => k + 1)} />
+            <TweakSection label="Telas novas (revisão)" />
+            <TweakButton label="Ver Login" onClick={() => (window as any).__reviewAuth('login')} />
+            <TweakButton label="Ver Cadastro" onClick={() => (window as any).__reviewAuth('signup')} />
+            <TweakButton label="Ver Recuperação de senha" onClick={() => (window as any).__reviewAuth('recover')} />
+            <TweakButton label="Ver Onboarding" onClick={() => (window as any).__reviewAuth('onboarding')} />
+            <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
+            <TweakButton label="Ver Central de notificações" onClick={() => openFlow('notificacoes')} />
+            <TweakButton label="Ver Busca global" onClick={() => openFlow('busca')} />
+            <TweakButton label="Ver Galeria de estados" onClick={() => openFlow('estados')} />
+          </TweaksPanel>
 
-        <FlowLayer flow={flow} close={closeFlow} openFlow={openFlow} go={go} />
-      </div>
+          <FlowLayer flow={flow} close={closeFlow} openFlow={openFlow} go={go} />
+        </div>
+      </AuthenticatedShellErrorBoundary>
     </CommercialCompanyProvider>
   );
 }

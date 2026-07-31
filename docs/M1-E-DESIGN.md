@@ -2215,6 +2215,115 @@ etapa.
 
 **E7-A1 formalmente concluído. E7-A2 desbloqueado, ainda não iniciado.**
 
+### 15.16 E7-A2 — Error boundary do shell autenticado (concluído)
+
+**Problema**: o E7-A0 confirmou que nenhum error boundary existia em
+lugar algum do app (nem `app/error.tsx`, nem `app/global-error.tsx`, nem
+nenhum componente React de classe com `componentDidCatch`). O crash de
+Home/Rail corrigido no E7-A1 foi um caso concreto; a ausência estrutural
+de defesa contra **qualquer outro** erro de render inesperado
+permanecia. Este boundary é a última camada de defesa — nunca substitui
+tratamento local, validações, capabilities, guards ou estados
+fail-closed já existentes (`remote_misconfigured`,
+`LocalCommercialUnavailableCard`, mensagens sanitizadas de RPC, etc.),
+que continuam tratando seus próprios casos antes de qualquer throw
+chegar até aqui.
+
+**Implementação** (`components/errors/AuthenticatedShellErrorBoundary.tsx`,
+novo): componente de classe React (`getDerivedStateFromError`/
+`componentDidCatch` — único mecanismo nativo para capturar erro de
+render/construtor/lifecycle de filhos; não existe equivalente em hook).
+
+**Ponto de integração** (`components/App.tsx`): envolve o `<div>` interno
+único do shell — `Rail` + `<main>{tela atual}</main>` + `TweaksPanel` +
+`FlowLayer` — como uma única unidade, dentro de
+`CommercialCompanyProvider`. Decisão deliberada: o Rail **também** fica
+protegido (poderia lançar também), e por isso o fallback precisa ser
+autossuficiente — ele nunca depende do Rail estar de pé para oferecer
+logout. Não envolve só a Home (deixaria as demais telas — Clientes,
+Kanban, Tarefas, Visitas, Propostas, Vendas, Ajustes, área do Super
+Admin, flows/modais — desprotegidas). Não há boundary por tela: solução
+única e centralizada, conforme escopo da etapa.
+
+**Fallback** (nunca stack trace, mensagem interna, código de erro ou
+dado sensível; nunca `alert()`): título "Não foi possível carregar esta
+área", descrição "Encontramos um erro inesperado. Você pode tentar
+novamente ou sair da sua conta.", ações "Tentar novamente" (limpa
+`hasError` via `setState` — recuperação controlada pelo React, nunca
+`window.location.reload()`) e "Sair da conta" (chama **apenas**
+`AuthService.logout()` — que já dispara `window.__logout()`
+internamente em `lib/services.ts`; nenhuma lógica de autenticação
+duplicada).
+
+**Reset por identidade**: `App.tsx` computa `shellErrorResetKey =
+[userId, platformRole, companyId, membershipRole].join(':')` — os
+mesmos quatro campos já usados por `useQueryCacheIdentity` — e passa
+como `key` do boundary. Trocar a `key` força o React a desmontar a
+instância antiga (descartando `hasError`) e montar uma nova, cobrindo
+logout, outro usuário, e mudança de `userId`/`companyId`/
+`platformRole`/`membershipRole` sem inventar estado global novo. Mesma
+`key` (identidade inalterada) **não** limpa o erro sozinha — só
+"Tentar novamente" ou troca real de identidade resetam, evitando o
+loop erro→reset automático→mesmo erro→reset contínuo. Navegação de
+tela como gatilho de reset foi avaliada e descartada: como o Rail está
+dentro do mesmo boundary da tela atual, não há como "trocar de tela"
+servir de mecanismo de recuperação enquanto o fallback está visível
+(o Rail fica coberto pelo fallback nesse estado) — reset por
+identidade cobre integralmente os requisitos concretos da etapa.
+
+**Logging**: `componentDidCatch` só usa `console.error` quando
+`NODE_ENV === 'development'`; nenhuma integração externa
+(Sentry/telemetria/RPC/tabela de log/`localStorage`) nesta etapa.
+
+**Limitações documentadas** (no próprio arquivo, como comentário):
+Error Boundaries React capturam erro de renderização, construtor e
+lifecycle de componentes filhos — **nunca** event handlers, callbacks
+assíncronos, promises rejeitadas fora do render, erros server-side/
+Route Handlers, nem erros anteriores à montagem do React. Não é uma
+solução universal de tratamento de erros.
+
+**Estados esperados continuam tratados localmente, sem depender do
+boundary** (nada alterado nesta etapa): `remote_misconfigured`, perfil
+ausente, membership ausente/inativa, empresa suspensa, `company_required`,
+`forbidden`, `lead_not_found`, `lead_archived`, `seller_not_found`,
+`stale_write`, `stage_not_found`, erro de rede tratado por hook,
+loading, estado vazio, `LocalCommercialUnavailableCard`.
+
+**Testes novos**: `tests/errors/AuthenticatedShellErrorBoundary.test.tsx`
+(8 testes isolados — render normal; erro de render capturado sem
+detalhe técnico; "Tentar novamente" recupera; erro persistente sem
+loop; "Sair da conta" chama `AuthService.logout` exatamente uma vez por
+clique; reset por troca de `key`/identidade vs. não-reset por `key`
+igual) e `tests/navigation/appErrorBoundaryIntegration.test.tsx` (5
+testes — `<App />` real com apenas `Home` mockada de forma controlável
+para lançar sob demanda, provando que o boundary contém o erro dentro
+da árvore real do shell: erro contido sem crash não tratado no runner
+de teste; logout acessível a partir do fallback tanto para Manager
+quanto para Seller; "Tentar novamente" remonta a tela real quando o
+erro deixa de ocorrer; render saudável preserva Rail/Home reais sem
+fallback). Cenário de reset por identidade a nível de `<App />`
+completo foi avaliado e descartado como redundante: já coberto de
+forma determinística nos testes isolados do boundary via o mesmo
+mecanismo de `key` agora integrado em `App.tsx`.
+
+**Validação**: TSC 22 erros preexistentes, mesmos 4 arquivos
+(inalterado); 169→171 arquivos/2561→2574 testes TS (+13 — 8 isolados +
+5 de integração); SQL/migrations inalterados (nenhum tocado nesta
+etapa); 4 builds verdes (padrão, OFF/OFF, ON/OFF misconfigured, ON/ON
+efetivo). `tests/screens/Home.test.tsx` e
+`tests/navigation/appHomeRailRemoteGuard.test.tsx` (E7-A1) continuam
+100% verdes com o boundary agora integrado ao shell — zero regressão.
+Nenhuma operação Supabase remota; nenhuma flag alterada; nenhum
+usuário/senha alterado; nenhuma dependência nova (React nativo).
+
+**Riscos residuais explícitos**: smoke test manual do E6 continua
+pendente por decisão do usuário; **E7-B1** (catálogo `sellers` local
+sem `company_id`, Podium/Ranking/`FlowPerfilVendedor`) continua
+pendente; **E7-B2** (timeline Manager/Seller) continua pendente; **E7-C**
+(regressão final do E7) continua pendente.
+
+**E7-A2 formalmente concluído. E7-B1 ainda não iniciado.**
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
