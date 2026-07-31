@@ -15,6 +15,8 @@ import { useCurrentCompanyAssignableSellers } from '@/lib/hooks/useCurrentCompan
 import { useAssignLeadSeller, isNoOpSellerAssignment } from '@/lib/hooks/useAssignLeadSeller';
 import { useArchiveLead } from '@/lib/hooks/useArchiveLead';
 import { useUnarchiveLead } from '@/lib/hooks/useUnarchiveLead';
+import { useLeadTimeline } from '@/lib/hooks/useLeadTimeline';
+import { useAddLeadTimelineEntry } from '@/lib/hooks/useAddLeadTimelineEntry';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -720,6 +722,121 @@ function FlowLigarRemote({ payload, close, ctx }: { payload: any; close: () => v
   );
 }
 
+function formatTimelineDate(value: string): string {
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR');
+}
+
+// M1-E E7-B2-A1 — painel reutilizável da timeline remota (leitura +
+// nota manual) para Manager/Seller. Usado por FlowVerCliente (Lead ativo,
+// canAddNote conforme posse/capability do ator) e FlowVerClienteArquivado
+// (Lead arquivado, canAddNote SEMPRE false — somente leitura, nunca
+// formulário, nunca mutation). Nunca mostra actor_profile_id/e-mail/UUID/
+// companyId (decisão humana da etapa: sem nome do ator na fase inicial).
+function RemoteLeadTimelinePanel({ companyId, leadId, userId, membershipRole, userIsActive, canAddNote }: {
+  companyId: string | null;
+  leadId: string;
+  userId: string | null;
+  membershipRole: 'manager' | 'seller' | null;
+  userIsActive: boolean;
+  canAddNote: boolean;
+}) {
+  const authorized =
+    userIsActive
+    && typeof companyId === 'string' && companyId.trim() !== ''
+    && (membershipRole === 'manager' || membershipRole === 'seller');
+  const timeline = useLeadTimeline({ companyId, leadId, authorized });
+  const addNote = useAddLeadTimelineEntry({ userId, companyId, membershipRole, userIsActive });
+  const [detail, setDetail] = useState('');
+  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const trimmed = detail.trim();
+  const canSubmit = canAddNote && trimmed !== '' && !addNote.isPending;
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    setFeedback(null);
+    try {
+      await addNote.addTimelineEntry({ leadId, detail: trimmed });
+      setDetail('');
+      setFeedback({ kind: 'success', text: 'Observação adicionada ao histórico.' });
+    } catch (err) {
+      // Identidade mudou em voo (logout/troca de empresa) — a árvore que
+      // dependia da identidade antiga já está sendo desmontada; nenhum
+      // feedback deve aparecer para uma sessão que não existe mais.
+      const code = isRemoteLeadsError(err) ? err.code : undefined;
+      if (code === 'remote_leads_mutation_identity_changed') return;
+      setFeedback({ kind: 'error', text: 'Não foi possível adicionar a observação.' });
+    }
+  };
+
+  return (
+    <>
+      {timeline.isLoading ? (
+        <div data-testid="remote-lead-timeline-loading" style={{ padding: '20px 0', color: 'var(--t-500)', fontSize: 13 }}>Carregando…</div>
+      ) : timeline.isError ? (
+        <div data-testid="remote-lead-timeline-error" role="alert" style={{ padding: '20px 0', display: 'flex', flexDirection: 'column', gap: 10, color: 'var(--red)', fontSize: 13 }}>
+          <span>Não foi possível carregar o histórico.</span>
+          <button onClick={() => timeline.refetch()} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--t-700)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, textDecoration: 'underline', padding: 0 }}>
+            Tentar novamente
+          </button>
+        </div>
+      ) : timeline.isEmpty ? (
+        <div style={{ textAlign: 'center', padding: '28px 12px', color: 'var(--t-500)', fontSize: 13 }}>Nenhum histórico registrado ainda.</div>
+      ) : (
+        <div data-testid="remote-lead-timeline-list" style={{ position: 'relative', paddingLeft: 8 }}>
+          {timeline.entries.map((e, i) => (
+            <div key={e.id} style={{ display: 'flex', gap: 14, paddingBottom: i < timeline.entries.length - 1 ? 20 : 0, position: 'relative' }}>
+              {i < timeline.entries.length - 1 && <div style={{ position: 'absolute', left: 18, top: 38, bottom: 0, width: 2, background: 'var(--border)' }} />}
+              <div style={{ width: 38, height: 38, borderRadius: 11, flexShrink: 0, background: `${e.color}22`, color: e.color, display: 'grid', placeItems: 'center', border: `1px solid ${e.color}44`, zIndex: 1 }}><Icon name={e.icon} size={18} stroke={2.1} /></div>
+              <div style={{ flex: 1, paddingTop: 2 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-900)' }}>{e.label}</span>
+                  <span style={{ fontSize: 11.5, color: 'var(--t-400)', whiteSpace: 'nowrap' }}>{formatTimelineDate(e.occurredAt)}</span>
+                </div>
+                {e.detail && <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}>{e.detail}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {canAddNote && (
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-2)' }}>
+          {/* Sem <label> textual visível separado — o botão abaixo já diz
+              "Adicionar observação" (texto único, evita duplicar o mesmo
+              rótulo duas vezes na mesma seção); aria-label cobre a
+              acessibilidade do textarea sozinho. */}
+          <textarea
+            value={detail}
+            onChange={(e: any) => setDetail(e.target.value)}
+            placeholder="Digite uma observação sobre este atendimento…"
+            aria-label="Adicionar observação"
+            rows={3}
+            disabled={addNote.isPending}
+            style={{ width: '100%', padding: '10px 13px', borderRadius: 10, border: '1px solid var(--border)', fontFamily: 'inherit', fontSize: 13.5, color: 'var(--t-900)', background: 'rgba(255,255,255,.03)', outline: 'none', resize: 'vertical' }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+            <LBtn kind="ghost" icon="check" onClick={handleSubmit} style={{ opacity: canSubmit ? 1 : .5, cursor: canSubmit ? 'pointer' : 'not-allowed' }}>
+              Adicionar observação
+            </LBtn>
+          </div>
+          {feedback && (
+            <div data-testid="remote-lead-timeline-note-feedback" role={feedback.kind === 'error' ? 'alert' : 'status'} style={{
+              marginTop: 10, padding: '9px 12px', borderRadius: 9, fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 8,
+              background: feedback.kind === 'error' ? 'var(--red-bg)' : 'rgba(39,199,95,.1)',
+              border: `1px solid ${feedback.kind === 'error' ? 'var(--red-line)' : 'rgba(39,199,95,.3)'}`,
+              color: feedback.kind === 'error' ? 'var(--red)' : '#27C75F',
+            }}>
+              <Icon name={feedback.kind === 'error' ? 'alert' : 'check'} size={14} stroke={2.2} />
+              {feedback.text}
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function FlowVerCliente({ payload, close, openFlow }: any) {
   const lead = payload.lead || LeadService.getAll()[0];
   // M1-E E4-B2: payload.capabilities (LeadMutationCapabilities), quando
@@ -744,6 +861,15 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
   // sem capabilities) preserva o agrupamento antigo (Ligar sob o mesmo
   // booleano das demais ações), sem chamar AuthService.
   let canLigar: boolean;
+  // M1-E E7-B2-A1 — identidade para a timeline remota: mesma fonte já usada
+  // por canLigar acima (payload.capabilities presente = Lead remoto real).
+  // companyId/userId/membershipRole só são resolvidos quando capabilities
+  // existe — no caminho local (sem capabilities) a timeline remota nunca é
+  // consultada, e RemoteLeadTimelinePanel nem é montado.
+  let timelineCompanyId: string | null = null;
+  let timelineUserId: string | null = null;
+  let timelineMembershipRole: 'manager' | 'seller' | null = null;
+  let canAddNote = false;
   if (capabilities) {
     const currentUser = AuthService.getCurrentUser();
     const membershipRole: 'manager' | 'seller' | null =
@@ -752,6 +878,18 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
         : null;
     canLigar = canActorMutateLead({
       capability: capabilities.canLogCallOutcome,
+      actorRole: membershipRole,
+      actorSellerId: currentUser?.activeMembership?.sellerId ?? null,
+      leadSellerId: lead.sellerId ?? null,
+    });
+    timelineCompanyId = currentUser?.activeMembership?.companyId ?? null;
+    timelineUserId = currentUser?.id ?? null;
+    timelineMembershipRole = membershipRole;
+    // Nota manual: mesma posse de canLigar (Manager sempre; Seller só no
+    // próprio Lead) — reaproveita canEditDetails como a capability genérica
+    // (nunca uma capability nova só para timeline nesta fase).
+    canAddNote = canActorMutateLead({
+      capability: capabilities.canEditDetails,
       actorRole: membershipRole,
       actorSellerId: currentUser?.activeMembership?.sellerId ?? null,
       leadSellerId: lead.sellerId ?? null,
@@ -821,7 +959,19 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 20, alignItems: 'start' }}>
         <FPanel title="Linha do tempo" icon="history" accent="#E8CE72">
-          {timeline ? (
+          {capabilities ? (
+            // M1-E E7-B2-A1 — Lead remoto real: timeline oficial
+            // (lead_timeline_entries via RLS), nunca lead.timeline (sempre
+            // undefined para LeadModel remoto, lib/leads/adapter.ts).
+            <RemoteLeadTimelinePanel
+              companyId={timelineCompanyId}
+              leadId={lead.id}
+              userId={timelineUserId}
+              membershipRole={timelineMembershipRole}
+              userIsActive={Boolean(timelineUserId)}
+              canAddNote={canAddNote}
+            />
+          ) : timeline ? (
             <div style={{ position: 'relative', paddingLeft: 8 }}>
               {timeline.map((e: any, i: number) => (
                 <div key={i} style={{ display: 'flex', gap: 14, paddingBottom: i < timeline.length - 1 ? 20 : 0, position: 'relative' }}>
@@ -1182,6 +1332,30 @@ export function FlowVerClienteArquivado({ payload, close, openFlow }: any) {
           {archivedAtLabel && <Info icon="calendar" label="Arquivado em" value={archivedAtLabel} />}
         </div>
       </FPanel>
+
+      {/* M1-E E7-B2-A1 — Lead arquivado: timeline SOMENTE LEITURA. canAddNote
+          sempre false (nunca formulário, nunca mutation). Gate reaproveita
+          ctx.capabilities.canArchive (a MESMA que já governa canRestore
+          acima) em vez de ctx.dataSource==='remote' — dataSource é 'remote'
+          mesmo em remote_misconfigured (só reflete a flag, não o modo
+          efetivo), o que consultaria a timeline indevidamente nesse estado;
+          canArchive já é Manager-only E exclusivo de remote_ready (nunca
+          Seller/Super Admin/local/misconfigured — mesma matriz de
+          resolveLeadMutationCapabilities). */}
+      {ctx.capabilities.canArchive && (
+        <div style={{ marginTop: 16 }}>
+          <FPanel title="Linha do tempo" icon="history" accent="#8B8B93">
+            <RemoteLeadTimelinePanel
+              companyId={ctx.companyId}
+              leadId={lead.id}
+              userId={ctx.userId}
+              membershipRole={ctx.membershipRole}
+              userIsActive={ctx.userIsActive}
+              canAddNote={false}
+            />
+          </FPanel>
+        </div>
+      )}
 
       {canRestore && (
         <div style={{ marginTop: 16 }}>

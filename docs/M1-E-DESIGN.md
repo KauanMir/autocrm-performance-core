@@ -2428,6 +2428,117 @@ não foi criado — decisão explícita do prompt, fora do escopo desta etapa.
 
 **E7-B1 formalmente concluído. E7-B2 ainda não iniciado.**
 
+### 15.18 E7-B2-A1 — Leitura da timeline remota e nota manual para Manager/Seller (concluído)
+
+**Escopo**: primeira fase funcional da timeline remota — leitura das
+entradas reais de `lead_timeline_entries` e adição de nota manual, para
+Manager/Seller, em Leads ativos e arquivados. **Nenhum evento automático de
+mutation foi conectado nesta etapa** (create/update/move/apply_event/
+assign/archive/unarchive continuam sem gravar timeline — decisão adiada
+para E7-B2-B1/B2, confirmada pela auditoria E7-B2-A0).
+
+**Arquitetura**: leitura via SELECT direto em `lead_timeline_entries`
+(`lib/leads/timelineRepository.ts`, `fetchLeadTimelineEntries`) — RLS
+(`lead_timeline_select`) é a autoridade real; `company_id`/`lead_id` são
+filtro explícito adicional. Nenhuma RPC nova (a auditoria confirmou que
+Manager/Seller nunca precisaram de uma, diferente do Super Admin, que usa
+`list_platform_lead_timeline`). Escrita reaproveita a RPC já publicada
+`add_lead_timeline_entry` (`addLeadTimelineNote`), com `icon`/`color`/
+`label` **fixos** (`message`/`#3B82F6`/`"Observação adicionada"` —
+constantes próprias, não reaproveitadas de
+`PLATFORM_MANUAL_TIMELINE_ICON/COLOR`) — o usuário só escreve `detail`.
+Nunca envia `p_company_id` (Manager/Seller derivam a empresa da própria
+membership no servidor, mesma convenção de `remoteMutationRepository.ts`).
+
+**Tipos/adapter**: `lib/leads/timelineAdapter.ts` — `LeadTimelineEntry`
+(id/leadId/icon/color/label/detail/occurredAt/createdAt), deliberadamente
+**sem `companyId`/`actorProfileId`** na apresentação (decisão humana: sem
+nome do ator nesta fase — a tabela não guarda snapshot textual, o nome
+atual do profile poderia divergir do nome no momento do evento, e a
+superfície Platform já publicada também não exibe ator). Fallback visual
+seguro para `icon`/`color` em branco (nunca deveria ocorrer, CHECK no
+banco) — nunca expõe código interno.
+
+**Query key**: reaproveita `leadQueryKeys.timeline(companyId, leadId)`
+(reservada desde o E2, `lib/leads/queryKeys.ts`) — nenhuma família nova.
+
+**Hooks**: `useLeadTimeline` (`lib/hooks/useLeadTimeline.ts`, mesmo molde
+de `usePlatformLeadTimeline` — sem paginação, `authorized` resolvido pelo
+chamador) e `useAddLeadTimelineEntry` (`lib/hooks/useAddLeadTimelineEntry.ts`,
+mesmo molde de `useUpdateLead`/`useAssignLeadSeller` — identidade por
+parâmetro, protegida por geração de cache
+(`lib/query/cacheIdentity.ts`), `retry: 0`, sem mutation otimista, invalida
+**somente** `leadQueryKeys.timeline(companyId, leadId)` — nunca `active`/
+`archived`/`detail`, mesma decisão já documentada em
+`useAddPlatformLeadTimelineEntry`).
+
+**Integração — Lead ativo** (`FlowVerCliente`, `components/flows/FlowsShared.tsx`):
+novo componente reutilizável `RemoteLeadTimelinePanel` monta quando
+`payload.capabilities` está presente (Lead remoto real — mesmo sinal já
+usado por `canLigar`/`canEditDetails`/etc. nesta função; em produção é
+`null` sempre que o modo não é `remote_active`, via `ScreensOps.tsx`).
+Nunca usa `lead.timeline` (sempre `undefined` para `LeadModel` remoto).
+`canAddNote` reaproveita `canActorMutateLead` com `capabilities.canEditDetails`
+— Manager sempre, Seller só no próprio Lead (mesma posse de `canLigar`,
+nenhuma capability nova). Modo local (capabilities ausente) preserva
+integralmente `lead.timeline` embutido, sem nenhuma chamada ao Supabase.
+
+**Integração — Lead arquivado** (`FlowVerClienteArquivado`): mesmo
+`RemoteLeadTimelinePanel`, `canAddNote` sempre `false` (nunca formulário,
+nunca mutation). **Achado corrigido durante a implementação**: o gate
+inicial usava `ctx.dataSource==='remote'`, mas `dataSource` continua
+`'remote'` mesmo em `remote_misconfigured` (só reflete a flag, não o modo
+efetivo) — consultaria a timeline indevidamente nesse estado. Corrigido
+para reaproveitar `ctx.capabilities.canArchive` (a mesma que já governa o
+botão "Restaurar Lead") — Manager-only e exclusiva de `remote_ready`, nunca
+Seller/Super Admin/local/misconfigured.
+
+**UX**: textos sanitizados em português exatamente como especificado
+("Nenhum histórico registrado ainda.", "Não foi possível carregar o
+histórico.", "Tentar novamente", "Adicionar observação", "Observação
+adicionada ao histórico.", "Não foi possível adicionar a observação.") —
+nunca erro do PostgreSQL, nome de RPC, stack, JSON, UUID, `companyId`,
+`actorProfileId`. Erro na nota preserva o texto digitado (nunca limpo);
+sucesso limpa o campo e mostra feedback positivo.
+
+**Modo local/remote_misconfigured**: comportamento legado preservado
+integralmente em modo local; em `remote_misconfigured`, nenhuma query,
+nenhuma RPC, nenhum fallback local — fail-closed, sem crash (confirmado
+tanto na integração quanto no gate corrigido do arquivado).
+
+**Super Admin**: superfície Platform (`usePlatformLeadTimeline`,
+`useAddPlatformLeadTimelineEntry`, `PlatformLeadDetails`,
+`PlatformLeadTimelineForm`) inteiramente intocada — nenhum arquivo dela foi
+alterado.
+
+**Testes**: `tests/leads/timelineRepository.test.ts` (13 — forma exata da
+consulta, filtros explícitos, ordenação, erros sanitizados, payload fixo da
+nota, rejeição de texto vazio); `tests/hooks/useLeadTimeline.test.tsx` (8);
+`tests/hooks/useAddLeadTimelineEntry.test.tsx` (9 — payload, bloqueios de
+identidade, invalidação exclusiva da timeline, proteção por geração de
+cache, retry 0, sem otimismo); `tests/flows/FlowVerCliente.test.tsx` (+11 —
+local vs remoto, nunca usa `lead.timeline` no remoto, loading/erro/retry/
+vazio, nota manual por posse Manager/Seller, nota vazia não envia, sucesso/
+erro do formulário); `tests/flows/FlowVerClienteArquivado.test.tsx` (+5 —
+Manager lê timeline sem formulário, vazio, Seller/Super Admin/
+`remote_misconfigured` nunca consultam). `QueryClientProvider` adicionado
+a ambos os arquivos de teste de Flow (agora necessário — `RemoteLeadTimelinePanel`
+usa TanStack Query).
+
+**Validação**: TSC 22 erros preexistentes, mesmos 4 arquivos (inalterado);
+172→175 arquivos/2593→2639 testes TS (+46); zero SQL/migration/RPC/trigger/
+RLS tocados; zero dual-write; zero evento automático; zero paginação; zero
+nome de ator; 4 builds verdes.
+
+**Riscos residuais explícitos**: smoke test manual do E6 continua
+pendente; **E7-B2-B1** (migration conectando as 7 RPCs de mutation à
+timeline, atomicamente) continua pendente; **E7-B2-B2** (invalidação de
+`leadQueryKeys.timeline` nos 7 hooks de mutation existentes, depois que
+B1 existir) continua pendente; **E7-B2-C** (regressão final do E7-B2) e
+**E7-C** (regressão geral do E7) continuam pendentes.
+
+**E7-B2-A1 formalmente concluído. E7-B2-B1 ainda não iniciado.**
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
