@@ -9,6 +9,7 @@ import {
   type UpdatePlatformLeadCallInput,
 } from '@/lib/hooks/useUpdatePlatformLead';
 import { platformCommercialQueryKeys } from '@/lib/commercial/queryKeys';
+import { leadQueryKeys } from '@/lib/leads/queryKeys';
 import { isPlatformCommercialError } from '@/lib/commercial/errors';
 
 const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
@@ -84,13 +85,28 @@ describe('useUpdatePlatformLead — payload da RPC', () => {
   });
 });
 
-describe('useUpdatePlatformLead — sucesso e invalidação', () => {
-  it('invalida SOMENTE leadsActive da empresa capturada — update_lead nunca afeta arquivados', async () => {
+describe('useUpdatePlatformLead — sucesso e invalidação (E7-B2-C)', () => {
+  it('invalida leadsActive E leadTimeline da empresa capturada, nunca leadsArchived — update_lead nunca afeta arquivados', async () => {
     const { hook, invalidateSpy } = setup();
     const updated = await hook.result.current.updateLead(baseInput());
     expect(updated).toEqual(UPDATED);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsActive('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadTimeline('company-a', 'lead-1') });
     expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsArchived('company-a') });
+  });
+
+  // M1-E E7-B2-C — achado de auditoria: nenhum teste Platform travava o
+  // isolamento entre as duas famílias de query key no nível do hook
+  // (só existia no nível do factory de keys, tests/commercial/queryKeys.test.ts).
+  it('NUNCA invalida leadQueryKeys (família operacional Manager/Seller) — isolamento entre superfícies', async () => {
+    const { hook, invalidateSpy } = setup();
+    await hook.result.current.updateLead(baseInput());
+    for (const call of invalidateSpy.mock.calls) {
+      const key = (call[0] as { queryKey?: unknown[] })?.queryKey;
+      expect(key?.includes('platform')).toBe(true);
+    }
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.active('company-a') });
   });
 });
 

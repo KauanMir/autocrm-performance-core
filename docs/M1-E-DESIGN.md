@@ -2728,6 +2728,87 @@ local ou remoto nesta etapa (nem start/stop/reset/migration/test db).
 **E7-B2-B2 formalmente concluído. Pendentes: E6 (smoke manual), E7-B2-C,
 E7-C.**
 
+### 15.21 E7-B2-C — Regressão e fechamento formal da timeline remota (concluído)
+
+**Escopo**: validação de ponta a ponta, sem funcionalidade nova, sem SQL/
+migration/RPC. Mapa de arquitetura real (confirmado por leitura de código,
+não pela documentação anterior): leitura ativa
+`FlowVerCliente`→`RemoteLeadTimelinePanel` (função privada dentro de
+`components/flows/FlowsShared.tsx`, não um arquivo próprio)
+→`useLeadTimeline`→`timelineRepository.fetchLeadTimelineEntries` (SELECT
+direto em `lead_timeline_entries`, nunca RPC, ordenado `occurred_at desc,
+created_at desc, id asc`); nota manual
+`useAddLeadTimelineEntry`→`addLeadTimelineNote`→RPC
+`add_lead_timeline_entry`; eventos automáticos: hook de mutation→
+`remoteMutationRepository`→RPC principal→`record_lead_timeline_event`
+(E7-B2-B1)→`onSuccess`→invalidação; Platform usa a mesma cadeia com
+`platformCommercialQueryKeys.leadTimeline`, isolada de `leadQueryKeys.timeline`
+por um segmento `'platform'` divergente na mesma raiz `['company', companyId,
+'leads']` (não raízes totalmente distintas, mas suficiente para nunca
+colidir — confirmado por teste dedicado em `tests/commercial/queryKeys.test.ts`).
+
+**Validação de ponta a ponta confirmada** (leitura completa de todos os 7
+hooks operacionais + 6 Platform + repository + query keys + cacheIdentity):
+zero dual-write (nenhum hook de mutation chama `add_lead_timeline_entry`),
+zero optimistic update (`setQueryData` nunca usado para eventos), zero
+evento fabricado no frontend, isolamento cross-tenant/cross-lead garantido
+pelas próprias query keys (`requireId` falha alto em vez de particionar
+vazio), proteção de identidade (`lib/query/cacheIdentity.ts`) herdada
+automaticamente por toda invalidação viver dentro do `onSuccess` protegido.
+
+**Achado real corrigido (bug pequeno, isolado, com teste de regressão —
+categoria B do prompt)**: `useUpdateLead.ts` invalidava `detail`/`timeline`
+usando `input.leadId` (capturado do cliente antes da chamada), diferente
+dos outros 5 hooks que usam `record.id` (devolvido pelo servidor). Não
+explorável hoje — `update_lead` nunca muda o id de um Lead — mas é uma
+inconsistência real de padrão, sem nenhum teste que a travasse. Corrigido
+para usar `record.id` (mesmo padrão dos demais); teste novo criado com uma
+resposta mockada de id divergente do input para provar qual fonte o código
+realmente usa (`tests/hooks/useUpdateLead.test.tsx`).
+
+**Gap de teste real corrigido (não é bug de app)**: 4 dos 6 hooks Platform
+(`useUpdatePlatformLead`, `useAssignPlatformLeadSeller`,
+`useArchivePlatformLead`, `useUnarchivePlatformLead`) já invalidavam
+`platformCommercialQueryKeys.leadTimeline` corretamente desde o E7-B2-B2,
+mas seus testes nunca afirmavam isso — o relatório da etapa anterior tinha
+implicado cobertura completa que não existia de fato. Corrigido: as 4
+suítes ganharam a asserção positiva que faltava; todas as 6 suítes Platform
+(incluindo as 2 que já tinham a asserção positiva) ganharam uma asserção
+nova de isolamento (nenhuma chamada de `invalidateQueries` usa uma key sem
+o segmento `'platform'`, e nenhuma usa `leadQueryKeys.*` diretamente) — a
+etapa anterior só testava o isolamento no nível do factory de keys, nunca
+no nível do hook.
+
+**Gap identificado e NÃO corrigido (fora de escopo, documentado)**: nenhum
+teste cobre o estado de "Carregando…" do `RemoteLeadTimelinePanel` — toda
+resposta mockada nos testes existentes resolve antes do branch de loading
+ser observável. Não é um dos 8 comportamentos prioritários listados para
+esta etapa (mutation→invalidação→refetch; evento aparece; Lead arquivado
+read-only; resposta atrasada entre identidades; Platform isolado; local
+não monta remoto; misconfigured fail-closed; frontend nunca cria evento) —
+decisão: não adicionar teste só para preencher esse estado cosmético,
+registrar como pendência menor.
+
+**Manager/Seller/Super Admin/Platform, ativo/arquivado, local/remote_ready/
+remote_misconfigured**: todos os comportamentos do prompt revalidados por
+leitura de código e pela suíte existente — nenhuma regressão nova
+encontrada em nenhum desses eixos.
+
+**Validação**: pgTAP local (Supabase já estava rodando, reaproveitado sem
+start/stop/reset) — 52 arquivos/2676 testes, mesmas 6 falhas pré-existentes
+nos mesmos 6 arquivos/números de teste (`10_...#7`, `14_...#20`, `18_...#17`,
+`19_...#17`, `20_...#69`, `21_...#65`), zero falha nova, arquivo `53_...`
+(timeline automática) 100% PASS — nenhuma migration criada ou alterada.
+Suíte TypeScript: 175 arquivos/2648 testes (2641 + 7 testes novos: 1 de
+`useUpdateLead` travando `record.id`, 6 de isolamento Platform); TSC 22
+erros preexistentes, mesmos 4 arquivos (inalterado); 4 builds verdes.
+
+**E7-B2 (leitura, nota manual, eventos automáticos, invalidação frontend)
+formalmente ENCERRADO.** Pendentes: smoke manual do E6 (nunca realizado em
+nenhuma etapa), E7-C (regressão geral final do E7 inteiro), as 6 falhas
+pgTAP locais pré-existentes (fora de escopo, causa já identificada como
+dado acumulado local, não uma regressão de código).
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)

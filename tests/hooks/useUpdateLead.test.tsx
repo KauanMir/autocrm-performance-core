@@ -1,7 +1,8 @@
 // Testes de useUpdateLead (M1-E, E4-B1). Supabase mockado (rpc). Cobre:
 // campos permitidos, ausência de p_company_id/seller/stage, expectedVersion
-// obrigatório, stale_write, invalidation (active + detail), proteção de
-// identidade, retry 0, sem mutation otimista.
+// obrigatório, stale_write, invalidation (active + detail + timeline
+// desde o E7-B2-B2/B2-C), proteção de identidade, retry 0, sem mutation
+// otimista.
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
@@ -109,12 +110,32 @@ describe('useUpdateLead — bloqueios de identidade', () => {
 });
 
 describe('useUpdateLead — sucesso, invalidação e ausência de otimismo', () => {
-  it('invalida active(companyId) e detail(companyId, leadId)', async () => {
+  it('invalida active(companyId), detail(companyId, leadId) e timeline(companyId, leadId) — update_lead grava evento automático desde o E7-B2-B1', async () => {
     const { hook, invalidateSpy } = setup();
     const updated = await hook.result.current.updateLead(baseInput);
     expect(updated).toEqual(UPDATED);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.active('company-a') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.detail('company-a', 'lead-1') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
+  });
+
+  // M1-E E7-B2-C — achado de auditoria: a invalidação de detail/timeline
+  // deve usar SEMPRE o id devolvido pelo servidor (record.id), nunca
+  // input.leadId capturado antes da chamada — mesmo padrão dos outros 5
+  // hooks (move/apply/assign/archive/unarchive). update_lead nunca muda o
+  // id de um Lead na prática (record.id === input.leadId em todo caso
+  // real), mas este teste força uma resposta mockada com id divergente
+  // para travar QUAL fonte o código usa — se regredir para input.leadId,
+  // este teste falha mesmo sem nenhuma mudança de comportamento real do
+  // backend.
+  it('invalidação usa record.id (devolvido pelo servidor), nunca input.leadId', async () => {
+    mocks.rpc.mockResolvedValue({ data: { ...UPDATED, id: 'lead-id-do-servidor' }, error: null });
+    const { hook, invalidateSpy } = setup();
+    await hook.result.current.updateLead({ ...baseInput, leadId: 'lead-id-do-input' });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.detail('company-a', 'lead-id-do-servidor') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-id-do-servidor') });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.detail('company-a', 'lead-id-do-input') });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-id-do-input') });
   });
 
   it('nenhuma escrita otimista: setQueryData nunca é chamado por este hook', async () => {

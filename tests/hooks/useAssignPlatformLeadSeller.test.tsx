@@ -9,6 +9,7 @@ import {
   type AssignPlatformLeadSellerCallInput,
 } from '@/lib/hooks/useAssignPlatformLeadSeller';
 import { platformCommercialQueryKeys } from '@/lib/commercial/queryKeys';
+import { leadQueryKeys } from '@/lib/leads/queryKeys';
 import { isPlatformCommercialError } from '@/lib/commercial/errors';
 
 const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
@@ -80,12 +81,24 @@ describe('useAssignPlatformLeadSeller — payload da RPC', () => {
   });
 });
 
-describe('useAssignPlatformLeadSeller — sucesso e invalidação', () => {
-  it('invalida SOMENTE leadsActive da empresa capturada', async () => {
+describe('useAssignPlatformLeadSeller — sucesso e invalidação (E7-B2-C)', () => {
+  it('invalida leadsActive E leadTimeline da empresa capturada, nunca leadsArchived — assign_lead_seller grava evento automático desde o E7-B2-B1', async () => {
     const { hook, invalidateSpy } = setup();
     await hook.result.current.assignSeller(baseInput());
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsActive('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadTimeline('company-a', 'lead-1') });
     expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsArchived('company-a') });
+  });
+
+  it('NUNCA invalida leadQueryKeys (família operacional Manager/Seller) — isolamento entre superfícies', async () => {
+    const { hook, invalidateSpy } = setup();
+    await hook.result.current.assignSeller(baseInput());
+    for (const call of invalidateSpy.mock.calls) {
+      const key = (call[0] as { queryKey?: unknown[] })?.queryKey;
+      expect(key?.includes('platform')).toBe(true);
+    }
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.active('company-a') });
   });
 });
 

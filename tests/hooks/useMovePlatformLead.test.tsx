@@ -9,6 +9,7 @@ import {
   type MovePlatformLeadCallInput,
 } from '@/lib/hooks/useMovePlatformLead';
 import { platformCommercialQueryKeys } from '@/lib/commercial/queryKeys';
+import { leadQueryKeys } from '@/lib/leads/queryKeys';
 import { isPlatformCommercialError } from '@/lib/commercial/errors';
 
 const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
@@ -86,6 +87,18 @@ describe('useMovePlatformLead — sucesso e invalidação (E7-B2-B2)', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsActive('company-a') });
     expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadsArchived('company-a') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: platformCommercialQueryKeys.leadTimeline('company-a', 'lead-1') });
+  });
+
+  // M1-E E7-B2-C — isolamento entre superfícies travado no nível do hook,
+  // não só no factory de keys.
+  it('NUNCA invalida leadQueryKeys (família operacional Manager/Seller) — isolamento entre superfícies', async () => {
+    const { hook, invalidateSpy } = setup();
+    await hook.result.current.moveLead(baseInput());
+    for (const call of invalidateSpy.mock.calls) {
+      const key = (call[0] as { queryKey?: unknown[] })?.queryKey;
+      expect(key?.includes('platform')).toBe(true);
+    }
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
   });
 });
 

@@ -54,7 +54,6 @@ export type UseUpdateLeadResult = {
 type UpdateLeadMutationResult = {
   record: RemoteLeadRecord;
   capturedCompanyId: string;
-  leadId: string;
 };
 
 export function useUpdateLead(options: UseUpdateLeadOptions): UseUpdateLeadResult {
@@ -97,20 +96,24 @@ export function useUpdateLead(options: UseUpdateLeadOptions): UseUpdateLeadResul
         throw createIdentityChangedMutationError('update_lead');
       }
 
-      return { record, capturedCompanyId, leadId: input.leadId };
+      return { record, capturedCompanyId };
     },
-    onSuccess: ({ capturedCompanyId, leadId }) => {
+    onSuccess: ({ record, capturedCompanyId }) => {
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.active(capturedCompanyId) });
       // Key reservada desde o E2 (lib/leads/queryKeys.ts), sem consumidor
       // ainda — invalidação antecipada e inofensiva (nenhuma query
       // observada nesta key hoje), pronta para quando um detalhe dedicado
       // existir.
-      queryClient.invalidateQueries({ queryKey: leadQueryKeys.detail(capturedCompanyId, leadId) });
+      queryClient.invalidateQueries({ queryKey: leadQueryKeys.detail(capturedCompanyId, record.id) });
       // M1-E E7-B2-B2 — update_lead grava evento automático na timeline
       // desde o E7-B2-B1 (mesma transação da RPC); invalida a timeline
       // exata para a UI já aberta (RemoteLeadTimelinePanel) refletir o
-      // evento sem precisar de F5/remontagem.
-      queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, leadId) });
+      // evento sem precisar de F5/remontagem. record.id (nunca
+      // input.leadId) por consistência com os demais 5 hooks — o valor
+      // confirmado pelo servidor na mesma resposta (E7-B2-C, achado de
+      // auditoria: nenhuma RPC de Lead muda o id, então não havia bug
+      // visível, mas o padrão correto é sempre usar o id devolvido).
+      queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, record.id) });
     },
   });
 
