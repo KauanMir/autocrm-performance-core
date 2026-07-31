@@ -2539,6 +2539,116 @@ B1 existir) continua pendente; **E7-B2-C** (regressão final do E7-B2) e
 
 **E7-B2-A1 formalmente concluído. E7-B2-B1 ainda não iniciado.**
 
+### 15.19 E7-B2-B1 — Eventos automáticos e transacionais da timeline dentro das RPCs (concluído)
+
+**Migration**: `20260731100000_m1e_e7b2b1_lead_timeline_automatic_events.sql`.
+As 7 RPCs de mutation de Leads (`create_lead`, `update_lead`,
+`move_lead_to_stage`, `apply_lead_event`, `assign_lead_seller`,
+`archive_lead`, `unarchive_lead`) passam a gravar automaticamente uma
+entrada em `lead_timeline_entries` **na mesma transação** da mutation —
+nenhum dual-write do frontend, nenhum trigger, nenhuma RPC nova exposta.
+`check_lead_phone_duplicate` e `add_lead_timeline_entry` (nota manual, E7-B2-A1)
+não são tocadas.
+
+**Arquitetura**: `CREATE OR REPLACE FUNCTION` (nunca `DROP+CREATE`) — as 7
+assinaturas públicas permanecem idênticas, então GRANTs/REVOKEs já
+publicados continuam intactos automaticamente (só `DROP+CREATE` os
+perderia). O `INSERT` na timeline acontece depois da mutation principal e
+antes do retorno, dentro do MESMO corpo de função — falha no `INSERT` (ex.:
+constraint) desfaz a mutation inteira; qualquer exceção anterior
+(`forbidden`/`lead_not_found`/`lead_archived`/`stale_write`/
+`stage_not_found`/`seller_not_found`) nunca alcança o `INSERT`.
+
+**Helper interno** `record_lead_timeline_event(p_company_id, p_lead_id,
+p_actor_kind, p_actor_profile_id, p_icon, p_color, p_label, p_detail
+default null)` — reduz a duplicação do `INSERT`+resolução do ator (idêntica
+nas 7 RPCs); `SECURITY DEFINER`, `search_path` vazio, **sem GRANT a
+authenticated/anon** (nunca uma RPC pública, mesmo padrão de
+`resolve_lead_mutation_context`).
+
+**Ator**: sempre `v_ctx.actor_profile_id`/`actor_kind` já resolvidos por
+`resolve_lead_mutation_context` — nunca aceito do cliente. Super Admin:
+`actor_profile_id` `NULL` na timeline (mesma regra de `created_by`/
+`updated_by_profile_id`/`add_lead_timeline_entry`); `audit_log` continua
+registrando a autoria real dele, **sem alteração** — a timeline comercial
+ganha uma entrada adicional (ator `NULL`) quando a mutation é bem-sucedida,
+nunca duplicando nem reduzindo o `audit_log`.
+
+**Mapa de eventos** (label sempre fixo; nunca UUID/código de enum/payload
+no texto):
+
+| RPC | Label | Detail | Guard de no-op |
+|---|---|---|---|
+| create_lead | "Lead criado" | — | — |
+| update_lead | "Dados do lead atualizados" | — | nenhum (RPC não detecta "sem mudança" hoje) |
+| move_lead_to_stage | "Etapa alterada" | "De {etapa} para {etapa}" (nomes reais) | só se `stage_id` mudou |
+| apply_lead_event | mapa próprio dos 18 códigos (ex.: "Ligação registrada", "Visita agendada", "Proposta criada/aprovada/recusada", "Venda registrada/cancelada", "Atendimento atualizado") | conforme o código | — |
+| assign_lead_seller | "Responsável alterado" / "Responsável removido" | "Atribuído a {nome real}" / — | só se `seller_id` mudou |
+| archive_lead | "Lead arquivado" | — | caminho idempotente já existente nunca alcança o INSERT |
+| unarchive_lead | "Lead restaurado" | — | idem |
+
+Ícones/cores reaproveitam os já usados na UI para o mesmo conceito (`flow`
+para etapa, `users` para responsável, `inbox`/`refresh` para arquivar/
+restaurar, `phone`/`calendar`/`handshake`/`trophy` por categoria de evento
+comercial) — nenhum valor inventado que a interface não soubesse renderizar.
+
+**Idempotência (auditada, não inventada)**: `move_lead_to_stage`/
+`assign_lead_seller` só inserem quando o valor **realmente** mudou
+(`v_lead.* IS DISTINCT FROM v_row.*`, capturado antes/depois do UPDATE) —
+mover para a mesma etapa ou reatribuir o mesmo vendedor nunca gera evento,
+mesmo com `version` sempre incrementada pelo trigger `leads_bump_version`.
+`archive_lead`/`unarchive_lead` já tinham caminho idempotente real (SELECT
+FOR UPDATE + retorno antecipado) — nunca duplicam. **Risco residual
+documentado, não corrigido nesta etapa**: `create_lead`/`update_lead`/
+`apply_lead_event` não têm `request_id`/`operation_id` formal — um retry de
+rede que reenvia a mesma chamada já aplicada no servidor produziria uma
+segunda mutação real e um segundo evento (mesma limitação estrutural já
+existente hoje para a própria mutation, não introduzida por esta migration).
+
+**Sem backfill**: eventos automáticos anteriores a esta migration não são
+reconstruídos — nenhuma inferência a partir de `updated_at`/`audit_log`/
+`version`/dados locais/demo.
+
+**Frontend intocado nesta etapa** (decisão explícita): nenhum hook
+(`useCreateLead`...`useUnarchiveLead`, `useLeadTimeline`,
+`useAddLeadTimelineEntry`), query key ou componente foi alterado — os
+eventos já existem no banco, mas a timeline aberta na tela pode não
+atualizar imediatamente após uma mutation (nenhuma invalidação de
+`leadQueryKeys.timeline` foi adicionada às mutations ainda). Correção do
+refresh imediato pertence à **E7-B2-B2**.
+
+**database.types.ts**: regenerado via `supabase gen types typescript --local`
+— diff puramente aditivo (só a entrada de `record_lead_timeline_event`);
+as 7 RPCs públicas não mudaram de assinatura, confirmado pelo diff vazio
+nelas.
+
+**Testes**: `supabase/tests/53_m1e_e7b2b1_lead_timeline_automatic_events.sql`
+(75 asserções pgTAP — uma por RPC bem-sucedida cria exatamente uma entrada
+sanitizada; toda falha conhecida — forbidden/not_found/archived/
+stale_write/stage_not_found/seller_not_found — não cria entrada; no-op real
+de etapa/vendedor não cria entrada falsa; idempotência de archive/
+unarchive; ator Manager/Seller/Super Admin; `audit_log` preservado;
+isolamento cross-tenant; helper sem GRANT; nota manual continua
+funcionando). Validação local sem `db reset`: `supabase migration up
+--local` (aplicação não destrutiva) + `supabase test db --local
+supabase/tests` — suíte completa 51→52 arquivos/2601→2676 testes pgTAP
+(+75), **mesmos 6 testes pré-existentes falhando em 6 arquivos não
+relacionados** (`10_m1f_s1_schema.sql` teste 7, `14_..._selfpromotion.sql`
+teste 20, `18_..._compatibility.sql` teste 17, `19_..._uniqueness.sql`
+teste 17, `20_..._company_lifecycle.sql` teste 69, `21_..._company_creation.sql`
+teste 65) — causa confirmada: dado real acumulado no banco local (ex.: um
+profile com `platform_role` preenchido de testes manuais anteriores),
+**não uma regressão desta etapa** e fora do escopo autorizado corrigir
+(exigiria investigar/alterar dados locais reais, ou um `db reset`, ambos
+não autorizados nesta etapa).
+
+Suíte TypeScript: 175 arquivos/2639 testes (inalterado — nenhum arquivo
+frontend tocado); TSC 22 erros preexistentes (inalterado); 4 builds verdes.
+
+**E7-B2-B1 formalmente concluído. E7-B2-B2 (invalidação de
+`leadQueryKeys.timeline` nas 7 mutations existentes) desbloqueado, NÃO
+iniciado.**
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)

@@ -1226,6 +1226,19 @@ export type Database = {
           seller_id: string
         }[]
       }
+      record_lead_timeline_event: {
+        Args: {
+          p_actor_kind: string
+          p_actor_profile_id: string
+          p_color: string
+          p_company_id: string
+          p_detail?: string
+          p_icon: string
+          p_label: string
+          p_lead_id: string
+        }
+        Returns: undefined
+      }
       reorder_pipeline_stages: {
         Args: { p_ordered_ids: string[] }
         Returns: {
