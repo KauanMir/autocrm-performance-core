@@ -6,6 +6,8 @@ import { PLACE, Podium } from '@/components/podiums/Podiums';
 import { useStore } from '@/lib/store';
 import { AuthService, SellerService, LeadService, VisitService, DealService, SaleService, TaskService } from '@/lib/services';
 import { VISIT_STATUS, DEAL_STATUS, TASK_STATE } from '@/lib/data';
+import type { User } from '@/lib/data';
+import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
 
@@ -13,6 +15,77 @@ const DEFAULT_SELLER = {
   id: '', name: 'Equipe', first: 'Equipe', team: '',
   leads: 0, scheduled: 0, visits: 0, sales: 0, conv: 0, move: 0,
 };
+
+// M1-E E7-A1 — resumo seguro de Leads para os widgets de UrgentAttention/
+// ConversionFunnel. Nunca chama LeadService.getAll() como seam síncrona
+// (essa chamada lança remote_leads_invalid_context para Super Admin e
+// remote_leads_snapshot_unavailable para Manager/Seller antes da bridge
+// popular o snapshot — achado do E7-A0). Usa useRemoteLeadsScreenState
+// (a mesma composição já usada por ScreenClientesLegacy/ScreenAndamentoLegacy)
+// como única fonte remota — nunca uma segunda fonte, nunca leitura direta
+// do remoteSnapshot. Mesma cascata de estados já provada em
+// ScreenClientesLegacy (stages→leads), reduzida ao que este resumo precisa:
+// um status discriminado, nunca um número inventado.
+//
+// 'unavailable' cobre tanto remote_misconfigured (fail-closed) quanto
+// remote_unavailable_identity (Super Admin sem companyId operacional, ou
+// Manager/Seller sem membership ativa/operacional) — em ambos os casos: sem
+// número, sem chamada a serviço local, sem seleção automática de empresa.
+type HomeLeadsSummary =
+  | { status: 'local' }
+  | { status: 'unavailable' }
+  | { status: 'loading' }
+  | { status: 'error'; retry: () => void }
+  | { status: 'ready'; totalLeads: number; delayedLeads: number };
+
+function useHomeLeadsSummary(currentUser: User | null): HomeLeadsSummary {
+  const remote = useRemoteLeadsScreenState(currentUser);
+  const { mode, pipeline, leads } = remote;
+
+  if (mode === 'local') return { status: 'local' };
+  if (mode === 'remote_misconfigured') return { status: 'unavailable' };
+  if (mode === 'remote_unavailable_identity') return { status: 'unavailable' };
+
+  // mode === 'remote_active' daqui em diante — mesma cascata de
+  // ScreenClientesLegacy (stages primeiro, leads depois).
+  const stagesConfigError = pipeline.configError !== null;
+  const stagesBlockingError = pipeline.isError && !pipeline.hasData && !stagesConfigError;
+  const stagesEmpty = pipeline.isEmpty && !pipeline.isError && !stagesConfigError;
+  const stagesLoading = !pipeline.hasData && !stagesConfigError && !stagesBlockingError && !stagesEmpty;
+  if (stagesConfigError || stagesEmpty) return { status: 'unavailable' };
+  if (stagesBlockingError) return { status: 'error', retry: pipeline.refetch };
+  if (stagesLoading) return { status: 'loading' };
+
+  const leadsConfigError = leads.configError !== null;
+  const leadsBlockingError = !leadsConfigError && leads.isError && !leads.hasData && !leads.isEmpty;
+  const leadsLoading = !leadsConfigError && !leadsBlockingError && leads.isLoading && !leads.hasData && !leads.isEmpty;
+  if (leadsConfigError) return { status: 'unavailable' };
+  if (leadsBlockingError) return { status: 'error', retry: leads.refetch };
+  if (leadsLoading) return { status: 'loading' };
+
+  return {
+    status: 'ready',
+    totalLeads: leads.leads.length,
+    delayedLeads: leads.leads.filter((l) => l.urgency === 'red').length,
+  };
+}
+
+// Estado compacto de loading/erro/indisponível para os widgets comerciais —
+// nunca o cartão de página inteira (LocalCommercialUnavailableCard não se
+// encaixa no espaço de uma seção do Home); mesma mensagem sanitizada em
+// todo lugar, nunca detalhe técnico/UUID/stack.
+function CommercialWidgetNotice({ children, onRetry }: { children: React.ReactNode; onRetry?: () => void }) {
+  return (
+    <div style={{ padding: '20px 22px', borderRadius: 14, textAlign: 'center', background: 'rgba(255,255,255,.02)', border: '1px solid var(--line-dark)', color: 'var(--txt-lo)', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+      <span>{children}</span>
+      {onRetry && (
+        <button onClick={onRetry} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--txt-mid)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, textDecoration: 'underline' }}>
+          Tentar novamente
+        </button>
+      )}
+    </div>
+  );
+}
 
 function getCompetition(sellers: any[]) {
   const currentUser = AuthService.getCurrentUser();
@@ -232,20 +305,49 @@ function SectionTitle({ icon, tone, children, right }: any) {
   );
 }
 
-function UrgentAttention({ go }: { go: (id: string) => void }) {
-  // Real counts via services (RBAC-filtered for sellers automatically) —
-  // no fixed name or fixed count (M0-K3). Sub-labels stay generic since the
-  // specific record isn't singled out.
-  const items = [
-    { n: LeadService.getAll().filter((l: any) => l.urgency === 'red').length, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' },
-    { n: VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' },
-    { n: DealService.getAll().filter((d: any) => d.status === DEAL_STATUS.APPROVAL).length, label: 'propostas aguardando aprovação', sub: 'Desconto acima do limite', icon: 'handshake', to: 'propostas' },
-    { n: TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' },
-  ];
+function UrgentAttention({ go, leadsSummary }: { go: (id: string) => void; leadsSummary: HomeLeadsSummary }) {
+  if (leadsSummary.status === 'unavailable') {
+    return (
+      <div>
+        <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
+        <CommercialWidgetNotice>Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>
+      </div>
+    );
+  }
+  if (leadsSummary.status === 'loading') {
+    return (
+      <div>
+        <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
+        <CommercialWidgetNotice>Carregando…</CommercialWidgetNotice>
+      </div>
+    );
+  }
+  if (leadsSummary.status === 'error') {
+    return (
+      <div>
+        <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
+        <CommercialWidgetNotice onRetry={leadsSummary.retry}>Não foi possível carregar as métricas.</CommercialWidgetNotice>
+      </div>
+    );
+  }
+  // 'local': RBAC-filtered via services (M0-K3). 'ready' (remoto): só o
+  // item de Leads é real — Visitas/Propostas/Pendências ainda não têm
+  // backend remoto (Visit/Deal/Task, achado do E5-B2-A0/E7-A0) e são
+  // OCULTADOS, nunca mostrados como zero.
+  const items = leadsSummary.status === 'local'
+    ? [
+        { n: LeadService.getAll().filter((l: any) => l.urgency === 'red').length, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' },
+        { n: VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' },
+        { n: DealService.getAll().filter((d: any) => d.status === DEAL_STATUS.APPROVAL).length, label: 'propostas aguardando aprovação', sub: 'Desconto acima do limite', icon: 'handshake', to: 'propostas' },
+        { n: TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' },
+      ]
+    : [
+        { n: leadsSummary.delayedLeads, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' },
+      ];
   return (
     <div>
       <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${items.length}, 1fr)`, gap: 14 }}>
         {items.map((it, i) => (
           <button key={i} onClick={() => go(it.to)} style={{ textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', background: 'linear-gradient(160deg,#2a0d0e,#180809)', border: '1px solid rgba(255,46,46,.45)', borderRadius: 16, padding: 18, position: 'relative', overflow: 'hidden', animation: `redScream 2.8s ease-in-out infinite`, animationDelay: (i * .35) + 's' }}>
             <div style={{ position: 'absolute', top: 0, left: 0, width: 4, height: '100%', background: '#FF3B3B' }} />
@@ -299,23 +401,55 @@ function QuickActions({ go }: { go: (id: string) => void }) {
   );
 }
 
-function ConversionFunnel({ active }: { active: boolean }) {
+function ConversionFunnel({ active, leadsSummary }: { active: boolean; leadsSummary: HomeLeadsSummary }) {
+  if (leadsSummary.status === 'unavailable') {
+    return (
+      <div>
+        <SectionTitle icon="flow">Funil de conversão</SectionTitle>
+        <CommercialWidgetNotice>Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>
+      </div>
+    );
+  }
+  if (leadsSummary.status === 'loading') {
+    return (
+      <div>
+        <SectionTitle icon="flow">Funil de conversão</SectionTitle>
+        <CommercialWidgetNotice>Carregando…</CommercialWidgetNotice>
+      </div>
+    );
+  }
+  if (leadsSummary.status === 'error') {
+    return (
+      <div>
+        <SectionTitle icon="flow">Funil de conversão</SectionTitle>
+        <CommercialWidgetNotice onRetry={leadsSummary.retry}>Não foi possível carregar o funil.</CommercialWidgetNotice>
+      </div>
+    );
+  }
   // Real totals via services — these are independent counts (how many of each
   // exist right now), not a true step-by-step conversion rate: there's no
   // event history to say how many leads actually became each visit/proposta/
   // venda. So no "X% da etapa anterior" here — that would be exactly the
   // fake percentage the audit flagged (M0-K3).
-  const stages = [
-    { label: 'Leads', sub: 'clientes cadastrados', v: LeadService.getAll().length, icon: 'users', c: '#5B9BFF' },
-    { label: 'Visitas', sub: 'agendadas no total', v: VisitService.getAll().length, icon: 'calendar', c: '#A855F7' },
-    { label: 'Propostas', sub: 'criadas no total', v: DealService.getAll().length, icon: 'handshake', c: '#27C75F' },
-    { label: 'Vendas', sub: 'registradas no total', v: SaleService.getAll().length, icon: 'trophy', c: '#E8CE72', gold: true },
-  ];
-  const top = Math.max(stages[0].v, stages[1].v, stages[2].v, stages[3].v, 1);
+  //
+  // 'ready' (remoto): só a etapa de Leads é real — Visitas/Propostas/Vendas
+  // ainda não têm backend remoto (Visit/Deal/Sale, achado do E5-B2-A0/
+  // E7-A0) e são OCULTADAS, nunca mostradas como zero.
+  const stages = leadsSummary.status === 'local'
+    ? [
+        { label: 'Leads', sub: 'clientes cadastrados', v: LeadService.getAll().length, icon: 'users', c: '#5B9BFF' },
+        { label: 'Visitas', sub: 'agendadas no total', v: VisitService.getAll().length, icon: 'calendar', c: '#A855F7' },
+        { label: 'Propostas', sub: 'criadas no total', v: DealService.getAll().length, icon: 'handshake', c: '#27C75F' },
+        { label: 'Vendas', sub: 'registradas no total', v: SaleService.getAll().length, icon: 'trophy', c: '#E8CE72', gold: true },
+      ]
+    : [
+        { label: 'Leads', sub: 'clientes cadastrados', v: leadsSummary.totalLeads, icon: 'users', c: '#5B9BFF' },
+      ];
+  const top = Math.max(...stages.map((s) => s.v), 1);
   return (
     <div>
       <SectionTitle icon="flow">Funil de conversão</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0, alignItems: 'stretch', background: 'linear-gradient(180deg,#161618,#111113)', border: '1px solid var(--line-dark)', borderRadius: 18, padding: '8px', boxShadow: 'var(--shadow-md)', position: 'relative' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${stages.length}, 1fr)`, gap: 0, alignItems: 'stretch', background: 'linear-gradient(180deg,#161618,#111113)', border: '1px solid var(--line-dark)', borderRadius: 18, padding: '8px', boxShadow: 'var(--shadow-md)', position: 'relative' }}>
         {stages.map((s: any, i: number) => {
           const pct = Math.round((s.v / top) * 100);
           return (
@@ -345,7 +479,7 @@ function ConversionFunnel({ active }: { active: boolean }) {
   );
 }
 
-export function Home({ t, setTweak, go, active }: any) {
+export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: User | null; [key: string]: any }) {
   const [period, setPeriod] = useState('30 dias');
   const [team, setTeam] = useState('Todos');
   const [narrow, setNarrow] = useState(typeof window !== 'undefined' && window.innerWidth < 1240);
@@ -357,6 +491,12 @@ export function Home({ t, setTweak, go, active }: any) {
   }, []);
 
   useStore(); // subscribes to store changes for re-render — sellers read via SellerService below (Correção 9)
+  // M1-E E7-A1 — chamado SEMPRE (Rules of Hooks), independente do modo;
+  // useRemoteLeadsScreenState já gateia local/remote_ready/misconfigured/
+  // sem-identidade internamente. Podium/Ranking (SellerService, abaixo)
+  // permanecem intocados nesta etapa — módulo de Sellers local não migrado,
+  // corrigido no E7-B1.
+  const leadsSummary = useHomeLeadsSummary(currentUser ?? null);
   const variant = t.podium;
   const allSellers = SellerService.getAll();
   const sellers = team === 'Todos' ? allSellers : allSellers.filter((s: any) => s.team === team);
@@ -410,9 +550,9 @@ export function Home({ t, setTweak, go, active }: any) {
           </div>
         )}
 
-        <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} /></div>
+        <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} /></div>
         <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>
-        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} /></div>
+        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} /></div>
         <QuickActions go={go} />
       </div>
     </div>

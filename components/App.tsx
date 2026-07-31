@@ -7,6 +7,7 @@ import { NAV_ROLES, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { isRemoteStagesEnabled, isPlatformAdminEnabled, isSuperAdminCommercialReadEnabled } from '@/lib/flags';
 import { canAccessStageSettings, canAccessPlatformAdmin, canManageInvites, canAccessCommercialWorkspace } from '@/lib/capabilities';
+import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { useQueryCacheIdentity } from '@/lib/hooks/useQueryCacheIdentity';
 import { useLeadsRemoteBridgeLifecycle } from '@/lib/hooks/useLeadsRemoteBridgeLifecycle';
 import { CommercialCompanyProvider } from '@/lib/commercial/CommercialCompanyContext';
@@ -114,19 +115,37 @@ function PlaceholderScreen({ title }: { title: string }) {
 
 function Rail({ current, go, currentUser }: { current: string; go: (id: string) => void; currentUser: User }) {
   const allowedIds = allowedNavIds(currentUser);
+  // M1-E E7-A1: SellerService (lib/services.ts) lê um catálogo LOCAL, sem
+  // company_id, sem namespace por empresa (achado do E7-A0) — fora do modo
+  // local ele nunca é consultado aqui, para não misturar Seller de
+  // demonstração fixo na UI de uma empresa remota real. Correção completa
+  // do catálogo de Sellers (para Podium/Ranking/FlowPerfilVendedor) fica
+  // para o E7-B1; aqui só se evita a consulta dentro do Rail.
+  const remoteMode = !isLocalCommercialDataAllowed();
   // M1-F S8-D2-A: sellerId vem de activeMembership.sellerId (nunca
   // User.sellerId legado, removido do tipo). 'Administrador' agora é
   // platformRole==='super_admin' (o "admin" legado deixou de existir como
   // conceito de papel — mesmo padrão já usado no restante do app).
-  const seller = currentUser.activeMembership?.sellerId
+  const seller = !remoteMode && currentUser.activeMembership?.sellerId
     ? SellerService.getById(currentUser.activeMembership.sellerId)
     : null;
+  // Sem o catálogo local em modo remoto, o texto secundário é omitido (não
+  // inventado) — só o papel real da identidade autenticada (já disponível,
+  // sem nenhuma consulta nova) decide entre "Vendedor"/"Administrador"/
+  // "Gerente", nunca "Gerente" para um Seller só por falta do team local.
   const displayTeam = seller?.team
     ? `Vendedor · ${seller.team}`
-    : currentUser.platformRole === 'super_admin' ? 'Administrador' : 'Gerente';
+    : currentUser.platformRole === 'super_admin'
+      ? 'Administrador'
+      : currentUser.activeMembership?.role === 'seller'
+        ? 'Vendedor'
+        : 'Gerente';
+  // M1-E E7-A1: TaskService (Tarefas) não tem backend remoto (achado do
+  // E5-B2-A0/E7-A0) — fora do modo local o badge nunca é calculado, nunca
+  // vira "0" (que pareceria um dado real de "zero pendências atrasadas").
   // Live count (RBAC-filtered by TaskService.getAll itself) — replaces the
   // hardcoded badge:3 that never moved regardless of real pendências (M0-K2).
-  const lateTasks = TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length;
+  const lateTasks = remoteMode ? null : TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length;
 
   return (
     <aside style={{ width: 236, flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', background: 'linear-gradient(180deg,#0b0b0c,#070708)', borderRight: '1px solid rgba(255,255,255,.06)' }}>
@@ -147,6 +166,8 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
       <nav style={{ position: 'relative', flex: 1, overflowY: 'auto', padding: '6px 14px' }}>
         {(NAV as any[]).filter((item: any) => allowedIds.includes(item.id)).map((item: any) => {
           const on = current === item.id;
+          // M1-E E7-A1: lateTasks é null em modo remoto (Tarefas sem
+          // backend remoto) — badge nunca vira "0" fictício, o span some.
           const badge = item.id === 'pendencias' ? lateTasks : 0;
           return (
             <button key={item.id} onClick={() => go(item.id)} style={{
@@ -162,7 +183,7 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
               {on && <span style={{ position: 'absolute', left: -1, top: '50%', transform: 'translateY(-50%)', width: 3, height: 22, borderRadius: 3, background: 'linear-gradient(180deg,#E8CE72,#C9A227)', boxShadow: '0 0 12px 1px rgba(212,175,55,.7)' }} />}
               <Icon name={item.icon} size={19} stroke={on ? 2.2 : 2} style={{ color: on ? '#E8CE72' : 'var(--txt-lo)', filter: on ? 'drop-shadow(0 0 6px rgba(212,175,55,.5))' : 'none' }} />
               <span style={{ fontSize: 14, fontWeight: on ? 700 : 500, flex: 1, letterSpacing: '.01em' }}>{item.label}</span>
-              {badge > 0 && <span style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999, background: 'linear-gradient(180deg,#FF4242,#D81F2C)', color: '#fff', fontSize: 11, fontWeight: 800, display: 'grid', placeItems: 'center', fontFamily: 'Archivo, sans-serif', boxShadow: '0 0 10px -1px rgba(255,46,46,.7)', animation: on ? 'none' : 'breatheSoft 2.6s ease-in-out infinite' }}>{badge}</span>}
+              {typeof badge === 'number' && badge > 0 && <span style={{ minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999, background: 'linear-gradient(180deg,#FF4242,#D81F2C)', color: '#fff', fontSize: 11, fontWeight: 800, display: 'grid', placeItems: 'center', fontFamily: 'Archivo, sans-serif', boxShadow: '0 0 10px -1px rgba(255,46,46,.7)', animation: on ? 'none' : 'breatheSoft 2.6s ease-in-out infinite' }}>{badge}</span>}
             </button>
           );
         })}
@@ -275,7 +296,7 @@ export function App() {
   useEffect(() => { if (current === 'home') setAnimKey(k => k + 1); }, [current, t.podium]);
 
   const Screens: Record<string, React.ComponentType<any>> = {
-    home: () => <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} />,
+    home: () => <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />,
     clientes: ScreenClientes,
     andamento: ScreenAndamento,
     pendencias: ScreenPendencias,
@@ -319,7 +340,7 @@ export function App() {
         <Rail current={effectiveCurrent} go={go} currentUser={currentUser} />
         <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
           {effectiveCurrent === 'home'
-            ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} />
+            ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />
             : (Cur ? <Cur go={go} t={t} /> : <PlaceholderScreen title={navItem?.label} />)}
         </main>
 

@@ -2121,6 +2121,100 @@ desta etapa confia inteiramente nos 40 testes automatizados novos.
 **E6-B2-B formalmente concluído. E6-C (regressão final e fechamento formal
 do E6) desbloqueado, ainda não iniciado.**
 
+### 15.15 E7-A0 (auditoria) e E7-A1 (correção do shell Home/Rail) — concluídos
+
+**E7-A0** auditou cache/identidade/erros/regressão com o código atual como
+fonte da verdade e encontrou, durante uma tentativa real de login local
+como Super Admin, um crash **não exclusivo do Super Admin**:
+`LocalCommercialDataDisabledError: remote_commercial_local_data_disabled`
+(`lib/leads/localCommercialAccess.ts`, `assertLocalCommercialDataAllowed`).
+
+**Causa raiz**: `components/screens/Home.tsx` (`UrgentAttention`/
+`ConversionFunnel`) e `components/App.tsx` (`Rail`, badge de Pendências)
+chamavam `VisitService.getAll()`/`DealService.getAll()`/`SaleService
+.getAll()`/`TaskService.getAll()` **incondicionalmente durante o render**,
+sem checar `isLocalCommercialDataAllowed()` — e `Home` também chamava
+`LeadService.getAll()` incondicionalmente, que em modo remoto é a *seam*
+síncrona (`lib/services.ts`) que lança `remote_leads_invalid_context`
+(Super Admin, sempre — nunca tem `companyId` operacional) ou
+`remote_leads_snapshot_unavailable` (Manager/Seller, na janela real antes
+da bridge popular o snapshot). `Home` é a tela padrão pós-login e `Rail` é
+montado sempre que há `currentUser` — o crash ocorria para **qualquer
+papel**, em `remote_ready` e em `remote_misconfigured` igualmente, sem
+nenhum error boundary em lugar algum do app para conter o dano.
+
+**Correção implementada** (`components/screens/Home.tsx`,
+`components/App.tsx`):
+
+- `Home` agora chama `useRemoteLeadsScreenState(currentUser)` (a mesma
+  composição já usada por `ScreenClientesLegacy`/`ScreenAndamentoLegacy` —
+  nunca uma segunda fonte remota, nunca leitura direta do
+  `remoteSnapshot`) através de um novo `useHomeLeadsSummary`, que reduz o
+  estado a um discriminado `{status: 'local'|'unavailable'|'loading'
+  |'error'|'ready', ...}` — mesma cascata de estados já provada em
+  `ScreenClientesLegacy` (stages→leads), nunca um número inventado.
+- **Local** (`REMOTE_LEADS=false`): comportamento legado 100% preservado —
+  `LeadService`/`VisitService`/`DealService`/`SaleService`/`TaskService`
+  continuam chamados exatamente como antes.
+- **Remoto operacional, sucesso**: só o widget dependente de Leads
+  permanece visível, com contagem real (`leadsSummary.totalLeads`/
+  `delayedLeads`); os widgets dependentes de Visit/Deal/Sale/Task (sem
+  backend remoto, achado do E5-B2-A0) são **ocultados**, nunca mostrados
+  como zero.
+- **Remoto, carregando**: estado de loading seguro (`"Carregando…"`),
+  nenhum acesso síncrono ao snapshot, nenhum throw.
+- **Remoto, erro**: estado sanitizado com retry (reaproveita
+  `pipeline.refetch`/`leads.refetch`, nunca detalhe técnico).
+- **`remote_misconfigured`** e **`remote_unavailable_identity`** (cobre
+  Super Admin sem `companyId` operacional e Manager/Seller sem membership
+  operacional): estado neutro (`"Métricas comerciais indisponíveis nesta
+  sessão."`), zero chamada a serviço local, zero `LeadService.getAll()`,
+  zero seleção automática de empresa, zero dado demo.
+- Podium/Ranking (`getCompetition`, `SellerService`) **permanecem
+  intocados** nesta etapa — o catálogo local de Sellers não tem
+  `company_id`/namespace (mesmo achado de fundo do E5-B2-A0, nunca coberto
+  pelo gate fail-closed) e sua correção completa (Podium, Ranking,
+  `FlowPerfilVendedor`) fica para o **E7-B1**.
+- `Rail`: o badge de Pendências nunca chama `TaskService.getAll()` em modo
+  remoto (Tarefas sem backend remoto) — vira `null`, nunca `"0"` fictício,
+  o badge simplesmente não aparece. A consulta a `SellerService.getById`
+  (equipe/vendedor no rodapé do Rail) é bloqueada especificamente dentro do
+  Rail em modo remoto; o texto secundário usa o papel já disponível na
+  identidade autenticada (`activeMembership.role`) em vez de inventar ou
+  usar um rótulo errado ("Gerente" para um Seller) — nunca migra o
+  catálogo completo de Sellers (E7-B1).
+
+Nenhum `try/catch` mascarando erro, nenhum fallback para `StoreAdapter`,
+nenhum dado demo, nenhuma primeira empresa/Lead/Seller usados como
+substituto — em todos os estados não-`ready`/não-`local`, os widgets
+afetados simplesmente não fazem a chamada bloqueada.
+
+**Testes novos**: `tests/screens/Home.test.tsx` (10 testes — local,
+remote_active Manager/Seller, Super Admin, misconfigured, loading, erro) e
+`tests/navigation/appHomeRailRemoteGuard.test.tsx` (8 testes — **primeiro
+teste do repositório a renderizar `<App />` real com `Home`/`Rail` reais,
+não mockados**, reproduzindo a árvore exata onde o bug do E7-A0 ocorria,
+para os 5 cenários de identidade × modo, mais os 2 cenários do Rail
+local/remoto). Nenhum teste anterior renderizava `<App>`/`<Home>` — gap
+identificado no próprio E7-A0 como a razão de 100% de cobertura verde
+nunca ter detectado este crash.
+
+**Validação**: TSC 22 erros preexistentes (inalterado); 167→169 arquivos/
+2543→2561 testes TS (+18); SQL/migrations inalterados (nenhum tocado nesta
+etapa); 4 builds verdes (padrão, OFF/OFF, ON/OFF misconfigured, ON/ON
+efetivo). Nenhuma operação Supabase remota; nenhuma flag alterada; nenhum
+usuário/senha alterado.
+
+**Riscos residuais explícitos**: **E7-A2** (error boundary ao redor do
+shell autenticado — defesa em profundidade, deliberadamente fora desta
+etapa) continua pendente; **E7-B1** (catálogo `sellers` local sem
+`company_id`, Podium/Ranking/`FlowPerfilVendedor`) continua pendente;
+**E7-B2** (timeline Manager/Seller) continua pendente; **smoke test manual
+do E6 continua pendente** por decisão do usuário — não realizado nesta
+etapa.
+
+**E7-A1 formalmente concluído. E7-A2 desbloqueado, ainda não iniciado.**
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
