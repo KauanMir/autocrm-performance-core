@@ -316,16 +316,18 @@ function FlowNovoClienteRemote({ close, openFlow, ctx }: { close: () => void; op
         ? { actorRole: 'seller', name: f.nome, phone: f.tel, car: f.car || CARS[0], temperature: TEMP_MAP[f.urg], paymentPreference: f.pay, source: f.origem }
         : { actorRole: 'manager', sellerId, name: f.nome, phone: f.tel, car: f.car || CARS[0], temperature: TEMP_MAP[f.urg], paymentPreference: f.pay, source: f.origem };
       const record = await createLeadHook.createLead(input);
-      TaskService.create({
-        title: `Ligar para ${f.nome}`,
-        lead: f.nome,
-        leadId: record.id,
-        state: TASK_STATE.TODAY,
-        prio: 'alta',
-        when: 'Hoje',
-        assignedTo: isSeller ? ctx.sellerId : sellerId,
-        note: 'Primeiro contato',
-      });
+      // M1-E E7-C — achado de auditoria: esta função chamava TaskService
+      // .create(...) após o create_lead remoto, mas TaskService (lib/
+      // services.ts) tem assertLocalCommercialDataAllowed desde o E5-B2-A1
+      // — SEMPRE lança em modo remoto. O Lead já tinha sido criado com
+      // sucesso no banco, mas essa chamada local lançava e o catch abaixo
+      // reportava falha ao usuário (que via um erro genérico mesmo com o
+      // Lead já existindo), sem nenhuma Task realmente criada. Tarefas
+      // locais não têm company_id/backend remoto (E5-B2-A0/A1) — não é
+      // possível "corrigir" criando uma Task remota sem uma etapa de
+      // backend nova, então esta chamada é removida do caminho remoto
+      // (o caminho local, FlowNovoClienteLocal, continua criando a Task
+      // normalmente).
       setCreated({ id: record.id });
     } catch (err) {
       const code = isRemoteLeadsError(err) ? err.code : undefined;

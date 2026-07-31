@@ -5,6 +5,7 @@ import { Avatar, LBtn, LBadge } from '@/components/ui/kit';
 import { STAGES } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { AuthService, SellerService } from '@/lib/services';
+import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { FField, Segmented, StepRail } from '@/components/flows/FlowsShared';
 
 function AuthStage({ children }: { children: React.ReactNode }) {
@@ -235,6 +236,16 @@ function RecoverView({ go }: { go: (v: string) => void }) {
 
 function OnboardingView({ onDone }: { onDone: () => void }) {
   const [step, setStep] = useState(0);
+  // M1-E E7-C — achado de auditoria: SellerService.getAll() era chamado
+  // incondicionalmente aqui (etapa "Adicione seus vendedores" da vitrine
+  // de onboarding pós-cadastro). SellerService tem
+  // assertLocalCommercialDataAllowed desde o E7-B1 — lança em modo remoto.
+  // Essa tela é alcançável por qualquer visitante real via "Criar conta"
+  // na tela de login (LoginView), antes de existir sessão/empresa — o
+  // gate não depende de empresa, só da flag global. Corrigido no mesmo
+  // padrão do E7-B1 (Home/FlowPerfilVendedor/ScreenResultados): lista
+  // vazia em vez de crash quando o modo remoto está ativo.
+  const demoSellers = isLocalCommercialDataAllowed() ? (SellerService.getAll() as any[]) : [];
   const steps = [
     { key: 'empresa', icon: 'building', title: 'Cadastre sua empresa', desc: 'Confirme os dados da loja que vão aparecer no sistema.' },
     { key: 'vendedores', icon: 'users', title: 'Adicione seus vendedores', desc: 'Quem entra na disputa pelo topo do ranking?' },
@@ -282,7 +293,7 @@ function OnboardingView({ onDone }: { onDone: () => void }) {
               </>}
               {step === 1 && <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
-                  {(SellerService.getAll() as any[]).slice(0, 4).map((s: any) => (
+                  {demoSellers.slice(0, 4).map((s: any) => (
                     <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(255,255,255,.03)' }}>
                       <Avatar name={s.name} size={36} ring="#3B82F6" />
                       <div style={{ flex: 1 }}><div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-900)' }}>{s.name}</div><div style={{ fontSize: 12, color: 'var(--t-500)' }}>Equipe {s.team}</div></div>

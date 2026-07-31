@@ -124,14 +124,40 @@ describe('FlowNovoCliente — Manager remoto', () => {
     await waitFor(() => expect(m.rpc).toHaveBeenCalledWith('create_lead', expect.objectContaining({ p_seller_id: 's1' })));
   });
 
-  it('sucesso: fecha com a Task local usando o UUID real retornado', async () => {
+  // M1-E E7-C — achado de auditoria: este teste antes travava um bug real
+  // (TaskService.create chamado após create_lead remoto). TaskService tem
+  // assertLocalCommercialDataAllowed desde o E5-B2-A1 — SEMPRE lança em
+  // modo remoto, o que fazia o Lead ser criado com sucesso no banco mas o
+  // usuário ver uma mensagem de erro genérica (a exceção local era
+  // capturada pelo catch do fluxo e reportada como falha da criação).
+  // Corrigido: o caminho remoto nunca mais chama TaskService.create
+  // (Tarefas locais não têm backend remoto — E5-B2-A0/A1); o teste agora
+  // trava o comportamento correto.
+  it('sucesso: mostra a tela de sucesso com o UUID real retornado, NUNCA chama TaskService (sem backend remoto de Tarefas)', async () => {
     m.user.current = manager();
     renderFlow();
     fireEvent.change(screen.getByPlaceholderText('Ex.: Carlos Andrade'), { target: { value: 'Novo Cliente' } });
     fireEvent.change(screen.getByPlaceholderText('(11) 90000-0000'), { target: { value: '11999990000' } });
     fireEvent.click(screen.getByText('Criar cliente'));
     await waitFor(() => expect(screen.getByText('Cliente criado!')).toBeInTheDocument());
-    expect(m.taskServiceCreate).toHaveBeenCalledWith(expect.objectContaining({ leadId: 'real-uuid-1' }));
+    expect(m.taskServiceCreate).not.toHaveBeenCalled();
+  });
+
+  // M1-E E7-C — prova mais forte da correção acima: mesmo se
+  // TaskService.create lançasse (como a guarda real
+  // assertLocalCommercialDataAllowed faz em modo remoto, fora deste mock),
+  // a criação do Lead remoto não pode depender disso — a tela de sucesso
+  // aparece independentemente.
+  it('mesmo com TaskService.create configurado para lançar, a criação remota ainda mostra sucesso (a chamada nunca acontece)', async () => {
+    m.taskServiceCreate.mockImplementation(() => {
+      throw new Error('local_commercial_data_disabled (simulado)');
+    });
+    m.user.current = manager();
+    renderFlow();
+    fireEvent.change(screen.getByPlaceholderText('Ex.: Carlos Andrade'), { target: { value: 'Novo Cliente' } });
+    fireEvent.change(screen.getByPlaceholderText('(11) 90000-0000'), { target: { value: '11999990000' } });
+    fireEvent.click(screen.getByText('Criar cliente'));
+    await waitFor(() => expect(screen.getByText('Cliente criado!')).toBeInTheDocument());
   });
 });
 

@@ -2809,6 +2809,98 @@ nenhuma etapa), E7-C (regressão geral final do E7 inteiro), as 6 falhas
 pgTAP locais pré-existentes (fora de escopo, causa já identificada como
 dado acumulado local, não uma regressão de código).
 
+### 15.22 E7-C — Regressão geral e fechamento técnico do E7 (concluído)
+
+**Escopo**: revalidação de ponta a ponta de E7-A1, E7-A2, E7-B1, E7-B2,
+junto com E4/E5/E6 (create/update/duplicidade, move/apply-event,
+assign/archive/unarchive), via leitura direta do código atual (não da
+documentação). Sem funcionalidade nova, sem SQL/migration/RPC.
+
+**Achados reais corrigidos (categoria "bug pequeno e isolado", ambos com
+causa comprovada, correção pequena, sem SQL, com teste de regressão)**:
+
+1. **`components/flows/Flows2.tsx` — `FlowNovoClienteRemote.performCreate`
+   chamava `TaskService.create(...)` após `create_lead` bem-sucedido.**
+   `TaskService` tem `assertLocalCommercialDataAllowed` desde o E5-B2-A1 —
+   lança incondicionalmente em modo remoto. Resultado real: o Lead era
+   criado com sucesso no banco, mas a chamada local subsequente lançava, o
+   `catch` do fluxo interpretava isso como falha da criação e mostrava um
+   erro genérico ao usuário — que via "erro" mesmo com o Lead já existindo
+   (nenhuma Task era de fato criada, e um reenvio do formulário arriscava
+   um Lead duplicado). Tarefas locais não têm `company_id`/backend remoto
+   (E5-B2-A0/A1) — a correção remove a chamada do caminho remoto (o
+   caminho local, `FlowNovoClienteLocal`, continua criando a Task
+   normalmente). Teste que travava o comportamento antigo (mockava
+   `TaskService.create` como no-op, escondendo o bug) corrigido para
+   travar o comportamento certo; teste novo prova que mesmo configurando
+   o mock para lançar, a tela de sucesso aparece (a chamada nunca
+   acontece).
+
+2. **`components/auth/AuthFlow.tsx` — `OnboardingView` (vitrine pós-
+   cadastro, etapa "Adicione seus vendedores") chamava
+   `SellerService.getAll()` incondicionalmente.** Mesma guarda
+   (`assertLocalCommercialDataAllowed`, agora via `SellerService` desde o
+   E7-B1) lança em modo remoto. Esta tela é alcançável por qualquer
+   visitante real via "Criar conta" na tela de login (`LoginView`), antes
+   de existir sessão/empresa — o gate depende só da flag global, não de
+   contexto de empresa. Corrigido no mesmo padrão do E7-B1
+   (`isLocalCommercialDataAllowed()` → lista vazia em vez de crash); teste
+   novo (`tests/auth/AuthFlowOnboardingSellerGuard.test.tsx`) cobre local/
+   remote_ready/remote_misconfigured.
+
+**Achados revisados e conscientemente NÃO corrigidos (fora do escopo do
+E7, já classificados anteriormente ou fora do mandato desta etapa)**:
+`components/flows/Flows3.tsx` (busca global, central de notificações) e
+`components/screens/ScreensBiz.tsx`/`ScreensOps.tsx` (atalhos de lista)
+continuam com um padrão `findLead(nome) || LeadService.getAll()[0]` —
+"primeiro Lead" como fallback quando a busca por nome não encontra
+correspondência. Diferente do padrão de Sellers (bloqueado por design),
+`LeadService` tem comportamento remoto real via bridge/snapshot (E3) — o
+fallback aqui é uma característica pré-existente de telas de busca/atalho
+genéricas do app (não construídas pelo M1-E), já identificada e
+deliberadamente escopada fora na auditoria do E7-B2-C ("busca global/
+notificações não estão conectadas à timeline remota, escopo conhecido").
+Não é uma regressão nova; registrado como pendência separada, fora do
+mandato desta etapa (categoria D do prompt: bug fora do E7).
+
+**Regressão de E4/E5/E6 (auditoria dedicada, sem achados novos além dos
+dois acima)**: create/update/duplicidade, move/apply-event,
+assign/archive/unarchive revalidados por leitura completa dos hooks e das
+RPCs (`resolve_lead_mutation_context`, checagens `IS DISTINCT FROM`,
+rejeição incondicional de Seller em assign/archive/unarchive) — nenhuma
+capability apenas de UI sem contrapartida no backend; catálogo de Sellers
+sempre o operacional (`useCurrentCompanyAssignableSellers`), nunca o
+histórico nem `SellerService`; `expectedVersion`/`stale_write` consistentes
+em todas as mutations que o exigem; restauração preserva `stage_id`/
+`seller_id` sem `p_restore_stage_id` (decisão do E6-A1, ainda válida); zero
+escrita cruzada remoto→local além do achado nº1 acima (agora corrigido).
+
+**Home/Rail/Error Boundary (E7-A1/A2) e catálogo de Sellers (E7-B1)**:
+revalidados — nenhuma chamada incondicional a Visit/Deal/Sale/Task/
+SellerService fora do modo local; Super Admin sem crash; Error Boundary
+sanitizado, com reset por identidade e sem uso como fluxo normal. Re-grep
+de `SellerService.getAll/getById/getCurrentSeller` em todo o repositório
+confirmou todos os call-sites já conhecidos ainda gated corretamente, mais
+o achado nº2 acima (não coberto pela auditoria original do E7-B1, que
+revisou fluxos autenticados mas não a vitrine de onboarding pré-
+autenticação).
+
+**Validação**: pgTAP local reaproveitado sem alteração (nenhum SQL tocado
+nesta etapa) — mesmo resultado já registrado no E7-B2-C (52 arquivos/2676
+testes, mesmas 6 falhas pré-existentes, zero falha nova). Suíte
+TypeScript: 176 arquivos/2652 testes (175/2648 + 1 arquivo novo/4 testes
+novos: 1 em `FlowNovoCliente.test.tsx` + 3 em
+`AuthFlowOnboardingSellerGuard.test.tsx`); TSC 22 erros preexistentes,
+mesmos 4 arquivos (inalterado); 4 builds verdes.
+
+**E7 (E7-A1 + E7-A2 + E7-B1 + E7-B2) formalmente ENCERRADO — critério
+técnico automatizado atendido.** Riscos residuais documentados: smoke
+manual do E6 (nunca realizado em nenhuma etapa), 6 falhas pgTAP locais
+pré-existentes (dado acumulado local, causa já identificada), fallback
+"primeiro Lead" em busca global/notificações/atalhos (pré-existente, fora
+do mandato do M1-E, não corrigido). Próxima etapa recomendada: **M1-E E8 —
+auditoria e preparação do rollout.**
+
 ## 16. Plano de testes
 
 ### A. Banco local (fase de Database)
