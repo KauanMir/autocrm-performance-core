@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge } from '@/components/ui/kit';
 import { STAGES } from '@/lib/data';
@@ -7,6 +7,9 @@ import type { User } from '@/lib/data';
 import { AuthService, SellerService } from '@/lib/services';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { FField, Segmented, StepRail } from '@/components/flows/FlowsShared';
+import { supabase } from '@/lib/supabase/client';
+import { parseRecoveryLink, type RecoveryLink } from '@/lib/auth/recoveryLink';
+import { createTemporaryRecoveryAuthClient } from '@/lib/auth/temporaryRecoveryAuthClient';
 
 function AuthStage({ children }: { children: React.ReactNode }) {
   return (
@@ -207,6 +210,39 @@ function SignupView({ go, onDone }: { go: (v: string) => void; onDone: () => voi
 function RecoverView({ go }: { go: (v: string) => void }) {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const canSend = email.trim().length > 0 && !loading;
+
+  // PILOT-P0-A1-EXEC-RECOVERY: substitui o mock (setSent(true) direto) por
+  // um pedido real ao Supabase Auth. redirectTo deriva de
+  // window.location.origin — nunca hardcoded, resolve sozinho tanto em dev
+  // (localhost) quanto em produção (domínio real), sem variável de ambiente
+  // nova. Anti-enumeração: o GoTrue nunca distingue "e-mail existe" de
+  // "e-mail não existe" por design — sent=true acontece sempre que a
+  // requisição em si é aceita, nunca condicionado à existência da conta.
+  // Erros reais (rate limit, indisponibilidade) recebem mensagem própria,
+  // controlada, nunca a mensagem de sucesso.
+  const handleSend = async () => {
+    if (!canSend) return;
+    setLoading(true);
+    setErr('');
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+      });
+      if (error) {
+        setErr('Não foi possível enviar o e-mail agora. Tente novamente em instantes.');
+        return;
+      }
+      setSent(true);
+    } catch {
+      setErr('Não foi possível enviar o e-mail agora. Tente novamente em instantes.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <AuthStage>
       <AuthHero />
@@ -217,18 +253,180 @@ function RecoverView({ go }: { go: (v: string) => void }) {
           </button>
           <div style={{ width: 56, height: 56, borderRadius: 16, background: 'var(--gold-bg)', border: '1px solid var(--gold-line)', display: 'grid', placeItems: 'center', color: '#E8CE72', marginBottom: 18 }}><Icon name="shield" size={28} stroke={2} /></div>
           <h2 className="display" style={{ margin: '0 0 6px', fontSize: 26, fontWeight: 800, color: '#fff' }}>Recuperar senha</h2>
-          <p style={{ margin: '0 0 24px', color: 'var(--t-500)', fontSize: 14 }}>Informe seu e-mail e enviaremos um link para você criar uma nova senha.</p>
+          <p style={{ margin: '0 0 24px', color: 'var(--t-500)', fontSize: 14 }}>Informe seu e-mail e, se existir uma conta, enviaremos um link para você criar uma nova senha.</p>
           <FField label="E-mail da conta" icon="message" type="email" placeholder="voce@empresa.com.br" value={email} onChange={(e: any) => setEmail(e.target.value)} />
-          <LBtn kind="gold" size="lg" icon="send" onClick={() => setSent(true)} style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}>Enviar recuperação</LBtn>
+          {err && <div style={{ fontSize: 13, color: '#FF4242', marginBottom: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(255,66,66,.1)', border: '1px solid rgba(255,66,66,.25)' }}>{err}</div>}
+          <LBtn kind="gold" size="lg" icon="send" onClick={handleSend} style={{ width: '100%', justifyContent: 'center', marginTop: 8, opacity: canSend ? 1 : .5 }}>
+            {loading ? 'Enviando…' : 'Enviar recuperação'}
+          </LBtn>
         </> : <div style={{ textAlign: 'center', padding: '10px 0' }}>
           <div style={{ position: 'relative', width: 92, height: 92, margin: '0 auto 20px' }}>
             <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: '2px solid #27C75F', animation: 'burstRing 1.1s ease-out' }} />
             <div style={{ position: 'absolute', inset: 10, borderRadius: '50%', background: 'radial-gradient(circle at 38% 30%, #27C75F, #14803d)', display: 'grid', placeItems: 'center', color: '#fff', boxShadow: '0 18px 44px -14px rgba(39,199,95,.6)' }}><Icon name="send" size={38} stroke={2.2} /></div>
           </div>
-          <h2 className="display" style={{ margin: '0 0 8px', fontSize: 25, fontWeight: 800, color: '#fff' }}>E-mail enviado!</h2>
-          <p style={{ margin: '0 auto 24px', color: 'var(--t-500)', fontSize: 14.5, maxWidth: 320 }}>Enviamos um link de recuperação para <b style={{ color: 'var(--t-900)' }}>{email || 'seu e-mail'}</b>. Verifique sua caixa de entrada.</p>
+          <h2 className="display" style={{ margin: '0 0 8px', fontSize: 25, fontWeight: 800, color: '#fff' }}>Verifique seu e-mail</h2>
+          <p style={{ margin: '0 auto 24px', color: 'var(--t-500)', fontSize: 14.5, maxWidth: 320 }}>Se existir uma conta com o e-mail <b style={{ color: 'var(--t-900)' }}>{email || 'informado'}</b>, você vai receber as instruções para redefinir sua senha.</p>
           <LBtn kind="ghost" size="lg" icon="arrowLeft" onClick={() => go('login')} style={{ width: '100%', justifyContent: 'center' }}>Voltar ao login</LBtn>
         </div>}
+      </AuthCard>
+    </AuthStage>
+  );
+}
+
+type RecoveryStatus = 'verifying' | 'valid' | 'invalid';
+
+// PILOT-P0-A1-EXEC-RECOVERY: monta quando AuthFlow detecta um link de
+// recuperação real na URL. Mesmo princípio de isolamento do
+// AcceptInviteFlow: token lido e removido da URL imediatamente no mount
+// (nunca guardado em useState/localStorage/log), cliente TEMPORÁRIO
+// (persistSession:false) para que uma sessão de recovery abandonada nunca
+// fique persistida sozinha no localStorage compartilhado.
+function ResetPasswordView({ go }: { go: (v: string) => void }) {
+  const [status, setStatus] = useState<RecoveryStatus>('verifying');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [formErr, setFormErr] = useState('');
+  const [success, setSuccess] = useState(false);
+  const clientRef = useRef<ReturnType<typeof createTemporaryRecoveryAuthClient> | null>(null);
+  const hasProcessedRef = useRef(false);
+
+  useEffect(() => {
+    // Guarda contra Strict Mode: sem ela, o segundo disparo do efeito em dev
+    // veria a URL já limpa pelo replaceState da primeira execução (mesma
+    // razão documentada no AcceptInviteFlow).
+    if (hasProcessedRef.current) return;
+    hasProcessedRef.current = true;
+    if (typeof window === 'undefined') { setStatus('invalid'); return; }
+
+    const link = parseRecoveryLink(window.location.search, window.location.hash);
+    // Remove o token da barra de endereço IMEDIATAMENTE, antes de qualquer
+    // chamada assíncrona — nunca fica visível em histórico/compartilhamento
+    // de tela por mais tempo que o necessário.
+    window.history.replaceState(null, '', window.location.pathname);
+
+    if (link.kind === 'none') { setStatus('invalid'); return; }
+
+    const client = createTemporaryRecoveryAuthClient();
+    clientRef.current = client;
+    processRecoveryLink(client, link).then((ok) => setStatus(ok ? 'valid' : 'invalid'));
+  }, []);
+
+  async function processRecoveryLink(
+    client: ReturnType<typeof createTemporaryRecoveryAuthClient>,
+    link: RecoveryLink,
+  ): Promise<boolean> {
+    try {
+      if (link.kind === 'token_hash') {
+        const { error } = await client.auth.verifyOtp({ token_hash: link.tokenHash, type: 'recovery' });
+        return !error;
+      }
+      if (link.kind === 'implicit_tokens') {
+        const { error } = await client.auth.setSession({
+          access_token: link.accessToken,
+          refresh_token: link.refreshToken,
+        });
+        return !error;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  // Mesma regra comunicada (mas nunca aplicada) pelo hint da senha do
+  // cadastro ("Use ao menos 8 caracteres") — reaproveitada aqui como a
+  // única fonte já existente no produto, em vez de inventar um número novo.
+  const passwordValid = password.length >= 8;
+  const passwordsMatch = password.length > 0 && password === confirmPassword;
+  const canSubmit = status === 'valid' && passwordValid && passwordsMatch && !submitting;
+
+  const handleSubmit = async () => {
+    if (!canSubmit) return;
+    const client = clientRef.current;
+    if (!client) return;
+    setSubmitting(true);
+    setFormErr('');
+    try {
+      const { error } = await client.auth.updateUser({ password });
+      if (error) {
+        setFormErr('Não foi possível atualizar sua senha. Tente novamente.');
+        return;
+      }
+      // Encerra a sessão de recovery explicitamente (defesa em profundidade
+      // — o cliente temporário já não persiste nada, mas nunca deixamos uma
+      // sessão de recovery ativa depois do sucesso) e força o usuário a
+      // entrar de novo com a senha nova, provando que ela realmente funciona.
+      await client.auth.signOut();
+      setSuccess(true);
+    } catch {
+      setFormErr('Não foi possível atualizar sua senha. Tente novamente.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (status === 'verifying') {
+    return (
+      <AuthStage>
+        <AuthHero />
+        <AuthCard>
+          <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--t-500)', fontSize: 14 }}>
+            Verificando link de recuperação…
+          </div>
+        </AuthCard>
+      </AuthStage>
+    );
+  }
+
+  if (status === 'invalid') {
+    return (
+      <AuthStage>
+        <AuthHero />
+        <AuthCard>
+          <div style={{ width: 56, height: 56, borderRadius: 16, background: 'rgba(255,66,66,.1)', border: '1px solid rgba(255,66,66,.25)', display: 'grid', placeItems: 'center', color: '#FF4242', marginBottom: 18 }}><Icon name="alert" size={28} stroke={2} /></div>
+          <h2 className="display" style={{ margin: '0 0 6px', fontSize: 26, fontWeight: 800, color: '#fff' }}>Link inválido ou expirado</h2>
+          <p style={{ margin: '0 0 24px', color: 'var(--t-500)', fontSize: 14 }}>Este link de recuperação é inválido ou expirou. Solicite um novo para continuar.</p>
+          <LBtn kind="gold" size="lg" icon="send" onClick={() => go('recover')} style={{ width: '100%', justifyContent: 'center', marginBottom: 10 }}>Solicitar nova recuperação</LBtn>
+          <LBtn kind="ghost" size="lg" icon="arrowLeft" onClick={() => go('login')} style={{ width: '100%', justifyContent: 'center' }}>Voltar ao login</LBtn>
+        </AuthCard>
+      </AuthStage>
+    );
+  }
+
+  if (success) {
+    return (
+      <AuthStage>
+        <AuthHero />
+        <AuthCard>
+          <div style={{ textAlign: 'center', padding: '10px 0' }}>
+            <div style={{ position: 'relative', width: 92, height: 92, margin: '0 auto 20px' }}>
+              <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: '2px solid #27C75F', animation: 'burstRing 1.1s ease-out' }} />
+              <div style={{ position: 'absolute', inset: 10, borderRadius: '50%', background: 'radial-gradient(circle at 38% 30%, #27C75F, #14803d)', display: 'grid', placeItems: 'center', color: '#fff', boxShadow: '0 18px 44px -14px rgba(39,199,95,.6)' }}><Icon name="check" size={38} stroke={2.2} /></div>
+            </div>
+            <h2 className="display" style={{ margin: '0 0 8px', fontSize: 25, fontWeight: 800, color: '#fff' }}>Senha atualizada!</h2>
+            <p style={{ margin: '0 auto 24px', color: 'var(--t-500)', fontSize: 14.5, maxWidth: 320 }}>Sua senha foi redefinida. Entre com a sua nova senha para continuar.</p>
+            <LBtn kind="gold" size="lg" icon="arrowRight" onClick={() => go('login')} style={{ width: '100%', justifyContent: 'center' }}>Ir para login</LBtn>
+          </div>
+        </AuthCard>
+      </AuthStage>
+    );
+  }
+
+  return (
+    <AuthStage>
+      <AuthHero />
+      <AuthCard>
+        <div style={{ width: 56, height: 56, borderRadius: 16, background: 'var(--gold-bg)', border: '1px solid var(--gold-line)', display: 'grid', placeItems: 'center', color: '#E8CE72', marginBottom: 18 }}><Icon name="shield" size={28} stroke={2} /></div>
+        <h2 className="display" style={{ margin: '0 0 6px', fontSize: 26, fontWeight: 800, color: '#fff' }}>Definir nova senha</h2>
+        <p style={{ margin: '0 0 24px', color: 'var(--t-500)', fontSize: 14 }}>Escolha uma nova senha para acessar sua conta.</p>
+        <PwField label="Nova senha" value={password} onChange={(e: any) => setPassword(e.target.value)} hint="Use ao menos 8 caracteres." />
+        <PwField label="Confirmar nova senha" value={confirmPassword} onChange={(e: any) => setConfirmPassword(e.target.value)} />
+        {formErr && <div style={{ fontSize: 13, color: '#FF4242', marginBottom: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(255,66,66,.1)', border: '1px solid rgba(255,66,66,.25)' }}>{formErr}</div>}
+        {!formErr && confirmPassword.length > 0 && !passwordsMatch && <div style={{ fontSize: 13, color: 'var(--t-500)', marginBottom: 10 }}>As senhas não coincidem.</div>}
+        <LBtn kind="gold" size="lg" icon="check" onClick={handleSubmit} style={{ width: '100%', justifyContent: 'center', marginTop: 8, opacity: canSubmit ? 1 : .5 }}>
+          {submitting ? 'Salvando…' : 'Salvar nova senha'}
+        </LBtn>
       </AuthCard>
     </AuthStage>
   );
@@ -358,8 +556,21 @@ export function AuthFlow({ view, setView, onAuthed, onSignedUp }: {
   onAuthed: (user: User) => void;
   onSignedUp: () => void;
 }) {
+  // PILOT-P0-A1-EXEC-RECOVERY: detecta um link de recuperação de senha real
+  // assim que a tela de Auth monta (usuário sem sessão, chegando via
+  // e-mail). Só decide QUAL view mostrar — a leitura/limpeza do token e a
+  // troca de senha em si vivem inteiramente em ResetPasswordView, mesma
+  // separação entre "detectar" e "processar" já usada pelo convite.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const link = parseRecoveryLink(window.location.search, window.location.hash);
+    if (link.kind !== 'none') setView('reset-password');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (view === 'signup') return <SignupView go={setView} onDone={onSignedUp} />;
   if (view === 'recover') return <RecoverView go={setView} />;
+  if (view === 'reset-password') return <ResetPasswordView go={setView} />;
   if (view === 'onboarding') return <OnboardingView onDone={() => setView('login')} />;
   return <LoginView go={setView} onDone={onAuthed} />;
 }
