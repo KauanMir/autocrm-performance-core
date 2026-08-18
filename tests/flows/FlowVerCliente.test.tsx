@@ -1,8 +1,9 @@
 // Testes de FlowVerCliente — boundary readOnly (M1-E, E3-B1). Leads remotos
 // abrem este detalhe com payload.readOnly=true: nenhum botão de mutation
 // (Ligar/Visita/Proposta/Acompanhar/Editar) pode ficar acessível. Sem mock
-// de rede — LeadService só é usado no fallback payload.lead ausente (não
-// exercitado aqui, o payload sempre traz o lead).
+// de rede — LeadService (mock local, vazio) não é mais consultado quando
+// payload.lead está ausente (PILOT-P0-A1-EXEC-FALLBACKS removeu o fallback
+// `LeadService.getAll()[0]`; ver describe dedicado abaixo).
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -73,6 +74,29 @@ function lead(overrides: Partial<Record<string, unknown>> = {}) {
     ...overrides,
   };
 }
+
+// PILOT-P0-A1-EXEC-FALLBACKS: antes, sem payload.lead o componente caía em
+// `LeadService.getAll()[0]` — em modo remoto isso abriria o primeiro Lead
+// real do snapshot (cliente errado). Agora renderiza um estado seguro e
+// explícito, sem tocar lead.* nenhum e sem fabricar payload.
+describe('FlowVerCliente — payload.lead ausente (PILOT-P0-A1-EXEC-FALLBACKS)', () => {
+  it('sem payload.lead: renderiza "Cliente indisponível", nunca abre outro Lead, sem crash', () => {
+    renderWithClient(<FlowVerCliente payload={{}} close={vi.fn()} openFlow={vi.fn()} />);
+    expect(screen.getByText('Cliente indisponível')).toBeInTheDocument();
+    expect(screen.queryByText('Ligar agora')).toBeNull();
+    expect(screen.queryByText('Editar dados')).toBeNull();
+  });
+
+  it('sem payload.lead: botão de fechar do FlowShell chama close()', () => {
+    const close = vi.fn();
+    renderWithClient(<FlowVerCliente payload={{}} close={close} openFlow={vi.fn()} />);
+    // FlowShell renderiza dois controles de fechar (seta voltar + X), ambos
+    // chamando onClose — qualquer um dos dois é suficiente para provar o
+    // caminho de saída.
+    fireEvent.click(screen.getAllByRole('button')[0]);
+    expect(close).toHaveBeenCalled();
+  });
+});
 
 describe('FlowVerCliente — modo normal (local, sem readOnly)', () => {
   it('mostra as 5 ações de mutation e o botão inline "Ligar agora"', () => {

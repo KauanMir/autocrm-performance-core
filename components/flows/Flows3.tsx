@@ -159,11 +159,18 @@ export function FlowNotificacoes({ payload, close, openFlow }: any) {
   // M1-E E7-B1: a notificação de ranking abaixo abre perfil-vendedor com um
   // Seller do catálogo LOCAL (SellerService, sem company_id, sem backend
   // remoto) — mesmo isolamento, nunca oferecida fora do modo local.
+  //
+  // PILOT-P0-A1-EXEC-FALLBACKS: a notificação demo "Carlos Andrade" abaixo
+  // também entrou no mesmo gate — antes ficava disponível mesmo fora do modo
+  // local; como o nome é hardcoded e nunca existe nos dados remotos reais,
+  // seu action caía no fallback `LeadService.getAll()[0]` e abria o primeiro
+  // Lead real do snapshot remoto (cliente errado). Gateada, essa ação nunca
+  // é oferecida fora do modo local — mesmo raciocínio das duas vizinhas.
   const localCommercialAllowed = isLocalCommercialDataAllowed();
   const groups = [
     { name: 'Urgente', tone: 'red', items: [
-      { icon: 'flame', t: <span>Cliente <b>Carlos Andrade</b> está sem resposta há 3 dias</span>, when: 'há 1h', action: () => openFlow('ligar', { lead: findLead('Carlos Andrade') || LeadService.getAll()[0] }), label: 'Ligar' },
       ...(localCommercialAllowed ? [
+        { icon: 'flame', t: <span>Cliente <b>Carlos Andrade</b> está sem resposta há 3 dias</span>, when: 'há 1h', action: () => openFlow('ligar', { lead: findLead('Carlos Andrade') || LeadService.getAll()[0] }), label: 'Ligar' },
         { icon: 'target', t: <span><b>João Ferreira</b> ultrapassou você no ranking</span>, when: 'há 2h', action: () => openFlow('perfil-vendedor', { seller: SellerService.getAll()[2] }), label: 'Ver' },
         { icon: 'calendar', t: <span>Visita de <b>Juliana Prado</b> ainda não confirmada</span>, when: 'há 3h', action: () => openFlow('confirmar-visita', { visit: VisitService.getAll().find((v: any) => v.status === 'pendente') }), label: 'Confirmar' },
       ] : []),

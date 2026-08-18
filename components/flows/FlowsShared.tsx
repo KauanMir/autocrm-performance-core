@@ -838,7 +838,25 @@ function RemoteLeadTimelinePanel({ companyId, leadId, userId, membershipRole, us
 }
 
 export function FlowVerCliente({ payload, close, openFlow }: any) {
-  const lead = payload.lead || LeadService.getAll()[0];
+  // PILOT-P0-A1-EXEC-FALLBACKS: sem payload.lead, NUNCA abrir outro cliente
+  // (o fallback antigo `|| LeadService.getAll()[0]` abriria o primeiro Lead
+  // real do snapshot remoto quando REMOTE_LEADS=true, expondo dado de outro
+  // cliente). Estado seguro e explícito, sem fabricar Lead nenhum.
+  if (!payload.lead) {
+    return (
+      <FlowShell eyebrow="CLIENTE" title="Cliente indisponível" icon="users" accent="#8B8B93" onClose={close}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '60px 28px', gap: 10 }}>
+          <div style={{ width: 68, height: 68, borderRadius: 20, background: '#8B8B931c', border: '1px solid #8B8B9344', color: '#8B8B93', display: 'grid', placeItems: 'center', marginBottom: 10 }}>
+            <Icon name="users" size={34} stroke={1.9} />
+          </div>
+          <p style={{ margin: 0, fontSize: 13.5, color: 'var(--t-500)', maxWidth: 320, lineHeight: 1.5 }}>
+            Não foi possível localizar este cliente. Ele pode ter sido removido ou o link não é mais válido.
+          </p>
+        </div>
+      </FlowShell>
+    );
+  }
+  const lead = payload.lead;
   // M1-E E4-B2: payload.capabilities (LeadMutationCapabilities), quando
   // presente, é a autoridade — substitui inteiramente a decisão antiga por
   // payload.readOnly, que continua funcionando exatamente como antes para

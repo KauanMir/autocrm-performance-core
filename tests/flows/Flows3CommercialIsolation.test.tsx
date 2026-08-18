@@ -119,12 +119,20 @@ describe('FlowNotificacoes — isolamento por modo', () => {
     expect(m.sellers).not.toHaveBeenCalled();
   });
 
-  it('modo NÃO local: notificação de Ligar (Lead) continua funcionando', () => {
+  // PILOT-P0-A1-EXEC-FALLBACKS: achado real — a notificação demo "Carlos
+  // Andrade" ficava disponível mesmo fora do modo local; como o nome é
+  // hardcoded e nunca existe nos dados remotos reais, seu action caía no
+  // fallback `LeadService.getAll()[0]` e abria o primeiro Lead real do
+  // snapshot remoto (cliente errado). Este teste antes AFIRMAVA esse
+  // comportamento como esperado — corrigido para o oposto: a notificação
+  // (e a ação "Ligar" que ela oferecia) nunca aparece fora do modo local,
+  // mesmo isolamento das duas notificações de Visita/Proposta.
+  it('modo NÃO local: notificação demo "Carlos Andrade" (Ligar) não aparece — nenhum Lead real pode ser aberto como substituto', () => {
     m.isLocalCommercialDataAllowed.mockReturnValue(false);
     const openFlow = vi.fn();
     render(<FlowNotificacoes payload={{}} close={() => {}} openFlow={openFlow} />);
-    fireEvent.click(screen.getByText('Ligar'));
-    expect(openFlow).toHaveBeenCalledWith('ligar', expect.any(Object));
+    expect(screen.queryByText(/Carlos Andrade/)).toBeNull();
+    expect(screen.queryByText('Ligar')).toBeNull();
   });
 
   it('modo local: botões Confirmar/Revisar aparecem (comportamento preservado)', () => {
@@ -132,6 +140,15 @@ describe('FlowNotificacoes — isolamento por modo', () => {
     render(<FlowNotificacoes payload={{}} close={() => {}} openFlow={() => {}} />);
     expect(screen.getByText('Confirmar')).toBeInTheDocument();
     expect(screen.getByText('Revisar')).toBeInTheDocument();
+  });
+
+  it('modo local: notificação demo "Carlos Andrade" (Ligar) continua aparecendo e funcionando (comportamento demo preservado)', () => {
+    m.isLocalCommercialDataAllowed.mockReturnValue(true);
+    const openFlow = vi.fn();
+    render(<FlowNotificacoes payload={{}} close={() => {}} openFlow={openFlow} />);
+    expect(screen.getByText(/Carlos Andrade/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Ligar'));
+    expect(openFlow).toHaveBeenCalledWith('ligar', expect.any(Object));
   });
 
   it('modo local: notificação de ranking continua aparecendo e abre o perfil do vendedor', () => {
