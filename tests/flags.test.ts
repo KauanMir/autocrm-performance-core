@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   isRemoteLeadsEnabled,
   isRemoteStagesEnabled,
+  isRemoteTasksEnabled,
   isPlatformAdminEnabled,
   isActiveUsersEnabled,
   isUserEmailEditEnabled,
@@ -14,6 +15,7 @@ import {
   isSuperAdminCommercialWriteEnabled,
   REMOTE_LEADS_DEV_OVERRIDE_KEY,
   REMOTE_STAGES_DEV_OVERRIDE_KEY,
+  REMOTE_TASKS_DEV_OVERRIDE_KEY,
   PLATFORM_ADMIN_DEV_OVERRIDE_KEY,
   ACTIVE_USERS_DEV_OVERRIDE_KEY,
   USER_EMAIL_EDIT_DEV_OVERRIDE_KEY,
@@ -25,6 +27,7 @@ import {
 
 const ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_STAGES';
 const LEADS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_LEADS';
+const TASKS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_TASKS';
 const PLATFORM_ADMIN_ENV_KEY = 'NEXT_PUBLIC_FF_PLATFORM_ADMIN';
 const ACTIVE_USERS_ENV_KEY = 'NEXT_PUBLIC_FF_ACTIVE_USERS';
 const USER_EMAIL_EDIT_ENV_KEY = 'NEXT_PUBLIC_FF_USER_EMAIL_EDIT';
@@ -52,6 +55,15 @@ function setLeadsEnv(nodeEnv: string, flagValue?: string) {
     vi.stubEnv(LEADS_ENV_KEY, undefined as unknown as string);
   } else {
     vi.stubEnv(LEADS_ENV_KEY, flagValue);
+  }
+}
+
+function setTasksEnv(nodeEnv: string, flagValue?: string) {
+  vi.stubEnv('NODE_ENV', nodeEnv);
+  if (flagValue === undefined) {
+    vi.stubEnv(TASKS_ENV_KEY, undefined as unknown as string);
+  } else {
+    vi.stubEnv(TASKS_ENV_KEY, flagValue);
   }
 }
 
@@ -1300,5 +1312,161 @@ describe('isolamento da flag WRITE comercial do Super Admin em relação às dem
     window.localStorage.setItem(SUPER_ADMIN_COMMERCIAL_READ_DEV_OVERRIDE_KEY, 'false');
     expect(isSuperAdminCommercialReadEnabled()).toBe(false);
     expect(isSuperAdminCommercialWriteEnabled()).toBe(true);
+  });
+});
+
+// COMMERCIAL-REMOTE-B1-B1 — isRemoteTasksEnabled (mesmo contrato de
+// isRemoteStagesEnabled/isRemoteLeadsEnabled, chave/env próprias). Só o
+// valor bruto da flag — a combinação com o estado de Leads/Stages
+// (task_local/task_blocked/task_remote_ready/task_remote_misconfigured)
+// é testada isoladamente em tests/tasks/remoteTasksMode.test.ts.
+
+describe('isRemoteTasksEnabled — valor do ambiente', () => {
+  it('variável ausente ⇒ false (OFF por padrão)', () => {
+    setTasksEnv('production');
+    expect(isRemoteTasksEnabled()).toBe(false);
+  });
+
+  it('"false" ⇒ false', () => {
+    setTasksEnv('production', 'false');
+    expect(isRemoteTasksEnabled()).toBe(false);
+  });
+
+  it('"true" ⇒ true', () => {
+    setTasksEnv('production', 'true');
+    expect(isRemoteTasksEnabled()).toBe(true);
+  });
+
+  it('valores inválidos ⇒ false', () => {
+    for (const invalid of ['1', 'yes', 'on', '', 'enabled']) {
+      setTasksEnv('production', invalid);
+      expect(isRemoteTasksEnabled()).toBe(false);
+    }
+  });
+
+  it('comparação é estrita e case-sensitive ("TRUE"/"True" não ativam)', () => {
+    for (const invalid of ['TRUE', 'True', ' true', 'true ']) {
+      setTasksEnv('production', invalid);
+      expect(isRemoteTasksEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('isRemoteTasksEnabled — development (override via localStorage)', () => {
+  it('env false + override "true" ⇒ true', () => {
+    setTasksEnv('development', 'false');
+    window.localStorage.setItem(REMOTE_TASKS_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteTasksEnabled()).toBe(true);
+  });
+
+  it('env true + override "false" ⇒ false', () => {
+    setTasksEnv('development', 'true');
+    window.localStorage.setItem(REMOTE_TASKS_DEV_OVERRIDE_KEY, 'false');
+    expect(isRemoteTasksEnabled()).toBe(false);
+  });
+
+  it('override inválido ⇒ usa o env', () => {
+    setTasksEnv('development', 'true');
+    window.localStorage.setItem(REMOTE_TASKS_DEV_OVERRIDE_KEY, 'yes');
+    expect(isRemoteTasksEnabled()).toBe(true);
+
+    setTasksEnv('development', 'false');
+    window.localStorage.setItem(REMOTE_TASKS_DEV_OVERRIDE_KEY, '1');
+    expect(isRemoteTasksEnabled()).toBe(false);
+  });
+
+  it('override ausente ⇒ usa o env', () => {
+    setTasksEnv('development', 'true');
+    expect(isRemoteTasksEnabled()).toBe(true);
+
+    setTasksEnv('development', 'false');
+    expect(isRemoteTasksEnabled()).toBe(false);
+  });
+
+  it('localStorage lançando erro ⇒ usa o env sem propagar', () => {
+    setTasksEnv('development', 'true');
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    expect(isRemoteTasksEnabled()).toBe(true);
+
+    setTasksEnv('development', 'false');
+    expect(isRemoteTasksEnabled()).toBe(false);
+  });
+});
+
+describe('isRemoteTasksEnabled — production (localStorage ignorado)', () => {
+  it('env true ⇒ true', () => {
+    setTasksEnv('production', 'true');
+    expect(isRemoteTasksEnabled()).toBe(true);
+  });
+
+  it('env false ⇒ false', () => {
+    setTasksEnv('production', 'false');
+    expect(isRemoteTasksEnabled()).toBe(false);
+  });
+
+  it('override "true" com env false ⇒ continua false', () => {
+    setTasksEnv('production', 'false');
+    window.localStorage.setItem(REMOTE_TASKS_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteTasksEnabled()).toBe(false);
+  });
+
+  it('override "false" com env true ⇒ continua true', () => {
+    setTasksEnv('production', 'true');
+    window.localStorage.setItem(REMOTE_TASKS_DEV_OVERRIDE_KEY, 'false');
+    expect(isRemoteTasksEnabled()).toBe(true);
+  });
+
+  it('localStorage.getItem NUNCA é chamado em produção (spy)', () => {
+    setTasksEnv('production', 'true');
+    const spy = vi.spyOn(Storage.prototype, 'getItem');
+    isRemoteTasksEnabled();
+    setTasksEnv('production', 'false');
+    isRemoteTasksEnabled();
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('isRemoteTasksEnabled — ambiente sem window (SSR)', () => {
+  it('sem window ⇒ usa o env sem lançar erro', () => {
+    setTasksEnv('development', 'true');
+    vi.stubGlobal('window', undefined);
+    expect(isRemoteTasksEnabled()).toBe(true);
+
+    setTasksEnv('development', 'false');
+    expect(isRemoteTasksEnabled()).toBe(false);
+  });
+});
+
+describe('isolamento da flag de tasks em relação às demais (incl. Leads/Stages)', () => {
+  it('a chave de override é distinta de todas as outras', () => {
+    expect(REMOTE_TASKS_DEV_OVERRIDE_KEY).toBe('autocrm_ff_remote_tasks');
+    expect(REMOTE_TASKS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_STAGES_DEV_OVERRIDE_KEY);
+    expect(REMOTE_TASKS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_LEADS_DEV_OVERRIDE_KEY);
+    expect(REMOTE_TASKS_DEV_OVERRIDE_KEY).not.toBe(PLATFORM_ADMIN_DEV_OVERRIDE_KEY);
+    expect(REMOTE_TASKS_DEV_OVERRIDE_KEY).not.toBe(ACTIVE_USERS_DEV_OVERRIDE_KEY);
+    expect(REMOTE_TASKS_DEV_OVERRIDE_KEY).not.toBe(USER_EMAIL_EDIT_DEV_OVERRIDE_KEY);
+    expect(REMOTE_TASKS_DEV_OVERRIDE_KEY).not.toBe(USER_LIFECYCLE_DEV_OVERRIDE_KEY);
+    expect(REMOTE_TASKS_DEV_OVERRIDE_KEY).not.toBe(COMPANY_SELECTOR_DEV_OVERRIDE_KEY);
+  });
+
+  it('env/override de tasks não afeta leads/stages (e vice-versa)', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(ENV_KEY, 'true');
+    vi.stubEnv(LEADS_ENV_KEY, 'true');
+    vi.stubEnv(TASKS_ENV_KEY, 'false');
+    window.localStorage.setItem(REMOTE_TASKS_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteStagesEnabled()).toBe(true);
+    expect(isRemoteLeadsEnabled()).toBe(true);
+    expect(isRemoteTasksEnabled()).toBe(true);
+
+    window.localStorage.clear();
+    vi.stubEnv(ENV_KEY, 'false');
+    vi.stubEnv(LEADS_ENV_KEY, 'false');
+    vi.stubEnv(TASKS_ENV_KEY, 'true');
+    expect(isRemoteStagesEnabled()).toBe(false);
+    expect(isRemoteLeadsEnabled()).toBe(false);
+    expect(isRemoteTasksEnabled()).toBe(true);
   });
 });

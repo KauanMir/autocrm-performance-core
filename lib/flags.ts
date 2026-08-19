@@ -14,6 +14,15 @@
 // precisa poder ser ativada independentemente da listagem de usuários já
 // publicada. Nenhuma UI consome esta flag ainda (S5-E1-A é só backend).
 //
+// COMMERCIAL-REMOTE-B1: NEXT_PUBLIC_FF_REMOTE_TASKS é uma flag SEPARADA de
+// NEXT_PUBLIC_FF_REMOTE_LEADS/NEXT_PUBLIC_FF_REMOTE_STAGES — Tasks é o
+// primeiro domínio comercial local (Tasks/Visits/Deals/Sales) a ganhar
+// backend remoto próprio, migrado independentemente dos demais. Esta flag
+// só controla o valor BRUTO de REMOTE_TASKS; a regra de que Tasks nunca
+// pode continuar em localStorage quando Leads já está remoto (rollout
+// parcial vira BLOCKED, nunca LOCAL) vive em
+// lib/tasks/remoteTasksMode.ts, não aqui.
+//
 // M1-F S6-F: NEXT_PUBLIC_FF_USER_LIFECYCLE é uma flag SEPARADA de
 // NEXT_PUBLIC_FF_ACTIVE_USERS, mas só tem efeito quando ACTIVE_USERS também
 // está ligada (a interface de ciclo de vida — suspender/reativar/desligar/
@@ -49,6 +58,7 @@
 
 export const REMOTE_STAGES_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_stages';
 export const REMOTE_LEADS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_leads';
+export const REMOTE_TASKS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_tasks';
 export const PLATFORM_ADMIN_DEV_OVERRIDE_KEY = 'autocrm_ff_platform_admin';
 export const ACTIVE_USERS_DEV_OVERRIDE_KEY = 'autocrm_ff_active_users';
 export const USER_EMAIL_EDIT_DEV_OVERRIDE_KEY = 'autocrm_ff_user_email_edit';
@@ -97,6 +107,15 @@ export function isRemoteStagesEnabled(): boolean {
 
 export function isRemoteLeadsEnabled(): boolean {
   return resolveFlag(process.env.NEXT_PUBLIC_FF_REMOTE_LEADS, REMOTE_LEADS_DEV_OVERRIDE_KEY);
+}
+
+// COMMERCIAL-REMOTE-B1 — NEXT_PUBLIC_FF_REMOTE_TASKS (mesmo contrato de
+// isRemoteStagesEnabled/isRemoteLeadsEnabled). Só o valor bruto da própria
+// flag — a combinação com o estado de Leads/Stages (rollout parcial vs.
+// misconfiguration) é decisão de lib/tasks/remoteTasksMode.ts, nunca desta
+// função.
+export function isRemoteTasksEnabled(): boolean {
+  return resolveFlag(process.env.NEXT_PUBLIC_FF_REMOTE_TASKS, REMOTE_TASKS_DEV_OVERRIDE_KEY);
 }
 
 export function isPlatformAdminEnabled(): boolean {
