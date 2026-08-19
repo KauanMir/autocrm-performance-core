@@ -13,7 +13,6 @@ import {
   PipelineService,
   SaleService,
   SellerService,
-  TaskService,
   VisitService,
 } from '@/lib/services';
 import { isRemoteLeadsError } from '@/lib/leads/errors';
@@ -325,9 +324,9 @@ describe('seam — flag ON NÃO bloqueia domínios fora de leads/comercial local
   });
 });
 
-// ── E. Flag ON — módulos comerciais locais (Visit/Deal/Sale/Task/Seller)
+// ── E. Flag ON — módulos comerciais locais (Visit/Deal/Sale/Seller)
 // bloqueados (M1-E E5-B2-A1 + E7-B1) ─────────────────────────────────────
-// Achado da auditoria E5-B2-A0: Visit/Deal/Sale/Task não têm company_id nem
+// Achado da auditoria E5-B2-A0: Visit/Deal/Sale não têm company_id nem
 // backend remoto — mantê-los graváveis sob flag ON (comportamento antigo,
 // coberto no describe acima até esta etapa) arriscava registros órfãos
 // referenciando um Lead que só existe no Supabase. Bloqueados via
@@ -338,8 +337,17 @@ describe('seam — flag ON NÃO bloqueia domínios fora de leads/comercial local
 // E7-A0) — todos os callers de UI foram corrigidos antes deste guard
 // (Home, TweaksPanel, FlowPerfilVendedor, FlowNotificacoes, FlowBusca,
 // ScreenResultados).
+//
+// COMMERCIAL-REMOTE-B1-B3-A: TaskService SAIU desta lista — Task agora tem
+// backend remoto e um guard PRÓPRIO (assertLocalTaskDataAllowed, chaveado
+// em resolveTaskRemoteMode(), nunca mais assertLocalCommercialDataAllowed).
+// TaskService.create/update continuam bloqueados fora de task_local, mas
+// com um código de erro diferente (remote_task_local_data_disabled); e
+// TaskService.getAll() deixou de lançar nesse cenário — vira [] (seam
+// síncrono chamado mid-render, nunca pode lançar). Cobertura dedicada em
+// tests/tasks/taskServiceRemoteRead.test.ts.
 
-describe('seam — flag ON bloqueia módulos comerciais locais (Visit/Deal/Sale/Task/Seller)', () => {
+describe('seam — flag ON bloqueia módulos comerciais locais (Visit/Deal/Sale/Seller)', () => {
   beforeEach(() => {
     mocks.isRemoteLeadsEnabled.mockReturnValue(true);
     getStore();
@@ -366,12 +374,6 @@ describe('seam — flag ON bloqueia módulos comerciais locais (Visit/Deal/Sale/
     })],
     ['SaleService.cancel', () => SaleService.cancel('sa1')],
     ['SaleService.getAll', () => SaleService.getAll()],
-    ['TaskService.create', () => TaskService.create({
-      title: 'Ligar para C', lead: 'C', leadId: null, assignedTo: 's1',
-      when: 'hoje', prio: 'alta', state: 'hoje', note: 'seam',
-    })],
-    ['TaskService.update', () => TaskService.update('t1', { note: 'x' })],
-    ['TaskService.getAll', () => TaskService.getAll()],
     ['SellerService.getAll', () => SellerService.getAll()],
     ['SellerService.getById', () => SellerService.getById('s1')],
     ['SellerService.getCurrentSeller', () => SellerService.getCurrentSeller()],

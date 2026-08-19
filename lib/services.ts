@@ -11,6 +11,11 @@ import { isRemoteLeadsEnabled } from './flags';
 import { getRemoteLeadSnapshot, type RemoteLeadSnapshot } from './leads/remoteSnapshot';
 import { RemoteLeadsError } from './leads/errors';
 import { assertLocalCommercialDataAllowed } from './leads/localCommercialAccess';
+import { resolveTaskRemoteMode } from './tasks/remoteTasksMode';
+import { assertLocalTaskDataAllowed } from './tasks/localTaskAccess';
+import { getRemoteTaskSnapshot } from './tasks/remoteTaskSnapshot';
+import { deriveRemoteTasks } from './tasks/deriveRemoteTasks';
+import { isTaskAdapterError, type TaskLeadRef } from './tasks/taskAdapter';
 
 // ── AuthService — Supabase Auth + profiles (M1-B) ───────────────────────
 // Login/logout/session now talk to Supabase Auth for real; the old
@@ -613,22 +618,91 @@ export const SaleService = {
 };
 
 // ── TaskService ───────────────────────────────────────────────────────
-// M1-E E5-B2-A1: mesmo isolamento — Task não tem company_id nem backend
-// remoto. Cobre também "acompanhamento" (FlowCriarAcompanhamento/
-// FlowNovaPendencia/FlowReagendarPendencia são só Task por baixo).
+// COMMERCIAL-REMOTE-B1-B3-A: Task agora TEM backend remoto (migration #51 —
+// RPCs create_task/update_task/complete_task, RLS, RemoteTaskSnapshot). O
+// que continua verdade do achado M1-E E5-B2-A1 é só a metade local: Task
+// (lib/data.ts) não tem company_id e é persistida em localStorage GLOBAL —
+// por isso local writes continuam isolados fail-closed, agora pelo guard
+// PRÓPRIO de Tasks (assertLocalTaskDataAllowed, chaveado em
+// resolveTaskRemoteMode(), nunca mais assertLocalCommercialDataAllowed,
+// que é chaveado no modo de LEADS). Cobre também "acompanhamento"
+// (FlowCriarAcompanhamento/FlowNovaPendencia/FlowReagendarPendencia/
+// FlowLigar são só Task por baixo) — nenhuma dessas flows foi alterada
+// nesta etapa, todas continuam no caminho local.
+//
+// Remote writes (create/update/complete) NUNCA passam por TaskService —
+// só pelos mutation hooks (useCreateTask/useUpdateTask/useCompleteTask).
+// TaskService.create/update permanecem local-only: bloqueados em qualquer
+// modo que não seja task_local, nunca executam RPC.
+//
+// Remote READ é a única capacidade nova aqui: getAll() ganha um branch
+// síncrono que lê exclusivamente o RemoteTaskSnapshot já populado pela
+// bridge (lib/tasks/taskBridge.ts, montada em lote posterior) — nunca
+// network, nunca fetch, nunca RPC dentro deste service. getAll() é um seam
+// síncrono legado, chamado hoje mid-render (ScreenPendencias/Home/Rail) —
+// por isso NUNCA lança para blocked/misconfigured/absent/adapter-failure,
+// sempre retorna [] nesses casos (throw ficaria reservado para os writes).
+function _taskRemoteOwnerContext(): { companyId: string; identityKey: string } | null {
+  const user = AuthService.getCurrentUser();
+  const companyId = user?.activeMembership?.companyId ?? null;
+  const identityKey = user?.id ?? null;
+  const membershipRole = user?.activeMembership?.role ?? null;
+  if (!companyId || !identityKey || (membershipRole !== 'manager' && membershipRole !== 'seller')) {
+    return null;
+  }
+  return { companyId, identityKey };
+}
+
+// Rows brutas → RemoteTaskModel[] compatível com Task (lib/tasks/
+// taskAdapter.ts). Lead ausente do snapshot (ou snapshot de Leads ainda
+// não populado) nunca bloqueia a Task inteira — vira "Cliente
+// indisponível" via o próprio adapter, nunca um throw aqui. Falha de
+// adaptação (row remota inválida) também nunca quebra este seam — []
+// e a UI React remota (useRemoteTasksScreenState) continua sendo o único
+// canal de configError, para não criar um segundo canal de erro aqui.
+function _remoteTasksOrEmpty(): Task[] {
+  const owner = _taskRemoteOwnerContext();
+  if (!owner) return [];
+
+  const taskSnapshot = getRemoteTaskSnapshot(owner.companyId, owner.identityKey);
+  if (!taskSnapshot) return [];
+
+  const leadSnapshot = getRemoteLeadSnapshot(owner.companyId, owner.identityKey);
+  const leadsById: Record<string, TaskLeadRef> = {};
+  if (leadSnapshot) {
+    for (const lead of leadSnapshot.leads) {
+      leadsById[lead.id] = { id: lead.id, name: lead.name };
+    }
+  }
+
+  const derived = deriveRemoteTasks(taskSnapshot.rows, leadsById, new Date());
+  if (isTaskAdapterError(derived)) return [];
+  // RLS (tasks_select) já é a autoridade de visibilidade — Manager vê tudo
+  // da empresa, Seller vê o que o backend decidir (own + unassigned,
+  // conforme a RPC). Nenhum filtro local adicional (_filteredTasks/
+  // assignedTo===sellerId) é aplicado aqui: reaplicar esse filtro
+  // removeria rows legitimamente entregues pelo servidor.
+  return derived.tasks;
+}
 
 export const TaskService = {
   create: (data: TaskInput) => {
-    assertLocalCommercialDataAllowed('TaskService.create');
+    assertLocalTaskDataAllowed('TaskService.create');
     return StoreAdapter.addTask(data);
   },
   update: (id: string, changes: Partial<Task>) => {
-    assertLocalCommercialDataAllowed('TaskService.update');
+    assertLocalTaskDataAllowed('TaskService.update');
     return StoreAdapter.updateTask(id, changes);
   },
-  getAll: () => {
-    assertLocalCommercialDataAllowed('TaskService.getAll');
-    return _filteredTasks();
+  getAll: (): Task[] => {
+    const mode = resolveTaskRemoteMode();
+    if (mode === 'task_local') return _filteredTasks();
+    if (mode === 'task_remote_ready') return _remoteTasksOrEmpty();
+    // task_blocked / task_remote_misconfigured: nunca Tasks locais, nunca
+    // throw num seam síncrono chamado mid-render — [] é o único estado
+    // seguro (mesma política de LocalCommercialUnavailableCard, mas sem
+    // lançar por baixo de um caller que não faz o gate de UI antes).
+    return [];
   },
 };
 
