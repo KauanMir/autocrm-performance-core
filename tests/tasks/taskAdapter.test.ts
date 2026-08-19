@@ -38,7 +38,6 @@ function taskRow(overrides: Partial<RemoteTaskRow> = {}): RemoteTaskRow {
 function makeContext(): TaskAdapterContext {
   return {
     leadsById: { 'lead-1': { id: 'lead-1', name: 'Carlos Andrade' } },
-    sellersById: { s1: { id: 's1', name: 'Marcos Silva' } },
   };
 }
 
@@ -109,7 +108,7 @@ describe('adaptRemoteTaskRow — resolução de Lead (§7/§8 do precheck, polí
   });
 });
 
-describe('adaptRemoteTaskRow — resolução de Seller (§9)', () => {
+describe('adaptRemoteTaskRow — assignedTo (B1-B2-B1-EXEC §0/§3: sem Seller catalog, mapeamento direto)', () => {
   it('assigned_seller_id null → sem responsável, nenhum erro', () => {
     const result = adaptRemoteTaskRow(taskRow({ assigned_seller_id: null }), makeContext(), NOW);
     expect(result.ok).toBe(true);
@@ -117,20 +116,32 @@ describe('adaptRemoteTaskRow — resolução de Seller (§9)', () => {
     expect(result.task.assignedTo).toBeNull();
   });
 
-  it('assigned_seller_id presente e resolvido → mantém o id (a UI resolve nome via sellersById separadamente, mesmo padrão de assignedTo local)', () => {
+  it('assigned_seller_id presente → mapeado diretamente para assignedTo, sem lookup', () => {
     const result = adaptRemoteTaskRow(taskRow({ assigned_seller_id: 's1' }), makeContext(), NOW);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.task.assignedTo).toBe('s1');
   });
 
-  it('assigned_seller_id presente e AUSENTE do catálogo → falha controlada (DB-invariant-impossible, catálogo do Manager inclui inativos)', () => {
-    const result = adaptRemoteTaskRow(taskRow({ assigned_seller_id: 's-fantasma' }), makeContext(), NOW);
-    expect(result.ok).toBe(false);
-    if (!isTaskAdapterError(result)) return;
-    expect(result.reason).toBe('invalid_task_configuration');
-    expect(result.code).toBe('seller_not_found');
-    expect(result.taskId).toBe('task-1');
+  it('assigned_seller_id conhecido apenas como raw id, SEM nenhum catálogo de Seller disponível → adaptação PASS (nenhuma dependência de sellersById existe mais)', () => {
+    // TaskAdapterContext não tem mais campo sellersById — este teste prova
+    // que um Seller totalmente "desconhecido" do adapter (nunca poderia
+    // ser validado mesmo se quiséssemos) não impede a adaptação. A
+    // integridade real (o Seller pertence à mesma company) é garantida
+    // pelo banco (tasks_company_seller_fk), nunca por este adapter.
+    const result = adaptRemoteTaskRow(
+      taskRow({ assigned_seller_id: 's-nunca-visto-em-nenhum-catalogo' }),
+      makeContext(),
+      NOW,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.task.assignedTo).toBe('s-nunca-visto-em-nenhum-catalogo');
+  });
+
+  it('TaskAdapterContext não expõe mais sellersById (verificação de shape em compile-time)', () => {
+    const context = makeContext();
+    expect(Object.keys(context)).toEqual(['leadsById']);
   });
 });
 

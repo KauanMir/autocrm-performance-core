@@ -47,16 +47,21 @@ export interface TaskLeadRef {
   name: string;
 }
 
-// Reexporta o mesmo shape de LeadSellerRef (lib/leads/adapter.ts) sem
-// importar aquele módulo — evita acoplar o pacote de Tasks ao de Leads só
-// por um tipo estrutural idêntico; os dois lados já produzem/consomem este
-// formato ({id, name}) de qualquer forma (toSellersByIdIndex,
-// lib/leads/sellerLabelsRepository.ts).
-export interface TaskSellerRef {
-  id: string;
-  name: string;
-}
-
+// CORREÇÃO ARQUITETURAL (B1-B2-B1-EXEC §0): o adapter NÃO depende mais de
+// um catálogo de Sellers. Motivo: RemoteTaskModel nunca teve um campo de
+// nome de Seller (só `assignedTo`, o id — mesmo shape do Task legado);
+// nenhuma tela atual ou planejada exibe o nome do Seller numa Task
+// (TaskRow mostra título/nota/prazo/Lead, nunca responsável); o Manager
+// picker de FlowNovaPendencia usa outro catálogo (SellerService/
+// useCurrentCompanyAssignableSellers), nunca este adapter; e
+// TaskService/Home (B1-B3) precisam adaptar Tasks de forma síncrona, sem
+// nenhum hook React de Seller disponível fora de um componente montado —
+// exigir sellersById aqui os travaria estruturalmente. Integridade
+// Seller/company continua garantida pelo banco (tasks_company_seller_fk,
+// RLS, RPC) — o adapter nunca precisou revalidar isso, só o fazia por
+// cautela; a cautela criava uma dependência fictícia. Se uma tela futura
+// precisar exibir o nome do Seller, ela resolve na camada de
+// apresentação (como Lead name já faz via leadsById), nunca aqui.
 export interface TaskAdapterContext {
   // Lead ativo (não-arquivado) já carregado — tipicamente o snapshot
   // remoto de Leads (lib/leads/remoteSnapshot.ts), lido pelo composer
@@ -65,12 +70,6 @@ export interface TaskAdapterContext {
   // Lead arquivado, ou o catálogo ainda não ter carregado; o adapter não
   // consegue e não tenta distinguir os dois casos.
   leadsById: Readonly<Record<string, TaskLeadRef>>;
-  // Catálogo de Sellers da empresa — para Manager, inclui inativos/
-  // históricos de propósito (list_current_company_seller_labels,
-  // supabase/migrations/20260730030000_...sql:60-71), então um
-  // assigned_seller_id ausente daqui É um erro de configuração real (ver
-  // política de falha abaixo), nunca um cache incompleto.
-  sellersById: Readonly<Record<string, TaskSellerRef>>;
 }
 
 // Texto neutro deliberado (B1-B2-A-EXEC §8): NÃO afirma "arquivado" porque
@@ -83,7 +82,6 @@ export const TASK_LEAD_UNAVAILABLE_DISPLAY_VALUE = 'Cliente indisponível';
 // ── Resultado discriminado (mesmo padrão do adapter de Leads) ───────────
 
 export type TaskAdapterErrorCode =
-  | 'seller_not_found'
   | 'invalid_due_at'
   | 'invalid_priority'
   | 'invalid_status'
@@ -164,13 +162,13 @@ function adaptOne(
     leadName = lead ? lead.name : TASK_LEAD_UNAVAILABLE_DISPLAY_VALUE;
   }
 
-  // Seller: null = sem responsável (schema permite, RPC de criação não
-  // produz isso hoje, mas o adapter não assume o writer); presente-e-
-  // ausente do catálogo É erro de configuração real (catálogo do Manager
-  // inclui inativos/históricos — ver TaskAdapterContext.sellersById).
-  if (row.assigned_seller_id !== null && !context.sellersById[row.assigned_seller_id]) {
-    return { ok: false, reason: 'invalid_task_configuration', code: 'seller_not_found', taskId: row.id, rowIndex };
-  }
+  // Seller: mapeado diretamente, sem lookup/validação de catálogo (B1-B2-
+  // B1-EXEC §0/§3) — assigned_seller_id vira assignedTo tal como é. null
+  // = sem responsável (schema permite defensivamente, RPC de criação não
+  // produz isso hoje, mas o adapter não assume o writer). Nenhum
+  // fallback, nenhum nome inventado, nenhuma dependência de Seller
+  // catalog — a integridade real (Seller pertence à mesma company) já é
+  // garantida pelo banco (tasks_company_seller_fk).
 
   const state: TaskState = deriveTaskState(row.status, dueAtDate, now);
   const when = formatTaskWhen(dueAtDate, now);
