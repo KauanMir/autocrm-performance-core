@@ -661,6 +661,106 @@ export type Database = {
           },
         ]
       }
+      tasks: {
+        Row: {
+          assigned_seller_id: string | null
+          company_id: string
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          created_by: string | null
+          due_at: string
+          id: string
+          lead_id: string | null
+          note: string
+          priority: Database["public"]["Enums"]["task_priority"]
+          status: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }
+        Insert: {
+          assigned_seller_id?: string | null
+          company_id: string
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          due_at: string
+          id?: string
+          lead_id?: string | null
+          note?: string
+          priority: Database["public"]["Enums"]["task_priority"]
+          status?: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Update: {
+          assigned_seller_id?: string | null
+          company_id?: string
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          due_at?: string
+          id?: string
+          lead_id?: string | null
+          note?: string
+          priority?: Database["public"]["Enums"]["task_priority"]
+          status?: Database["public"]["Enums"]["task_status"]
+          title?: string
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_company_lead_fk"
+            columns: ["company_id", "lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "tasks_company_seller_fk"
+            columns: ["company_id", "assigned_seller_id"]
+            isOneToOne: false
+            referencedRelation: "sellers"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "tasks_completed_by_fk"
+            columns: ["company_id", "completed_by"]
+            isOneToOne: false
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
+          },
+          {
+            foreignKeyName: "tasks_created_by_fk"
+            columns: ["company_id", "created_by"]
+            isOneToOne: false
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
+          },
+          {
+            foreignKeyName: "tasks_updated_by_fk"
+            columns: ["company_id", "updated_by"]
+            isOneToOne: false
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -877,6 +977,33 @@ export type Database = {
           success: boolean
         }[]
       }
+      complete_task: {
+        Args: { p_expected_version: number; p_id: string }
+        Returns: {
+          assigned_seller_id: string | null
+          company_id: string
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          created_by: string | null
+          due_at: string
+          id: string
+          lead_id: string | null
+          note: string
+          priority: Database["public"]["Enums"]["task_priority"]
+          status: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_company: {
         Args: {
           p_cnpj?: string
@@ -958,6 +1085,40 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "leads"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_task: {
+        Args: {
+          p_assigned_seller_id?: string
+          p_due_at: string
+          p_lead_id?: string
+          p_note?: string
+          p_priority: Database["public"]["Enums"]["task_priority"]
+          p_title: string
+        }
+        Returns: {
+          assigned_seller_id: string | null
+          company_id: string
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          created_by: string | null
+          due_at: string
+          id: string
+          lead_id: string | null
+          note: string
+          priority: Database["public"]["Enums"]["task_priority"]
+          status: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -1319,6 +1480,16 @@ export type Database = {
           retry_after_seconds: number
         }[]
       }
+      resolve_commercial_mutation_context: {
+        Args: never
+        Returns: {
+          actor_kind: string
+          actor_profile_id: string
+          actor_seller_id: string
+          company_status: Database["public"]["Enums"]["company_status"]
+          resolved_company_id: string
+        }[]
+      }
       resolve_lead_mutation_context: {
         Args: { p_company_id?: string; p_read_only?: boolean }
         Returns: {
@@ -1461,6 +1632,41 @@ export type Database = {
           updated_at: string
         }[]
       }
+      update_task: {
+        Args: {
+          p_assigned_seller_id: string
+          p_due_at: string
+          p_expected_version: number
+          p_id: string
+          p_note: string
+          p_priority: Database["public"]["Enums"]["task_priority"]
+          p_title: string
+        }
+        Returns: {
+          assigned_seller_id: string | null
+          company_id: string
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          created_by: string | null
+          due_at: string
+          id: string
+          lead_id: string | null
+          note: string
+          priority: Database["public"]["Enums"]["task_priority"]
+          status: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       validate_invite_token: {
         Args: { p_token_hash: string }
         Returns: {
@@ -1505,6 +1711,8 @@ export type Database = {
       lead_urgency: "red" | "amber" | "green"
       membership_lifecycle_status: "active" | "suspended" | "offboarded"
       platform_role: "super_admin"
+      task_priority: "alta" | "media" | "baixa"
+      task_status: "pending" | "completed"
       user_role: "admin" | "manager" | "seller"
     }
     CompositeTypes: {
@@ -1672,6 +1880,8 @@ export const Constants = {
       lead_urgency: ["red", "amber", "green"],
       membership_lifecycle_status: ["active", "suspended", "offboarded"],
       platform_role: ["super_admin"],
+      task_priority: ["alta", "media", "baixa"],
+      task_status: ["pending", "completed"],
       user_role: ["admin", "manager", "seller"],
     },
   },
