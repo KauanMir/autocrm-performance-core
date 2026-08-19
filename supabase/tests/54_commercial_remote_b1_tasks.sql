@@ -82,16 +82,16 @@ insert into public.leads (id, company_id, name, phone, car, stage_id, seller_id)
 select has_table('public', 'tasks', 'tabela public.tasks existe');
 
 select is(
-  (select array_agg(enumlabel order by enumsortorder)
+  (select array_agg(enumlabel::text order by enumsortorder)
      from pg_enum e join pg_type t on t.oid = e.enumtypid
     where t.typname = 'task_priority'),
-  array['alta','media','baixa'],
+  array['alta','media','baixa']::text[],
   'task_priority: exatamente alta/media/baixa, nesta ordem');
 select is(
-  (select array_agg(enumlabel order by enumsortorder)
+  (select array_agg(enumlabel::text order by enumsortorder)
      from pg_enum e join pg_type t on t.oid = e.enumtypid
     where t.typname = 'task_status'),
-  array['pending','completed'],
+  array['pending','completed']::text[],
   'task_status: exatamente pending/completed (sem late/today/upcoming)');
 
 select col_not_null('public', 'tasks', 'company_id', 'company_id NOT NULL');
@@ -273,8 +273,11 @@ select throws_ok(
     (select id from public.tasks where title = 'T1R ManagerReassign')),
   'task_completed', 'Manager: update_task numa Task concluida e negado (imutavel neste B1)');
 
-select ok(
-  (select t.id from public.create_task('T4 ManagerCreated A2', 'media', now() + interval '1 day', 'b1tSellerA2') t) is not null,
+-- id capturado agora (Manager enxerga T4) porque Seller A1/Manager B/Super
+-- Admin/anon, mais abaixo, NAO enxergam T4 via SELECT (RLS) — um lookup por
+-- titulo sob esses papeis retornaria NULL e mascararia o teste pretendido.
+select t.id as t4_id from public.create_task('T4 ManagerCreated A2', 'media', now() + interval '1 day', 'b1tSellerA2') t \gset
+select ok(:'t4_id' is not null,
   'Manager: create_task T4 para Seller A2 (usado nos testes de isolamento de Seller abaixo)');
 
 reset role;
@@ -289,9 +292,12 @@ set local role authenticated;
 select is(
   (select t.assigned_seller_id from public.create_task('T2 SellerA1 Self', 'media', now() + interval '1 day') t),
   'b1tSellerA1', 'Seller: create_task sem assigned_seller_id normaliza para o proprio seller');
-select is(
-  (select t.assigned_seller_id from public.create_task('T3 SellerA1 Explicit', 'baixa', now() + interval '1 day', 'b1tSellerA1') t),
-  'b1tSellerA1', 'Seller: create_task informando o proprio seller_id explicitamente funciona');
+-- id capturado agora (Seller A1 enxerga a propria T3) porque Manager B/Super
+-- Admin/anon, mais abaixo, NAO enxergam T3 via SELECT (RLS/grants) — um
+-- lookup por titulo sob esses papeis retornaria NULL/erro e mascararia o
+-- teste pretendido (cross-company/Super Admin/anon).
+select t.id as t3_id, t.assigned_seller_id as t3_seller from public.create_task('T3 SellerA1 Explicit', 'baixa', now() + interval '1 day', 'b1tSellerA1') t \gset
+select is(:'t3_seller'::text, 'b1tSellerA1'::text, 'Seller: create_task informando o proprio seller_id explicitamente funciona');
 select throws_ok(
   $$select public.create_task('Para outro seller', 'media', now(), 'b1tSellerA2')$$,
   'forbidden', 'Seller: create_task para outro Seller e negado');
@@ -308,20 +314,19 @@ select is(
 
 select ok(
   (select t.due_at from public.update_task(
-    (select id from public.tasks where title = 'T3 SellerA1 Explicit'), 1,
+    :'t3_id', 1,
     'T3 SellerA1 Explicit', 'nota atualizada', 'alta', now() + interval '5 days', 'b1tSellerA1') t) is not null,
   'Seller: update_task na propria Task funciona');
 
 select throws_ok(
-  format($$select public.update_task(%L, 1, 'x', '', 'media', now(), 'b1tSellerA2')$$,
-    (select id from public.tasks where title = 'T4 ManagerCreated A2')),
+  format($$select public.update_task(%L, 1, 'x', '', 'media', now(), 'b1tSellerA2')$$, :'t4_id'),
   'forbidden', 'Seller: update_task em Task de outro Seller e negado');
 select throws_ok(
   format($$select public.update_task(%L, 2, 'T2 SellerA1 Self', '', 'media', now(), 'b1tSellerA2')$$,
     (select id from public.tasks where title = 'T2 SellerA1 Self')),
   'forbidden', 'Seller: update_task tentando reatribuir a propria Task para outro Seller e negado');
 select throws_ok(
-  format($$select public.complete_task(%L, 1)$$, (select id from public.tasks where title = 'T4 ManagerCreated A2')),
+  format($$select public.complete_task(%L, 1)$$, :'t4_id'),
   'forbidden', 'Seller: complete_task em Task de outro Seller e negado');
 
 select ok(
@@ -341,11 +346,10 @@ select is(
   (select count(*)::int from public.tasks where title in ('T1 ManagerCreated A1','T3 SellerA1 Explicit','T4 ManagerCreated A2')),
   0, 'Manager B (CA2): nenhuma Task de CA1 e visivel (isolamento por company_id)');
 select throws_ok(
-  format($$select public.update_task(%L, 1, 'x', '', 'media', now(), 'b1tSellerA1')$$,
-    (select id from public.tasks where title = 'T3 SellerA1 Explicit')),
+  format($$select public.update_task(%L, 1, 'x', '', 'media', now(), 'b1tSellerA1')$$, :'t3_id'),
   'task_not_found', 'Manager B: update_task numa Task de outra empresa (id existe, company nao) e negado como task_not_found');
 select throws_ok(
-  format($$select public.complete_task(%L, 1)$$, (select id from public.tasks where title = 'T3 SellerA1 Explicit')),
+  format($$select public.complete_task(%L, 1)$$, :'t3_id'),
   'task_not_found', 'Manager B: complete_task numa Task de outra empresa e negado como task_not_found');
 reset role;
 
@@ -369,11 +373,10 @@ select throws_ok(
   $$select public.create_task('x', 'media', now(), 'b1tSellerA1')$$,
   'forbidden', 'Super Admin: create_task negado (Tasks nao tem superficie de Super Admin neste B1)');
 select throws_ok(
-  format($$select public.update_task(%L, 1, 'x', '', 'media', now(), 'b1tSellerA1')$$,
-    (select id from public.tasks where title = 'T3 SellerA1 Explicit')),
+  format($$select public.update_task(%L, 1, 'x', '', 'media', now(), 'b1tSellerA1')$$, :'t3_id'),
   'forbidden', 'Super Admin: update_task negado');
 select throws_ok(
-  format($$select public.complete_task(%L, 1)$$, (select id from public.tasks where title = 'T3 SellerA1 Explicit')),
+  format($$select public.complete_task(%L, 1)$$, :'t3_id'),
   'forbidden', 'Super Admin: complete_task negado');
 select is(
   (select count(*)::int from public.tasks),
@@ -433,11 +436,10 @@ set local role anon;
 select throws_ok($$select count(*) from public.tasks$$, '42501', null, 'anon: SELECT direto em tasks falha');
 select throws_ok($$select public.create_task('x', 'media', now())$$, '42501', null, 'anon: create_task falha (sem EXECUTE)');
 select throws_ok(
-  format($$select public.update_task(%L, 1, 'x', '', 'media', now(), 'b1tSellerA1')$$,
-    (select id from public.tasks where title = 'T3 SellerA1 Explicit')),
+  format($$select public.update_task(%L, 1, 'x', '', 'media', now(), 'b1tSellerA1')$$, :'t3_id'),
   '42501', null, 'anon: update_task falha (sem EXECUTE)');
 select throws_ok(
-  format($$select public.complete_task(%L, 1)$$, (select id from public.tasks where title = 'T3 SellerA1 Explicit')),
+  format($$select public.complete_task(%L, 1)$$, :'t3_id'),
   '42501', null, 'anon: complete_task falha (sem EXECUTE)');
 reset role;
 
