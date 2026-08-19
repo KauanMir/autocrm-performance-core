@@ -10,6 +10,8 @@ import { canAccessStageSettings, canAccessPlatformAdmin, canManageInvites, canAc
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { useQueryCacheIdentity } from '@/lib/hooks/useQueryCacheIdentity';
 import { useLeadsRemoteBridgeLifecycle } from '@/lib/hooks/useLeadsRemoteBridgeLifecycle';
+import { useTasksRemoteBridgeLifecycle } from '@/lib/hooks/useTasksRemoteBridgeLifecycle';
+import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState';
 import { CommercialCompanyProvider } from '@/lib/commercial/CommercialCompanyContext';
 import { subscribeStore } from '@/lib/store';
 import { AuthService, SellerService, TaskService } from '@/lib/services';
@@ -141,12 +143,31 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
       : currentUser.activeMembership?.role === 'seller'
         ? 'Vendedor'
         : 'Gerente';
-  // M1-E E7-A1: TaskService (Tarefas) não tem backend remoto (achado do
-  // E5-B2-A0/E7-A0) — fora do modo local o badge nunca é calculado, nunca
-  // vira "0" (que pareceria um dado real de "zero pendências atrasadas").
-  // Live count (RBAC-filtered by TaskService.getAll itself) — replaces the
-  // hardcoded badge:3 that never moved regardless of real pendências (M0-K2).
-  const lateTasks = remoteMode ? null : TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length;
+  // COMMERCIAL-REMOTE-B1-B3-B: badge de Pendências usa a fonte de verdade
+  // PRÓPRIA de Tasks (useRemoteTasksScreenState → resolveTaskRemoteMode),
+  // nunca mais `remoteMode` (linha acima, modo de LEADS) como proxy — os
+  // dois são independentes (task_blocked existe exatamente para Leads já
+  // remoto + Tasks ainda local). Chamado INCONDICIONALMENTE (Rules of
+  // Hooks) — o hook decide sozinho, por dentro, se falta identidade ou se
+  // deve montar a query; nunca um `if` em volta dele aqui.
+  const remoteTasksScreen = useRemoteTasksScreenState(currentUser);
+  const tasksActiveReady =
+    remoteTasksScreen.mode === 'task_remote_active'
+    && !remoteTasksScreen.isLoading
+    && !remoteTasksScreen.isError
+    && remoteTasksScreen.configError === null;
+  // task_local: seam síncrono local intocado (TaskService.getAll(), mesmo
+  // comportamento de sempre). Qualquer outro estado fora de
+  // task_remote_active-e-pronto (blocked/misconfigured/unavailable-
+  // identity/loading/erro/configError): badge ausente — nunca Tasks
+  // locais, nunca contagem antiga (REMOTE != LOCAL FALLBACK, mesmo
+  // contrato já usado no resto do B1-B3).
+  const lateTasks =
+    remoteTasksScreen.mode === 'task_local'
+      ? TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length
+      : tasksActiveReady
+        ? remoteTasksScreen.tasks.filter((t) => t.state === TASK_STATE.LATE).length
+        : null;
 
   return (
     <aside style={{ width: 236, flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', background: 'linear-gradient(180deg,#0b0b0c,#070708)', borderRight: '1px solid rgba(255,255,255,.06)' }}>
@@ -167,8 +188,9 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
       <nav style={{ position: 'relative', flex: 1, overflowY: 'auto', padding: '6px 14px' }}>
         {(NAV as any[]).filter((item: any) => allowedIds.includes(item.id)).map((item: any) => {
           const on = current === item.id;
-          // M1-E E7-A1: lateTasks é null em modo remoto (Tarefas sem
-          // backend remoto) — badge nunca vira "0" fictício, o span some.
+          // lateTasks é null fora de task_local/task_remote_active-pronto
+          // (blocked/misconfigured/unavailable-identity/loading/erro/
+          // configError) — badge nunca vira "0" fictício, o span some.
           const badge = item.id === 'pendencias' ? lateTasks : 0;
           return (
             <button key={item.id} onClick={() => go(item.id)} style={{
@@ -249,6 +271,17 @@ export function App() {
   // identidade (logout, troca de usuário/empresa/membership, desativação da
   // flag) — ver lib/hooks/useLeadsRemoteBridgeLifecycle.ts.
   useLeadsRemoteBridgeLifecycle(currentUser);
+
+  // COMMERCIAL-REMOTE-B1-B3-B: único ponto de montagem da bridge de Tasks
+  // remotas — mesmo molde de useLeadsRemoteBridgeLifecycle acima (nunca
+  // dentro de ScreenPendencias/Home/Rail). O bridge é passivo (nunca faz
+  // fetch por conta própria, lib/tasks/taskBridge.ts) — a query ativa vem
+  // de quem monta useRemoteTasksScreenState (Rail, a partir deste lote).
+  // notify reusa o MESMO _setTick já usado por subscribeStore (linha
+  // abaixo): Home e ScreenPendencias ainda leem TaskService.getAll() em
+  // render (não migraram nesta etapa) — precisam rerenderizar quando o
+  // snapshot mudar, mesmo depois de Rail deixar de depender dele.
+  useTasksRemoteBridgeLifecycle(currentUser, () => _setTick(n => n + 1));
 
   const go = (id: string) => {
     if (!currentUser) return;

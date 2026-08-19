@@ -34,6 +34,12 @@ vi.mock('@/lib/services', () => ({
   },
   SellerService: { getAll: () => [], getById: () => null },
   TaskService: { getAll: () => [] },
+  // COMMERCIAL-REMOTE-B1-B3-B: Rail agora chama useRemoteTasksScreenState,
+  // que compõe useRemoteLeadsScreenState → usePipelineStages, que lê
+  // PipelineService.getStages() de forma síncrona e incondicional (mesmo
+  // em modo local) — precisa existir no mock mesmo quando o teste não usa
+  // Pipeline/Leads diretamente.
+  PipelineService: { getStages: () => [] },
 }));
 
 vi.mock('@/components/ui/TweaksPanel', () => ({

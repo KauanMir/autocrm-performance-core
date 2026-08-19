@@ -9,9 +9,18 @@
 // de tests/navigation/appCacheIdentity.test.tsx, mas SEM mockar Home.
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
+
+// Badge de Pendências escopado ao próprio botão de nav — evita colidir com
+// qualquer outro "2"/número solto renderizado por Home (não mockada neste
+// arquivo) em telas que não são o foco deste teste.
+function pendenciasBadge(): HTMLElement | null {
+  const button = screen.getByText('Pendências').closest('button')!;
+  return within(button).queryByText(/^\d+$/);
+}
 
 beforeEach(() => {
   (Element.prototype as any).scrollTo = () => {};
@@ -19,6 +28,8 @@ beforeEach(() => {
 
 const m = vi.hoisted(() => ({
   useRemoteLeadsScreenState: vi.fn(),
+  useRemoteTasksScreenState: vi.fn(),
+  useTasksRemoteBridgeLifecycle: vi.fn(),
   isRemoteLeadsEnabled: vi.fn(),
   isRemoteStagesEnabled: vi.fn(),
   restoredUser: { current: null as User | null },
@@ -35,11 +46,28 @@ vi.mock('@/lib/hooks/useRemoteLeadsScreenState', () => ({
   useRemoteLeadsScreenState: m.useRemoteLeadsScreenState,
 }));
 
+// COMMERCIAL-REMOTE-B1-B3-B: Rail agora chama useRemoteTasksScreenState
+// diretamente — mockado aqui pelo mesmo motivo/padrão de
+// useRemoteLeadsScreenState acima (controlar o mode deterministicamente
+// sem depender de lib/flags/QueryClient real).
+vi.mock('@/lib/hooks/useRemoteTasksScreenState', () => ({
+  useRemoteTasksScreenState: m.useRemoteTasksScreenState,
+}));
+
 // A bridge não é mockada por conveniência: é removida do caminho de Home
 // por definição (achado do E7-A0/objetivo do E7-A1) — este teste prova que
 // o shell nunca precisa dela para renderizar a Home remota.
 vi.mock('@/lib/hooks/useLeadsRemoteBridgeLifecycle', () => ({
   useLeadsRemoteBridgeLifecycle: () => {},
+}));
+
+// useTasksRemoteBridgeLifecycle é um spy (não um no-op fixo) — a suíte "App
+// — Task bridge lifecycle mount" abaixo verifica com quais argumentos o App
+// realmente o chama. A lógica INTERNA do hook já tem cobertura própria em
+// tests/hooks/useTasksRemoteBridgeLifecycle.test.tsx — não é reexercitada
+// aqui, só o wiring (App chama o hook, com currentUser e um notify).
+vi.mock('@/lib/hooks/useTasksRemoteBridgeLifecycle', () => ({
+  useTasksRemoteBridgeLifecycle: m.useTasksRemoteBridgeLifecycle,
 }));
 
 vi.mock('@/lib/flags', async (importOriginal) => {
@@ -142,6 +170,17 @@ function screenState(mode: string, over: {
   return { mode, pipeline: pipelineResult(over.pipeline), sellerLabels: sellerLabelsResult(over.sellerLabels), leads: leadsResult(over.leads) };
 }
 
+// COMMERCIAL-REMOTE-B1-B3-B: shape de UseRemoteTasksScreenStateResult
+// (lib/hooks/useRemoteTasksScreenState.ts) — mesmo padrão de screenState()
+// acima, para os testes de badge do Rail.
+function taskScreenState(mode: string, over: Partial<Record<string, unknown>> = {}) {
+  return {
+    mode, tasks: [], isLoading: false, isFetching: false, isError: false, error: null,
+    configError: null, isEmpty: false, hasData: false, refetch: vi.fn(),
+    ...over,
+  };
+}
+
 const DEFAULT_SELLERS = [
   { id: 's1', name: 'Marcos Silva', first: 'Marcos', team: 'Seminovos', leads: 10, scheduled: 2, visits: 5, sales: 8, conv: 40, move: 0 },
   { id: 's2', name: 'Ana Souza', first: 'Ana', team: 'Novos', leads: 8, scheduled: 1, visits: 4, sales: 6, conv: 35, move: 1 },
@@ -166,6 +205,12 @@ beforeEach(() => {
   m.sellerServiceGetAll.mockReset().mockReturnValue(DEFAULT_SELLERS);
   m.sellerServiceGetById.mockReset().mockReturnValue(null);
   m.useRemoteLeadsScreenState.mockReset();
+  // Default deliberado: um mode de Tasks que NUNCA chama TaskService.getAll()
+  // nem renderiza badge (task_blocked) — preserva o comportamento observável
+  // de todos os testes pré-existentes deste arquivo (nenhum deles configura
+  // o mode de Tasks explicitamente, exceto os describes G/H, que sobrescrevem).
+  m.useRemoteTasksScreenState.mockReset().mockReturnValue(taskScreenState('task_blocked'));
+  m.useTasksRemoteBridgeLifecycle.mockReset();
   m.isRemoteLeadsEnabled.mockReset().mockReturnValue(false);
   m.isRemoteStagesEnabled.mockReset().mockReturnValue(false);
   m.restoredUser.current = null;
@@ -268,6 +313,7 @@ describe('App (shell) — Rail no caminho local (REMOTE_LEADS=false)', () => {
     m.isRemoteStagesEnabled.mockReturnValue(false);
     m.restoredUser.current = manager();
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_local'));
     m.taskServiceGetAll.mockReturnValue([{ id: 't1', state: 'late' }, { id: 't2', state: 'late' }]);
 
     renderApp();
@@ -308,5 +354,128 @@ describe('App (shell) — Rail no caminho remoto', () => {
     // "Gerente" (rótulo errado para um Seller) por falta do team local.
     expect(screen.getByText('Vendedor')).toBeInTheDocument();
     expect(m.sellerServiceGetById).not.toHaveBeenCalled();
+  });
+});
+
+// ── I. Rail — badge de Tasks remoto (COMMERCIAL-REMOTE-B1-B3-B) ───────────
+describe('App (shell) — Rail: badge de Tasks por mode remoto', () => {
+  it('task_remote_active com dado: badge conta LATE remoto, TaskService.getAll nunca chamado', async () => {
+    m.restoredUser.current = manager();
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { leads: { hasData: true, isEmpty: false } }));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true,
+      tasks: [
+        { id: 't1', state: TASK_STATE.LATE },
+        { id: 't2', state: TASK_STATE.LATE },
+        { id: 't3', state: TASK_STATE.TODAY },
+      ],
+    }));
+
+    renderApp();
+    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    expect(pendenciasBadge()?.textContent).toBe('2');
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  // §31 do EXEC: prova direta do corte — mesmo com o TaskService (mock)
+  // "contendo" 99 Tasks atrasadas, o badge remoto usa exclusivamente
+  // remote.tasks (2 LATE), nunca TaskService.getAll().
+  it('badge remoto ignora TaskService.getAll() mesmo quando ele teria dado errado', async () => {
+    m.restoredUser.current = manager();
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { leads: { hasData: true, isEmpty: false } }));
+    m.taskServiceGetAll.mockReturnValue(
+      Array.from({ length: 99 }, (_, i) => ({ id: `stale-${i}`, state: TASK_STATE.LATE })),
+    );
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true,
+      tasks: [
+        { id: 't1', state: TASK_STATE.LATE },
+        { id: 't2', state: TASK_STATE.LATE },
+      ],
+    }));
+
+    renderApp();
+    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    expect(pendenciasBadge()?.textContent).toBe('2');
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('task_remote_active + isLoading: badge ausente, nunca número stale/local', async () => {
+    m.restoredUser.current = manager();
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { leads: { hasData: true, isEmpty: false } }));
+    m.taskServiceGetAll.mockReturnValue([{ id: 't1', state: TASK_STATE.LATE }]);
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isLoading: true }));
+
+    renderApp();
+    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    expect(pendenciasBadge()).toBeNull();
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('task_remote_active + isError: badge ausente, sem fallback local', async () => {
+    m.restoredUser.current = manager();
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { leads: { hasData: true, isEmpty: false } }));
+    m.taskServiceGetAll.mockReturnValue([{ id: 't1', state: TASK_STATE.LATE }]);
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isError: true, error: new Error('x') }));
+
+    renderApp();
+    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    expect(pendenciasBadge()).toBeNull();
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('task_remote_active + configError: badge ausente', async () => {
+    m.restoredUser.current = manager();
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { leads: { hasData: true, isEmpty: false } }));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      configError: { ok: false, reason: 'invalid_task_configuration', code: 'invalid_priority', taskId: 't1', rowIndex: 0 },
+    }));
+
+    renderApp();
+    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    expect(pendenciasBadge()).toBeNull();
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['task_blocked'],
+    ['task_remote_misconfigured'],
+    ['task_remote_unavailable_identity'],
+  ] as const)('%s: badge ausente, TaskService.getAll não chamado', async (mode) => {
+    m.restoredUser.current = manager();
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { leads: { hasData: true, isEmpty: false } }));
+    m.taskServiceGetAll.mockReturnValue([{ id: 't1', state: TASK_STATE.LATE }]);
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState(mode));
+
+    renderApp();
+    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    expect(pendenciasBadge()).toBeNull();
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+  });
+});
+
+// ── J. App — Task bridge lifecycle mount (COMMERCIAL-REMOTE-B1-B3-B) ──────
+// Teste de wiring simples: prova que o App monta useTasksRemoteBridgeLifecycle
+// com currentUser (incluindo null, pré-auth) e um notify — a lógica INTERNA
+// do hook já está coberta em tests/hooks/useTasksRemoteBridgeLifecycle.test.tsx,
+// não é reexercitada aqui.
+describe('App — Task bridge lifecycle mount', () => {
+  it('chamado com currentUser=null antes da sessão resolver, depois com o usuário real — sempre com um notify', async () => {
+    m.restoredUser.current = manager();
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { leads: { hasData: true, isEmpty: false } }));
+
+    renderApp();
+
+    // Primeiro render: restoreSession() ainda não resolveu (currentUser
+    // começa null em App.tsx) — o hook é chamado incondicionalmente mesmo
+    // assim, nunca dentro de um `if (currentUser)`.
+    expect(m.useTasksRemoteBridgeLifecycle.mock.calls[0][0]).toBeNull();
+    expect(m.useTasksRemoteBridgeLifecycle.mock.calls[0][1]).toEqual(expect.any(Function));
+
+    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+
+    const lastCall = m.useTasksRemoteBridgeLifecycle.mock.calls.at(-1)!;
+    expect(lastCall[0]).toEqual(manager());
+    expect(lastCall[1]).toEqual(expect.any(Function));
   });
 });
