@@ -8,6 +8,7 @@ import { AuthService, SellerService, LeadService, VisitService, DealService, Sal
 import { VISIT_STATUS, DEAL_STATUS, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
+import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
@@ -68,6 +69,41 @@ function useHomeLeadsSummary(currentUser: User | null): HomeLeadsSummary {
     status: 'ready',
     totalLeads: leads.leads.length,
     delayedLeads: leads.leads.filter((l) => l.urgency === 'red').length,
+  };
+}
+
+// COMMERCIAL-REMOTE-B1-B3-G — resumo de Tasks da Home, independente de
+// leadsSummary (achado do G-PRECHECK: o card de pendências usava
+// leadsSummary.status como proxy incorreto — Tasks tem modo remoto
+// próprio, resolveTaskRemoteMode(), desde B1-B3-A). Mesmo padrão de
+// useHomeLeadsSummary: wrapper fino sobre a composição já pronta
+// (useRemoteTasksScreenState → useTasks/useAdaptedRemoteTasks), chamada
+// SEMPRE (Rules of Hooks), nenhuma query nova, nenhum dado local dentro
+// do hook — 'local' só sinaliza o modo; a contagem local continua sendo
+// lida no ponto visual (UrgentAttention), igual ao padrão de Leads.
+type HomeTasksSummary =
+  | { status: 'local' }
+  | { status: 'unavailable' }
+  | { status: 'loading' }
+  | { status: 'error'; retry: () => void }
+  | { status: 'ready'; lateCount: number };
+
+function useHomeTasksSummary(currentUser: User | null): HomeTasksSummary {
+  const remote = useRemoteTasksScreenState(currentUser);
+
+  if (remote.mode === 'task_local') return { status: 'local' };
+  if (remote.mode === 'task_blocked') return { status: 'unavailable' };
+  if (remote.mode === 'task_remote_misconfigured') return { status: 'unavailable' };
+  if (remote.mode === 'task_remote_unavailable_identity') return { status: 'unavailable' };
+
+  // mode === 'task_remote_active' daqui em diante.
+  if (remote.isLoading) return { status: 'loading' };
+  if (remote.isError) return { status: 'error', retry: remote.refetch };
+  if (remote.configError !== null) return { status: 'unavailable' };
+
+  return {
+    status: 'ready',
+    lateCount: remote.tasks.filter((task) => task.state === TASK_STATE.LATE).length,
   };
 }
 
@@ -306,66 +342,83 @@ function SectionTitle({ icon, tone, children, right }: any) {
   );
 }
 
-function UrgentAttention({ go, leadsSummary }: { go: (id: string) => void; leadsSummary: HomeLeadsSummary }) {
+function UrgentMetricCard({ it, i, go }: { it: { n: number; label: string; sub: string; icon: string; to: string }; i: number; go: (id: string) => void }) {
+  return (
+    <button key={i} onClick={() => go(it.to)} style={{ textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', background: 'linear-gradient(160deg,#2a0d0e,#180809)', border: '1px solid rgba(255,46,46,.45)', borderRadius: 16, padding: 18, position: 'relative', overflow: 'hidden', animation: `redScream 2.8s ease-in-out infinite`, animationDelay: (i * .35) + 's' }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, width: 4, height: '100%', background: '#FF3B3B' }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <Icon name={it.icon} size={18} stroke={2.2} style={{ color: '#FF6B6B' }} />
+        <span style={{ fontSize: 11, color: '#FF8A8A', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700 }}>Urgente</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span className="display tnum" style={{ fontSize: 40, fontWeight: 900, color: '#fff', lineHeight: .9 }}>{it.n}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: '#fff' }}>{it.label}</span>
+      </div>
+      <div style={{ fontSize: 12, color: '#E5A6A6', marginTop: 8 }}>{it.sub}</div>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 13, fontSize: 12.5, fontWeight: 700, color: '#FF6B6B' }}>
+        Resolver agora <Icon name="arrowRight" size={14} stroke={2.5} />
+      </div>
+    </button>
+  );
+}
+
+function UrgentAttention({ go, leadsSummary, tasksSummary }: { go: (id: string) => void; leadsSummary: HomeLeadsSummary; tasksSummary: HomeTasksSummary }) {
+  // 'local': RBAC-filtered via services (M0-K3). leadsSummary.status ===
+  // 'local' implica tasksSummary.status também 'local' — garantia
+  // ESTRUTURAL de resolveTaskRemoteMode() (Task nunca fica remoto
+  // enquanto Leads está local, lib/tasks/remoteTasksMode.ts) — por isso
+  // este branch continua lendo os 4 services locais diretamente, sem
+  // nenhuma dependência de tasksSummary.
+  if (leadsSummary.status === 'local') {
+    const items = [
+      { n: LeadService.getAll().filter((l: any) => l.urgency === 'red').length, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' },
+      { n: VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' },
+      { n: DealService.getAll().filter((d: any) => d.status === DEAL_STATUS.APPROVAL).length, label: 'propostas aguardando aprovação', sub: 'Desconto acima do limite', icon: 'handshake', to: 'propostas' },
+      { n: TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' },
+    ];
+    return (
+      <div>
+        <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${items.length}, 1fr)`, gap: 14 }}>
+          {items.map((it, i) => <UrgentMetricCard key={i} it={it} i={i} go={go} />)}
+        </div>
+      </div>
+    );
+  }
+
+  // Fora do local: Leads e Tasks são widgets independentes dentro da
+  // mesma seção (G-PRECHECK §8/§9) — cada summary decide sua própria
+  // célula (métrica real ou notice compacto), nunca um bloqueando o
+  // outro. Visitas/Propostas continuam sem backend remoto (Visit/Deal,
+  // achado do E5-B2-A0/E7-A0) e permanecem OCULTADAS, nunca mostradas
+  // como zero.
+  const cells: React.ReactNode[] = [];
   if (leadsSummary.status === 'unavailable') {
-    return (
-      <div>
-        <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
-        <CommercialWidgetNotice>Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>
-      </div>
-    );
+    cells.push(<CommercialWidgetNotice key="leads">Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>);
+  } else if (leadsSummary.status === 'loading') {
+    cells.push(<CommercialWidgetNotice key="leads">Carregando…</CommercialWidgetNotice>);
+  } else if (leadsSummary.status === 'error') {
+    cells.push(<CommercialWidgetNotice key="leads" onRetry={leadsSummary.retry}>Não foi possível carregar as métricas.</CommercialWidgetNotice>);
+  } else {
+    cells.push(<UrgentMetricCard key="leads" i={cells.length} go={go} it={{ n: leadsSummary.delayedLeads, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' }} />);
   }
-  if (leadsSummary.status === 'loading') {
-    return (
-      <div>
-        <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
-        <CommercialWidgetNotice>Carregando…</CommercialWidgetNotice>
-      </div>
-    );
+
+  // tasksSummary.status === 'unavailable' (e 'local', estruturalmente
+  // inalcançável aqui): célula omitida — nunca um card mostrando zero/
+  // indisponível como dado real, mesmo padrão já usado para Visit/Deal.
+  if (tasksSummary.status === 'loading') {
+    cells.push(<CommercialWidgetNotice key="tasks">Carregando pendências…</CommercialWidgetNotice>);
+  } else if (tasksSummary.status === 'error') {
+    cells.push(<CommercialWidgetNotice key="tasks" onRetry={tasksSummary.retry}>Não foi possível carregar as pendências.</CommercialWidgetNotice>);
+  } else if (tasksSummary.status === 'ready') {
+    cells.push(<UrgentMetricCard key="tasks" i={cells.length} go={go} it={{ n: tasksSummary.lateCount, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' }} />);
   }
-  if (leadsSummary.status === 'error') {
-    return (
-      <div>
-        <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
-        <CommercialWidgetNotice onRetry={leadsSummary.retry}>Não foi possível carregar as métricas.</CommercialWidgetNotice>
-      </div>
-    );
-  }
-  // 'local': RBAC-filtered via services (M0-K3). 'ready' (remoto): só o
-  // item de Leads é real — Visitas/Propostas/Pendências ainda não têm
-  // backend remoto (Visit/Deal/Task, achado do E5-B2-A0/E7-A0) e são
-  // OCULTADOS, nunca mostrados como zero.
-  const items = leadsSummary.status === 'local'
-    ? [
-        { n: LeadService.getAll().filter((l: any) => l.urgency === 'red').length, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' },
-        { n: VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' },
-        { n: DealService.getAll().filter((d: any) => d.status === DEAL_STATUS.APPROVAL).length, label: 'propostas aguardando aprovação', sub: 'Desconto acima do limite', icon: 'handshake', to: 'propostas' },
-        { n: TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' },
-      ]
-    : [
-        { n: leadsSummary.delayedLeads, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' },
-      ];
+
   return (
     <div>
       <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${items.length}, 1fr)`, gap: 14 }}>
-        {items.map((it, i) => (
-          <button key={i} onClick={() => go(it.to)} style={{ textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', background: 'linear-gradient(160deg,#2a0d0e,#180809)', border: '1px solid rgba(255,46,46,.45)', borderRadius: 16, padding: 18, position: 'relative', overflow: 'hidden', animation: `redScream 2.8s ease-in-out infinite`, animationDelay: (i * .35) + 's' }}>
-            <div style={{ position: 'absolute', top: 0, left: 0, width: 4, height: '100%', background: '#FF3B3B' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <Icon name={it.icon} size={18} stroke={2.2} style={{ color: '#FF6B6B' }} />
-              <span style={{ fontSize: 11, color: '#FF8A8A', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700 }}>Urgente</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span className="display tnum" style={{ fontSize: 40, fontWeight: 900, color: '#fff', lineHeight: .9 }}>{it.n}</span>
-              <span style={{ fontSize: 13.5, fontWeight: 700, color: '#fff' }}>{it.label}</span>
-            </div>
-            <div style={{ fontSize: 12, color: '#E5A6A6', marginTop: 8 }}>{it.sub}</div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 13, fontSize: 12.5, fontWeight: 700, color: '#FF6B6B' }}>
-              Resolver agora <Icon name="arrowRight" size={14} stroke={2.5} />
-            </div>
-          </button>
-        ))}
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cells.length}, 1fr)`, gap: 14 }}>
+        {cells}
       </div>
     </div>
   );
@@ -496,6 +549,11 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // useRemoteLeadsScreenState já gateia local/remote_ready/misconfigured/
   // sem-identidade internamente.
   const leadsSummary = useHomeLeadsSummary(currentUser ?? null);
+  // COMMERCIAL-REMOTE-B1-B3-G — chamado SEMPRE (Rules of Hooks), mesma
+  // garantia de leadsSummary acima; independente dela por design
+  // (G-PRECHECK §8/§9 — Leads e Tasks nunca voltam a compartilhar um
+  // proxy de estado).
+  const tasksSummary = useHomeTasksSummary(currentUser ?? null);
   const variant = t.podium;
   // M1-E E7-B1 — Podium/Ranking/MinhaDisputa dependem exclusivamente do
   // catálogo LOCAL de Sellers (getStore().sellers, sem company_id, sem
@@ -567,7 +625,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
 
         <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} /></div>
         {isSellersLocal && <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>}
-        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} /></div>
+        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} /></div>
         <QuickActions go={go} />
       </div>
     </div>
