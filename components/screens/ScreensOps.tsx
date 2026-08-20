@@ -8,9 +8,9 @@ import { LeadService, TaskService, PipelineService, AuthService, SellerService }
 import { useRemoteLeadsScreenState, type RemoteLeadsScreenMode } from '@/lib/hooks/useRemoteLeadsScreenState';
 import { useRemoteLeadStageMoveController } from '@/lib/hooks/useRemoteLeadStageMoveController';
 import { useArchivedLeads } from '@/lib/hooks/useArchivedLeads';
+import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState';
 import { resolveLeadMutationCapabilities, type LeadMutationCapabilities } from '@/lib/leads/mutationCapabilities';
 import { canActorMutateLead } from '@/lib/leads/leadMutationOwnership';
-import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { adaptLeadRows } from '@/lib/leads/adapter';
 import type { RemoteLeadsErrorCode } from '@/lib/leads/errors';
 import type { RemoteLeadsFlagMode } from '@/lib/leads/remoteLeadsMode';
@@ -51,19 +51,6 @@ function flagModeFromScreenState(mode: RemoteLeadsScreenMode): RemoteLeadsFlagMo
   return 'remote_ready'; // remote_unavailable_identity | remote_active
 }
 
-// M1-E E5-B2-A1 — Barreira 1 (UI) para Pendências: Task não tem company_id
-// nem backend remoto (auditoria E5-B2-A0). Fora do modo local, a tela não
-// monta nenhuma lista local — resolvido ANTES de qualquer chamada a
-// TaskService.getAll().
-function LocalCommercialUnavailableCard() {
-  return (
-    <LCard style={{ maxWidth: 640 }}>
-      <div data-testid="local-commercial-unavailable" style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
-        Visitas, propostas, vendas e acompanhamentos serão disponibilizados após a migração deste módulo.
-      </div>
-    </LCard>
-  );
-}
 import { isSuperAdminCommercialReadEnabled } from '@/lib/flags';
 import { PlatformCommercialClientsView } from '@/components/commercial/PlatformCommercialClientsView';
 import { PlatformCommercialPipelineView } from '@/components/commercial/PlatformCommercialPipelineView';
@@ -851,7 +838,20 @@ const PRIO: Record<string, { c: string; label: string }> = {
   baixa: { c: 'var(--t-400)', label: 'Baixa' },
 };
 
-function TaskRow({ task, go }: any) {
+// COMMERCIAL-REMOTE-B1-B3-C1: `remoteActive` vem SEMPRE de ScreenPendencias
+// (derivado de remoteTasksScreen.mode) — nunca inferido por duck-typing em
+// cima de task.version/task.dueAt. Em remoteActive:
+//   - concluir: temporariamente desabilitado (native `disabled`, sem
+//     TaskService.update nem useCompleteTask ainda — isso é o B1-B3-C2);
+//   - Reagendar: oculto (FlowReagendarPendencia usa TaskService.update
+//     parcial, bloqueado fora de task_local desde o B1-B3-A);
+//   - nome do Lead: texto não-clicável — LeadService.getAll() remoto pode
+//     LANÇAR se o snapshot de Leads ainda não estiver populado (achado do
+//     precheck C, §0/§22), e FlowVerCliente exige o Lead completo (não
+//     aceita só leadId, confirmado por leitura direta de
+//     components/flows/FlowsShared.tsx:840) — nenhum caminho comprovadamente
+//     seguro existe ainda para abrir o Lead a partir daqui.
+function TaskRow({ task, go, remoteActive }: any) {
   // No local "done" state — a task marked TASK_STATE.DONE stops matching any
   // of the 3 active groups in ScreenPendencias and simply stops rendering
   // here, via the real store mutation + F5-safe persistence (M0-K2, was a
@@ -865,8 +865,12 @@ function TaskRow({ task, go }: any) {
       border: `1px solid ${late ? 'var(--red-line)' : 'var(--border)'}`,
       borderRadius: 11, transition: 'all .2s',
     }}>
-      <button onClick={() => TaskService.update(task.id, { state: TASK_STATE.DONE })} className="focus-ring" title="Concluir pendência" style={{
-        width: 24, height: 24, borderRadius: 7, flexShrink: 0, cursor: 'pointer',
+      <button
+        onClick={remoteActive ? undefined : () => TaskService.update(task.id, { state: TASK_STATE.DONE })}
+        disabled={remoteActive}
+        className="focus-ring" title="Concluir pendência" style={{
+        width: 24, height: 24, borderRadius: 7, flexShrink: 0, cursor: remoteActive ? 'default' : 'pointer',
+        opacity: remoteActive ? 0.5 : 1,
         border: `2px solid ${late ? 'var(--red)' : 'var(--border)'}`,
         background: 'transparent', display: 'grid', placeItems: 'center', color: '#fff',
       }} />
@@ -876,31 +880,90 @@ function TaskRow({ task, go }: any) {
         <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}>{task.note}</div>
       </div>
       <span style={{ fontSize: 12, fontWeight: 700, color: late ? 'var(--red)' : 'var(--t-500)', whiteSpace: 'nowrap' }}>{task.when}</span>
-      <button onClick={() => (window as any).__openFlow('reagendar-pendencia', { task })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-        <Icon name="refresh" size={14} stroke={2} /> Reagendar
-      </button>
-      <button onClick={() => {
-        const lead = LeadService.getAll().find((l: any) => l.name === task.lead);
-        (window as any).__openFlow('ver-cliente', { lead: lead ?? LeadService.getAll()[0] });
-      }} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-        <Icon name="user" size={14} stroke={2} /> {task.lead.split(' ')[0]}
-      </button>
+      {!remoteActive && (
+        <button onClick={() => (window as any).__openFlow('reagendar-pendencia', { task })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+          <Icon name="refresh" size={14} stroke={2} /> Reagendar
+        </button>
+      )}
+      {remoteActive ? (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', whiteSpace: 'nowrap' }}>
+          <Icon name="user" size={14} stroke={2} /> {task.lead.split(' ')[0]}
+        </span>
+      ) : (
+        <button onClick={() => {
+          const lead = LeadService.getAll().find((l: any) => l.name === task.lead);
+          (window as any).__openFlow('ver-cliente', { lead: lead ?? LeadService.getAll()[0] });
+        }} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+          <Icon name="user" size={14} stroke={2} /> {task.lead.split(' ')[0]}
+        </button>
+      )}
     </div>
   );
 }
 
+// COMMERCIAL-REMOTE-B1-B3-C1: gate de página inteira passou de
+// isLocalCommercialDataAllowed() (modo de LEADS, achado do precheck B — Task
+// já tem backend remoto próprio) para remoteTasksScreen.mode
+// (resolveTaskRemoteMode(), via useRemoteTasksScreenState — chamado
+// INCONDICIONALMENTE, antes de qualquer return, mesmo padrão de
+// ScreenClientesLegacy/ScreenAndamentoLegacy no mesmo arquivo). currentUser
+// não chega por prop (App.tsx só passa isso para Home) — resolvido aqui do
+// mesmo jeito que ScreenClientes/ScreenAndamento já fazem.
 export function ScreenPendencias({ go }: any) {
   useStore();
   const [tab, setTab] = useState('Atrasadas');
-  if (!isLocalCommercialDataAllowed()) {
+  const currentUser = AuthService.getCurrentUser();
+  const remoteTasksScreen = useRemoteTasksScreenState(currentUser);
+  const mode = remoteTasksScreen.mode;
+
+  if (mode === 'task_blocked' || mode === 'task_remote_misconfigured') {
     return (
       <LightScreen>
         <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
-        <LocalCommercialUnavailableCard />
+        <KanbanStateCard testId="pendencias-state-unavailable">Pendências indisponíveis nesta sessão.</KanbanStateCard>
       </LightScreen>
     );
   }
-  const tasks = TaskService.getAll();
+  if (mode === 'task_remote_unavailable_identity') {
+    return (
+      <LightScreen>
+        <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
+        <KanbanStateCard testId="pendencias-state-unavailable-identity">Pendências indisponíveis nesta sessão.</KanbanStateCard>
+      </LightScreen>
+    );
+  }
+
+  const remoteActive = mode === 'task_remote_active';
+  if (remoteActive && remoteTasksScreen.isLoading) {
+    return (
+      <LightScreen>
+        <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
+        <KanbanStateCard testId="pendencias-state-loading">Carregando pendências…</KanbanStateCard>
+      </LightScreen>
+    );
+  }
+  if (remoteActive && remoteTasksScreen.isError) {
+    return (
+      <LightScreen>
+        <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
+        <KanbanStateCard testId="pendencias-state-error" onRetry={remoteTasksScreen.refetch}>Não foi possível carregar as pendências.</KanbanStateCard>
+      </LightScreen>
+    );
+  }
+  if (remoteActive && remoteTasksScreen.configError !== null) {
+    return (
+      <LightScreen>
+        <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
+        <KanbanStateCard testId="pendencias-state-config-error">Uma ou mais pendências remotas estão com configuração inválida.</KanbanStateCard>
+      </LightScreen>
+    );
+  }
+
+  // Daqui em diante: mode === 'task_local' OU (remoteActive && pronto —
+  // não-loading/não-erro/sem configError). Fonte única em cada caso — nunca
+  // TaskService.getAll() no branch remoto, nunca remoteTasksScreen.tasks no
+  // local.
+  const tasks = remoteActive ? [...remoteTasksScreen.tasks] : TaskService.getAll();
   const groups: Record<string, any[]> = {
     'Atrasadas': tasks.filter((t: any) => t.state === TASK_STATE.LATE),
     'Hoje': tasks.filter((t: any) => t.state === TASK_STATE.TODAY),
@@ -910,7 +973,7 @@ export function ScreenPendencias({ go }: any) {
   const view = tab === 'Todas' ? Object.entries(groups) : [[tab, groups[tab]]];
   return (
     <LightScreen>
-      <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-pendencia')}>Nova pendência</LBtn>} />
+      <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." actions={remoteActive ? undefined : <LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-pendencia')}>Nova pendência</LBtn>} />
       <Guide tone="red" icon="alert" text={<span>Você tem <b>{late} pendências atrasadas</b>. Resolva primeiro as vermelhas — cada dia parado é uma venda mais distante.</span>} action="Ver atrasadas" onAction={() => setTab('Atrasadas')} />
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
         {['Atrasadas', 'Hoje', 'Próximas', 'Todas'].map(t => (
@@ -926,7 +989,7 @@ export function ScreenPendencias({ go }: any) {
               <span style={{ fontSize: 12.5, color: 'var(--t-400)' }}>{items.length}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {items.length ? items.map((t: any) => <TaskRow key={t.id} task={t} go={go} />)
+              {items.length ? items.map((t: any) => <TaskRow key={t.id} task={t} go={go} remoteActive={remoteActive} />)
                 : <LCard style={{ textAlign: 'center', color: 'var(--green)', fontWeight: 600 }}>Tudo em dia por aqui. Ótimo trabalho!</LCard>}
             </div>
           </div>
