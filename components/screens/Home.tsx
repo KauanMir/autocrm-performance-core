@@ -363,56 +363,51 @@ function UrgentMetricCard({ it, i, go }: { it: { n: number; label: string; sub: 
 }
 
 function UrgentAttention({ go, leadsSummary, tasksSummary }: { go: (id: string) => void; leadsSummary: HomeLeadsSummary; tasksSummary: HomeTasksSummary }) {
-  // 'local': RBAC-filtered via services (M0-K3). leadsSummary.status ===
-  // 'local' implica tasksSummary.status também 'local' — garantia
-  // ESTRUTURAL de resolveTaskRemoteMode() (Task nunca fica remoto
-  // enquanto Leads está local, lib/tasks/remoteTasksMode.ts) — por isso
-  // este branch continua lendo os 4 services locais diretamente, sem
-  // nenhuma dependência de tasksSummary.
-  if (leadsSummary.status === 'local') {
-    const items = [
-      { n: LeadService.getAll().filter((l: any) => l.urgency === 'red').length, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' },
-      { n: VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' },
-      { n: DealService.getAll().filter((d: any) => d.status === DEAL_STATUS.APPROVAL).length, label: 'propostas aguardando aprovação', sub: 'Desconto acima do limite', icon: 'handshake', to: 'propostas' },
-      { n: TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' },
-    ];
-    return (
-      <div>
-        <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${items.length}, 1fr)`, gap: 14 }}>
-          {items.map((it, i) => <UrgentMetricCard key={i} it={it} i={i} go={go} />)}
-        </div>
-      </div>
-    );
-  }
-
-  // Fora do local: Leads e Tasks são widgets independentes dentro da
-  // mesma seção (G-PRECHECK §8/§9) — cada summary decide sua própria
-  // célula (métrica real ou notice compacto), nunca um bloqueando o
-  // outro. Visitas/Propostas continuam sem backend remoto (Visit/Deal,
-  // achado do E5-B2-A0/E7-A0) e permanecem OCULTADAS, nunca mostradas
-  // como zero.
-  const cells: React.ReactNode[] = [];
-  if (leadsSummary.status === 'unavailable') {
-    cells.push(<CommercialWidgetNotice key="leads">Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>);
-  } else if (leadsSummary.status === 'loading') {
-    cells.push(<CommercialWidgetNotice key="leads">Carregando…</CommercialWidgetNotice>);
-  } else if (leadsSummary.status === 'error') {
-    cells.push(<CommercialWidgetNotice key="leads" onRetry={leadsSummary.retry}>Não foi possível carregar as métricas.</CommercialWidgetNotice>);
-  } else {
-    cells.push(<UrgentMetricCard key="leads" i={cells.length} go={go} it={{ n: leadsSummary.delayedLeads, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' }} />);
-  }
-
-  // tasksSummary.status === 'unavailable' (e 'local', estruturalmente
-  // inalcançável aqui): célula omitida — nunca um card mostrando zero/
-  // indisponível como dado real, mesmo padrão já usado para Visit/Deal.
-  if (tasksSummary.status === 'loading') {
-    cells.push(<CommercialWidgetNotice key="tasks">Carregando pendências…</CommercialWidgetNotice>);
+  // COMMERCIAL-REMOTE-B1-B3-G-R1 — Tasks é resolvido SEMPRE por
+  // tasksSummary, NUNCA por leadsSummary.status==='local' (o G-EXEC tinha
+  // reintroduzido esse acoplamento por engano). A suposição "Leads local
+  // ⟹ Task local" é FALSA quando REMOTE_TASKS=true e REMOTE_LEADS=false:
+  // resolveTaskRemoteMode() (lib/tasks/remoteTasksMode.ts) só entra no
+  // ramo `leadsMode==='local' ? 'task_local' : 'task_blocked'` quando
+  // `tasksEnabled` é false — com tasksEnabled=true e leadsMode local (≠
+  // 'remote_ready'), o resultado é 'task_remote_misconfigured', nunca
+  // 'task_local'. TaskService.getAll() só pode ser chamado quando
+  // tasksSummary.status === 'local'.
+  let taskCell: React.ReactNode | null = null;
+  if (tasksSummary.status === 'local') {
+    const lateCount = TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length;
+    taskCell = <UrgentMetricCard key="tasks" i={0} go={go} it={{ n: lateCount, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' }} />;
+  } else if (tasksSummary.status === 'loading') {
+    taskCell = <CommercialWidgetNotice key="tasks">Carregando pendências…</CommercialWidgetNotice>;
   } else if (tasksSummary.status === 'error') {
-    cells.push(<CommercialWidgetNotice key="tasks" onRetry={tasksSummary.retry}>Não foi possível carregar as pendências.</CommercialWidgetNotice>);
+    taskCell = <CommercialWidgetNotice key="tasks" onRetry={tasksSummary.retry}>Não foi possível carregar as pendências.</CommercialWidgetNotice>;
   } else if (tasksSummary.status === 'ready') {
-    cells.push(<UrgentMetricCard key="tasks" i={cells.length} go={go} it={{ n: tasksSummary.lateCount, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' }} />);
+    taskCell = <UrgentMetricCard key="tasks" i={0} go={go} it={{ n: tasksSummary.lateCount, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' }} />;
   }
+  // 'unavailable': célula omitida — nunca um card mostrando zero/
+  // indisponível como dado real.
+
+  // Leads/Visitas/Propostas: legado, continuam governados por
+  // leadsSummary — Visit/Deal nunca ganharam backend remoto (achado do
+  // E5-B2-A0/E7-A0) e permanecem fora de escopo deste lote.
+  let leadCells: React.ReactNode[];
+  if (leadsSummary.status === 'local') {
+    leadCells = [
+      <UrgentMetricCard key="leads" i={0} go={go} it={{ n: LeadService.getAll().filter((l: any) => l.urgency === 'red').length, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' }} />,
+      <UrgentMetricCard key="visitas" i={1} go={go} it={{ n: VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' }} />,
+      <UrgentMetricCard key="propostas" i={2} go={go} it={{ n: DealService.getAll().filter((d: any) => d.status === DEAL_STATUS.APPROVAL).length, label: 'propostas aguardando aprovação', sub: 'Desconto acima do limite', icon: 'handshake', to: 'propostas' }} />,
+    ];
+  } else if (leadsSummary.status === 'unavailable') {
+    leadCells = [<CommercialWidgetNotice key="leads">Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>];
+  } else if (leadsSummary.status === 'loading') {
+    leadCells = [<CommercialWidgetNotice key="leads">Carregando…</CommercialWidgetNotice>];
+  } else if (leadsSummary.status === 'error') {
+    leadCells = [<CommercialWidgetNotice key="leads" onRetry={leadsSummary.retry}>Não foi possível carregar as métricas.</CommercialWidgetNotice>];
+  } else {
+    leadCells = [<UrgentMetricCard key="leads" i={0} go={go} it={{ n: leadsSummary.delayedLeads, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' }} />];
+  }
+
+  const cells = [...leadCells, ...(taskCell ? [taskCell] : [])];
 
   return (
     <div>

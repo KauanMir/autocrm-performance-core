@@ -499,3 +499,56 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
     expect(screen.queryByText('pendências atrasadas')).toBeNull();
   });
 });
+
+// ── H. Gate de Tasks é SEMPRE tasksSummary, nunca leadsSummary (R1) ─────
+// COMMERCIAL-REMOTE-B1-B3-G-R1 — "Leads local ⟹ Task local" é falso
+// quando REMOTE_TASKS=true e REMOTE_LEADS=false: resolveTaskRemoteMode()
+// retorna 'task_remote_misconfigured' nesse caso (não 'task_local'). O
+// G-EXEC tinha, por engano, deixado o item de Tasks dentro do branch
+// leadsSummary.status==='local'. Esta suíte prova que o gate real agora é
+// tasksSummary, independente do valor de leadsSummary.
+describe('Home — Leads local + Tasks não-local (R1, gate correto)', () => {
+  it('Leads local + Tasks unavailable (misconfigured): TaskService.getAll 0 calls, nenhuma pendência mostrada, Leads/Visitas/Propostas locais continuam', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_misconfigured'));
+    m.taskServiceGetAll.mockReturnValue(Array.from({ length: 99 }, (_, i) => ({ id: `local-${i}`, state: TASK_STATE.LATE })));
+    m.leadServiceGetAll.mockReturnValue([{ id: 'l1', urgency: 'red' }]);
+    renderHome(manager());
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+    expect(screen.queryByText('pendências atrasadas')).toBeNull();
+    expect(screen.getByText('leads atrasados')).toBeInTheDocument();
+    expect(screen.getByText('visitas não confirmadas')).toBeInTheDocument();
+    expect(screen.getByText('propostas aguardando aprovação')).toBeInTheDocument();
+  });
+
+  it('Leads local + Tasks loading: TaskService.getAll 0 calls, notice de carregando, Leads locais continuam', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isLoading: true }));
+    m.taskServiceGetAll.mockReturnValue([{ id: 't1', state: TASK_STATE.LATE }]);
+    renderHome(manager());
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+    expect(screen.getByText('Carregando pendências…')).toBeInTheDocument();
+    expect(screen.queryByText('pendências atrasadas')).toBeNull();
+    expect(screen.getByText('leads atrasados')).toBeInTheDocument();
+  });
+
+  it('Leads local + Tasks local (real): TaskService.getAll chamado, contagem local preservada', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_local'));
+    m.taskServiceGetAll.mockReturnValue([
+      { id: 't1', state: TASK_STATE.LATE },
+      { id: 't2', state: TASK_STATE.LATE },
+    ]);
+    renderHome(manager());
+    expect(m.taskServiceGetAll).toHaveBeenCalled();
+    const card = screen.getByText('pendências atrasadas').closest('button');
+    expect(card?.textContent).toContain('2');
+  });
+
+  // Inversa (Leads não-local + Tasks local) é estruturalmente impossível:
+  // task_local só existe quando resolveRemoteLeadsFlagMode()==='local'
+  // (lib/tasks/remoteTasksMode.ts:60) — e leadsSummary.status só é
+  // diferente de 'local' quando o mode do hook de Leads já não é 'local'.
+  // Nenhum fixture dessa combinação é criado (instrução explícita do R1 —
+  // não fabricar estado impossível).
+});
