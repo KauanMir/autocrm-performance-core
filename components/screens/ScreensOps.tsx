@@ -9,6 +9,8 @@ import { useRemoteLeadsScreenState, type RemoteLeadsScreenMode } from '@/lib/hoo
 import { useRemoteLeadStageMoveController } from '@/lib/hooks/useRemoteLeadStageMoveController';
 import { useArchivedLeads } from '@/lib/hooks/useArchivedLeads';
 import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState';
+import { useCompleteTask } from '@/lib/hooks/useCompleteTask';
+import { isRemoteTasksError } from '@/lib/tasks/errors';
 import { resolveLeadMutationCapabilities, type LeadMutationCapabilities } from '@/lib/leads/mutationCapabilities';
 import { canActorMutateLead } from '@/lib/leads/leadMutationOwnership';
 import { adaptLeadRows } from '@/lib/leads/adapter';
@@ -37,6 +39,27 @@ function remoteLeadMoveErrorMessage(code: RemoteLeadsErrorCode | undefined): str
       return 'Esta empresa está em modo somente leitura.';
     default:
       return 'Não foi possível movimentar o Lead.';
+  }
+}
+
+// COMMERCIAL-REMOTE-B1-B3-C2: mensagens sanitizadas fixas da conclusão
+// remota de Tasks — mesmo modelo de remoteLeadMoveErrorMessage acima:
+// nenhum UUID/SQL/RPC/payload/stack, nenhum código bruto. identity_changed
+// nunca chega aqui — o handler de TaskRow descarta antes (não é um erro
+// pertencente à identidade atual, não deve aparecer para o novo usuário).
+function remoteTaskCompleteErrorMessage(error: unknown): string {
+  const code = isRemoteTasksError(error) ? error.code : undefined;
+  switch (code) {
+    case 'remote_tasks_mutation_stale_write':
+      return 'Esta pendência foi alterada. Os dados foram atualizados.';
+    case 'remote_tasks_mutation_already_completed':
+      return 'Esta pendência já foi concluída.';
+    case 'remote_tasks_mutation_task_not_found':
+      return 'Esta pendência não está mais disponível.';
+    case 'remote_tasks_mutation_forbidden':
+      return 'Você não tem permissão para concluir esta pendência.';
+    default:
+      return 'Não foi possível concluir a pendência. Tente novamente.';
   }
 }
 
@@ -838,11 +861,12 @@ const PRIO: Record<string, { c: string; label: string }> = {
   baixa: { c: 'var(--t-400)', label: 'Baixa' },
 };
 
-// COMMERCIAL-REMOTE-B1-B3-C1: `remoteActive` vem SEMPRE de ScreenPendencias
-// (derivado de remoteTasksScreen.mode) — nunca inferido por duck-typing em
-// cima de task.version/task.dueAt. Em remoteActive:
-//   - concluir: temporariamente desabilitado (native `disabled`, sem
-//     TaskService.update nem useCompleteTask ainda — isso é o B1-B3-C2);
+// COMMERCIAL-REMOTE-B1-B3-C1/C2: `remoteActive` vem SEMPRE de
+// ScreenPendencias (derivado de remoteTasksScreen.mode) — nunca inferido
+// por duck-typing em cima de task.version/task.dueAt. Em remoteActive:
+//   - concluir: useCompleteTask({taskId, expectedVersion: task.version}),
+//     nunca TaskService.update — montado INCONDICIONALMENTE (Rules of
+//     Hooks), uma instância por row (isPending/error isolados por Task);
 //   - Reagendar: oculto (FlowReagendarPendencia usa TaskService.update
 //     parcial, bloqueado fora de task_local desde o B1-B3-A);
 //   - nome do Lead: texto não-clicável — LeadService.getAll() remoto pode
@@ -851,14 +875,54 @@ const PRIO: Record<string, { c: string; label: string }> = {
 //     aceita só leadId, confirmado por leitura direta de
 //     components/flows/FlowsShared.tsx:840) — nenhum caminho comprovadamente
 //     seguro existe ainda para abrir o Lead a partir daqui.
-function TaskRow({ task, go, remoteActive }: any) {
+function TaskRow({ task, go, remoteActive, currentUser }: any) {
   // No local "done" state — a task marked TASK_STATE.DONE stops matching any
   // of the 3 active groups in ScreenPendencias and simply stops rendering
   // here, via the real store mutation + F5-safe persistence (M0-K2, was a
   // cosmetic-only useState before that reset on every reload).
   const late = task.state === TASK_STATE.LATE;
   const p = PRIO[task.prio];
+
+  // Mesma derivação de identidade já usada por useRemoteTasksScreenState/
+  // useTasksRemoteBridgeLifecycle/useCreateTask — não existe um helper
+  // compartilhado de identidade de Tasks a reusar (resolveLeadFlowContext é
+  // específico de Leads); reimplementar essas 4 linhas é o padrão já
+  // estabelecido pelos outros consumidores de Tasks, não duplicação indevida.
+  const completeHook = useCompleteTask({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: currentUser?.activeMembership?.role ?? null,
+    userIsActive: Boolean(currentUser),
+  });
+  const [completeError, setCompleteError] = useState<string | null>(null);
+
+  const handleComplete = async () => {
+    if (completeHook.isPending) return;
+    // task.version já vem validado pelo adapter (Number.isInteger >= 1) —
+    // nunca fabricar um valor aqui (nunca `?? 1`/`Number(...) || 1`); se por
+    // algum motivo ele não for um inteiro válido, a mutation simplesmente
+    // não é chamada.
+    const expectedVersion = task.version;
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+      setCompleteError('Não foi possível concluir a pendência. Tente novamente.');
+      return;
+    }
+    setCompleteError(null);
+    try {
+      await completeHook.completeTask({ taskId: task.id, expectedVersion });
+    } catch (err) {
+      // identity_changed nunca vem do backend — só do próprio hook quando a
+      // geração do cache muda em voo (logout/troca de empresa). Não é um
+      // erro da identidade ATUAL: nunca mostrado, a nova identidade/query já
+      // assume a renderização sozinha.
+      if (isRemoteTasksError(err) && err.code === 'remote_tasks_mutation_identity_changed') return;
+      setCompleteError(remoteTaskCompleteErrorMessage(err));
+    }
+  };
+
+  const completeDisabled = remoteActive && completeHook.isPending;
   return (
+    <>
     <div style={{
       display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px',
       background: late ? 'var(--red-bg)' : 'var(--surface)',
@@ -866,11 +930,11 @@ function TaskRow({ task, go, remoteActive }: any) {
       borderRadius: 11, transition: 'all .2s',
     }}>
       <button
-        onClick={remoteActive ? undefined : () => TaskService.update(task.id, { state: TASK_STATE.DONE })}
-        disabled={remoteActive}
+        onClick={remoteActive ? handleComplete : () => TaskService.update(task.id, { state: TASK_STATE.DONE })}
+        disabled={completeDisabled}
         className="focus-ring" title="Concluir pendência" style={{
-        width: 24, height: 24, borderRadius: 7, flexShrink: 0, cursor: remoteActive ? 'default' : 'pointer',
-        opacity: remoteActive ? 0.5 : 1,
+        width: 24, height: 24, borderRadius: 7, flexShrink: 0, cursor: completeDisabled ? 'default' : 'pointer',
+        opacity: completeDisabled ? 0.5 : 1,
         border: `2px solid ${late ? 'var(--red)' : 'var(--border)'}`,
         background: 'transparent', display: 'grid', placeItems: 'center', color: '#fff',
       }} />
@@ -898,6 +962,10 @@ function TaskRow({ task, go, remoteActive }: any) {
         </button>
       )}
     </div>
+    {completeError && (
+      <div data-testid="task-complete-error" style={{ fontSize: 12, color: 'var(--red)', padding: '0 4px' }}>{completeError}</div>
+    )}
+    </>
   );
 }
 
@@ -989,7 +1057,7 @@ export function ScreenPendencias({ go }: any) {
               <span style={{ fontSize: 12.5, color: 'var(--t-400)' }}>{items.length}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {items.length ? items.map((t: any) => <TaskRow key={t.id} task={t} go={go} remoteActive={remoteActive} />)
+              {items.length ? items.map((t: any) => <TaskRow key={t.id} task={t} go={go} remoteActive={remoteActive} currentUser={currentUser} />)
                 : <LCard style={{ textAlign: 'center', color: 'var(--green)', fontWeight: 600 }}>Tudo em dia por aqui. Ótimo trabalho!</LCard>}
             </div>
           </div>

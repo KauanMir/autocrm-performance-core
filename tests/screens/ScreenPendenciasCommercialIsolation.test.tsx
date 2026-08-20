@@ -1,17 +1,20 @@
 // Testes de isolamento por modo de ScreenPendencias (COMMERCIAL-REMOTE-B1-
-// B3-C1). Task agora tem backend remoto próprio — o gate deixou de ser
+// B3-C1/C2). Task tem backend remoto próprio — o gate deixou de ser
 // isLocalCommercialDataAllowed() (modo de LEADS, achado do precheck B) e
 // passou a ser remoteTasksScreen.mode (resolveTaskRemoteMode(), via
-// useRemoteTasksScreenState). O hook é mockado diretamente no nível da tela
-// (mesmo padrão de tests/navigation/appHomeRailRemoteGuard.test.tsx para o
-// Rail) — evita precisar de um QueryClientProvider real e dá controle
-// determinístico sobre mode/isLoading/isError/configError/tasks.
+// useRemoteTasksScreenState). useCompleteTask (C2) é mockado diretamente no
+// nível da tela pelo mesmo motivo — evita precisar de um QueryClientProvider
+// real e dá controle determinístico sobre isPending/error/completeTask,
+// sem retestar a integração já coberta em
+// tests/tasks/taskMutationsIntegration.test.tsx.
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { RemoteTasksError } from '@/lib/tasks/errors';
 
 const m = vi.hoisted(() => ({
   useRemoteTasksScreenState: vi.fn(),
+  useCompleteTask: vi.fn(),
   tasks: vi.fn(() => [] as any[]),
   taskServiceUpdate: vi.fn(),
   leadServiceGetAll: vi.fn(() => [] as any[]),
@@ -21,6 +24,10 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks/useRemoteTasksScreenState', () => ({
   useRemoteTasksScreenState: m.useRemoteTasksScreenState,
+}));
+
+vi.mock('@/lib/hooks/useCompleteTask', () => ({
+  useCompleteTask: m.useCompleteTask,
 }));
 
 vi.mock('@/lib/store', () => ({ useStore: () => ({}) }));
@@ -69,13 +76,24 @@ function remoteTask(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+// Cada TaskRow monta sua PRÓPRIA instância de useCompleteTask — o mock
+// central expõe um completeTask spy comum (para asserts de payload) mas
+// isPending por chamada é controlado via m.completePendingTaskId.current.
+function completeHookResult(completeTask: any) {
+  return { completeTask, isPending: false, isError: false, isSuccess: false, error: null, reset: vi.fn() };
+}
+
 const LOCAL_MANAGER = { id: 'user-1', name: 'Gerente', email: 'g@a.com', activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
+
+let completeTaskSpy: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   m.tasks.mockReset().mockReturnValue([]);
   m.taskServiceUpdate.mockReset();
   m.leadServiceGetAll.mockReset().mockReturnValue([]);
   m.useRemoteTasksScreenState.mockReset().mockReturnValue(taskScreenState('task_local'));
+  completeTaskSpy = vi.fn().mockResolvedValue({});
+  m.useCompleteTask.mockReset().mockImplementation(() => completeHookResult(completeTaskSpy));
   m.user.current = LOCAL_MANAGER;
   (window as any).__openFlow = m.openFlow;
   m.openFlow.mockReset();
@@ -92,6 +110,7 @@ describe('ScreenPendencias — task_local (preservado)', () => {
 
     fireEvent.click(screen.getByTitle('Concluir pendência'));
     expect(m.taskServiceUpdate).toHaveBeenCalledWith('t1', { state: 'concluida' });
+    expect(completeTaskSpy).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByText('Juliana'));
     expect(m.leadServiceGetAll).toHaveBeenCalled();
@@ -173,7 +192,7 @@ describe('ScreenPendencias — task_remote_active configError', () => {
   });
 });
 
-describe('ScreenPendencias — task_remote_active com dado', () => {
+describe('ScreenPendencias — task_remote_active com dado (C1 preservado)', () => {
   it('renderiza grupos a partir de remote.tasks, Nova pendência/Reagendar ausentes, TaskService.getAll 0 calls', () => {
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
       hasData: true,
@@ -189,20 +208,6 @@ describe('ScreenPendencias — task_remote_active com dado', () => {
     expect(screen.queryByText('Nova pendência')).toBeNull();
     expect(screen.queryByText('Reagendar')).toBeNull();
     expect(m.tasks).not.toHaveBeenCalled();
-  });
-
-  it('checkbox de concluir fica desabilitado e não chama TaskService.update', () => {
-    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
-      hasData: true,
-      tasks: [remoteTask()],
-    }));
-
-    render(<ScreenPendencias go={() => {}} />);
-
-    const checkbox = screen.getByTitle('Concluir pendência') as HTMLButtonElement;
-    expect(checkbox.disabled).toBe(true);
-    fireEvent.click(checkbox);
-    expect(m.taskServiceUpdate).not.toHaveBeenCalled();
   });
 
   it('nome do Lead aparece como texto, sem lookup/flow — LeadService.getAll nunca chamado', () => {
@@ -245,5 +250,157 @@ describe('ScreenPendencias — transição local → remote loading', () => {
 
     expect(screen.queryByText('Ligar para Juliana')).toBeNull();
     expect(screen.getByTestId('pendencias-state-loading')).toBeInTheDocument();
+  });
+});
+
+// ── COMMERCIAL-REMOTE-B1-B3-C2 — conclusão remota ──────────────────────────
+
+describe('ScreenPendencias — conclusão remota: payload e version', () => {
+  it('completeTask chamado com {taskId, expectedVersion: task.version} exato, TaskService.update 0 calls', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask({ id: 'task-1', version: 7 })],
+    }));
+
+    render(<ScreenPendencias go={() => {}} />);
+    fireEvent.click(screen.getByTitle('Concluir pendência'));
+
+    expect(completeTaskSpy).toHaveBeenCalledWith({ taskId: 'task-1', expectedVersion: 7 });
+    expect(m.taskServiceUpdate).not.toHaveBeenCalled();
+  });
+
+  it('version inválida (ausente/não-inteira): completeTask 0 calls, nenhuma version inventada', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask({ id: 'task-bad', version: undefined as any })],
+    }));
+
+    render(<ScreenPendencias go={() => {}} />);
+    fireEvent.click(screen.getByTitle('Concluir pendência'));
+
+    expect(completeTaskSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('ScreenPendencias — conclusão remota: pending/double-submit', () => {
+  it('isPending=true: controle desabilitado, clique não gera segunda mutation', () => {
+    m.useCompleteTask.mockImplementation(() => ({
+      completeTask: completeTaskSpy, isPending: true, isError: false, isSuccess: false, error: null, reset: vi.fn(),
+    }));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask()],
+    }));
+
+    render(<ScreenPendencias go={() => {}} />);
+    const checkbox = screen.getByTitle('Concluir pendência') as HTMLButtonElement;
+    expect(checkbox.disabled).toBe(true);
+
+    fireEvent.click(checkbox);
+    expect(completeTaskSpy).not.toHaveBeenCalled();
+  });
+
+  it('Task A pending não bloqueia conclusão da Task B (instância por row)', () => {
+    const completeA = vi.fn().mockResolvedValue({});
+    const completeB = vi.fn().mockResolvedValue({});
+    m.useCompleteTask.mockImplementation(() => {
+      // Cada TaskRow monta sua própria chamada — a primeira (Task A) fica
+      // pending, a segunda (Task B) permanece livre.
+      const callIndex = m.useCompleteTask.mock.calls.length;
+      return callIndex === 1
+        ? { completeTask: completeA, isPending: true, isError: false, isSuccess: false, error: null, reset: vi.fn() }
+        : { completeTask: completeB, isPending: false, isError: false, isSuccess: false, error: null, reset: vi.fn() };
+    });
+    // Ambas em 'atrasada' (mesmo grupo, tab padrão) — evita um segundo passe
+    // de render ao trocar de tab, que chamaria useCompleteTask de novo para
+    // a Task já montada antes da Task nova montar pela primeira vez.
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask({ id: 'task-a', state: 'atrasada' }), remoteTask({ id: 'task-b', title: 'Task B', version: 2, state: 'atrasada' })],
+    }));
+
+    render(<ScreenPendencias go={() => {}} />);
+    const checkboxes = screen.getAllByTitle('Concluir pendência') as HTMLButtonElement[];
+    expect(checkboxes[0].disabled).toBe(true);
+    expect(checkboxes[1].disabled).toBe(false);
+
+    fireEvent.click(checkboxes[1]);
+    expect(completeB).toHaveBeenCalledWith({ taskId: 'task-b', expectedVersion: 2 });
+    expect(completeA).not.toHaveBeenCalled();
+  });
+});
+
+describe('ScreenPendencias — conclusão remota: sucesso (wiring, sem reconstruir integração)', () => {
+  it('completeTask chamado; rerender do screen-state sem a Task faz a row desaparecer, sem remoção otimista', async () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask({ id: 'task-1' })],
+    }));
+
+    const { rerender } = render(<ScreenPendencias go={() => {}} />);
+    fireEvent.click(screen.getByTitle('Concluir pendência'));
+    await waitFor(() => expect(completeTaskSpy).toHaveBeenCalled());
+
+    // Antes do refetch resolver: a row continua na tela (sem remoção manual).
+    expect(screen.getByText('Ligar para Cliente Remoto')).toBeInTheDocument();
+
+    // useCompleteTask já invalida/refetcha por conta própria (coberto em
+    // tests/tasks/taskMutationsIntegration.test.tsx) — aqui só simulamos o
+    // resultado desse refetch chegando ao screen-state.
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: false, isEmpty: true, tasks: [] }));
+    rerender(<ScreenPendencias go={() => {}} />);
+
+    expect(screen.queryByText('Ligar para Cliente Remoto')).toBeNull();
+  });
+});
+
+describe.each([
+  ['stale_write', 'remote_tasks_mutation_stale_write', 'Esta pendência foi alterada. Os dados foram atualizados.'],
+  ['already_completed', 'remote_tasks_mutation_already_completed', 'Esta pendência já foi concluída.'],
+  ['task_not_found', 'remote_tasks_mutation_task_not_found', 'Esta pendência não está mais disponível.'],
+  ['forbidden', 'remote_tasks_mutation_forbidden', 'Você não tem permissão para concluir esta pendência.'],
+  ['generic', 'remote_tasks_mutation_generic_error', 'Não foi possível concluir a pendência. Tente novamente.'],
+] as const)('ScreenPendencias — conclusão remota: erro %s', (_label, code, expectedMessage) => {
+  it(`mostra "${expectedMessage}", sem TaskService.update, sem remoção manual`, async () => {
+    completeTaskSpy.mockRejectedValueOnce(new RemoteTasksError(code as any, { operation: 'complete_task' }));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask()],
+    }));
+
+    render(<ScreenPendencias go={() => {}} />);
+    fireEvent.click(screen.getByTitle('Concluir pendência'));
+
+    expect(await screen.findByText(expectedMessage)).toBeInTheDocument();
+    expect(m.taskServiceUpdate).not.toHaveBeenCalled();
+    // A row não é removida manualmente — ela só some quando o screen-state
+    // (refetch) deixar de trazê-la, nunca por causa do erro em si.
+    expect(screen.getByText('Ligar para Cliente Remoto')).toBeInTheDocument();
+  });
+});
+
+describe('ScreenPendencias — conclusão remota: identity_changed', () => {
+  it('nenhuma mensagem de erro é mostrada', async () => {
+    completeTaskSpy.mockRejectedValueOnce(new RemoteTasksError('remote_tasks_mutation_identity_changed', { operation: 'complete_task' }));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask()],
+    }));
+
+    render(<ScreenPendencias go={() => {}} />);
+    fireEvent.click(screen.getByTitle('Concluir pendência'));
+
+    await waitFor(() => expect(completeTaskSpy).toHaveBeenCalled());
+    expect(screen.queryByTestId('task-complete-error')).toBeNull();
+  });
+});
+
+describe('ScreenPendencias — conclusão remota: reset de erro', () => {
+  it('nova tentativa limpa a mensagem de erro anterior antes do novo resultado', async () => {
+    completeTaskSpy.mockRejectedValueOnce(new RemoteTasksError('remote_tasks_mutation_stale_write', { operation: 'complete_task' }));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask()],
+    }));
+
+    render(<ScreenPendencias go={() => {}} />);
+    fireEvent.click(screen.getByTitle('Concluir pendência'));
+    expect(await screen.findByText('Esta pendência foi alterada. Os dados foram atualizados.')).toBeInTheDocument();
+
+    completeTaskSpy.mockResolvedValueOnce({});
+    fireEvent.click(screen.getByTitle('Concluir pendência'));
+    await waitFor(() => expect(screen.queryByText('Esta pendência foi alterada. Os dados foram atualizados.')).toBeNull());
   });
 });
