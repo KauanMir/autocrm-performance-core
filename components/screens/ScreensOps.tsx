@@ -867,8 +867,9 @@ const PRIO: Record<string, { c: string; label: string }> = {
 //   - concluir: useCompleteTask({taskId, expectedVersion: task.version}),
 //     nunca TaskService.update — montado INCONDICIONALMENTE (Rules of
 //     Hooks), uma instância por row (isPending/error isolados por Task);
-//   - Reagendar: oculto (FlowReagendarPendencia usa TaskService.update
-//     parcial, bloqueado fora de task_local desde o B1-B3-A);
+//   - Reagendar: sempre visível desde o B1-B3-E — FlowReagendarPendencia
+//     decide local/remoto sozinho (useUpdateTask full-replace no branch
+//     remoto, nunca mais TaskService.update fora de task_local);
 //   - nome do Lead: texto não-clicável — LeadService.getAll() remoto pode
 //     LANÇAR se o snapshot de Leads ainda não estiver populado (achado do
 //     precheck C, §0/§22), e FlowVerCliente exige o Lead completo (não
@@ -944,11 +945,13 @@ function TaskRow({ task, go, remoteActive, currentUser }: any) {
         <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}>{task.note}</div>
       </div>
       <span style={{ fontSize: 12, fontWeight: 700, color: late ? 'var(--red)' : 'var(--t-500)', whiteSpace: 'nowrap' }}>{task.when}</span>
-      {!remoteActive && (
-        <button onClick={() => (window as any).__openFlow('reagendar-pendencia', { task })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-          <Icon name="refresh" size={14} stroke={2} /> Reagendar
-        </button>
-      )}
+      {/* COMMERCIAL-REMOTE-B1-B3-E: sempre visível — por construção, este
+          ponto só é alcançado em task_local ou task_remote_active pronto.
+          FlowReagendarPendencia decide sozinho local/remoto (FlowLayer não
+          bloqueia mais 'reagendar-pendencia' fora do modo local). */}
+      <button onClick={() => (window as any).__openFlow('reagendar-pendencia', { task })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+        <Icon name="refresh" size={14} stroke={2} /> Reagendar
+      </button>
       {remoteActive ? (
         <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', whiteSpace: 'nowrap' }}>
           <Icon name="user" size={14} stroke={2} /> {task.lead.split(' ')[0]}

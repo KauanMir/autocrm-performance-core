@@ -192,8 +192,8 @@ describe('ScreenPendencias — task_remote_active configError', () => {
   });
 });
 
-describe('ScreenPendencias — task_remote_active com dado (C1 preservado, D atualizado)', () => {
-  it('renderiza grupos a partir de remote.tasks, Reagendar ausente, TaskService.getAll 0 calls', () => {
+describe('ScreenPendencias — task_remote_active com dado (C1 preservado, D/E atualizados)', () => {
+  it('renderiza grupos a partir de remote.tasks, TaskService.getAll 0 calls', () => {
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
       hasData: true,
       tasks: [remoteTask({ id: 't-remote-1', state: 'atrasada' }), remoteTask({ id: 't-remote-2', state: 'hoje', title: 'Follow-up remoto' })],
@@ -205,13 +205,13 @@ describe('ScreenPendencias — task_remote_active com dado (C1 preservado, D atu
 
     expect(screen.getByText('Ligar para Cliente Remoto')).toBeInTheDocument();
     expect(screen.getByText('Follow-up remoto')).toBeInTheDocument();
-    expect(screen.queryByText('Reagendar')).toBeNull();
     expect(m.tasks).not.toHaveBeenCalled();
   });
 
-  // COMMERCIAL-REMOTE-B1-B3-D: "Nova pendência" deixou de ser oculto em modo
-  // remoto — FlowNovaPendencia agora decide local/remoto sozinho.
-  it('"Nova pendência" está visível (Task tem create remoto próprio desde o D)', () => {
+  // COMMERCIAL-REMOTE-B1-B3-D/E: "Nova pendência" e "Reagendar" deixaram de
+  // ser ocultos em modo remoto — FlowNovaPendencia/FlowReagendarPendencia
+  // agora decidem local/remoto sozinhos.
+  it('"Nova pendência" e "Reagendar" estão visíveis (Task tem create/update remotos próprios desde D/E)', () => {
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
       hasData: true,
       tasks: [remoteTask()],
@@ -220,6 +220,7 @@ describe('ScreenPendencias — task_remote_active com dado (C1 preservado, D atu
     render(<ScreenPendencias go={() => {}} />);
 
     expect(screen.getByText('Nova pendência')).toBeInTheDocument();
+    expect(screen.getByText('Reagendar')).toBeInTheDocument();
   });
 
   it('nome do Lead aparece como texto, sem lookup/flow — LeadService.getAll nunca chamado', () => {

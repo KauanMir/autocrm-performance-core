@@ -49,13 +49,16 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
 // COMMERCIAL-REMOTE-B1-B3-D: 'nova-pendencia' SAIU deste set — Task tem
 // backend remoto próprio desde o B1-B3-A, e FlowNovaPendencia agora decide
 // local/remoto sozinho (resolveTaskRemoteMode(), mesmo contrato de
-// resolveLeadFlowContext), nunca mais lançando em modo remoto. Visit/Deal/
-// Sale (Visita/Proposta/Venda) E 'criar-acompanhamento'/'reagendar-
-// pendencia' permanecem aqui — nenhum dos dois foi migrado ainda.
+// resolveLeadFlowContext), nunca mais lançando em modo remoto.
+//
+// COMMERCIAL-REMOTE-B1-B3-E: 'reagendar-pendencia' SAIU pelo mesmo motivo —
+// FlowReagendarPendencia agora decide local/remoto sozinho. Visit/Deal/Sale
+// (Visita/Proposta/Venda) E 'criar-acompanhamento' permanecem aqui —
+// nenhum dos dois foi migrado ainda.
 const LOCAL_COMMERCIAL_FLOW_IDS = new Set<string>([
   'criar-visita', 'confirmar-visita', 'registrar-resultado',
   'nova-proposta', 'aprovar-proposta', 'registrar-venda',
-  'criar-acompanhamento', 'reagendar-pendencia',
+  'criar-acompanhamento',
 ]);
 
 function LocalCommercialFlowUnavailable({ close }: { close: () => void }) {

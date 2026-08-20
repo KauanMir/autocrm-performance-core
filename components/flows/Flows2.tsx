@@ -18,6 +18,7 @@ import type { RemoteLeadDuplicateRow } from '@/lib/leads/remoteMutationRepositor
 import { resolveLeadFlowContext, type LeadFlowContext } from '@/lib/leads/leadFlowContext';
 import { isRemoteLeadsError } from '@/lib/leads/errors';
 import { useCreateTask } from '@/lib/hooks/useCreateTask';
+import { useUpdateTask } from '@/lib/hooks/useUpdateTask';
 import { resolveTaskRemoteMode } from '@/lib/tasks/remoteTasksMode';
 import { combineLocalDateAndTimeToIso } from '@/lib/tasks/dueAtHelpers';
 import { startOfLocalDay } from '@/lib/tasks/deriveTaskState';
@@ -1299,6 +1300,25 @@ function addLocalDays(d: Date, days: number): Date {
   return new Date(base.getFullYear(), base.getMonth(), base.getDate() + days);
 }
 
+// COMMERCIAL-REMOTE-B1-B3-E: extração mínima da regra remota de dueAt —
+// mesma lógica exata que já vivia inline em FlowNovaPendencia (B1-B3-D),
+// agora compartilhada com FlowReagendarPendencia. Continua neste arquivo
+// (nenhum módulo/lib novo) — os dois únicos consumidores já estão aqui.
+// Hoje/Amanhã derivam a DATA do calendário local (nunca now+24h em ms);
+// Esta semana/Personalizado usam a data escolhida pelo usuário; Esta semana
+// é limitada a [hoje, domingo local] (weekInRange), nunca só via min/max do
+// <input>. combineLocalDateAndTimeToIso continua a única autoridade de
+// parsing/validação de data+hora — nenhum parser duplicado aqui.
+function resolveRemoteDueAt(when: string, dueDate: string, dueTime: string, now: Date = new Date()) {
+  const todayYMD = localYMD(now);
+  const tomorrowYMD = localYMD(addLocalDays(now, 1));
+  const sundayYMD = localYMD(addLocalDays(now, (7 - now.getDay()) % 7));
+  const dateForWhen = when === 'Hoje' ? todayYMD : when === 'Amanhã' ? tomorrowYMD : dueDate;
+  const weekInRange = when !== 'Esta semana' || (dueDate >= todayYMD && dueDate <= sundayYMD);
+  const result = combineLocalDateAndTimeToIso({ date: dateForWhen, time: dueTime });
+  return { todayYMD, sundayYMD, weekInRange, valid: result.ok && weekInRange, result };
+}
+
 // Mensagens sanitizadas fixas da criação remota de Task — mesmo modelo de
 // remoteLeadErrorMessage (topo deste arquivo)/remoteTaskCompleteErrorMessage
 // (ScreensOps.tsx, não compartilhado entre arquivos de propósito, mesma
@@ -1320,6 +1340,46 @@ function remoteTaskCreateErrorMessage(error: unknown): string {
     default:
       return 'Não foi possível criar a pendência. Tente novamente.';
   }
+}
+
+// COMMERCIAL-REMOTE-B1-B3-E: mensagens sanitizadas do reagendamento remoto —
+// mesmo modelo de remoteTaskCreateErrorMessage acima (helper próprio deste
+// flow, não compartilhado — mesma convenção de remoteLeadMoveErrorMessage
+// vs remoteCallOutcomeErrorMessage para Leads). identity_changed nunca
+// chega aqui — tratado antes, no catch do handler.
+function remoteTaskUpdateErrorMessage(error: unknown): string {
+  const code = isRemoteTasksError(error) ? error.code : undefined;
+  switch (code) {
+    case 'remote_tasks_mutation_stale_write':
+      return 'Esta pendência foi alterada. Os dados foram atualizados.';
+    case 'remote_tasks_mutation_task_completed':
+      return 'Esta pendência já foi concluída.';
+    case 'remote_tasks_mutation_task_not_found':
+      return 'Esta pendência não está mais disponível.';
+    case 'remote_tasks_mutation_forbidden':
+      return 'Você não tem permissão para reagendar esta pendência.';
+    case 'remote_tasks_mutation_seller_required':
+      return 'Esta pendência está sem um responsável válido.';
+    case 'remote_tasks_mutation_seller_not_found':
+      return 'O responsável desta pendência não está mais disponível.';
+    case 'remote_tasks_mutation_invalid_title':
+      return 'Esta pendência possui dados inválidos e precisa ser atualizada.';
+    default:
+      return 'Não foi possível reagendar a pendência. Tente novamente.';
+  }
+}
+
+// COMMERCIAL-REMOTE-B1-B3-E §0: dentro deste flow o usuário não consegue
+// corrigir title/assignedSellerId/permissão — resubmeter com o MESMO
+// payload depois de qualquer um desses erros sempre falharia de novo
+// (stale_write em particular: expectedVersion ficaria definitivamente
+// obsoleto). Único código genuinamente transitório é generic_error (ou
+// qualquer erro não reconhecido como RemoteTasksError) — só ele permite
+// nova tentativa na mesma instância do flow; todos os outros exigem
+// fechar e reabrir (Task/contexto atualizados na nova abertura).
+function isRemoteTaskUpdateRetryable(error: unknown): boolean {
+  const code = isRemoteTasksError(error) ? error.code : undefined;
+  return code === undefined || code === 'remote_tasks_mutation_generic_error';
 }
 
 export function FlowNovaPendencia({ payload, close }: any) {
@@ -1388,23 +1448,11 @@ export function FlowNovaPendencia({ payload, close }: any) {
   // segunda implementação.
   useCloseOnIdentityChange(identityKey, close);
 
-  // ── Data/hora remota (§0/§13-18): nunca hora automática — o usuário
-  // sempre escolhe explicitamente. Hoje/Amanhã derivam a DATA do calendário
-  // local (nunca now+24h em ms, que quebraria perto de DST); Esta
-  // semana/Personalizado usam a data escolhida pelo usuário. Esta semana é
-  // limitada a [hoje, domingo da semana local atual] — nunca só via
-  // min/max do <input>, também revalidado aqui (§15).
-  const now = new Date();
-  const todayYMD = localYMD(now);
-  const tomorrowYMD = localYMD(addLocalDays(now, 1));
-  const sundayYMD = localYMD(addLocalDays(now, (7 - now.getDay()) % 7));
-  const remoteDateForWhen =
-    when === 'Hoje' ? todayYMD
-    : when === 'Amanhã' ? tomorrowYMD
-    : dueDate;
-  const remoteWeekInRange = when !== 'Esta semana' || (dueDate >= todayYMD && dueDate <= sundayYMD);
-  const remoteDueAtResult = combineLocalDateAndTimeToIso({ date: remoteDateForWhen, time: dueTime });
-  const remoteDueAtValid = remoteDueAtResult.ok && remoteWeekInRange;
+  // COMMERCIAL-REMOTE-B1-B3-E: cálculo movido para resolveRemoteDueAt
+  // (compartilhado com FlowReagendarPendencia) — mesmos nomes de variável
+  // de antes, refatoração puramente mecânica, nenhuma mudança de
+  // comportamento (§0/§13-18 do B1-B3-D continuam valendo).
+  const { todayYMD, sundayYMD, weekInRange: remoteWeekInRange, valid: remoteDueAtValid, result: remoteDueAtResult } = resolveRemoteDueAt(when, dueDate, dueTime);
 
   const remoteSellerItems: SellerPickerItem[] = assignableSellers.assignableSellers.map((s) => ({ id: s.seller_id, name: s.name }));
 
@@ -1559,31 +1607,159 @@ export function FlowNovaPendencia({ payload, close }: any) {
   );
 }
 
+// COMMERCIAL-REMOTE-B1-B3-E: `taskDataSource` decide local/remoto do mesmo
+// jeito que FlowNovaPendencia (resolveTaskRemoteMode(), nunca fallback
+// local sob modo remoto). Diferente do Create: nenhum picker de
+// responsável em nenhum papel — este flow só reagenda, nunca reatribui
+// (Manager E Seller reenviam task.assignedTo intacto, backend continua
+// autoridade sobre quem pode fazer o quê).
 export function FlowReagendarPendencia({ payload, close }: any) {
   const task = payload.task;
   const [when, setWhen] = useState('Amanhã');
   const [customWhen, setCustomWhen] = useState('');
+  // COMMERCIAL-REMOTE-B1-B3-E: só usados no branch remoto — começam vazios
+  // de propósito (§10-12 do precheck: mesma convenção "sem prefill
+  // silencioso" já usada no Create; usuário escolhe explicitamente).
+  const [dueDate, setDueDate] = useState('');
+  const [dueTime, setDueTime] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // REOPEN REQUIRED (§0 do EXEC): true após qualquer erro que não seja
+  // generic_error — bloqueia permanentemente novos submits NESTA instância
+  // do flow (retry com o mesmo expectedVersion/payload nunca teria sucesso).
+  const [blocked, setBlocked] = useState(false);
+
+  const user = AuthService.getCurrentUser();
+  const taskDataSource: 'local' | 'remote' = resolveTaskRemoteMode() === 'task_local' ? 'local' : 'remote';
+
+  // Identidade — mesma forma canônica de useRemoteTasksScreenState/
+  // useCreateTask/useCompleteTask/TaskRow.
+  const identityUserId = user?.id ?? null;
+  const identityCompanyId = user?.activeMembership?.companyId ?? null;
+  const identityMembershipRole = user?.activeMembership?.role ?? null;
+  const identityUserIsActive = Boolean(user);
+  const identityKey = identityUserId && identityCompanyId ? `${identityUserId}:${identityCompanyId}` : null;
+
+  // Hooks SEMPRE chamados, incondicionalmente, antes de qualquer return
+  // (inclusive o `!task` abaixo) — Rules of Hooks.
+  const updateHook = useUpdateTask({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  useCloseOnIdentityChange(identityKey, close);
+
+  const remoteDueAt = resolveRemoteDueAt(when, dueDate, dueTime);
+  const { todayYMD, sundayYMD, weekInRange: remoteWeekInRange, valid: remoteDueAtValid, result: remoteDueAtResult } = remoteDueAt;
+
   if (!task) return null;
+
   const whenState: Record<string, string> = { 'Hoje': TASK_STATE.TODAY, 'Amanhã': TASK_STATE.UPCOMING, 'Esta semana': TASK_STATE.UPCOMING, 'Personalizado': TASK_STATE.UPCOMING };
   const isCustomWhen = when === 'Personalizado';
   const finalWhen = isCustomWhen ? customWhen.trim() : when;
-  const canSave = !!finalWhen;
+  const canSaveLocal = !!finalWhen;
+
+  // §6/§12/§13 do EXEC: version/assignedSeller nunca fabricados; no-op
+  // (mesmo instante) bloqueado por epoch-ms, sem normalização complexa.
+  const hasValidVersion = Number.isInteger(task.version) && task.version >= 1;
+  const hasValidAssignedSeller = typeof task.assignedTo === 'string' && task.assignedTo.trim() !== '';
+  const remoteDueAtChanged =
+    remoteDueAtValid && remoteDueAtResult.ok && task.dueAt != null
+    && new Date(remoteDueAtResult.iso).getTime() !== new Date(task.dueAt).getTime();
+
+  const canSaveRemote = Boolean(
+    remoteDueAtValid
+    && remoteDueAtChanged
+    && hasValidVersion
+    && hasValidAssignedSeller
+    && !submitting
+    && !updateHook.isPending
+    && !blocked,
+  );
+  const canSave = taskDataSource === 'local' ? canSaveLocal : canSaveRemote;
+
+  const handleSaveLocal = () => {
+    if (!finalWhen) return;
+    TaskService.update(task.id, { when: finalWhen, state: whenState[when] });
+    close();
+  };
+
+  const handleSaveRemote = async () => {
+    if (!canSaveRemote || !remoteDueAtResult.ok) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      // FULL REPLACE (§10/§14/§15 do EXEC): title/note/priority/
+      // assignedSellerId vêm DIRETO de task — nunca de LeadService/
+      // SellerService/TaskService/label de UI — mesmo sem terem mudado.
+      await updateHook.updateTask({
+        taskId: task.id,
+        expectedVersion: task.version,
+        title: task.title,
+        note: task.note,
+        priority: task.prio,
+        dueAt: remoteDueAtResult.iso,
+        assignedSellerId: task.assignedTo,
+      });
+      close();
+    } catch (err) {
+      // Mesmo padrão de FlowAtribuirVendedor/FlowNovaPendencia:
+      // identity_changed fecha o flow diretamente, nunca mostra erro da
+      // sessão antiga.
+      if (isRemoteTasksError(err) && err.code === 'remote_tasks_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(remoteTaskUpdateErrorMessage(err));
+      if (!isRemoteTaskUpdateRetryable(err)) setBlocked(true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <FlowShell eyebrow="REAGENDAR PENDÊNCIA" title="Reagendar" icon="refresh" accent="#3B82F6" onClose={close}
-      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={() => {
-        if (!finalWhen) return;
-        TaskService.update(task.id, { when: finalWhen, state: whenState[when] });
-        close();
-      }} style={{ opacity: canSave ? 1 : .5 }}>Reagendar</LBtn></>}>
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check"
+        onClick={taskDataSource === 'local' ? handleSaveLocal : handleSaveRemote}
+        style={{ opacity: canSave ? 1 : .5 }}>
+        {taskDataSource === 'remote' && (submitting || updateHook.isPending) ? 'Reagendando…' : 'Reagendar'}
+      </LBtn></>}>
       <div style={{ maxWidth: 520 }}>
         <FPanel>
           <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-900)', marginBottom: 4 }}>{task.title}</div>
           <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginBottom: 16 }}>Atualmente: {task.when}</div>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Nova data</div>
           <Segmented options={['Hoje', 'Amanhã', 'Esta semana', 'Personalizado']} value={when} onChange={setWhen} accent="#3B82F6" />
-          {isCustomWhen && (
+          {taskDataSource === 'local' ? (
+            isCustomWhen && (
+              <div style={{ marginTop: 14 }}>
+                <FField label="Data ou prazo" icon="calendar" placeholder="Ex.: 12/07/2026, sexta-feira, daqui 10 dias…" value={customWhen} onChange={(e: any) => setCustomWhen(e.target.value)} />
+              </div>
+            )
+          ) : (
             <div style={{ marginTop: 14 }}>
-              <FField label="Data ou prazo" icon="calendar" placeholder="Ex.: 12/07/2026, sexta-feira, daqui 10 dias…" value={customWhen} onChange={(e: any) => setCustomWhen(e.target.value)} />
+              {!hasValidAssignedSeller ? (
+                <div style={{ fontSize: 12.5, color: 'var(--amber)' }}>Esta pendência está sem um responsável válido. Não é possível reagendá-la agora.</div>
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: (when === 'Esta semana' || when === 'Personalizado') ? '1fr 1fr' : '1fr', gap: 18 }}>
+                    {(when === 'Esta semana' || when === 'Personalizado') && (
+                      <FField label="Data" icon="calendar" type="date" value={dueDate} onChange={(e: any) => setDueDate(e.target.value)}
+                        min={when === 'Esta semana' ? todayYMD : undefined}
+                        max={when === 'Esta semana' ? sundayYMD : undefined}
+                        disabled={blocked} />
+                    )}
+                    <FField label="Hora" icon="clock" type="time" value={dueTime} onChange={(e: any) => setDueTime(e.target.value)} disabled={blocked} />
+                  </div>
+                  {when === 'Esta semana' && dueDate && !remoteWeekInRange && (
+                    <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--amber)' }}>Escolha uma data entre hoje e domingo desta semana.</div>
+                  )}
+                </>
+              )}
+              {submitError && (
+                <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--red-bg, rgba(255,59,59,.08))', border: '1px solid var(--red-line, rgba(255,59,59,.3))' }}>
+                  <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{submitError}</span>
+                </div>
+              )}
             </div>
           )}
         </FPanel>

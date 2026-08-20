@@ -62,7 +62,7 @@ import { FlowLayer } from '@/components/flows/FlowLayer';
 const COMMERCIAL_FLOW_IDS = [
   'criar-visita', 'confirmar-visita', 'registrar-resultado',
   'nova-proposta', 'aprovar-proposta', 'registrar-venda',
-  'criar-acompanhamento', 'reagendar-pendencia',
+  'criar-acompanhamento',
 ];
 
 const NON_COMMERCIAL_FLOW_IDS = [
@@ -144,34 +144,35 @@ describe('FlowLayer — modo NÃO local: gate bloqueia todos os flows comerciais
   });
 });
 
-// COMMERCIAL-REMOTE-B1-B3-D: 'nova-pendencia' SAIU de LOCAL_COMMERCIAL_FLOW_
-// IDS — Task tem backend remoto próprio (FlowNovaPendencia decide local/
-// remoto sozinho via resolveTaskRemoteMode(), nunca mais lançando em modo
-// remoto). Diferente de NON_COMMERCIAL_FLOW_IDS (flows que nunca foram
-// comerciais) — este é um flow comercial que deixou de ser bloqueado por
-// ESTE gate especificamente, por isso tem sua própria suíte.
-describe('FlowLayer — nova-pendencia não é mais bloqueado por isLocalCommercialDataAllowed', () => {
+// COMMERCIAL-REMOTE-B1-B3-D/E: 'nova-pendencia' e 'reagendar-pendencia'
+// SAÍRAM de LOCAL_COMMERCIAL_FLOW_IDS — Task tem backend remoto próprio
+// (FlowNovaPendencia/FlowReagendarPendencia decidem local/remoto sozinhos
+// via resolveTaskRemoteMode(), nunca mais lançando em modo remoto).
+// Diferente de NON_COMMERCIAL_FLOW_IDS (flows que nunca foram comerciais)
+// — são flows comerciais que deixaram de ser bloqueados por ESTE gate
+// especificamente, por isso têm sua própria suíte.
+describe.each(['nova-pendencia', 'reagendar-pendencia'])('FlowLayer — %s não é mais bloqueado por isLocalCommercialDataAllowed', (id) => {
   it('modo local: monta o componente real', () => {
     mocks.isLocalCommercialDataAllowed.mockReturnValue(true);
-    renderFlow('nova-pendencia');
-    expect(screen.getByText('FlowNovaPendencia')).toBeInTheDocument();
+    renderFlow(id, { task: { id: 't1' } });
+    expect(screen.getByText(STUB_LABEL_BY_FLOW_ID[id])).toBeInTheDocument();
     expect(screen.queryByText('Módulo indisponível')).toBeNull();
   });
 
   it('modo NÃO local (Leads remoto): monta o componente real mesmo assim — o próprio flow decide local/remoto', () => {
     mocks.isLocalCommercialDataAllowed.mockReturnValue(false);
-    renderFlow('nova-pendencia');
-    expect(screen.getByText('FlowNovaPendencia')).toBeInTheDocument();
+    renderFlow(id, { task: { id: 't1' } });
+    expect(screen.getByText(STUB_LABEL_BY_FLOW_ID[id])).toBeInTheDocument();
     expect(screen.queryByText('Módulo indisponível')).toBeNull();
   });
 });
 
-describe('FlowLayer — reagendar-pendencia/criar-acompanhamento continuam bloqueados (regressão)', () => {
-  it.each(['reagendar-pendencia', 'criar-acompanhamento'])('%s: continua mostrando estado indisponível em modo NÃO local', (id) => {
+describe('FlowLayer — criar-acompanhamento continua bloqueado (regressão)', () => {
+  it('continua mostrando estado indisponível em modo NÃO local', () => {
     mocks.isLocalCommercialDataAllowed.mockReturnValue(false);
-    renderFlow(id);
+    renderFlow('criar-acompanhamento');
     expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
-    expect(screen.queryByText(STUB_LABEL_BY_FLOW_ID[id])).toBeNull();
+    expect(screen.queryByText('FlowCriarAcompanhamento')).toBeNull();
   });
 });
 
