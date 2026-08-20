@@ -1041,7 +1041,13 @@ export function ScreenPendencias({ go }: any) {
   const view = tab === 'Todas' ? Object.entries(groups) : [[tab, groups[tab]]];
   return (
     <LightScreen>
-      <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." actions={remoteActive ? undefined : <LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-pendencia')}>Nova pendência</LBtn>} />
+      {/* COMMERCIAL-REMOTE-B1-B3-D: botão sempre visível aqui — por
+          construção, este ponto só é alcançado em task_local ou
+          task_remote_active pronto (blocked/misconfigured/unavailable-
+          identity/loading/erro/configError já retornaram antes, acima).
+          FlowNovaPendencia decide sozinho local/remoto (FlowLayer não
+          bloqueia mais 'nova-pendencia' fora do modo local). */}
+      <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-pendencia')}>Nova pendência</LBtn>} />
       <Guide tone="red" icon="alert" text={<span>Você tem <b>{late} pendências atrasadas</b>. Resolva primeiro as vermelhas — cada dia parado é uma venda mais distante.</span>} action="Ver atrasadas" onAction={() => setTab('Atrasadas')} />
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
         {['Atrasadas', 'Hoje', 'Próximas', 'Todas'].map(t => (

@@ -192,8 +192,8 @@ describe('ScreenPendencias — task_remote_active configError', () => {
   });
 });
 
-describe('ScreenPendencias — task_remote_active com dado (C1 preservado)', () => {
-  it('renderiza grupos a partir de remote.tasks, Nova pendência/Reagendar ausentes, TaskService.getAll 0 calls', () => {
+describe('ScreenPendencias — task_remote_active com dado (C1 preservado, D atualizado)', () => {
+  it('renderiza grupos a partir de remote.tasks, Reagendar ausente, TaskService.getAll 0 calls', () => {
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
       hasData: true,
       tasks: [remoteTask({ id: 't-remote-1', state: 'atrasada' }), remoteTask({ id: 't-remote-2', state: 'hoje', title: 'Follow-up remoto' })],
@@ -205,9 +205,21 @@ describe('ScreenPendencias — task_remote_active com dado (C1 preservado)', () 
 
     expect(screen.getByText('Ligar para Cliente Remoto')).toBeInTheDocument();
     expect(screen.getByText('Follow-up remoto')).toBeInTheDocument();
-    expect(screen.queryByText('Nova pendência')).toBeNull();
     expect(screen.queryByText('Reagendar')).toBeNull();
     expect(m.tasks).not.toHaveBeenCalled();
+  });
+
+  // COMMERCIAL-REMOTE-B1-B3-D: "Nova pendência" deixou de ser oculto em modo
+  // remoto — FlowNovaPendencia agora decide local/remoto sozinho.
+  it('"Nova pendência" está visível (Task tem create remoto próprio desde o D)', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true,
+      tasks: [remoteTask()],
+    }));
+
+    render(<ScreenPendencias go={() => {}} />);
+
+    expect(screen.getByText('Nova pendência')).toBeInTheDocument();
   });
 
   it('nome do Lead aparece como texto, sem lookup/flow — LeadService.getAll nunca chamado', () => {

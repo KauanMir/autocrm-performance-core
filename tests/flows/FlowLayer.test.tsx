@@ -62,7 +62,7 @@ import { FlowLayer } from '@/components/flows/FlowLayer';
 const COMMERCIAL_FLOW_IDS = [
   'criar-visita', 'confirmar-visita', 'registrar-resultado',
   'nova-proposta', 'aprovar-proposta', 'registrar-venda',
-  'criar-acompanhamento', 'nova-pendencia', 'reagendar-pendencia',
+  'criar-acompanhamento', 'reagendar-pendencia',
 ];
 
 const NON_COMMERCIAL_FLOW_IDS = [
@@ -141,6 +141,37 @@ describe('FlowLayer — modo NÃO local: gate bloqueia todos os flows comerciais
     const buttons = screen.getAllByRole('button');
     buttons[0].click();
     expect(close).toHaveBeenCalled();
+  });
+});
+
+// COMMERCIAL-REMOTE-B1-B3-D: 'nova-pendencia' SAIU de LOCAL_COMMERCIAL_FLOW_
+// IDS — Task tem backend remoto próprio (FlowNovaPendencia decide local/
+// remoto sozinho via resolveTaskRemoteMode(), nunca mais lançando em modo
+// remoto). Diferente de NON_COMMERCIAL_FLOW_IDS (flows que nunca foram
+// comerciais) — este é um flow comercial que deixou de ser bloqueado por
+// ESTE gate especificamente, por isso tem sua própria suíte.
+describe('FlowLayer — nova-pendencia não é mais bloqueado por isLocalCommercialDataAllowed', () => {
+  it('modo local: monta o componente real', () => {
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(true);
+    renderFlow('nova-pendencia');
+    expect(screen.getByText('FlowNovaPendencia')).toBeInTheDocument();
+    expect(screen.queryByText('Módulo indisponível')).toBeNull();
+  });
+
+  it('modo NÃO local (Leads remoto): monta o componente real mesmo assim — o próprio flow decide local/remoto', () => {
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(false);
+    renderFlow('nova-pendencia');
+    expect(screen.getByText('FlowNovaPendencia')).toBeInTheDocument();
+    expect(screen.queryByText('Módulo indisponível')).toBeNull();
+  });
+});
+
+describe('FlowLayer — reagendar-pendencia/criar-acompanhamento continuam bloqueados (regressão)', () => {
+  it.each(['reagendar-pendencia', 'criar-acompanhamento'])('%s: continua mostrando estado indisponível em modo NÃO local', (id) => {
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(false);
+    renderFlow(id);
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+    expect(screen.queryByText(STUB_LABEL_BY_FLOW_ID[id])).toBeNull();
   });
 });
 

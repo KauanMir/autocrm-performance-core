@@ -7,7 +7,7 @@ import { AuthService, LeadService, VisitService, DealService, SaleService, TaskS
 import {
   CARS, ORIGINS, PAYS,
   FField, FArea, Segmented, ChoiceTile, ClientChip, LeadPicker, LocalSellerPicker, SellerPicker,
-  FPanel, StepRail, SummaryRow, FlowShell, FlowSuccess,
+  FPanel, StepRail, SummaryRow, FlowShell, FlowSuccess, type SellerPickerItem,
 } from './FlowsShared';
 import { useCurrentCompanyAssignableSellers } from '@/lib/hooks/useCurrentCompanyAssignableSellers';
 import { useCreateLead, type CreateLeadCallInput } from '@/lib/hooks/useCreateLead';
@@ -17,6 +17,11 @@ import { useLeadDuplicateGuard } from '@/lib/hooks/useLeadDuplicateGuard';
 import type { RemoteLeadDuplicateRow } from '@/lib/leads/remoteMutationRepository';
 import { resolveLeadFlowContext, type LeadFlowContext } from '@/lib/leads/leadFlowContext';
 import { isRemoteLeadsError } from '@/lib/leads/errors';
+import { useCreateTask } from '@/lib/hooks/useCreateTask';
+import { resolveTaskRemoteMode } from '@/lib/tasks/remoteTasksMode';
+import { combineLocalDateAndTimeToIso } from '@/lib/tasks/dueAtHelpers';
+import { startOfLocalDay } from '@/lib/tasks/deriveTaskState';
+import { isRemoteTasksError } from '@/lib/tasks/errors';
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
 const TEMP_INFO: Record<string, string> = {
@@ -1280,18 +1285,74 @@ const NOVA_PENDENCIA_WHEN_STATE: Record<string, string> = {
   'Personalizado': TASK_STATE.UPCOMING,
 };
 
+// COMMERCIAL-REMOTE-B1-B3-D: 'YYYY-MM-DD' local (mesmo formato de <input
+// type="date">/dueAtHelpers.ts) — nunca via toISOString() (que converteria
+// para UTC e poderia mostrar o dia errado perto da virada de meia-noite
+// local). addLocalDays reusa startOfLocalDay (lib/tasks/deriveTaskState.ts)
+// — mesmo conceito de "dia local" do resto do rollout, nunca uma segunda
+// noção divergente.
+function localYMD(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function addLocalDays(d: Date, days: number): Date {
+  const base = startOfLocalDay(d);
+  return new Date(base.getFullYear(), base.getMonth(), base.getDate() + days);
+}
+
+// Mensagens sanitizadas fixas da criação remota de Task — mesmo modelo de
+// remoteLeadErrorMessage (topo deste arquivo)/remoteTaskCompleteErrorMessage
+// (ScreensOps.tsx, não compartilhado entre arquivos de propósito, mesma
+// convenção já usada para os erros de Lead). identity_changed nunca chega
+// aqui — useCloseOnIdentityChange fecha o flow antes.
+function remoteTaskCreateErrorMessage(error: unknown): string {
+  const code = isRemoteTasksError(error) ? error.code : undefined;
+  switch (code) {
+    case 'remote_tasks_mutation_forbidden':
+      return 'Você não tem permissão para criar esta pendência.';
+    case 'remote_tasks_mutation_seller_required':
+      return 'Selecione um responsável para a pendência.';
+    case 'remote_tasks_mutation_seller_not_found':
+      return 'O responsável selecionado não está mais disponível.';
+    case 'remote_tasks_mutation_lead_not_found':
+      return 'O cliente vinculado não está mais disponível.';
+    case 'remote_tasks_mutation_invalid_title':
+      return 'Informe um título válido para a pendência.';
+    default:
+      return 'Não foi possível criar a pendência. Tente novamente.';
+  }
+}
+
 export function FlowNovaPendencia({ payload, close }: any) {
   const [done, setDone] = useState(false);
   const [type, setType] = useState('Ligar');
   const [client, setClient] = useState(payload.lead ? payload.lead.name : '');
   const [when, setWhen] = useState('Hoje');
   const [customWhen, setCustomWhen] = useState('');
+  // COMMERCIAL-REMOTE-B1-B3-D: só usados no branch remoto (§0/§13-18) — data/
+  // hora do local (customWhen, texto livre) permanecem intocados.
+  const [dueDate, setDueDate] = useState('');
+  const [dueTime, setDueTime] = useState('');
   const [prio, setPrio] = useState('Alta');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const types: [string, string][] = [['Ligar', 'phone'], ['Visita', 'calendar'], ['Follow-up', 'refresh'], ['Proposta', 'handshake'], ['Documento', 'doc']];
 
   const user = AuthService.getCurrentUser();
   const isSeller = user?.activeMembership?.role === 'seller';
-  const allSellers = SellerService.getAll();
+
+  // COMMERCIAL-REMOTE-B1-B3-D: mesmo contrato de resolveLeadFlowContext
+  // (lib/leads/leadFlowContext.ts) — 'remote' sempre que Task não estiver em
+  // task_local, inclusive blocked/misconfigured (nunca fallback local
+  // silencioso). Na prática este flow só é aberto em task_local ou
+  // task_remote_active (ScreenPendencias oculta o botão, FlowLayer bloqueia
+  // o flow-id nos outros modos) — useCreateTask falha fechado (forbidden)
+  // de qualquer forma se isso não for verdade.
+  const taskDataSource: 'local' | 'remote' = resolveTaskRemoteMode() === 'task_local' ? 'local' : 'remote';
+
+  // Catálogo local só é lido em task_local — remoto nunca chama
+  // SellerService (§7: nem para a seleção, nem para resolver o label de
+  // exibição).
+  const allSellers = taskDataSource === 'local' ? SellerService.getAll() : [];
   // Seller creates a task for themself. Manager/admin has no sellerId of
   // their own — an avulsa task must never save with assignedTo null (that's
   // what let it silently show up for every seller, Correção 4, M0-K4.1). If
@@ -1300,33 +1361,127 @@ export function FlowNovaPendencia({ payload, close }: any) {
     isSeller ? (user?.activeMembership?.sellerId ?? null) : (payload.lead?.sellerId ?? null),
   );
   const finalSellerId = isSeller ? (user?.activeMembership?.sellerId ?? null) : assignedSellerId;
-  const finalSeller = finalSellerId ? allSellers.find((s: any) => s.id === finalSellerId) : null;
+  const finalSeller = taskDataSource === 'local' && finalSellerId ? allSellers.find((s: any) => s.id === finalSellerId) : null;
   const isCustomWhen = when === 'Personalizado';
   const finalWhen = isCustomWhen ? customWhen.trim() : when;
-  const canCreate = !!finalSellerId && !!finalWhen;
+
+  // Identidade — mesma forma canônica de useRemoteTasksScreenState/
+  // useTasksRemoteBridgeLifecycle/useCreateTask/useCompleteTask (TaskRow,
+  // ScreensOps.tsx). Hooks chamados SEMPRE, na mesma ordem (Rules of Hooks)
+  // — em task_local eles simplesmente nunca são exercitados via submit.
+  const identityUserId = user?.id ?? null;
+  const identityCompanyId = user?.activeMembership?.companyId ?? null;
+  const identityMembershipRole = user?.activeMembership?.role ?? null;
+  const identityUserIsActive = Boolean(user);
+  const identityKey = identityUserId && identityCompanyId ? `${identityUserId}:${identityCompanyId}` : null;
+
+  const createHook = useCreateTask({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  const assignableSellers = useCurrentCompanyAssignableSellers({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  // useCloseOnIdentityChange já existe neste arquivo (linha ~63, reusado por
+  // FlowNovoClienteRemote/FlowEditarCliente) — mesma proteção, nunca uma
+  // segunda implementação.
+  useCloseOnIdentityChange(identityKey, close);
+
+  // ── Data/hora remota (§0/§13-18): nunca hora automática — o usuário
+  // sempre escolhe explicitamente. Hoje/Amanhã derivam a DATA do calendário
+  // local (nunca now+24h em ms, que quebraria perto de DST); Esta
+  // semana/Personalizado usam a data escolhida pelo usuário. Esta semana é
+  // limitada a [hoje, domingo da semana local atual] — nunca só via
+  // min/max do <input>, também revalidado aqui (§15).
+  const now = new Date();
+  const todayYMD = localYMD(now);
+  const tomorrowYMD = localYMD(addLocalDays(now, 1));
+  const sundayYMD = localYMD(addLocalDays(now, (7 - now.getDay()) % 7));
+  const remoteDateForWhen =
+    when === 'Hoje' ? todayYMD
+    : when === 'Amanhã' ? tomorrowYMD
+    : dueDate;
+  const remoteWeekInRange = when !== 'Esta semana' || (dueDate >= todayYMD && dueDate <= sundayYMD);
+  const remoteDueAtResult = combineLocalDateAndTimeToIso({ date: remoteDateForWhen, time: dueTime });
+  const remoteDueAtValid = remoteDueAtResult.ok && remoteWeekInRange;
+
+  const remoteSellerItems: SellerPickerItem[] = assignableSellers.assignableSellers.map((s) => ({ id: s.seller_id, name: s.name }));
+
+  const canCreate = taskDataSource === 'local'
+    ? !!finalSellerId && !!finalWhen
+    : Boolean(
+        remoteDueAtValid
+        && !submitting
+        && !createHook.isPending
+        && (isSeller || (!!finalSellerId && !assignableSellers.isLoading)),
+      );
+
+  // Só para o texto de sucesso — em remoto, finalWhen/customWhen não
+  // representam mais o "quando" real (o campo livre saiu de uso nesse
+  // branch, item §16); usar o rótulo do Segmented em vez de um texto vazio.
+  const successWhenLabel = taskDataSource === 'local' ? finalWhen : when;
+
+  const handleCreateLocal = () => {
+    if (!finalSellerId || !finalWhen) return;
+    const prioMap: Record<string, string> = { Alta: 'alta', Média: 'media', Baixa: 'baixa' };
+    TaskService.create({
+      title: `${type}${client ? ' — ' + client : ''}`,
+      lead: client,
+      leadId: payload.lead?.id ?? null,
+      state: NOVA_PENDENCIA_WHEN_STATE[when] || TASK_STATE.UPCOMING,
+      prio: prioMap[prio] || 'media',
+      when: finalWhen,
+      assignedTo: finalSellerId,
+      note: '',
+    });
+    setDone(true);
+  };
+
+  const handleCreateRemote = async () => {
+    if (!canCreate || submitting || createHook.isPending || !remoteDueAtResult.ok) return;
+    const prioMap: Record<string, 'alta' | 'media' | 'baixa'> = { Alta: 'alta', Média: 'media', Baixa: 'baixa' };
+    const priority = prioMap[prio] || 'media';
+    const title = `${type}${client ? ' — ' + client : ''}`;
+    const leadId = payload.lead?.id ?? null;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      if (isSeller) {
+        await createHook.createTask({ actorRole: 'seller', title, priority, dueAt: remoteDueAtResult.iso, leadId, note: '' });
+      } else {
+        if (!finalSellerId) return;
+        await createHook.createTask({ actorRole: 'manager', title, priority, dueAt: remoteDueAtResult.iso, assignedSellerId: finalSellerId, leadId, note: '' });
+      }
+      setDone(true);
+    } catch (err) {
+      // Mesmo padrão de FlowAtribuirVendedor (FlowsShared.tsx:1166-1170):
+      // identity_changed fecha o flow diretamente, nunca mostra o erro da
+      // sessão antiga — useCloseOnIdentityChange acima é proteção
+      // complementar (identidade muda enquanto o flow está aberto, fora de
+      // uma mutation em voo), não substitui este close() explícito aqui.
+      if (isRemoteTasksError(err) && err.code === 'remote_tasks_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(remoteTaskCreateErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (done) return (
     <FlowShell eyebrow="NOVA PENDÊNCIA" title="Pendência criada" icon="check" accent="#27C75F" onClose={close}>
-      <FlowSuccess title="Pendência criada!" sub={`"${type}${client ? ' — ' + client : ''}" foi adicionada para ${finalWhen.toLowerCase()}.`} actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      <FlowSuccess title="Pendência criada!" sub={`"${type}${client ? ' — ' + client : ''}" foi adicionada para ${successWhenLabel.toLowerCase()}.`} actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
     </FlowShell>
   );
   return (
     <FlowShell eyebrow="NOVA PENDÊNCIA" title="Criar uma pendência" icon="check" accent="#E8CE72" onClose={close}
-      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={() => {
-        if (!finalSellerId || !finalWhen) return;
-        const prioMap: Record<string, string> = { Alta: 'alta', Média: 'media', Baixa: 'baixa' };
-        TaskService.create({
-          title: `${type}${client ? ' — ' + client : ''}`,
-          lead: client,
-          leadId: payload.lead?.id ?? null,
-          state: NOVA_PENDENCIA_WHEN_STATE[when] || TASK_STATE.UPCOMING,
-          prio: prioMap[prio] || 'media',
-          when: finalWhen,
-          assignedTo: finalSellerId,
-          note: '',
-        });
-        setDone(true);
-      }} style={{ opacity: canCreate ? 1 : .5 }}>Criar pendência</LBtn></>}>
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check"
+        onClick={taskDataSource === 'local' ? handleCreateLocal : handleCreateRemote}
+        style={{ opacity: canCreate ? 1 : .5 }}>
+        {taskDataSource === 'remote' && (submitting || createHook.isPending) ? 'Criando…' : 'Criar pendência'}
+      </LBtn></>}>
       <div style={{ maxWidth: 720 }}>
         <FPanel style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Tipo de tarefa</div>
@@ -1341,8 +1496,23 @@ export function FlowNovaPendencia({ payload, close }: any) {
         </FPanel>
         {!isSeller && (
           <FPanel style={{ marginBottom: 16 }}>
-            <LocalSellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
-            {!finalSeller && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--amber)' }}>Selecione o vendedor responsável por esta pendência.</div>}
+            {taskDataSource === 'local' ? (
+              <>
+                <LocalSellerPicker value={finalSeller} onPick={(s: any) => setAssignedSellerId(s.id)} />
+                {!finalSeller && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--amber)' }}>Selecione o vendedor responsável por esta pendência.</div>}
+              </>
+            ) : (
+              <SellerPicker
+                items={remoteSellerItems}
+                value={assignedSellerId}
+                onChange={(id: string | null) => setAssignedSellerId(id)}
+                loading={assignableSellers.isLoading}
+                disabled={submitting || createHook.isPending}
+                error={assignableSellers.isError ? 'Não foi possível carregar os vendedores.' : null}
+                allowNone={false}
+                placeholder="Selecione o vendedor…"
+              />
+            )}
           </FPanel>
         )}
         <FPanel>
@@ -1357,12 +1527,33 @@ export function FlowNovaPendencia({ payload, close }: any) {
               <Segmented options={['Alta', 'Média', 'Baixa']} value={prio} onChange={setPrio} accent={prio === 'Alta' ? '#FF3B3B' : '#E8CE72'} />
             </div>
           </div>
-          {isCustomWhen && (
+          {taskDataSource === 'local' ? (
+            isCustomWhen && (
+              <div style={{ marginTop: 4 }}>
+                <FField label="Data ou prazo" icon="calendar" placeholder="Ex.: 12/07/2026, sexta-feira, daqui 10 dias…" value={customWhen} onChange={(e: any) => setCustomWhen(e.target.value)} />
+              </div>
+            )
+          ) : (
             <div style={{ marginTop: 4 }}>
-              <FField label="Data ou prazo" icon="calendar" placeholder="Ex.: 12/07/2026, sexta-feira, daqui 10 dias…" value={customWhen} onChange={(e: any) => setCustomWhen(e.target.value)} />
+              <div style={{ display: 'grid', gridTemplateColumns: (when === 'Esta semana' || when === 'Personalizado') ? '1fr 1fr' : '1fr', gap: 18 }}>
+                {(when === 'Esta semana' || when === 'Personalizado') && (
+                  <FField label="Data" icon="calendar" type="date" value={dueDate} onChange={(e: any) => setDueDate(e.target.value)}
+                    min={when === 'Esta semana' ? todayYMD : undefined}
+                    max={when === 'Esta semana' ? sundayYMD : undefined} />
+                )}
+                <FField label="Hora" icon="clock" type="time" value={dueTime} onChange={(e: any) => setDueTime(e.target.value)} />
+              </div>
+              {when === 'Esta semana' && dueDate && !remoteWeekInRange && (
+                <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--amber)' }}>Escolha uma data entre hoje e domingo desta semana.</div>
+              )}
             </div>
           )}
         </FPanel>
+        {taskDataSource === 'remote' && submitError && (
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--red-bg, rgba(255,59,59,.08))', border: '1px solid var(--red-line, rgba(255,59,59,.3))' }}>
+            <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{submitError}</span>
+          </div>
+        )}
       </div>
     </FlowShell>
   );

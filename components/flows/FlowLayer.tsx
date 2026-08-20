@@ -45,10 +45,17 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
 // Task (Visita/Proposta/Venda/Acompanhamento/Pendência) passa por aqui,
 // não importa quem chamou openFlow (LeadCard, ScreensBiz, Flows3, estado
 // antigo) — nunca depende do botão que originou a chamada.
+//
+// COMMERCIAL-REMOTE-B1-B3-D: 'nova-pendencia' SAIU deste set — Task tem
+// backend remoto próprio desde o B1-B3-A, e FlowNovaPendencia agora decide
+// local/remoto sozinho (resolveTaskRemoteMode(), mesmo contrato de
+// resolveLeadFlowContext), nunca mais lançando em modo remoto. Visit/Deal/
+// Sale (Visita/Proposta/Venda) E 'criar-acompanhamento'/'reagendar-
+// pendencia' permanecem aqui — nenhum dos dois foi migrado ainda.
 const LOCAL_COMMERCIAL_FLOW_IDS = new Set<string>([
   'criar-visita', 'confirmar-visita', 'registrar-resultado',
   'nova-proposta', 'aprovar-proposta', 'registrar-venda',
-  'criar-acompanhamento', 'nova-pendencia', 'reagendar-pendencia',
+  'criar-acompanhamento', 'reagendar-pendencia',
 ]);
 
 function LocalCommercialFlowUnavailable({ close }: { close: () => void }) {
