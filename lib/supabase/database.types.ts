@@ -761,6 +761,112 @@ export type Database = {
           },
         ]
       }
+      visits: {
+        Row: {
+          assigned_seller_id: string
+          client_name: string | null
+          closed_at: string | null
+          closed_by: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          lead_id: string | null
+          note: string
+          outcome: Database["public"]["Enums"]["visit_outcome"] | null
+          result_note: string | null
+          scheduled_at: string
+          status: Database["public"]["Enums"]["visit_status"]
+          updated_at: string
+          updated_by: string | null
+          vehicles: string[]
+          version: number
+        }
+        Insert: {
+          assigned_seller_id: string
+          client_name?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          lead_id?: string | null
+          note?: string
+          outcome?: Database["public"]["Enums"]["visit_outcome"] | null
+          result_note?: string | null
+          scheduled_at: string
+          status?: Database["public"]["Enums"]["visit_status"]
+          updated_at?: string
+          updated_by?: string | null
+          vehicles: string[]
+          version?: number
+        }
+        Update: {
+          assigned_seller_id?: string
+          client_name?: string | null
+          closed_at?: string | null
+          closed_by?: string | null
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          lead_id?: string | null
+          note?: string
+          outcome?: Database["public"]["Enums"]["visit_outcome"] | null
+          result_note?: string | null
+          scheduled_at?: string
+          status?: Database["public"]["Enums"]["visit_status"]
+          updated_at?: string
+          updated_by?: string | null
+          vehicles?: string[]
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "visits_closed_by_fk"
+            columns: ["company_id", "closed_by"]
+            isOneToOne: false
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
+          },
+          {
+            foreignKeyName: "visits_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "visits_company_lead_fk"
+            columns: ["company_id", "lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "visits_company_seller_fk"
+            columns: ["company_id", "assigned_seller_id"]
+            isOneToOne: false
+            referencedRelation: "sellers"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "visits_created_by_fk"
+            columns: ["company_id", "created_by"]
+            isOneToOne: false
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
+          },
+          {
+            foreignKeyName: "visits_updated_by_fk"
+            columns: ["company_id", "updated_by"]
+            isOneToOne: false
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -927,6 +1033,35 @@ export type Database = {
           success: boolean
         }[]
       }
+      cancel_visit: {
+        Args: { p_expected_version: number; p_id: string }
+        Returns: {
+          assigned_seller_id: string
+          client_name: string | null
+          closed_at: string | null
+          closed_by: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          lead_id: string | null
+          note: string
+          outcome: Database["public"]["Enums"]["visit_outcome"] | null
+          result_note: string | null
+          scheduled_at: string
+          status: Database["public"]["Enums"]["visit_status"]
+          updated_at: string
+          updated_by: string | null
+          vehicles: string[]
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "visits"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       check_lead_phone_duplicate: {
         Args: {
           p_company_id?: string
@@ -1000,6 +1135,35 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      confirm_visit: {
+        Args: { p_expected_version: number; p_id: string }
+        Returns: {
+          assigned_seller_id: string
+          client_name: string | null
+          closed_at: string | null
+          closed_by: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          lead_id: string | null
+          note: string
+          outcome: Database["public"]["Enums"]["visit_outcome"] | null
+          result_note: string | null
+          scheduled_at: string
+          status: Database["public"]["Enums"]["visit_status"]
+          updated_at: string
+          updated_by: string | null
+          vehicles: string[]
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "visits"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -1119,6 +1283,42 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_visit: {
+        Args: {
+          p_assigned_seller_id?: string
+          p_client_name?: string
+          p_lead_id?: string
+          p_note?: string
+          p_scheduled_at: string
+          p_vehicles: string[]
+        }
+        Returns: {
+          assigned_seller_id: string
+          client_name: string | null
+          closed_at: string | null
+          closed_by: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          lead_id: string | null
+          note: string
+          outcome: Database["public"]["Enums"]["visit_outcome"] | null
+          result_note: string | null
+          scheduled_at: string
+          status: Database["public"]["Enums"]["visit_status"]
+          updated_at: string
+          updated_by: string | null
+          vehicles: string[]
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "visits"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -1400,6 +1600,40 @@ export type Database = {
         }
         Returns: undefined
       }
+      register_visit_result: {
+        Args: {
+          p_expected_version: number
+          p_id: string
+          p_outcome: Database["public"]["Enums"]["visit_outcome"]
+          p_result_note?: string
+        }
+        Returns: {
+          assigned_seller_id: string
+          client_name: string | null
+          closed_at: string | null
+          closed_by: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          lead_id: string | null
+          note: string
+          outcome: Database["public"]["Enums"]["visit_outcome"] | null
+          result_note: string | null
+          scheduled_at: string
+          status: Database["public"]["Enums"]["visit_status"]
+          updated_at: string
+          updated_by: string | null
+          vehicles: string[]
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "visits"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       reorder_pipeline_stages: {
         Args: { p_ordered_ids: string[] }
         Returns: {
@@ -1667,6 +1901,42 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      update_visit: {
+        Args: {
+          p_assigned_seller_id: string
+          p_expected_version: number
+          p_id: string
+          p_note: string
+          p_scheduled_at: string
+          p_vehicles: string[]
+        }
+        Returns: {
+          assigned_seller_id: string
+          client_name: string | null
+          closed_at: string | null
+          closed_by: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          lead_id: string | null
+          note: string
+          outcome: Database["public"]["Enums"]["visit_outcome"] | null
+          result_note: string | null
+          scheduled_at: string
+          status: Database["public"]["Enums"]["visit_status"]
+          updated_at: string
+          updated_by: string | null
+          vehicles: string[]
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "visits"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       validate_invite_token: {
         Args: { p_token_hash: string }
         Returns: {
@@ -1674,6 +1944,10 @@ export type Database = {
           masked_email: string
           valid: boolean
         }[]
+      }
+      visits_vehicles_valid: {
+        Args: { p_vehicles: string[] }
+        Returns: boolean
       }
     }
     Enums: {
@@ -1714,6 +1988,8 @@ export type Database = {
       task_priority: "alta" | "media" | "baixa"
       task_status: "pending" | "completed"
       user_role: "admin" | "manager" | "seller"
+      visit_outcome: "sold" | "negotiating" | "thinking" | "no_interest"
+      visit_status: "scheduled" | "confirmed" | "canceled" | "completed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1883,6 +2159,8 @@ export const Constants = {
       task_priority: ["alta", "media", "baixa"],
       task_status: ["pending", "completed"],
       user_role: ["admin", "manager", "seller"],
+      visit_outcome: ["sold", "negotiating", "thinking", "no_interest"],
+      visit_status: ["scheduled", "confirmed", "canceled", "completed"],
     },
   },
 } as const

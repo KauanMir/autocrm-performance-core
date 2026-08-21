@@ -59,6 +59,7 @@
 export const REMOTE_STAGES_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_stages';
 export const REMOTE_LEADS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_leads';
 export const REMOTE_TASKS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_tasks';
+export const REMOTE_VISITS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_visits';
 export const PLATFORM_ADMIN_DEV_OVERRIDE_KEY = 'autocrm_ff_platform_admin';
 export const ACTIVE_USERS_DEV_OVERRIDE_KEY = 'autocrm_ff_active_users';
 export const USER_EMAIL_EDIT_DEV_OVERRIDE_KEY = 'autocrm_ff_user_email_edit';
@@ -116,6 +117,15 @@ export function isRemoteLeadsEnabled(): boolean {
 // função.
 export function isRemoteTasksEnabled(): boolean {
   return resolveFlag(process.env.NEXT_PUBLIC_FF_REMOTE_TASKS, REMOTE_TASKS_DEV_OVERRIDE_KEY);
+}
+
+// COMMERCIAL-REMOTE-VISITS-B2 — NEXT_PUBLIC_FF_REMOTE_VISITS (mesmo
+// contrato de isRemoteTasksEnabled). Só o valor bruto da própria flag — a
+// combinação com o estado de Leads (rollout parcial vs. misconfiguration)
+// é decisão de lib/visits/remoteVisitsMode.ts, nunca desta função. Sem
+// dependência de isRemoteTasksEnabled — os dois domínios são independentes.
+export function isRemoteVisitsEnabled(): boolean {
+  return resolveFlag(process.env.NEXT_PUBLIC_FF_REMOTE_VISITS, REMOTE_VISITS_DEV_OVERRIDE_KEY);
 }
 
 export function isPlatformAdminEnabled(): boolean {

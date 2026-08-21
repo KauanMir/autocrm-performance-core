@@ -6,6 +6,7 @@ import {
   isRemoteLeadsEnabled,
   isRemoteStagesEnabled,
   isRemoteTasksEnabled,
+  isRemoteVisitsEnabled,
   isPlatformAdminEnabled,
   isActiveUsersEnabled,
   isUserEmailEditEnabled,
@@ -16,6 +17,7 @@ import {
   REMOTE_LEADS_DEV_OVERRIDE_KEY,
   REMOTE_STAGES_DEV_OVERRIDE_KEY,
   REMOTE_TASKS_DEV_OVERRIDE_KEY,
+  REMOTE_VISITS_DEV_OVERRIDE_KEY,
   PLATFORM_ADMIN_DEV_OVERRIDE_KEY,
   ACTIVE_USERS_DEV_OVERRIDE_KEY,
   USER_EMAIL_EDIT_DEV_OVERRIDE_KEY,
@@ -28,6 +30,7 @@ import {
 const ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_STAGES';
 const LEADS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_LEADS';
 const TASKS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_TASKS';
+const VISITS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_VISITS';
 const PLATFORM_ADMIN_ENV_KEY = 'NEXT_PUBLIC_FF_PLATFORM_ADMIN';
 const ACTIVE_USERS_ENV_KEY = 'NEXT_PUBLIC_FF_ACTIVE_USERS';
 const USER_EMAIL_EDIT_ENV_KEY = 'NEXT_PUBLIC_FF_USER_EMAIL_EDIT';
@@ -64,6 +67,15 @@ function setTasksEnv(nodeEnv: string, flagValue?: string) {
     vi.stubEnv(TASKS_ENV_KEY, undefined as unknown as string);
   } else {
     vi.stubEnv(TASKS_ENV_KEY, flagValue);
+  }
+}
+
+function setVisitsEnv(nodeEnv: string, flagValue?: string) {
+  vi.stubEnv('NODE_ENV', nodeEnv);
+  if (flagValue === undefined) {
+    vi.stubEnv(VISITS_ENV_KEY, undefined as unknown as string);
+  } else {
+    vi.stubEnv(VISITS_ENV_KEY, flagValue);
   }
 }
 
@@ -1468,5 +1480,166 @@ describe('isolamento da flag de tasks em relação às demais (incl. Leads/Stage
     expect(isRemoteStagesEnabled()).toBe(false);
     expect(isRemoteLeadsEnabled()).toBe(false);
     expect(isRemoteTasksEnabled()).toBe(true);
+  });
+});
+
+// COMMERCIAL-REMOTE-VISITS-B2 — isRemoteVisitsEnabled (mesmo contrato de
+// isRemoteTasksEnabled, chave/env próprias). Só o valor bruto da flag — a
+// combinação com o estado de Leads (visit_local/visit_blocked/
+// visit_remote_ready/visit_remote_misconfigured) é testada isoladamente em
+// tests/visits/remoteVisitsMode.test.ts.
+
+describe('isRemoteVisitsEnabled — valor do ambiente', () => {
+  it('variável ausente ⇒ false (OFF por padrão)', () => {
+    setVisitsEnv('production');
+    expect(isRemoteVisitsEnabled()).toBe(false);
+  });
+
+  it('"false" ⇒ false', () => {
+    setVisitsEnv('production', 'false');
+    expect(isRemoteVisitsEnabled()).toBe(false);
+  });
+
+  it('"true" ⇒ true', () => {
+    setVisitsEnv('production', 'true');
+    expect(isRemoteVisitsEnabled()).toBe(true);
+  });
+
+  it('valores inválidos ⇒ false', () => {
+    for (const invalid of ['1', 'yes', 'on', '', 'enabled']) {
+      setVisitsEnv('production', invalid);
+      expect(isRemoteVisitsEnabled()).toBe(false);
+    }
+  });
+
+  it('comparação é estrita e case-sensitive ("TRUE"/"True" não ativam)', () => {
+    for (const invalid of ['TRUE', 'True', ' true', 'true ']) {
+      setVisitsEnv('production', invalid);
+      expect(isRemoteVisitsEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('isRemoteVisitsEnabled — development (override via localStorage)', () => {
+  it('env false + override "true" ⇒ true', () => {
+    setVisitsEnv('development', 'false');
+    window.localStorage.setItem(REMOTE_VISITS_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteVisitsEnabled()).toBe(true);
+  });
+
+  it('env true + override "false" ⇒ false', () => {
+    setVisitsEnv('development', 'true');
+    window.localStorage.setItem(REMOTE_VISITS_DEV_OVERRIDE_KEY, 'false');
+    expect(isRemoteVisitsEnabled()).toBe(false);
+  });
+
+  it('override inválido ⇒ usa o env', () => {
+    setVisitsEnv('development', 'true');
+    window.localStorage.setItem(REMOTE_VISITS_DEV_OVERRIDE_KEY, 'yes');
+    expect(isRemoteVisitsEnabled()).toBe(true);
+
+    setVisitsEnv('development', 'false');
+    window.localStorage.setItem(REMOTE_VISITS_DEV_OVERRIDE_KEY, '1');
+    expect(isRemoteVisitsEnabled()).toBe(false);
+  });
+
+  it('override ausente ⇒ usa o env', () => {
+    setVisitsEnv('development', 'true');
+    expect(isRemoteVisitsEnabled()).toBe(true);
+
+    setVisitsEnv('development', 'false');
+    expect(isRemoteVisitsEnabled()).toBe(false);
+  });
+
+  it('localStorage lançando erro ⇒ usa o env sem propagar', () => {
+    setVisitsEnv('development', 'true');
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    expect(isRemoteVisitsEnabled()).toBe(true);
+
+    setVisitsEnv('development', 'false');
+    expect(isRemoteVisitsEnabled()).toBe(false);
+  });
+});
+
+describe('isRemoteVisitsEnabled — production (localStorage ignorado)', () => {
+  it('env true ⇒ true', () => {
+    setVisitsEnv('production', 'true');
+    expect(isRemoteVisitsEnabled()).toBe(true);
+  });
+
+  it('env false ⇒ false', () => {
+    setVisitsEnv('production', 'false');
+    expect(isRemoteVisitsEnabled()).toBe(false);
+  });
+
+  it('override "true" com env false ⇒ continua false', () => {
+    setVisitsEnv('production', 'false');
+    window.localStorage.setItem(REMOTE_VISITS_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteVisitsEnabled()).toBe(false);
+  });
+
+  it('override "false" com env true ⇒ continua true', () => {
+    setVisitsEnv('production', 'true');
+    window.localStorage.setItem(REMOTE_VISITS_DEV_OVERRIDE_KEY, 'false');
+    expect(isRemoteVisitsEnabled()).toBe(true);
+  });
+
+  it('localStorage.getItem NUNCA é chamado em produção (spy)', () => {
+    setVisitsEnv('production', 'true');
+    const spy = vi.spyOn(Storage.prototype, 'getItem');
+    isRemoteVisitsEnabled();
+    setVisitsEnv('production', 'false');
+    isRemoteVisitsEnabled();
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('isRemoteVisitsEnabled — ambiente sem window (SSR)', () => {
+  it('sem window ⇒ usa o env sem lançar erro', () => {
+    setVisitsEnv('development', 'true');
+    vi.stubGlobal('window', undefined);
+    expect(isRemoteVisitsEnabled()).toBe(true);
+
+    setVisitsEnv('development', 'false');
+    expect(isRemoteVisitsEnabled()).toBe(false);
+  });
+});
+
+describe('isolamento da flag de visits em relação às demais (incl. Leads/Stages/Tasks)', () => {
+  it('a chave de override é distinta de todas as outras', () => {
+    expect(REMOTE_VISITS_DEV_OVERRIDE_KEY).toBe('autocrm_ff_remote_visits');
+    expect(REMOTE_VISITS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_STAGES_DEV_OVERRIDE_KEY);
+    expect(REMOTE_VISITS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_LEADS_DEV_OVERRIDE_KEY);
+    expect(REMOTE_VISITS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_TASKS_DEV_OVERRIDE_KEY);
+    expect(REMOTE_VISITS_DEV_OVERRIDE_KEY).not.toBe(PLATFORM_ADMIN_DEV_OVERRIDE_KEY);
+    expect(REMOTE_VISITS_DEV_OVERRIDE_KEY).not.toBe(ACTIVE_USERS_DEV_OVERRIDE_KEY);
+    expect(REMOTE_VISITS_DEV_OVERRIDE_KEY).not.toBe(USER_EMAIL_EDIT_DEV_OVERRIDE_KEY);
+    expect(REMOTE_VISITS_DEV_OVERRIDE_KEY).not.toBe(USER_LIFECYCLE_DEV_OVERRIDE_KEY);
+    expect(REMOTE_VISITS_DEV_OVERRIDE_KEY).not.toBe(COMPANY_SELECTOR_DEV_OVERRIDE_KEY);
+  });
+
+  it('env/override de visits não afeta leads/stages/tasks (e vice-versa) — sem dependência de Tasks', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(ENV_KEY, 'true');
+    vi.stubEnv(LEADS_ENV_KEY, 'true');
+    vi.stubEnv(TASKS_ENV_KEY, 'true');
+    vi.stubEnv(VISITS_ENV_KEY, 'false');
+    window.localStorage.setItem(REMOTE_VISITS_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteStagesEnabled()).toBe(true);
+    expect(isRemoteLeadsEnabled()).toBe(true);
+    expect(isRemoteTasksEnabled()).toBe(true);
+    expect(isRemoteVisitsEnabled()).toBe(true);
+
+    window.localStorage.clear();
+    vi.stubEnv(ENV_KEY, 'false');
+    vi.stubEnv(LEADS_ENV_KEY, 'false');
+    vi.stubEnv(TASKS_ENV_KEY, 'false');
+    vi.stubEnv(VISITS_ENV_KEY, 'true');
+    expect(isRemoteStagesEnabled()).toBe(false);
+    expect(isRemoteLeadsEnabled()).toBe(false);
+    expect(isRemoteTasksEnabled()).toBe(false);
+    expect(isRemoteVisitsEnabled()).toBe(true);
   });
 });
