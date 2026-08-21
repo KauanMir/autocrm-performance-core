@@ -11,7 +11,11 @@ import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState
 import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState';
 import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
 import { useRemoteDealsScreenState } from '@/lib/hooks/useRemoteDealsScreenState';
+import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
+import { groupLateTasksBySeller, groupOpenDealsBySeller, type SellerAttentionRow } from '@/lib/home/managerAttention';
+import type { RemoteTaskModel } from '@/lib/tasks/taskAdapter';
+import type { RemoteDealModel } from '@/lib/deals/adapter';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
 
@@ -88,7 +92,7 @@ type HomeTasksSummary =
   | { status: 'unavailable' }
   | { status: 'loading' }
   | { status: 'error'; retry: () => void }
-  | { status: 'ready'; lateCount: number };
+  | { status: 'ready'; lateCount: number; lateTasks: readonly RemoteTaskModel[] };
 
 function useHomeTasksSummary(currentUser: User | null): HomeTasksSummary {
   const remote = useRemoteTasksScreenState(currentUser);
@@ -103,9 +107,16 @@ function useHomeTasksSummary(currentUser: User | null): HomeTasksSummary {
   if (remote.isError) return { status: 'error', retry: remote.refetch };
   if (remote.configError !== null) return { status: 'unavailable' };
 
+  // COMMERCIAL-REMOTE-DEALS-B7-B2 — lateTasks expõe o MESMO array já
+  // filtrado usado para lateCount (nenhum cálculo adicional, nenhuma
+  // segunda leitura de remote.tasks) — reaproveitado pela seção Manager
+  // "Equipe precisa de atenção" (ManagerTeamAttentionSection) para agrupar
+  // por Seller sem chamar useRemoteTasksScreenState uma segunda vez.
+  const lateTasks = remote.tasks.filter((task) => task.state === TASK_STATE.LATE);
   return {
     status: 'ready',
-    lateCount: remote.tasks.filter((task) => task.state === TASK_STATE.LATE).length,
+    lateCount: lateTasks.length,
+    lateTasks,
   };
 }
 
@@ -164,7 +175,7 @@ type HomeDealsSummary =
   | { status: 'unavailable' }
   | { status: 'loading' }
   | { status: 'error'; retry: () => void }
-  | { status: 'ready'; openCount: number };
+  | { status: 'ready'; openCount: number; openDeals: readonly RemoteDealModel[] };
 
 function useHomeDealsSummary(currentUser: User | null): HomeDealsSummary {
   const remote = useRemoteDealsScreenState(currentUser);
@@ -179,9 +190,15 @@ function useHomeDealsSummary(currentUser: User | null): HomeDealsSummary {
   if (remote.isError) return { status: 'error', retry: remote.refetch };
   if (remote.configError !== null) return { status: 'unavailable' };
 
+  // COMMERCIAL-REMOTE-DEALS-B7-B2 — openDeals expõe o MESMO array já
+  // filtrado usado para openCount (mesmo raciocínio de lateTasks acima) —
+  // reaproveitado pela seção Manager sem chamar useRemoteDealsScreenState
+  // uma segunda vez.
+  const openDeals = remote.deals.filter((deal) => deal.status === 'open');
   return {
     status: 'ready',
-    openCount: remote.deals.filter((deal) => deal.status === 'open').length,
+    openCount: openDeals.length,
+    openDeals,
   };
 }
 
@@ -536,6 +553,80 @@ function UrgentAttention({ go, leadsSummary, tasksSummary, visitsSummary, dealsS
   );
 }
 
+function SellerAttentionRowView({ row }: { row: SellerAttentionRow }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, background: 'rgba(255,255,255,.02)', border: '1px solid var(--line-dark)' }}>
+      <span style={{ fontSize: 13.5, fontWeight: 600, color: '#fff' }}>{row.sellerLabel}</span>
+      <span className="tnum" style={{ fontSize: 15, fontWeight: 800, color: '#fff' }}>{row.count}</span>
+    </div>
+  );
+}
+
+function ManagerAttentionSubsection({ title, rows, emptyLabel, notice }: { title: string; rows: SellerAttentionRow[] | null; emptyLabel: string; notice: React.ReactNode | null }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--txt-lo)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.06em' }}>{title}</div>
+      {notice ?? (
+        rows && rows.length > 0
+          ? <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{rows.map((row) => <SellerAttentionRowView key={row.sellerId} row={row} />)}</div>
+          : <div style={{ fontSize: 13, color: 'var(--txt-lo)', padding: '10px 14px' }}>{emptyLabel}</div>
+      )}
+    </div>
+  );
+}
+
+// COMMERCIAL-REMOTE-DEALS-B7-B2 — seção Manager-only "Equipe precisa de
+// atenção": DUAS subseções independentes (Tasks/Deals nunca combinadas
+// numa mesma linha — B7-B2-PRECHECK §5/§8, cada domínio tem seu próprio
+// loading/error/ready). Nenhum score combinado, nenhuma relação Task↔Deal
+// apresentada. lateTasks/openDeals já vêm prontos de tasksSummary/
+// dealsSummary (linha 6/8 do PRECHECK) — zero query nova aqui, o
+// agrupamento em si é 100% lib/home/managerAttention.ts (puro).
+function ManagerTeamAttentionSection({ tasksSummary, dealsSummary, sellersById }: {
+  tasksSummary: HomeTasksSummary;
+  dealsSummary: HomeDealsSummary;
+  sellersById: Readonly<Record<string, { id: string; name: string }>>;
+}) {
+  const isTaskRelevant = tasksSummary.status === 'loading' || tasksSummary.status === 'error' || tasksSummary.status === 'ready';
+  const isDealRelevant = dealsSummary.status === 'loading' || dealsSummary.status === 'error' || dealsSummary.status === 'ready';
+  // 'local'/'unavailable' em AMBOS: nenhuma seção vazia é montada
+  // (B7-B2-PRECHECK §17/§43).
+  if (!isTaskRelevant && !isDealRelevant) return null;
+
+  const subsections: React.ReactNode[] = [];
+  if (isTaskRelevant) {
+    const notice = tasksSummary.status === 'loading'
+      ? <CommercialWidgetNotice>Carregando acompanhamentos…</CommercialWidgetNotice>
+      : tasksSummary.status === 'error'
+        ? <CommercialWidgetNotice onRetry={tasksSummary.retry}>Não foi possível carregar os acompanhamentos.</CommercialWidgetNotice>
+        : null;
+    const rows = tasksSummary.status === 'ready' ? groupLateTasksBySeller(tasksSummary.lateTasks, sellersById) : null;
+    subsections.push(
+      <ManagerAttentionSubsection key="tasks" title="Acompanhamentos atrasados" rows={rows} notice={notice} emptyLabel="Nenhum acompanhamento atrasado." />,
+    );
+  }
+  if (isDealRelevant) {
+    const notice = dealsSummary.status === 'loading'
+      ? <CommercialWidgetNotice>Carregando negociações…</CommercialWidgetNotice>
+      : dealsSummary.status === 'error'
+        ? <CommercialWidgetNotice onRetry={dealsSummary.retry}>Não foi possível carregar as negociações.</CommercialWidgetNotice>
+        : null;
+    const rows = dealsSummary.status === 'ready' ? groupOpenDealsBySeller(dealsSummary.openDeals, sellersById) : null;
+    subsections.push(
+      <ManagerAttentionSubsection key="deals" title="Negociações em andamento" rows={rows} notice={notice} emptyLabel="Nenhuma negociação em andamento." />,
+    );
+  }
+
+  return (
+    <div>
+      <SectionTitle icon="users" tone="#5B9BFF">Equipe precisa de atenção</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${subsections.length}, 1fr)`, gap: 20, background: 'linear-gradient(180deg,#161618,#111113)', border: '1px solid var(--line-dark)', borderRadius: 18, padding: 20 }}>
+        {subsections}
+      </div>
+    </div>
+  );
+}
+
 function QuickActions({ go }: { go: (id: string) => void }) {
   const actions = [
     { label: 'Novo cliente', icon: 'plus', tone: 'gold', to: 'clientes' },
@@ -683,6 +774,19 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // de todas por design (B7-B-PRECHECK §5 — cada domínio comercial resolve
   // seu próprio estado, nunca um proxy de outro).
   const dealsSummary = useHomeDealsSummary(currentUser ?? null);
+  // COMMERCIAL-REMOTE-DEALS-B7-B2 — apresentação apenas; RLS/backend
+  // continua a única autoridade sobre quais rows cada usuário recebe.
+  // membershipRole força 'manager' → null para Seller (nunca 'seller'),
+  // desabilitando estruturalmente a query de sellerLabels quando a seção
+  // Manager nunca vai renderizar (B7-B2-PRECHECK §11/§15 — zero query
+  // desnecessária para Seller).
+  const isManager = currentUser?.activeMembership?.role === 'manager';
+  const sellerLabels = useCurrentCompanySellerLabels({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: isManager ? 'manager' : null,
+    userIsActive: Boolean(currentUser),
+  });
   const variant = t.podium;
   // M1-E E7-B1 — Podium/Ranking/MinhaDisputa dependem exclusivamente do
   // catálogo LOCAL de Sellers (getStore().sellers, sem company_id, sem
@@ -755,6 +859,11 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
         <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} /></div>
         {isSellersLocal && <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>}
         <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} dealsSummary={dealsSummary} /></div>
+        {isManager && (
+          <div style={{ marginBottom: 26 }}>
+            <ManagerTeamAttentionSection tasksSummary={tasksSummary} dealsSummary={dealsSummary} sellersById={sellerLabels.sellersById} />
+          </div>
+        )}
         <QuickActions go={go} />
       </div>
     </div>

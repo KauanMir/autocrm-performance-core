@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   useRemoteTasksScreenState: vi.fn(),
   useRemoteVisitsScreenState: vi.fn(),
   useRemoteDealsScreenState: vi.fn(),
+  useCurrentCompanySellerLabels: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   leadServiceGetAll: vi.fn(),
   visitServiceGetAll: vi.fn(),
@@ -41,6 +42,10 @@ vi.mock('@/lib/hooks/useRemoteVisitsScreenState', () => ({
 
 vi.mock('@/lib/hooks/useRemoteDealsScreenState', () => ({
   useRemoteDealsScreenState: m.useRemoteDealsScreenState,
+}));
+
+vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
+  useCurrentCompanySellerLabels: m.useCurrentCompanySellerLabels,
 }));
 
 vi.mock('@/lib/leads/localCommercialAccess', () => ({
@@ -162,6 +167,20 @@ function dealScreenState(mode: string, over: Partial<Record<string, unknown>> = 
   };
 }
 
+// COMMERCIAL-REMOTE-DEALS-B7-B2 — resultado padrão de
+// useCurrentCompanySellerLabels (assinatura real, lib/hooks/
+// useCurrentCompanySellerLabels.ts), usado pela seção Manager para
+// resolver sellerId → nome sem N+1.
+function currentCompanySellerLabelsResult(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    remoteLeadsEnabled: true, queryEnabled: true, queryKey: [],
+    sellerLabels: [], sellersById: {},
+    isLoading: false, isFetching: false, isError: false, error: null,
+    isEmpty: true, hasData: false, refetch: vi.fn(),
+    ...over,
+  };
+}
+
 // variant 'B' evita o caminho FitBox/ResizeObserver do Podium (fora do
 // escopo do E7-A1 — ResizeObserver não existe no jsdom por padrão e nenhum
 // teste no projeto ainda exercitava o render real de Home/Podium).
@@ -212,6 +231,7 @@ beforeEach(() => {
   // sobrescreve para um mode não-local próprio (nunca 'deal_local' junto de
   // Leads remoto — violaria a garantia estrutural de resolveDealRemoteMode()).
   m.useRemoteDealsScreenState.mockReset().mockReturnValue(dealScreenState('deal_local'));
+  m.useCurrentCompanySellerLabels.mockReset().mockReturnValue(currentCompanySellerLabelsResult());
 });
 
 // ── A. Home local ────────────────────────────────────────────────────────
@@ -888,7 +908,11 @@ describe('Home — Deals summary remoto (independente de Leads/Tasks/Visits)', (
   it('loading: nenhuma contagem falsa, notice dedicado de Negociações', () => {
     m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isLoading: true }));
-    renderHome(manager());
+    // Seller (não Manager): isola esta asserção da seção Manager
+    // "Equipe precisa de atenção" (B7-B2), que reusa a mesma copy de
+    // loading/erro para a própria subseção de Negociações — comportamento
+    // do resumo em si é idêntico para os dois papéis.
+    renderHome(seller('s1'));
     expect(screen.getByText('Carregando negociações…')).toBeInTheDocument();
     expect(screen.queryByText('negociações em andamento')).toBeNull();
     expect(m.dealServiceGetAll).not.toHaveBeenCalled();
@@ -898,7 +922,8 @@ describe('Home — Deals summary remoto (independente de Leads/Tasks/Visits)', (
     const refetch = vi.fn();
     m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isError: true, refetch }));
-    renderHome(manager());
+    // Seller (não Manager): mesma razão do teste de loading acima.
+    renderHome(seller('s1'));
     expect(screen.getByText('Não foi possível carregar as negociações.')).toBeInTheDocument();
     expect(screen.queryByText('negociações em andamento')).toBeNull();
     expect(m.dealServiceGetAll).not.toHaveBeenCalled();
@@ -989,5 +1014,176 @@ describe('Home — Deals summary local/OFF preserva o legado (COMMERCIAL-REMOTE-
     expect(screen.getByText('Ranking completo')).toBeInTheDocument();
     expect(screen.getByText('Minha disputa')).toBeInTheDocument();
     expect(screen.getByText('Ações rápidas')).toBeInTheDocument();
+  });
+
+  it('Manager local: "Equipe precisa de atenção" NUNCA aparece (Tasks/Deals ambos local, gate exige pelo menos um domínio remoto relevante)', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+    renderHome(manager());
+    expect(screen.queryByText('Equipe precisa de atenção')).toBeNull();
+  });
+});
+
+// ── L. Manager Team Attention (COMMERCIAL-REMOTE-DEALS-B7-B2) ──────────
+// Seção Manager-only "Equipe precisa de atenção": duas subseções
+// INDEPENDENTES (Tasks/Deals nunca combinadas numa linha), agrupamento por
+// Seller via lib/home/managerAttention.ts (testado isoladamente em
+// tests/home/managerAttention.test.ts — aqui só a integração com Home:
+// gate, wiring de sellersById, readiness por domínio, ausência para Seller).
+describe('Home — Manager Team Attention (Equipe precisa de atenção)', () => {
+  function remoteTask(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 't1', title: 'x', lead: 'x', leadId: null, assignedTo: 's1', when: 'Hoje', prio: 'alta', note: '', state: TASK_STATE.LATE, createdAt: '2026-08-01T10:00:00Z', dueAt: '2026-08-01T10:00:00Z', version: 1, ...over };
+  }
+  function remoteDeal(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 'd1', leadId: 'l1', clientName: 'Cliente', assignedSellerId: 's1', vehicle: 'x', valueCents: 100, discountPercent: 0, paymentMethod: 'financiamento_100', downPaymentCents: null, installments: null, note: '', status: 'open', lostBy: null, lostAt: null, createdAt: '2026-08-01T10:00:00Z', updatedAt: '2026-08-01T10:00:00Z', version: 1, ...over };
+  }
+  const SELLERS_BY_ID = { s1: { id: 's1', name: 'Lucas Martins' }, s2: { id: 's2', name: 'Ana Souza' } };
+
+  beforeEach(() => {
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
+    );
+    m.useCurrentCompanySellerLabels.mockReturnValue(currentCompanySellerLabelsResult({ sellersById: SELLERS_BY_ID, hasData: true, isEmpty: false }));
+  });
+
+  it('Manager: seção presente quando ao menos um domínio remoto tem estado relevante (aqui, só Tasks ready)', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: true, tasks: [remoteTask()] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    renderHome(manager());
+    expect(screen.getByText('Equipe precisa de atenção')).toBeInTheDocument();
+  });
+
+  it('Seller: seção SEMPRE ausente, mesmo com os dois domínios ready', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: true, tasks: [remoteTask()] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: true, deals: [remoteDeal()] }));
+    renderHome(seller('s1'));
+    expect(screen.queryByText('Equipe precisa de atenção')).toBeNull();
+    // B7-B1 (agregado) preservado normalmente para Seller.
+    expect(screen.getByText('negociações em andamento')).toBeInTheDocument();
+  });
+
+  it('Task group: conta LATE por Seller, TODAY/COMPLETED nunca contam (filtro já aplicado por useHomeTasksSummary)', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true,
+      tasks: [
+        remoteTask({ id: 't1', assignedTo: 's1', state: TASK_STATE.LATE }),
+        remoteTask({ id: 't2', assignedTo: 's1', state: TASK_STATE.LATE }),
+        remoteTask({ id: 't3', assignedTo: 's1', state: TASK_STATE.LATE }),
+        remoteTask({ id: 't4', assignedTo: 's1', state: TASK_STATE.TODAY }),
+        remoteTask({ id: 't5', assignedTo: 's2', state: TASK_STATE.LATE }),
+      ],
+    }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    renderHome(manager());
+    const section = screen.getByText('Acompanhamentos atrasados').closest('div')?.parentElement as HTMLElement;
+    expect(section.textContent).toContain('Lucas Martins');
+    expect(section.textContent).toContain('3');
+    expect(section.textContent).toContain('Ana Souza');
+    expect(section.textContent).toContain('1');
+  });
+
+  it('Deal group: conta OPEN por Seller, lost/sold nunca contam (filtro já aplicado por useHomeDealsSummary)', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true,
+      deals: [
+        remoteDeal({ id: 'd1', assignedSellerId: 's1', status: 'open' }),
+        remoteDeal({ id: 'd2', assignedSellerId: 's1', status: 'open' }),
+        remoteDeal({ id: 'd3', assignedSellerId: 's1', status: 'open' }),
+        remoteDeal({ id: 'd4', assignedSellerId: 's1', status: 'open' }),
+        remoteDeal({ id: 'd5', assignedSellerId: 's1', status: 'lost' }),
+        remoteDeal({ id: 'd6', assignedSellerId: 's2', status: 'open' }),
+        remoteDeal({ id: 'd7', assignedSellerId: 's2', status: 'open' }),
+        remoteDeal({ id: 'd8', assignedSellerId: 's2', status: 'sold' }),
+      ],
+    }));
+    renderHome(manager());
+    const section = screen.getByText('Negociações em andamento').closest('div')?.parentElement as HTMLElement;
+    expect(section.textContent).toContain('Lucas Martins');
+    expect(section.textContent).toContain('4');
+    expect(section.textContent).toContain('Ana Souza');
+    expect(section.textContent).toContain('2');
+  });
+
+  it('Empty: Tasks ready sem atrasados + Deals ready sem abertas mostram as duas mensagens congeladas', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: false, isEmpty: true, tasks: [] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: false, isEmpty: true, deals: [] }));
+    renderHome(manager());
+    expect(screen.getByText('Nenhum acompanhamento atrasado.')).toBeInTheDocument();
+    expect(screen.getByText('Nenhuma negociação em andamento.')).toBeInTheDocument();
+  });
+
+  it('Partial: Tasks ready + Deals loading — Tasks visível, Deals em loading, zero fake', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: true, tasks: [remoteTask({ assignedTo: 's1' })] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isLoading: true }));
+    renderHome(manager());
+    const taskSection = screen.getByText('Acompanhamentos atrasados').closest('div')?.parentElement as HTMLElement;
+    expect(taskSection.textContent).toContain('Lucas Martins');
+    // Aparece 2x (célula compartilhada de UrgentAttention + subseção
+    // Manager) — ambas legítimas, mesmo dealsSummary.status==='loading'.
+    expect(screen.getAllByText('Carregando negociações…').length).toBeGreaterThan(0);
+  });
+
+  it('Partial (inverso): Deals ready + Tasks loading — Deals visível, Tasks em loading, zero fake', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isLoading: true }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: true, deals: [remoteDeal({ assignedSellerId: 's1' })] }));
+    renderHome(manager());
+    const dealSection = screen.getByText('Negociações em andamento').closest('div')?.parentElement as HTMLElement;
+    expect(dealSection.textContent).toContain('Lucas Martins');
+    expect(screen.getByText('Carregando acompanhamentos…')).toBeInTheDocument();
+  });
+
+  it('Error independence: Tasks error + Deals ready — Deals permanece, Tasks mostra erro com retry', () => {
+    const refetch = vi.fn();
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isError: true, refetch }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: true, deals: [remoteDeal({ assignedSellerId: 's1' })] }));
+    renderHome(manager());
+    const dealSection = screen.getByText('Negociações em andamento').closest('div')?.parentElement as HTMLElement;
+    expect(dealSection.textContent).toContain('Lucas Martins');
+    expect(screen.getByText('Não foi possível carregar os acompanhamentos.')).toBeInTheDocument();
+  });
+
+  it('Error independence (inverso): Deals error + Tasks ready — Tasks permanece, Deals mostra erro com retry', () => {
+    const refetch = vi.fn();
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: true, tasks: [remoteTask({ assignedTo: 's1' })] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isError: true, refetch }));
+    renderHome(manager());
+    const taskSection = screen.getByText('Acompanhamentos atrasados').closest('div')?.parentElement as HTMLElement;
+    expect(taskSection.textContent).toContain('Lucas Martins');
+    // Aparece 2x (célula compartilhada de UrgentAttention + subseção
+    // Manager) — ambas legítimas, mesmo dealsSummary.status==='error'.
+    expect(screen.getAllByText('Não foi possível carregar as negociações.').length).toBeGreaterThan(0);
+  });
+
+  it('Deals OFF: subseção Tasks continua, subseção Deals ausente, zero DealService', () => {
+    m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: true, tasks: [remoteTask({ assignedTo: 's1' })] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_blocked'));
+    renderHome(manager());
+    expect(screen.getByText('Acompanhamentos atrasados')).toBeInTheDocument();
+    expect(screen.queryByText('Negociações em andamento')).toBeNull();
+    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('Tasks unavailable: subseção Deals continua, subseção Tasks ausente, zero TaskService local', () => {
+    m.taskServiceGetAll.mockReturnValue([{ id: 't1', state: TASK_STATE.LATE }]);
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: true, deals: [remoteDeal({ assignedSellerId: 's1' })] }));
+    renderHome(manager());
+    expect(screen.getByText('Negociações em andamento')).toBeInTheDocument();
+    expect(screen.queryByText('Acompanhamentos atrasados')).toBeNull();
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('nenhuma linguagem proibida na nova seção (score/performance/aprovação/relação Task-Deal)', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: true, tasks: [remoteTask()] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: true, deals: [remoteDeal()] }));
+    renderHome(manager());
+    expect(screen.queryByText(/Negociações sem acompanhamento/)).toBeNull();
+    expect(screen.queryByText(/Deal atrasada/)).toBeNull();
+    expect(screen.queryByText(/Negociação parada/)).toBeNull();
+    expect(screen.queryByText(/Aguardando aprovação/)).toBeNull();
+    expect(screen.queryByText(/^Aprovar$/)).toBeNull();
+    expect(screen.queryByText(/Score/)).toBeNull();
+    expect(screen.queryByText(/Performance/)).toBeNull();
   });
 });
