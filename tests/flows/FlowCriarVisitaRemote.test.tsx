@@ -460,7 +460,11 @@ describe('FlowCriarVisita — pending/double-submit', () => {
     renderFlow();
     fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Avulso' } });
     pickVehicle('Golf GTI 2022');
-    fillWhenRemote('Hoje', { time: '10:30' });
+    // 'Amanhã' (não 'Hoje') — mesmo motivo do B7-0-TEST-CLOCK-FIX: qualquer
+    // slot fixo em 'Amanhã' é sempre futuro relativo ao relógio real do
+    // runner, em qualquer hora do dia. Nenhum destes testes asserta o dia
+    // agendado.
+    fillWhenRemote('Amanhã', { time: '10:30' });
 
     expect(screen.getByText('Agendando…')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Agendando…'));
@@ -478,7 +482,11 @@ describe('FlowCriarVisita — sucesso remoto', () => {
     renderFlow();
     fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Avulso' } });
     pickVehicle('Golf GTI 2022');
-    fillWhenRemote('Hoje', { time: '10:30' });
+    // 'Amanhã' (não 'Hoje') — mesmo motivo do B7-0-TEST-CLOCK-FIX: qualquer
+    // slot fixo em 'Amanhã' é sempre futuro relativo ao relógio real do
+    // runner, em qualquer hora do dia. Nenhum destes testes asserta o dia
+    // agendado.
+    fillWhenRemote('Amanhã', { time: '10:30' });
     fireEvent.click(screen.getByText('Agendar visita'));
 
     expect(screen.queryByText('Visita agendada!')).toBeNull();
@@ -509,7 +517,11 @@ describe.each([
     renderFlow();
     fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Avulso' } });
     pickVehicle('Golf GTI 2022');
-    fillWhenRemote('Hoje', { time: '10:30' });
+    // 'Amanhã' (não 'Hoje') — mesmo motivo do B7-0-TEST-CLOCK-FIX: qualquer
+    // slot fixo em 'Amanhã' é sempre futuro relativo ao relógio real do
+    // runner, em qualquer hora do dia. Nenhum destes testes asserta o dia
+    // agendado.
+    fillWhenRemote('Amanhã', { time: '10:30' });
     fireEvent.click(screen.getByText('Agendar visita'));
 
     expect(await screen.findByText(expectedMessage)).toBeInTheDocument();
@@ -529,7 +541,11 @@ describe('FlowCriarVisita — identity_changed', () => {
     const { close } = renderFlow();
     fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Avulso' } });
     pickVehicle('Golf GTI 2022');
-    fillWhenRemote('Hoje', { time: '10:30' });
+    // 'Amanhã' (não 'Hoje') — mesmo motivo do B7-0-TEST-CLOCK-FIX: qualquer
+    // slot fixo em 'Amanhã' é sempre futuro relativo ao relógio real do
+    // runner, em qualquer hora do dia. Nenhum destes testes asserta o dia
+    // agendado.
+    fillWhenRemote('Amanhã', { time: '10:30' });
     fireEvent.click(screen.getByText('Agendar visita'));
 
     await waitFor(() => expect(close).toHaveBeenCalled());

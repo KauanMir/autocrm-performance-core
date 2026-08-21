@@ -14,6 +14,7 @@ import { TASK_STATE } from '@/lib/data';
 const m = vi.hoisted(() => ({
   useRemoteLeadsScreenState: vi.fn(),
   useRemoteTasksScreenState: vi.fn(),
+  useRemoteVisitsScreenState: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   leadServiceGetAll: vi.fn(),
   visitServiceGetAll: vi.fn(),
@@ -31,6 +32,10 @@ vi.mock('@/lib/hooks/useRemoteLeadsScreenState', () => ({
 
 vi.mock('@/lib/hooks/useRemoteTasksScreenState', () => ({
   useRemoteTasksScreenState: m.useRemoteTasksScreenState,
+}));
+
+vi.mock('@/lib/hooks/useRemoteVisitsScreenState', () => ({
+  useRemoteVisitsScreenState: m.useRemoteVisitsScreenState,
 }));
 
 vi.mock('@/lib/leads/localCommercialAccess', () => ({
@@ -124,6 +129,20 @@ function taskScreenState(mode: string, over: Partial<Record<string, unknown>> = 
   };
 }
 
+// COMMERCIAL-REMOTE-VISITS-B7 — resultado padrão de
+// useRemoteVisitsScreenState, mesmo formato de taskScreenState acima,
+// próprio de Visits (mode/visits/isLoading/isFetching/isError/error/
+// configError/isEmpty/hasData/refetch).
+function visitScreenState(mode: string, over: Partial<Record<string, unknown>> = {}) {
+  return {
+    mode,
+    visits: [],
+    isLoading: false, isFetching: false, isError: false, error: null,
+    configError: null, isEmpty: false, hasData: false, refetch: vi.fn(),
+    ...over,
+  };
+}
+
 // variant 'B' evita o caminho FitBox/ResizeObserver do Podium (fora do
 // escopo do E7-A1 — ResizeObserver não existe no jsdom por padrão e nenhum
 // teste no projeto ainda exercitava o render real de Home/Podium).
@@ -162,6 +181,12 @@ beforeEach(() => {
   // sobrescreve para um mode não-local próprio (nunca 'task_local' junto de
   // Leads remoto — violaria a garantia estrutural de resolveTaskRemoteMode()).
   m.useRemoteTasksScreenState.mockReset().mockReturnValue(taskScreenState('task_local'));
+  // COMMERCIAL-REMOTE-VISITS-B7 — default 'visit_local', mesmo raciocínio
+  // do default de Tasks acima: preserva o baseline local de todos os
+  // testes escritos antes do B7. Toda describe com Leads remoto sobrescreve
+  // para um mode não-local próprio (nunca 'visit_local' junto de Leads
+  // remoto — violaria a garantia estrutural de resolveVisitRemoteMode()).
+  m.useRemoteVisitsScreenState.mockReset().mockReturnValue(visitScreenState('visit_local'));
 });
 
 // ── A. Home local ────────────────────────────────────────────────────────
@@ -187,6 +212,23 @@ describe('Home — caminho local (REMOTE_LEADS=false)', () => {
     expect(screen.getByText('Ranking completo')).toBeInTheDocument();
     expect(screen.getByText('Minha disputa')).toBeInTheDocument();
   });
+
+  // COMMERCIAL-REMOTE-VISITS-B7 — visitsSummary.status==='local' preserva
+  // exatamente a semântica legada: só VISIT_STATUS.PENDING ('pendente')
+  // conta como "não confirmada" — 'agendada' (SCHEDULED, sem confirmação
+  // necessária) nunca entra, mesma distinção que já existia antes do B7.
+  it('visitas não confirmadas conta só VISIT_STATUS.PENDING, nunca SCHEDULED/outros', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+    m.visitServiceGetAll.mockReturnValue([
+      { id: 'v1', status: 'pendente' },
+      { id: 'v2', status: 'pendente' },
+      { id: 'v3', status: 'agendada' },
+      { id: 'v4', status: 'confirmada' },
+    ]);
+    renderHome(manager());
+    const card = screen.getByText('visitas não confirmadas').closest('button');
+    expect(card?.textContent).toContain('2');
+  });
 });
 
 // ── Podium/Ranking/MinhaDisputa em modo remoto (M1-E E7-B1) ─────────────
@@ -207,6 +249,10 @@ describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
     // testa Tasks especificamente, então usa 'unavailable' — sem card, sem
     // TaskService.getAll.
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    // COMMERCIAL-REMOTE-VISITS-B7 — mesma garantia estrutural para Visits:
+    // Leads remoto ⟹ Visits nunca 'visit_local'. Esta suíte não testa
+    // Visits especificamente, então usa 'unavailable'.
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
   });
 
   it('nunca chama SellerService.getAll/getById', () => {
@@ -246,6 +292,9 @@ describe('Home — remote_active (Manager e Seller)', () => {
     // COMMERCIAL-REMOTE-B1-B3-G — mesma garantia estrutural da suíte
     // acima: Leads remoto nunca convive com Tasks 'task_local'.
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    // COMMERCIAL-REMOTE-VISITS-B7 — idem para Visits: Leads remoto nunca
+    // convive com Visits 'visit_local'.
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
   });
 
   it.each([['Manager', manager()], ['Seller', seller('s1')]])('%s: nunca chama serviços locais bloqueados nem LeadService.getAll(), usa a fonte remota', (_label, user) => {
@@ -301,6 +350,7 @@ describe('Home — Super Admin sem companyId operacional', () => {
     m.authGetCurrentUser.mockReturnValue(superAdmin());
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_unavailable_identity'));
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
     renderHome(superAdmin());
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
     expect(m.visitServiceGetAll).not.toHaveBeenCalled();
@@ -316,6 +366,7 @@ describe('Home — remote_misconfigured (REMOTE_LEADS=true, REMOTE_STAGES=false)
   it('fail-closed: nenhuma chamada local, nenhum crash', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_misconfigured'));
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_misconfigured'));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_misconfigured'));
     renderHome(manager());
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
     expect(m.visitServiceGetAll).not.toHaveBeenCalled();
@@ -329,9 +380,10 @@ describe('Home — remote_misconfigured (REMOTE_LEADS=true, REMOTE_STAGES=false)
 // ── F. Snapshot/query ainda carregando ──────────────────────────────────
 describe('Home — remote_active, ainda carregando', () => {
   beforeEach(() => {
-    // COMMERCIAL-REMOTE-B1-B3-G — mesma garantia estrutural das suítes
+    // COMMERCIAL-REMOTE-B1-B3-G/B7 — mesma garantia estrutural das suítes
     // remotas acima; estes testes cobrem só o estado de Leads.
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
   });
 
   it('stages carregando: estado de loading seguro, nenhum acesso síncrono ao snapshot, nenhum throw', () => {
@@ -374,6 +426,10 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(
       screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
     );
+    // COMMERCIAL-REMOTE-VISITS-B7 — esta suíte cobre só a independência de
+    // Tasks; Visits usa 'unavailable' (garantia estrutural: Leads remoto
+    // nunca convive com 'visit_local').
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
   });
 
   it('99 Tasks locais vs 2 remotas atrasadas: Home mostra 2, TaskService.getAll nunca é chamado no branch remoto', () => {
@@ -484,6 +540,10 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
   it('transição local → remote loading: contagem local some imediatamente, sem stale', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_local'));
+    // Estrutural: 'local' de Leads no primeiro render implica 'visit_local'
+    // (resolveVisitRemoteMode()) — mesmo raciocínio já aplicado a Tasks
+    // acima, nunca fabricar uma combinação impossível (R1).
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_local'));
     m.taskServiceGetAll.mockReturnValue([{ id: 't1', state: TASK_STATE.LATE }]);
     const props: any = { t: { podium: 'B' }, setTweak: vi.fn(), go: vi.fn(), active: false, currentUser: manager() };
     const { rerender } = render(<Home {...props} />);
@@ -493,6 +553,7 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
       screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
     );
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isLoading: true }));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
     rerender(<Home {...props} />);
 
     expect(screen.getByText('Carregando pendências…')).toBeInTheDocument();
@@ -551,4 +612,160 @@ describe('Home — Leads local + Tasks não-local (R1, gate correto)', () => {
   // diferente de 'local' quando o mode do hook de Leads já não é 'local'.
   // Nenhum fixture dessa combinação é criado (instrução explícita do R1 —
   // não fabricar estado impossível).
+});
+
+// ── I. Home Visits Summary remoto (COMMERCIAL-REMOTE-VISITS-B7) ────────
+// useHomeVisitsSummary substitui a antiga dependência de
+// leadsSummary.status==='local' pelo modo remoto próprio de Visits
+// (resolveVisitRemoteMode(), via useRemoteVisitsScreenState) — Leads e
+// Visits passam a ter estados totalmente independentes dentro de
+// UrgentAttention/ConversionFunnel, mesmo padrão já provado para Tasks na
+// Seção G. Definições de unconfirmedCount/openCount congeladas no
+// B7-PRECHECK §9/§10 (só RemoteVisitModel/status, sem now/scheduledAt).
+describe('Home — Visits summary remoto (independente de Leads)', () => {
+  function remoteVisit(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 'v1', status: 'scheduled', ...over };
+  }
+
+  beforeEach(() => {
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
+    );
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    // Podium/Ranking/MinhaDisputa (SellerService) reproduzem os mesmos
+    // labels de coluna "Leads"/"Visitas" (Col, Home.tsx) — desligado aqui
+    // para isolar as asserções desta suíte dos dois cards reais de Visits,
+    // fora do escopo de Sellers/Podium (E7-B1, já coberto na sua própria
+    // suíte acima).
+    m.isLocalCommercialDataAllowed.mockReturnValue(false);
+  });
+
+  it('snapshot [scheduled, scheduled, confirmed, completed, canceled]: card mostra 2 não confirmadas, funil mostra 3 em aberto — completed/canceled nunca contam', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true,
+      visits: [
+        remoteVisit({ id: 'v1', status: 'scheduled' }),
+        remoteVisit({ id: 'v2', status: 'scheduled' }),
+        remoteVisit({ id: 'v3', status: 'confirmed' }),
+        remoteVisit({ id: 'v4', status: 'completed' }),
+        remoteVisit({ id: 'v5', status: 'canceled' }),
+      ],
+    }));
+    renderHome(manager());
+    const card = screen.getByText('visitas não confirmadas').closest('button');
+    expect(card?.textContent).toContain('2');
+    const funnelStage = screen.getByText('Visitas').closest('.lift');
+    expect(funnelStage?.textContent).toContain('3');
+    expect(m.visitServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('Seller: conta somente o snapshot já RLS-scoped recebido, nenhum SellerService necessário', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true,
+      visits: [remoteVisit({ id: 'v1', status: 'scheduled' })],
+    }));
+    renderHome(seller('s1'));
+    const card = screen.getByText('visitas não confirmadas').closest('button');
+    expect(card?.textContent).toContain('1');
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('loading: nenhuma contagem local, notice dedicado de Visits', () => {
+    m.visitServiceGetAll.mockReturnValue([{ id: 'v1', status: 'pendente' }]);
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { isLoading: true }));
+    renderHome(manager());
+    expect(screen.getByText('Carregando visitas…')).toBeInTheDocument();
+    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
+    expect(m.visitServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('erro: mensagem sanitizada com retry, sem fallback local', () => {
+    const refetch = vi.fn();
+    m.visitServiceGetAll.mockReturnValue([{ id: 'v1', status: 'pendente' }]);
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { isError: true, refetch }));
+    renderHome(manager());
+    expect(screen.getByText('Não foi possível carregar as visitas.')).toBeInTheDocument();
+    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
+    expect(m.visitServiceGetAll).not.toHaveBeenCalled();
+    const [retryBtn] = screen.getAllByText('Tentar novamente');
+    fireEvent.click(retryBtn);
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it('configError: unavailable, sem contagem parcial', () => {
+    m.visitServiceGetAll.mockReturnValue([{ id: 'v1', status: 'pendente' }]);
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { configError: { code: 'x' } as any }));
+    renderHome(manager());
+    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
+    expect(screen.queryByText('Carregando visitas…')).toBeNull();
+    expect(screen.queryByText('Não foi possível carregar as visitas.')).toBeNull();
+    expect(m.visitServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it.each(['visit_blocked', 'visit_remote_misconfigured', 'visit_remote_unavailable_identity'])(
+    '%s: unavailable, VisitService.getAll nunca chamado, nenhum zero falso',
+    (mode) => {
+      m.visitServiceGetAll.mockReturnValue([{ id: 'v1', status: 'pendente' }]);
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState(mode));
+      renderHome(manager());
+      expect(screen.queryByText('visitas não confirmadas')).toBeNull();
+      expect(m.visitServiceGetAll).not.toHaveBeenCalled();
+    },
+  );
+
+  it('unconfirmedCount=0 é sucesso (ready), não indisponibilidade', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { hasData: false, isEmpty: true, visits: [] }));
+    renderHome(manager());
+    const card = screen.getByText('visitas não confirmadas').closest('button');
+    expect(card?.textContent).toContain('0');
+  });
+
+  it('independência A: Leads ready + Visits blocked — Leads normal, Visits some sem zero falso', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_blocked'));
+    renderHome(manager());
+    expect(screen.getByText('leads atrasados')).toBeInTheDocument();
+    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
+  });
+
+  it('independência B: Leads error + Visits ready — Visits summary continua disponível', () => {
+    const refetch = vi.fn();
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { isError: true, isEmpty: false, refetch } }),
+    );
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [remoteVisit({ status: 'scheduled' })],
+    }));
+    renderHome(manager());
+    expect(screen.getByText('Não foi possível carregar as métricas.')).toBeInTheDocument();
+    const card = screen.getByText('visitas não confirmadas').closest('button');
+    expect(card?.textContent).toContain('1');
+  });
+
+  it('funil: Leads + Visitas presentes quando ambos válidos, sem Propostas/Vendas locais', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true,
+      visits: [remoteVisit({ status: 'scheduled' }), remoteVisit({ status: 'confirmed' })],
+    }));
+    renderHome(manager());
+    expect(screen.getByText('Leads')).toBeInTheDocument();
+    expect(screen.getByText('Visitas')).toBeInTheDocument();
+    expect(screen.queryByText('Propostas')).toBeNull();
+    expect(screen.queryByText('Vendas')).toBeNull();
+  });
+
+  it('funil: Visits unavailable — Leads continua, stage Visitas omitido (nunca zero)', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_misconfigured'));
+    renderHome(manager());
+    expect(screen.getByText('Leads')).toBeInTheDocument();
+    expect(screen.queryByText('Visitas')).toBeNull();
+  });
+
+  it('nenhuma nova superfície "Pendentes de resultado" é criada na Home', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true,
+      visits: [remoteVisit({ status: 'scheduled' }), remoteVisit({ status: 'confirmed' })],
+    }));
+    renderHome(manager());
+    expect(screen.queryByText(/Pendentes de resultado/)).toBeNull();
+  });
 });

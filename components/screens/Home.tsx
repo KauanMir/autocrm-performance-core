@@ -9,6 +9,7 @@ import { VISIT_STATUS, DEAL_STATUS, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
 import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState';
+import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
@@ -104,6 +105,49 @@ function useHomeTasksSummary(currentUser: User | null): HomeTasksSummary {
   return {
     status: 'ready',
     lateCount: remote.tasks.filter((task) => task.state === TASK_STATE.LATE).length,
+  };
+}
+
+// COMMERCIAL-REMOTE-VISITS-B7 — resumo de Visits da Home, independente de
+// leadsSummary (mesmo raciocínio de useHomeTasksSummary/G-PRECHECK: Visits
+// tem modo remoto próprio, resolveVisitRemoteMode(), desde o B2).
+// "Leads local ⟹ Visits local" é estruturalmente garantido por
+// resolveVisitRemoteMode() (visit_local só existe quando
+// resolveRemoteLeadsFlagMode()==='local') — mas o inverso NÃO vale: Leads
+// remote_active pode conviver com Visits blocked/misconfigured/loading/
+// error (cada domínio comercial resolve seu próprio estado, nunca um proxy
+// do outro — B7-PRECHECK §18). Wrapper fino sobre
+// useRemoteVisitsScreenState, a mesma composição já usada por ScreenVisitas
+// — nenhuma query nova, nenhuma segunda fonte.
+type HomeVisitsSummary =
+  | { status: 'local' }
+  | { status: 'unavailable' }
+  | { status: 'loading' }
+  | { status: 'error'; retry: () => void }
+  | { status: 'ready'; unconfirmedCount: number; openCount: number };
+
+function useHomeVisitsSummary(currentUser: User | null): HomeVisitsSummary {
+  const remote = useRemoteVisitsScreenState(currentUser);
+
+  if (remote.mode === 'visit_local') return { status: 'local' };
+  if (remote.mode === 'visit_blocked') return { status: 'unavailable' };
+  if (remote.mode === 'visit_remote_misconfigured') return { status: 'unavailable' };
+  if (remote.mode === 'visit_remote_unavailable_identity') return { status: 'unavailable' };
+
+  // mode === 'visit_remote_active' daqui em diante.
+  if (remote.isLoading) return { status: 'loading' };
+  if (remote.isError) return { status: 'error', retry: remote.refetch };
+  if (remote.configError !== null) return { status: 'unavailable' };
+
+  // Definições congeladas no B7-PRECHECK §9/§10 — só RemoteVisitModel/
+  // status (nunca legacy PENDING/SCHEDULED/RESCHEDULED/AWAITING_RESULT),
+  // sem dependência de scheduledAt/now (B7-PRECHECK §11 — nenhum relógio
+  // novo só para a Home; groupVisitsForScreen/pending-result permanecem
+  // fora de escopo).
+  return {
+    status: 'ready',
+    unconfirmedCount: remote.visits.filter((v) => v.status === 'scheduled').length,
+    openCount: remote.visits.filter((v) => v.status === 'scheduled' || v.status === 'confirmed').length,
   };
 }
 
@@ -362,7 +406,7 @@ function UrgentMetricCard({ it, i, go }: { it: { n: number; label: string; sub: 
   );
 }
 
-function UrgentAttention({ go, leadsSummary, tasksSummary }: { go: (id: string) => void; leadsSummary: HomeLeadsSummary; tasksSummary: HomeTasksSummary }) {
+function UrgentAttention({ go, leadsSummary, tasksSummary, visitsSummary }: { go: (id: string) => void; leadsSummary: HomeLeadsSummary; tasksSummary: HomeTasksSummary; visitsSummary: HomeVisitsSummary }) {
   // COMMERCIAL-REMOTE-B1-B3-G-R1 — Tasks é resolvido SEMPRE por
   // tasksSummary, NUNCA por leadsSummary.status==='local' (o G-EXEC tinha
   // reintroduzido esse acoplamento por engano). A suposição "Leads local
@@ -387,15 +431,14 @@ function UrgentAttention({ go, leadsSummary, tasksSummary }: { go: (id: string) 
   // 'unavailable': célula omitida — nunca um card mostrando zero/
   // indisponível como dado real.
 
-  // Leads/Visitas/Propostas: legado, continuam governados por
-  // leadsSummary — Visit/Deal nunca ganharam backend remoto (achado do
-  // E5-B2-A0/E7-A0) e permanecem fora de escopo deste lote.
+  // Leads/Propostas: legado, continuam governados por leadsSummary — Deal
+  // nunca ganhou backend remoto (achado do E5-B2-A0/E7-A0) e permanece fora
+  // de escopo deste lote.
   let leadCells: React.ReactNode[];
   if (leadsSummary.status === 'local') {
     leadCells = [
       <UrgentMetricCard key="leads" i={0} go={go} it={{ n: LeadService.getAll().filter((l: any) => l.urgency === 'red').length, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' }} />,
-      <UrgentMetricCard key="visitas" i={1} go={go} it={{ n: VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' }} />,
-      <UrgentMetricCard key="propostas" i={2} go={go} it={{ n: DealService.getAll().filter((d: any) => d.status === DEAL_STATUS.APPROVAL).length, label: 'propostas aguardando aprovação', sub: 'Desconto acima do limite', icon: 'handshake', to: 'propostas' }} />,
+      <UrgentMetricCard key="propostas" i={1} go={go} it={{ n: DealService.getAll().filter((d: any) => d.status === DEAL_STATUS.APPROVAL).length, label: 'propostas aguardando aprovação', sub: 'Desconto acima do limite', icon: 'handshake', to: 'propostas' }} />,
     ];
   } else if (leadsSummary.status === 'unavailable') {
     leadCells = [<CommercialWidgetNotice key="leads">Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>];
@@ -407,7 +450,28 @@ function UrgentAttention({ go, leadsSummary, tasksSummary }: { go: (id: string) 
     leadCells = [<UrgentMetricCard key="leads" i={0} go={go} it={{ n: leadsSummary.delayedLeads, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' }} />];
   }
 
-  const cells = [...leadCells, ...(taskCell ? [taskCell] : [])];
+  // COMMERCIAL-REMOTE-VISITS-B7 — Visitas resolvido SEMPRE por
+  // visitsSummary, NUNCA por leadsSummary.status (mesmo princípio de
+  // tasksSummary acima/G-PRECHECK-R1): "Leads local ⟹ Visits local" é
+  // garantido por resolveVisitRemoteMode(), mas o inverso não vale — Leads
+  // remote_active pode conviver com Visits blocked/misconfigured/loading/
+  // error, e cada um mostra seu próprio estado. VisitService.getAll() só
+  // pode ser chamado quando visitsSummary.status === 'local'.
+  let visitCell: React.ReactNode | null = null;
+  if (visitsSummary.status === 'local') {
+    const unconfirmed = VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length;
+    visitCell = <UrgentMetricCard key="visitas" i={1} go={go} it={{ n: unconfirmed, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' }} />;
+  } else if (visitsSummary.status === 'loading') {
+    visitCell = <CommercialWidgetNotice key="visitas">Carregando visitas…</CommercialWidgetNotice>;
+  } else if (visitsSummary.status === 'error') {
+    visitCell = <CommercialWidgetNotice key="visitas" onRetry={visitsSummary.retry}>Não foi possível carregar as visitas.</CommercialWidgetNotice>;
+  } else if (visitsSummary.status === 'ready') {
+    visitCell = <UrgentMetricCard key="visitas" i={1} go={go} it={{ n: visitsSummary.unconfirmedCount, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' }} />;
+  }
+  // 'unavailable': célula omitida — nunca um card mostrando zero/
+  // indisponível como dado real (mesmo padrão de Tasks/Leads acima).
+
+  const cells = [...leadCells, ...(visitCell ? [visitCell] : []), ...(taskCell ? [taskCell] : [])];
 
   return (
     <div>
@@ -450,7 +514,7 @@ function QuickActions({ go }: { go: (id: string) => void }) {
   );
 }
 
-function ConversionFunnel({ active, leadsSummary }: { active: boolean; leadsSummary: HomeLeadsSummary }) {
+function ConversionFunnel({ active, leadsSummary, visitsSummary }: { active: boolean; leadsSummary: HomeLeadsSummary; visitsSummary: HomeVisitsSummary }) {
   if (leadsSummary.status === 'unavailable') {
     return (
       <div>
@@ -481,9 +545,13 @@ function ConversionFunnel({ active, leadsSummary }: { active: boolean; leadsSumm
   // venda. So no "X% da etapa anterior" here — that would be exactly the
   // fake percentage the audit flagged (M0-K3).
   //
-  // 'ready' (remoto): só a etapa de Leads é real — Visitas/Propostas/Vendas
-  // ainda não têm backend remoto (Visit/Deal/Sale, achado do E5-B2-A0/
-  // E7-A0) e são OCULTADAS, nunca mostradas como zero.
+  // 'ready' (remoto): Leads é sempre real. Visitas é adicionada SOMENTE
+  // quando visitsSummary tem dado remoto válido (COMMERCIAL-REMOTE-VISITS-
+  // B7 §16/§17 — Visits resolve seu próprio estado, independente de
+  // leadsSummary; "Leads local ⟹ Visits local" garante que visitsSummary
+  // nunca é 'local' neste branch). Propostas/Vendas ainda não têm backend
+  // remoto (Deal/Sale, achado do E5-B2-A0/E7-A0) e permanecem OCULTADAS,
+  // nunca mostradas como zero — B7 não tenta migrá-las.
   const stages = leadsSummary.status === 'local'
     ? [
         { label: 'Leads', sub: 'clientes cadastrados', v: LeadService.getAll().length, icon: 'users', c: '#5B9BFF' },
@@ -493,6 +561,9 @@ function ConversionFunnel({ active, leadsSummary }: { active: boolean; leadsSumm
       ]
     : [
         { label: 'Leads', sub: 'clientes cadastrados', v: leadsSummary.totalLeads, icon: 'users', c: '#5B9BFF' },
+        ...(visitsSummary.status === 'ready'
+          ? [{ label: 'Visitas', sub: 'agendadas em aberto', v: visitsSummary.openCount, icon: 'calendar', c: '#A855F7' }]
+          : []),
       ];
   const top = Math.max(...stages.map((s) => s.v), 1);
   return (
@@ -549,6 +620,11 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // (G-PRECHECK §8/§9 — Leads e Tasks nunca voltam a compartilhar um
   // proxy de estado).
   const tasksSummary = useHomeTasksSummary(currentUser ?? null);
+  // COMMERCIAL-REMOTE-VISITS-B7 — chamado SEMPRE (Rules of Hooks), mesma
+  // garantia de leadsSummary/tasksSummary acima; independente de ambas por
+  // design (B7-PRECHECK §18 — Leads/Tasks/Visits nunca voltam a
+  // compartilhar um proxy de estado).
+  const visitsSummary = useHomeVisitsSummary(currentUser ?? null);
   const variant = t.podium;
   // M1-E E7-B1 — Podium/Ranking/MinhaDisputa dependem exclusivamente do
   // catálogo LOCAL de Sellers (getStore().sellers, sem company_id, sem
@@ -618,9 +694,9 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
           </div>
         )}
 
-        <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} /></div>
+        <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} /></div>
         {isSellersLocal && <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>}
-        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} /></div>
+        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} /></div>
         <QuickActions go={go} />
       </div>
     </div>
