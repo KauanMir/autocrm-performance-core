@@ -6,7 +6,7 @@ import {
 } from './FlowsShared';
 import {
   FlowNovoCliente, FlowEditarCliente, FlowCriarVisita, FlowReagendarVisita, FlowConfirmarVisita,
-  FlowRegistrarResultado, FlowNovaProposta, FlowAprovarProposta,
+  FlowRegistrarResultado, FlowRegistrarResultadoRemoto, FlowNovaProposta, FlowAprovarProposta,
   FlowRegistrarVenda, FlowNovaPendencia, FlowReagendarPendencia, FlowCriarAcompanhamento,
 } from './Flows2';
 import {
@@ -29,6 +29,7 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'reagendar-visita': FlowReagendarVisita,
   'confirmar-visita': FlowConfirmarVisita,
   'registrar-resultado': FlowRegistrarResultado,
+  'registrar-resultado-remoto': FlowRegistrarResultadoRemoto,
   'nova-proposta': FlowNovaProposta,
   'aprovar-proposta': FlowAprovarProposta,
   'registrar-venda': FlowRegistrarVenda,
@@ -71,6 +72,17 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
 // abaixo (isVisitRescheduleFlowAllowed). 'confirmar-visita'/
 // 'registrar-resultado' permanecem aqui, inalterados — B5 não libera
 // Confirmar/Cancelar/Registrar resultado remotamente.
+//
+// COMMERCIAL-REMOTE-VISITS-B6-A: Confirmar/Cancelar viraram ações INLINE
+// da própria row (ScreensBiz.tsx) — nenhum flow id novo, nenhuma mudança
+// neste arquivo.
+//
+// COMMERCIAL-REMOTE-VISITS-B6-B: 'registrar-resultado-remoto' é outro flow
+// id NOVO REMOTE-ONLY, mesmo padrão de 'reagendar-visita' — gate dedicado
+// logo abaixo (isVisitRegisterResultFlowAllowed). O id local
+// 'registrar-resultado' permanece aqui, inalterado — continua abrindo
+// FlowRegistrarResultado local (que ainda encaminha para registrar-venda/
+// nova-proposta/criar-acompanhamento LOCAIS, nenhum dos três alterado).
 const LOCAL_COMMERCIAL_FLOW_IDS = new Set<string>([
   'confirmar-visita', 'registrar-resultado',
   'nova-proposta', 'aprovar-proposta', 'registrar-venda',
@@ -124,6 +136,16 @@ function isVisitRescheduleFlowAllowed(): boolean {
   return resolveVisitRemoteMode() === 'visit_remote_ready';
 }
 
+// COMMERCIAL-REMOTE-VISITS-B6-B — gate DEDICADO de
+// 'registrar-resultado-remoto', mesmo contrato exato de
+// isVisitRescheduleFlowAllowed (B5): REMOTE-ONLY, 'visit_local' também
+// bloqueia (nenhuma row local jamais abre este id — o registro local
+// continua inteiramente atrás de 'registrar-resultado', em
+// LOCAL_COMMERCIAL_FLOW_IDS, intocado).
+function isVisitRegisterResultFlowAllowed(): boolean {
+  return resolveVisitRemoteMode() === 'visit_remote_ready';
+}
+
 export function FlowLayer({ flow, close, openFlow, go }: {
   flow: { id: string; payload: any } | null;
   close: () => void;
@@ -143,6 +165,9 @@ export function FlowLayer({ flow, close, openFlow, go }: {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   if (flow.id === 'reagendar-visita' && !isVisitRescheduleFlowAllowed()) {
+    return <LocalCommercialFlowUnavailable close={close} />;
+  }
+  if (flow.id === 'registrar-resultado-remoto' && !isVisitRegisterResultFlowAllowed()) {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   return <Comp payload={flow.payload || {}} close={close} openFlow={openFlow} go={go} />;

@@ -316,12 +316,12 @@ describe('ScreenVisitas — visit_remote_active com dado', () => {
   // COMMERCIAL-REMOTE-VISITS-B4: "Agendar visita" voltou a aparecer aqui
   // (create_visit conectado) — abre o create flow remoto via openFlow,
   // nunca chama VisitService diretamente (a implementação local/remota é
-  // decidida dentro de FlowCriarVisita, fora do escopo desta tela).
-  // "Registrar"/"Ver" continuam ausentes — Registrar resultado é B6-B;
-  // "Ver" nunca existiu no remote path (§17 do B3, texto não-clicável).
-  // "Confirmar" tem sua própria suíte de elegibilidade abaixo — não
-  // testado aqui.
-  it('"Agendar visita" abre o create flow remoto; nenhuma ação de mutation por row salvo Remarcar/Confirmar (Registrar/Ver)', () => {
+  // decidida dentro de FlowCriarVisita, fora do escopo desta tela). Este
+  // fixture não está em Pendentes de resultado, então "Registrar
+  // resultado" não aparece; "Ver" nunca existiu no remote path (§17 do B3,
+  // texto não-clicável). "Confirmar" tem sua própria suíte de
+  // elegibilidade abaixo — não testado aqui.
+  it('"Agendar visita" abre o create flow remoto; nenhuma ação de mutation por row salvo Remarcar/Confirmar (Registrar resultado/Ver)', () => {
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
       hasData: true, visits: [remoteVisit({ scheduledAt: new Date(2026, 7, 21, 18, 0, 0).toISOString() })],
     }));
@@ -332,7 +332,7 @@ describe('ScreenVisitas — visit_remote_active com dado', () => {
     expect(m.openFlow).toHaveBeenCalledWith('criar-visita');
     expect(VisitService.create).not.toHaveBeenCalled();
 
-    expect(screen.queryByText('Registrar')).toBeNull();
+    expect(screen.queryByText('Registrar resultado')).toBeNull();
     expect(screen.queryByText('Ver')).toBeNull();
     expect(VisitService.update).not.toHaveBeenCalled();
   });
@@ -379,7 +379,7 @@ describe('ScreenVisitas — visit_remote_active: Confirmar/Cancelar (B6-A)', () 
       vi.useRealTimers();
     });
 
-    it('A) scheduled, ativa (não-pending): Confirmar + Remarcar + Cancelar, sem Registrar', () => {
+    it('A) scheduled, ativa (não-pending): Confirmar + Remarcar + Cancelar, sem Registrar resultado', () => {
       m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
         hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: FUTURE_TODAY })],
       }));
@@ -387,10 +387,10 @@ describe('ScreenVisitas — visit_remote_active: Confirmar/Cancelar (B6-A)', () 
       expect(screen.getByText('Confirmar')).toBeInTheDocument();
       expect(screen.getByText('Remarcar')).toBeInTheDocument();
       expect(screen.getByText('Cancelar')).toBeInTheDocument();
-      expect(screen.queryByText('Registrar')).toBeNull();
+      expect(screen.queryByText('Registrar resultado')).toBeNull();
     });
 
-    it('B) confirmed, ativa: Remarcar + Cancelar, sem Confirmar, sem Registrar', () => {
+    it('B) confirmed, ativa: Remarcar + Cancelar, sem Confirmar, sem Registrar resultado', () => {
       m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
         hasData: true, visits: [remoteVisit({ status: 'confirmed', scheduledAt: FUTURE_TODAY })],
       }));
@@ -398,10 +398,10 @@ describe('ScreenVisitas — visit_remote_active: Confirmar/Cancelar (B6-A)', () 
       expect(screen.queryByText('Confirmar')).toBeNull();
       expect(screen.getByText('Remarcar')).toBeInTheDocument();
       expect(screen.getByText('Cancelar')).toBeInTheDocument();
-      expect(screen.queryByText('Registrar')).toBeNull();
+      expect(screen.queryByText('Registrar resultado')).toBeNull();
     });
 
-    it('C) scheduled, Pendentes de resultado: Remarcar + Cancelar, sem Confirmar, sem Registrar (B6-B)', () => {
+    it('C) scheduled, Pendentes de resultado: Registrar resultado + Remarcar + Cancelar, sem Confirmar', () => {
       m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
         hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: PAST_TODAY })],
       }));
@@ -409,10 +409,10 @@ describe('ScreenVisitas — visit_remote_active: Confirmar/Cancelar (B6-A)', () 
       expect(screen.queryByText('Confirmar')).toBeNull();
       expect(screen.getByText('Remarcar')).toBeInTheDocument();
       expect(screen.getByText('Cancelar')).toBeInTheDocument();
-      expect(screen.queryByText('Registrar')).toBeNull();
+      expect(screen.getByText('Registrar resultado')).toBeInTheDocument();
     });
 
-    it('D) confirmed, Pendentes de resultado: Remarcar + Cancelar, sem Confirmar, sem Registrar (B6-B)', () => {
+    it('D) confirmed, Pendentes de resultado: Registrar resultado + Remarcar + Cancelar, sem Confirmar', () => {
       m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
         hasData: true, visits: [remoteVisit({ status: 'confirmed', scheduledAt: PAST_TODAY })],
       }));
@@ -420,7 +420,7 @@ describe('ScreenVisitas — visit_remote_active: Confirmar/Cancelar (B6-A)', () 
       expect(screen.queryByText('Confirmar')).toBeNull();
       expect(screen.getByText('Remarcar')).toBeInTheDocument();
       expect(screen.getByText('Cancelar')).toBeInTheDocument();
-      expect(screen.queryByText('Registrar')).toBeNull();
+      expect(screen.getByText('Registrar resultado')).toBeInTheDocument();
     });
   });
 
@@ -549,6 +549,37 @@ describe('ScreenVisitas — visit_remote_active: Confirmar/Cancelar (B6-A)', () 
       await waitFor(() => expect(cancelVisitSpy).toHaveBeenCalled());
       expect(screen.queryByTestId('visit-cancel-error')).toBeNull();
     });
+  });
+});
+
+// COMMERCIAL-REMOTE-VISITS-B6-B: "Registrar resultado" — visível somente
+// em Pendentes de resultado (fixture já usa scheduledAt no passado real,
+// relógio real, nunca fake timers — mesmo raciocínio já aplicado às
+// suítes Confirmar/Cancelar acima).
+describe('ScreenVisitas — visit_remote_active: Registrar resultado (B6-B)', () => {
+  const REAL_PAST = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  it('"Registrar resultado" abre registrar-resultado-remoto com a Visit remota completa; VisitService.update nunca chamado', () => {
+    const visit = remoteVisit({ id: 'visit-result-1', status: 'scheduled', scheduledAt: REAL_PAST });
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [visit],
+    }));
+
+    render(<ScreenVisitas go={() => {}} />);
+
+    fireEvent.click(screen.getByText('Registrar resultado'));
+    expect(m.openFlow).toHaveBeenCalledWith('registrar-resultado-remoto', { visit });
+    expect(VisitService.update).not.toHaveBeenCalled();
+  });
+
+  it('não aparece para Visit ativa (fora de Pendentes de resultado)', () => {
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: future })],
+    }));
+
+    render(<ScreenVisitas go={() => {}} />);
+    expect(screen.queryByText('Registrar resultado')).toBeNull();
   });
 });
 

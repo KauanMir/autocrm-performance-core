@@ -25,11 +25,13 @@ import { startOfLocalDay } from '@/lib/tasks/deriveTaskState';
 import { isRemoteTasksError } from '@/lib/tasks/errors';
 import { useCreateVisit } from '@/lib/hooks/useCreateVisit';
 import { useUpdateVisit } from '@/lib/hooks/useUpdateVisit';
+import { useRegisterVisitResult } from '@/lib/hooks/useRegisterVisitResult';
 import { resolveVisitRemoteMode } from '@/lib/visits/remoteVisitsMode';
 import { isRemoteVisitsError } from '@/lib/visits/errors';
 import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
 import type { LeadModel } from '@/lib/leads/adapter';
 import type { RemoteVisitModel } from '@/lib/visits/adapter';
+import type { Database } from '@/lib/supabase/database.types';
 import { startOfVisitLocalDay, formatVisitTime, formatVisitShortDate } from '@/lib/visits/visitScreenGrouping';
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
@@ -1180,6 +1182,164 @@ function remoteVisitUpdateErrorMessage(error: unknown): string {
 function isRemoteVisitUpdateRetryable(error: unknown): boolean {
   const code = isRemoteVisitsError(error) ? error.code : undefined;
   return code === undefined || code === 'remote_visits_mutation_generic_error';
+}
+
+type VisitOutcome = Database['public']['Enums']['visit_outcome'];
+
+// COMMERCIAL-REMOTE-VISITS-B6-B — mensagens sanitizadas fixas do registro
+// remoto de resultado, mesmo modelo dos outros mappers desta série. Cobre
+// exatamente os códigos reais de register_visit_result (migration #52,
+// comentário "Erros estáveis" da função): forbidden, visit_not_found,
+// visit_closed, stale_write. identity_changed nunca chega aqui.
+function remoteVisitResultErrorMessage(error: unknown): string {
+  const code = isRemoteVisitsError(error) ? error.code : undefined;
+  switch (code) {
+    case 'remote_visits_mutation_forbidden':
+      return 'Você não tem permissão para registrar o resultado desta visita.';
+    case 'remote_visits_mutation_visit_not_found':
+      return 'Esta visita não está mais disponível.';
+    case 'remote_visits_mutation_visit_closed':
+      return 'Esta visita já foi encerrada.';
+    case 'remote_visits_mutation_stale_write':
+      return 'Esta visita foi alterada. Os dados foram atualizados.';
+    default:
+      return 'Não foi possível registrar o resultado. Tente novamente.';
+  }
+}
+
+// B6-PRECHECK §32: mesmo raciocínio de isRemoteVisitUpdateRetryable — só
+// generic_error (ou código não reconhecido) permite nova tentativa nesta
+// instância do flow; todos os demais exigem fechar e reabrir (stale_write
+// em particular deixaria expectedVersion definitivamente obsoleto).
+function isRemoteVisitResultRetryable(error: unknown): boolean {
+  const code = isRemoteVisitsError(error) ? error.code : undefined;
+  return code === undefined || code === 'remote_visits_mutation_generic_error';
+}
+
+// B6-PRECHECK §14/§16-20: mensagem de continuidade adiada por outcome —
+// os três primeiros destinos (Venda/Proposta/Acompanhamento) não têm
+// backend remoto (confirmado por grep: zero tabela `deals`/`sales`, zero
+// hook useCreateDeal/useCreateSale; `criar-acompanhamento` em si nunca
+// ganhou branch local/remoto, mesmo Tasks tendo infra remota própria em
+// OUTRO fluxo — FlowNovaPendencia). no_interest não tem follow-up nem no
+// local hoje, então não precisa de nenhuma mensagem extra.
+const REMOTE_VISIT_RESULT_FOLLOWUP_MESSAGE: Record<VisitOutcome, string> = {
+  sold: ' A continuidade para Venda será disponibilizada após a migração desse módulo.',
+  negotiating: ' A continuidade para Proposta/Negociação será disponibilizada após a migração desse módulo.',
+  thinking: ' A continuidade para Acompanhamento será disponibilizada após a migração desse fluxo.',
+  no_interest: '',
+};
+
+const REMOTE_VISIT_RESULT_OPTS: ReadonlyArray<{ id: VisitOutcome; icon: string; title: string; desc: string; accent: string }> = [
+  { id: 'sold', icon: 'trophy', title: 'Fechou negócio', desc: 'Cliente vai comprar', accent: '#E8CE72' },
+  { id: 'negotiating', icon: 'handshake', title: 'Em negociação', desc: 'Montar proposta', accent: '#27C75F' },
+  { id: 'thinking', icon: 'clock', title: 'Vai pensar', desc: 'Agendar follow-up', accent: '#FFA31F' },
+  { id: 'no_interest', icon: 'xCircle', title: 'Sem interesse', desc: 'Encerrar por agora', accent: '#8B8B93' },
+];
+
+// COMMERCIAL-REMOTE-VISITS-B6-B — registro remoto de resultado de uma
+// Visit EXISTENTE (mesmo id, nunca cria Sale/Deal/Task/Visit nova). Flow
+// NOVO, REMOTE-ONLY (mesmo padrão de FlowReagendarVisita, B5): o registro
+// local continua inteiramente dentro de FlowRegistrarResultado (abaixo,
+// intocado), que abre registrar-venda/nova-proposta/criar-acompanhamento
+// — este flow NUNCA abre nenhum deles, mesmo com outcome sold/negotiating/
+// thinking (REGRA ABSOLUTA do B6-PRECHECK §15): nenhum desses três
+// destinos tem backend remoto (confirmado por grep — zero infraestrutura
+// de Deal/Sale, e o entry point de Task usado aqui nunca foi migrado). O
+// success state mostra uma mensagem de continuidade adiada em vez de
+// qualquer botão "próximo passo" — o outcome já está persistido de forma
+// atômica e durável na própria Visit assim que a RPC responde; não é uma
+// etapa pendente da mesma mutation, nem precisa ser.
+export function FlowRegistrarResultadoRemoto({ payload, close }: any) {
+  const visit: RemoteVisitModel | undefined = payload.visit;
+
+  const [outcome, setOutcome] = useState<VisitOutcome | null>(null);
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState(false);
+  const [done, setDone] = useState<VisitOutcome | null>(null);
+
+  const user = AuthService.getCurrentUser();
+  const identityUserId = user?.id ?? null;
+  const identityCompanyId = user?.activeMembership?.companyId ?? null;
+  const identityMembershipRole = user?.activeMembership?.role ?? null;
+  const identityUserIsActive = Boolean(user);
+  const identityKey = identityUserId && identityCompanyId ? `${identityUserId}:${identityCompanyId}` : null;
+
+  // Hook SEMPRE chamado, incondicionalmente, antes de qualquer return
+  // (inclusive o `!visit` abaixo) — Rules of Hooks.
+  const registerHook = useRegisterVisitResult({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  useCloseOnIdentityChange(identityKey, close);
+
+  if (!visit) return null;
+
+  const canSave = Boolean(outcome && !submitting && !registerHook.isPending && !blocked);
+
+  const handleSave = async () => {
+    if (!canSave || !outcome) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await registerHook.registerVisitResult({
+        visitId: visit.id,
+        expectedVersion: visit.version,
+        outcome,
+        resultNote: note.trim(),
+      });
+      setDone(outcome);
+    } catch (err) {
+      // Mesmo padrão de FlowReagendarVisita/FlowNovaPendencia:
+      // identity_changed fecha o flow diretamente, nunca mostra o erro da
+      // sessão antiga.
+      if (isRemoteVisitsError(err) && err.code === 'remote_visits_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(remoteVisitResultErrorMessage(err));
+      if (!isRemoteVisitResultRetryable(err)) setBlocked(true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (done) {
+    const o = REMOTE_VISIT_RESULT_OPTS.find((x) => x.id === done)!;
+    const successAccent = o.accent === '#8B8B93' ? '#27C75F' : o.accent;
+    return (
+      <FlowShell eyebrow="RESULTADO DA VISITA" title="Resultado registrado" icon="clipboard" accent={successAccent} onClose={close}>
+        <FlowSuccess icon="checkCircle" accent={successAccent} title={`Resultado registrado: ${o.title}`}
+          sub={`O resultado da visita foi salvo.${REMOTE_VISIT_RESULT_FOLLOWUP_MESSAGE[done]}`}
+          actions={<LBtn kind="ghost" size="lg" icon="check" onClick={close}>Fechar</LBtn>} />
+      </FlowShell>
+    );
+  }
+
+  return (
+    <FlowShell eyebrow="RESULTADO DA VISITA" title="Como foi a visita?" icon="clipboard" accent="#E8CE72" onClose={close}
+      sub={`Registre o que aconteceu na visita de ${visit.clientName}. Isso mantém o acompanhamento sempre certo.`}
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check" onClick={handleSave} style={{ opacity: canSave ? 1 : .5 }}>
+        {(submitting || registerHook.isPending) ? 'Registrando…' : 'Salvar resultado'}
+      </LBtn></>}>
+      <div style={{ maxWidth: 760 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 18 }}>
+          {REMOTE_VISIT_RESULT_OPTS.map((o) => (
+            <ChoiceTile key={o.id} big icon={o.icon} title={o.title} desc={o.desc} accent={o.accent} active={outcome === o.id}
+              onClick={() => { if (!blocked) setOutcome(o.id); }} />
+          ))}
+        </div>
+        <FPanel><FArea label="Anotações da visita (opcional)" placeholder="O que o cliente achou, objeções, próximos passos…" value={note} onChange={(e: any) => setNote(e.target.value)} disabled={blocked} /></FPanel>
+        {submitError && (
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--red-bg, rgba(255,59,59,.08))', border: '1px solid var(--red-line, rgba(255,59,59,.3))' }}>
+            <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{submitError}</span>
+          </div>
+        )}
+      </div>
+    </FlowShell>
+  );
 }
 
 export function FlowConfirmarVisita({ payload, close, openFlow }: any) {

@@ -50,6 +50,7 @@ vi.mock('@/components/flows/Flows2', () => ({
   FlowReagendarVisita: stub('FlowReagendarVisita'),
   FlowConfirmarVisita: stub('FlowConfirmarVisita'),
   FlowRegistrarResultado: stub('FlowRegistrarResultado'),
+  FlowRegistrarResultadoRemoto: stub('FlowRegistrarResultadoRemoto'),
   FlowNovaProposta: stub('FlowNovaProposta'),
   FlowAprovarProposta: stub('FlowAprovarProposta'),
   FlowRegistrarVenda: stub('FlowRegistrarVenda'),
@@ -265,6 +266,55 @@ describe('FlowLayer — reagendar-visita: gate caller-independent, e criar-visit
     expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
     renderFlow('registrar-resultado');
     expect(screen.getAllByText('Módulo indisponível').length).toBeGreaterThan(0);
+  });
+});
+
+// COMMERCIAL-REMOTE-VISITS-B6-B — 'registrar-resultado-remoto' é outro
+// flow id NOVO REMOTE-ONLY, mesmo contrato exato de 'reagendar-visita'
+// (B5): 'visit_local' também bloqueia (o registro local continua atrás de
+// 'registrar-resultado', em LOCAL_COMMERCIAL_FLOW_IDS, intocado).
+describe('FlowLayer — registrar-resultado-remoto permitido em visit_remote_ready', () => {
+  it('monta o componente real', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue('visit_remote_ready');
+    renderFlow('registrar-resultado-remoto', { visit: { id: 'v1' } });
+    expect(screen.getByText('FlowRegistrarResultadoRemoto')).toBeInTheDocument();
+    expect(screen.queryByText('Módulo indisponível')).toBeNull();
+  });
+});
+
+describe.each(['visit_local', 'visit_blocked', 'visit_remote_misconfigured'] as const)('FlowLayer — registrar-resultado-remoto bloqueado em %s', (mode) => {
+  it('mostra estado indisponível, nunca monta o componente real', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue(mode);
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(true);
+    renderFlow('registrar-resultado-remoto', { visit: { id: 'v1' } });
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+    expect(screen.queryByText('FlowRegistrarResultadoRemoto')).toBeNull();
+  });
+});
+
+describe('FlowLayer — registrar-resultado-remoto: gate caller-independent, e demais flows Visits sem widening', () => {
+  it('bloqueia mesmo com payload.visit anexado, sem lê-lo', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue('visit_blocked');
+    renderFlow('registrar-resultado-remoto', { visit: { id: 'v1', clientName: 'Nome Real' } });
+    expect(screen.queryByText('Nome Real')).toBeNull();
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+  });
+
+  it('criar-visita e reagendar-visita continuam corretos (regressão B4/B5, não afetados por B6-B)', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue('visit_local');
+    renderFlow('criar-visita');
+    expect(screen.getByText('FlowCriarVisita')).toBeInTheDocument();
+
+    mocks.resolveVisitRemoteMode.mockReturnValue('visit_remote_ready');
+    renderFlow('reagendar-visita', { visit: { id: 'v1' } });
+    expect(screen.getByText('FlowReagendarVisita')).toBeInTheDocument();
+  });
+
+  it('registrar-resultado local continua local-only (regressão)', () => {
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(false);
+    renderFlow('registrar-resultado');
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+    expect(screen.queryByText('FlowRegistrarResultado')).toBeNull();
   });
 });
 

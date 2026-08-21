@@ -265,6 +265,15 @@ function RemoteVisitRow({ visit, sellersById, showDate, isPendingResult }: {
             {confirmHook.isPending ? 'Confirmando…' : 'Confirmar'}
           </LBtn>
         )}
+        {/* COMMERCIAL-REMOTE-VISITS-B6-B: "Registrar resultado" aparece
+            SOMENTE em Pendentes de resultado (isPendingResult, já derivado
+            centralmente por groupVisitsForScreen — nunca recalculado aqui,
+            mesmo padrão de canConfirm/B6-A). Abre um flow dedicado
+            REMOTE-ONLY (registrar-resultado-remoto) — nunca o
+            'registrar-resultado' local. */}
+        {isPendingResult && (
+          <LBtn size="sm" kind="primary" icon="clipboard" onClick={() => (window as any).__openFlow('registrar-resultado-remoto', { visit })}>Registrar resultado</LBtn>
+        )}
         <LBtn size="sm" kind="ghost" icon="refresh" onClick={() => (window as any).__openFlow('reagendar-visita', { visit })}>Remarcar</LBtn>
         {!cancelConfirming ? (
           <LBtn size="sm" kind="ghost" icon="xCircle" onClick={() => setCancelConfirming(true)}>Cancelar</LBtn>
@@ -382,16 +391,20 @@ export function ScreenVisitas({ go }: any) {
     ];
     return (
       <LightScreen>
-        {/* COMMERCIAL-REMOTE-VISITS-B4/B5/B6-A: "Agendar visita"
+        {/* COMMERCIAL-REMOTE-VISITS-B4/B5/B6: "Agendar visita"
             (create_visit), "Confirmar"/"Cancelar" inline por row
-            (confirm_visit/cancel_visit) e "Remarcar" por row
-            (update_visit) estão conectados. Confirmar/Cancelar são ações
-            INLINE desta tela (nenhum flow id novo) — FlowCriarVisita/
-            FlowReagendarVisita continuam decidindo sozinhos via
-            resolveVisitRemoteMode() para os dois que SÃO flows.
-            "Registrar resultado" segue fora de escopo até B6-B — FlowLayer
-            continua bloqueando 'confirmar-visita'/'registrar-resultado'
-            (os flows LOCAIS) fora do modo local de qualquer forma. */}
+            (confirm_visit/cancel_visit), "Remarcar" por row (update_visit)
+            e "Registrar resultado" em Pendentes de resultado
+            (register_visit_result) estão todos conectados. Confirmar/
+            Cancelar são ações INLINE desta tela (nenhum flow id) —
+            FlowCriarVisita/FlowReagendarVisita/FlowRegistrarResultadoRemoto
+            decidem sozinhos (os três que SÃO flows) via
+            resolveVisitRemoteMode()/gates dedicados em FlowLayer.
+            Registrar resultado NUNCA abre registrar-venda/nova-proposta/
+            criar-acompanhamento (nenhum dos três tem backend remoto,
+            B6-PRECHECK §14-16) — sucesso mostra mensagem de continuidade
+            adiada. FlowLayer continua bloqueando 'confirmar-visita'/
+            'registrar-resultado' (os flows LOCAIS) fora do modo local. */}
         <PageHead title="Visitas" sub={pageHeadSub} actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {remoteGroups.map((g) => (
