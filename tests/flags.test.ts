@@ -7,6 +7,7 @@ import {
   isRemoteStagesEnabled,
   isRemoteTasksEnabled,
   isRemoteVisitsEnabled,
+  isRemoteDealsEnabled,
   isPlatformAdminEnabled,
   isActiveUsersEnabled,
   isUserEmailEditEnabled,
@@ -18,6 +19,7 @@ import {
   REMOTE_STAGES_DEV_OVERRIDE_KEY,
   REMOTE_TASKS_DEV_OVERRIDE_KEY,
   REMOTE_VISITS_DEV_OVERRIDE_KEY,
+  REMOTE_DEALS_DEV_OVERRIDE_KEY,
   PLATFORM_ADMIN_DEV_OVERRIDE_KEY,
   ACTIVE_USERS_DEV_OVERRIDE_KEY,
   USER_EMAIL_EDIT_DEV_OVERRIDE_KEY,
@@ -31,6 +33,7 @@ const ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_STAGES';
 const LEADS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_LEADS';
 const TASKS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_TASKS';
 const VISITS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_VISITS';
+const DEALS_ENV_KEY = 'NEXT_PUBLIC_FF_REMOTE_DEALS';
 const PLATFORM_ADMIN_ENV_KEY = 'NEXT_PUBLIC_FF_PLATFORM_ADMIN';
 const ACTIVE_USERS_ENV_KEY = 'NEXT_PUBLIC_FF_ACTIVE_USERS';
 const USER_EMAIL_EDIT_ENV_KEY = 'NEXT_PUBLIC_FF_USER_EMAIL_EDIT';
@@ -76,6 +79,15 @@ function setVisitsEnv(nodeEnv: string, flagValue?: string) {
     vi.stubEnv(VISITS_ENV_KEY, undefined as unknown as string);
   } else {
     vi.stubEnv(VISITS_ENV_KEY, flagValue);
+  }
+}
+
+function setDealsEnv(nodeEnv: string, flagValue?: string) {
+  vi.stubEnv('NODE_ENV', nodeEnv);
+  if (flagValue === undefined) {
+    vi.stubEnv(DEALS_ENV_KEY, undefined as unknown as string);
+  } else {
+    vi.stubEnv(DEALS_ENV_KEY, flagValue);
   }
 }
 
@@ -1641,5 +1653,171 @@ describe('isolamento da flag de visits em relação às demais (incl. Leads/Stag
     expect(isRemoteLeadsEnabled()).toBe(false);
     expect(isRemoteTasksEnabled()).toBe(false);
     expect(isRemoteVisitsEnabled()).toBe(true);
+  });
+});
+
+// COMMERCIAL-REMOTE-DEALS-B2-A — isRemoteDealsEnabled (mesmo contrato de
+// isRemoteTasksEnabled/isRemoteVisitsEnabled, chave/env próprias). Só o
+// valor bruto da flag — a combinação com o estado de Leads
+// (deal_local/deal_blocked/deal_remote_ready/deal_remote_misconfigured) é
+// testada separadamente em tests/deals/remoteDealsMode.test.ts.
+
+describe('isRemoteDealsEnabled — valor do ambiente', () => {
+  it('variável ausente ⇒ false (OFF por padrão)', () => {
+    setDealsEnv('production');
+    expect(isRemoteDealsEnabled()).toBe(false);
+  });
+
+  it('"false" ⇒ false', () => {
+    setDealsEnv('production', 'false');
+    expect(isRemoteDealsEnabled()).toBe(false);
+  });
+
+  it('"true" ⇒ true', () => {
+    setDealsEnv('production', 'true');
+    expect(isRemoteDealsEnabled()).toBe(true);
+  });
+
+  it('valores não reconhecidos (case-sensitive, sem 1/yes/on/vazio) ⇒ false', () => {
+    for (const invalid of ['1', 'yes', 'on', '', 'enabled']) {
+      setDealsEnv('production', invalid);
+      expect(isRemoteDealsEnabled()).toBe(false);
+    }
+  });
+
+  it('variações de maiúsculas/espaços não são reconhecidas ⇒ false', () => {
+    for (const invalid of ['TRUE', 'True', ' true', 'true ']) {
+      setDealsEnv('production', invalid);
+      expect(isRemoteDealsEnabled()).toBe(false);
+    }
+  });
+});
+
+describe('isRemoteDealsEnabled — development (override via localStorage)', () => {
+  it('env false + override "true" ⇒ true', () => {
+    setDealsEnv('development', 'false');
+    window.localStorage.setItem(REMOTE_DEALS_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteDealsEnabled()).toBe(true);
+  });
+
+  it('env true + override "false" ⇒ false', () => {
+    setDealsEnv('development', 'true');
+    window.localStorage.setItem(REMOTE_DEALS_DEV_OVERRIDE_KEY, 'false');
+    expect(isRemoteDealsEnabled()).toBe(false);
+  });
+
+  it('override inválido ⇒ usa o env', () => {
+    setDealsEnv('development', 'true');
+    window.localStorage.setItem(REMOTE_DEALS_DEV_OVERRIDE_KEY, 'yes');
+    expect(isRemoteDealsEnabled()).toBe(true);
+
+    setDealsEnv('development', 'false');
+    window.localStorage.setItem(REMOTE_DEALS_DEV_OVERRIDE_KEY, '1');
+    expect(isRemoteDealsEnabled()).toBe(false);
+  });
+
+  it('override ausente ⇒ usa o env', () => {
+    setDealsEnv('development', 'true');
+    expect(isRemoteDealsEnabled()).toBe(true);
+
+    setDealsEnv('development', 'false');
+    expect(isRemoteDealsEnabled()).toBe(false);
+  });
+
+  it('SecurityError no localStorage cai no env, sem lançar', () => {
+    setDealsEnv('development', 'true');
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    expect(isRemoteDealsEnabled()).toBe(true);
+
+    setDealsEnv('development', 'false');
+    expect(isRemoteDealsEnabled()).toBe(false);
+  });
+});
+
+describe('isRemoteDealsEnabled — production (localStorage ignorado)', () => {
+  it('env true ⇒ true', () => {
+    setDealsEnv('production', 'true');
+    expect(isRemoteDealsEnabled()).toBe(true);
+  });
+
+  it('env false ⇒ false', () => {
+    setDealsEnv('production', 'false');
+    expect(isRemoteDealsEnabled()).toBe(false);
+  });
+
+  it('override "true" com env false ⇒ continua false', () => {
+    setDealsEnv('production', 'false');
+    window.localStorage.setItem(REMOTE_DEALS_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteDealsEnabled()).toBe(false);
+  });
+
+  it('override "false" com env true ⇒ continua true', () => {
+    setDealsEnv('production', 'true');
+    window.localStorage.setItem(REMOTE_DEALS_DEV_OVERRIDE_KEY, 'false');
+    expect(isRemoteDealsEnabled()).toBe(true);
+  });
+
+  it('localStorage nunca é consultado em produção', () => {
+    setDealsEnv('production', 'true');
+    const spy = vi.spyOn(Storage.prototype, 'getItem');
+    isRemoteDealsEnabled();
+    setDealsEnv('production', 'false');
+    isRemoteDealsEnabled();
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('isRemoteDealsEnabled — ambiente sem window (SSR)', () => {
+  it('sem window ⇒ usa o env sem lançar erro', () => {
+    setDealsEnv('development', 'true');
+    vi.stubGlobal('window', undefined);
+    expect(isRemoteDealsEnabled()).toBe(true);
+
+    setDealsEnv('development', 'false');
+    expect(isRemoteDealsEnabled()).toBe(false);
+  });
+});
+
+describe('isolamento da flag de deals em relação às demais (incl. Leads/Stages/Tasks/Visits)', () => {
+  it('a chave de override é distinta de todas as outras', () => {
+    expect(REMOTE_DEALS_DEV_OVERRIDE_KEY).toBe('autocrm_ff_remote_deals');
+    expect(REMOTE_DEALS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_STAGES_DEV_OVERRIDE_KEY);
+    expect(REMOTE_DEALS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_LEADS_DEV_OVERRIDE_KEY);
+    expect(REMOTE_DEALS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_TASKS_DEV_OVERRIDE_KEY);
+    expect(REMOTE_DEALS_DEV_OVERRIDE_KEY).not.toBe(REMOTE_VISITS_DEV_OVERRIDE_KEY);
+    expect(REMOTE_DEALS_DEV_OVERRIDE_KEY).not.toBe(PLATFORM_ADMIN_DEV_OVERRIDE_KEY);
+    expect(REMOTE_DEALS_DEV_OVERRIDE_KEY).not.toBe(ACTIVE_USERS_DEV_OVERRIDE_KEY);
+    expect(REMOTE_DEALS_DEV_OVERRIDE_KEY).not.toBe(USER_EMAIL_EDIT_DEV_OVERRIDE_KEY);
+    expect(REMOTE_DEALS_DEV_OVERRIDE_KEY).not.toBe(USER_LIFECYCLE_DEV_OVERRIDE_KEY);
+    expect(REMOTE_DEALS_DEV_OVERRIDE_KEY).not.toBe(COMPANY_SELECTOR_DEV_OVERRIDE_KEY);
+  });
+
+  it('env/override de deals não afeta leads/stages/tasks/visits (e vice-versa) — sem dependência de Visits/Tasks', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv(ENV_KEY, 'true');
+    vi.stubEnv(LEADS_ENV_KEY, 'true');
+    vi.stubEnv(TASKS_ENV_KEY, 'true');
+    vi.stubEnv(VISITS_ENV_KEY, 'true');
+    vi.stubEnv(DEALS_ENV_KEY, 'false');
+    window.localStorage.setItem(REMOTE_DEALS_DEV_OVERRIDE_KEY, 'true');
+    expect(isRemoteStagesEnabled()).toBe(true);
+    expect(isRemoteLeadsEnabled()).toBe(true);
+    expect(isRemoteTasksEnabled()).toBe(true);
+    expect(isRemoteVisitsEnabled()).toBe(true);
+    expect(isRemoteDealsEnabled()).toBe(true);
+
+    window.localStorage.clear();
+    vi.stubEnv(ENV_KEY, 'false');
+    vi.stubEnv(LEADS_ENV_KEY, 'false');
+    vi.stubEnv(TASKS_ENV_KEY, 'false');
+    vi.stubEnv(VISITS_ENV_KEY, 'false');
+    vi.stubEnv(DEALS_ENV_KEY, 'true');
+    expect(isRemoteStagesEnabled()).toBe(false);
+    expect(isRemoteLeadsEnabled()).toBe(false);
+    expect(isRemoteTasksEnabled()).toBe(false);
+    expect(isRemoteVisitsEnabled()).toBe(false);
+    expect(isRemoteDealsEnabled()).toBe(true);
   });
 });

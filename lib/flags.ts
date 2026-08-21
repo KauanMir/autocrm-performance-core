@@ -60,6 +60,7 @@ export const REMOTE_STAGES_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_stages';
 export const REMOTE_LEADS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_leads';
 export const REMOTE_TASKS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_tasks';
 export const REMOTE_VISITS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_visits';
+export const REMOTE_DEALS_DEV_OVERRIDE_KEY = 'autocrm_ff_remote_deals';
 export const PLATFORM_ADMIN_DEV_OVERRIDE_KEY = 'autocrm_ff_platform_admin';
 export const ACTIVE_USERS_DEV_OVERRIDE_KEY = 'autocrm_ff_active_users';
 export const USER_EMAIL_EDIT_DEV_OVERRIDE_KEY = 'autocrm_ff_user_email_edit';
@@ -126,6 +127,17 @@ export function isRemoteTasksEnabled(): boolean {
 // dependência de isRemoteTasksEnabled — os dois domínios são independentes.
 export function isRemoteVisitsEnabled(): boolean {
   return resolveFlag(process.env.NEXT_PUBLIC_FF_REMOTE_VISITS, REMOTE_VISITS_DEV_OVERRIDE_KEY);
+}
+
+// COMMERCIAL-REMOTE-DEALS-B2-A — NEXT_PUBLIC_FF_REMOTE_DEALS (mesmo
+// contrato de isRemoteTasksEnabled/isRemoteVisitsEnabled). Só o valor bruto
+// da própria flag — a combinação com o estado de Leads (rollout parcial vs.
+// misconfiguration) é decisão de lib/deals/remoteDealsMode.ts, nunca desta
+// função. Sem dependência de isRemoteVisitsEnabled/isRemoteTasksEnabled —
+// os quatro domínios comerciais (Tasks/Visits/Deals/Sales) são
+// independentes entre si.
+export function isRemoteDealsEnabled(): boolean {
+  return resolveFlag(process.env.NEXT_PUBLIC_FF_REMOTE_DEALS, REMOTE_DEALS_DEV_OVERRIDE_KEY);
 }
 
 export function isPlatformAdminEnabled(): boolean {
