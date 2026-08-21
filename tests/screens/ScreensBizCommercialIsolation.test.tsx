@@ -1,12 +1,12 @@
 // Testes de isolamento fail-closed dos módulos comerciais locais em
-// ScreensBiz.tsx (M1-E, E5-B2-A1 + E7-B1): ScreenPropostas/ScreenVendas/
-// ScreenResultados. Cobre Barreira 1 (UI) — em modo NÃO local, nenhuma
-// tela chama DealService/SaleService.getAll(), nenhum dado antigo aparece,
-// nenhuma ação de aprovar/cancelar é oferecida. ScreenResultados (E7-B1)
-// ganhou o mesmo isolamento para SellerService (catálogo local sem
-// company_id, sem backend remoto — achado do E7-A0), alcançável pelo
-// Manager mesmo em modo remoto (NAV_ROLES.manager inclui 'resultados').
-// Em modo local, comportamento preservado integralmente.
+// ScreensBiz.tsx (M1-E, E5-B2-A1 + E7-B1): ScreenVendas/ScreenResultados.
+// Cobre Barreira 1 (UI) — em modo NÃO local, nenhuma tela chama
+// SaleService.getAll(), nenhum dado antigo aparece, nenhuma ação de
+// cancelar é oferecida. ScreenResultados (E7-B1) ganhou o mesmo isolamento
+// para SellerService (catálogo local sem company_id, sem backend remoto —
+// achado do E7-A0), alcançável pelo Manager mesmo em modo remoto
+// (NAV_ROLES.manager inclui 'resultados'). Em modo local, comportamento
+// preservado integralmente.
 //
 // ScreenVisitas SAIU deste arquivo (COMMERCIAL-REMOTE-VISITS-B3): Visit
 // ganhou backend remoto próprio (migration #52, local-only) e o gate
@@ -15,8 +15,15 @@
 // useRemoteVisitsScreenState), testado em
 // tests/screens/ScreenVisitasCommercialIsolation.test.tsx (mesmo padrão de
 // extração já aplicado a ScreenPendencias em B1-B3-C1, ver
-// tests/screens/ScreenPendenciasCommercialIsolation.test.tsx). Deal/Sale/
-// SellerService ainda não migraram — as 3 telas abaixo continuam por
+// tests/screens/ScreenPendenciasCommercialIsolation.test.tsx).
+//
+// ScreenPropostas SAIU deste arquivo pelo mesmo motivo
+// (COMMERCIAL-REMOTE-DEALS-B3): Deal ganhou backend remoto próprio
+// (migration #53, local-only, ainda PENDING REMOTE) e o gate deixou de ser
+// só isLocalCommercialDataAllowed() — passou a ser remoteDealsScreen.mode
+// (via useRemoteDealsScreenState), testado em
+// tests/screens/ScreenPropostasCommercialIsolation.test.tsx. Sale/
+// SellerService ainda não migraram — as 2 telas abaixo continuam por
 // isLocalCommercialDataAllowed().
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -63,7 +70,7 @@ vi.mock('@/lib/services', () => ({
   PipelineService: { reorderStages: () => {}, getStages: () => [] },
 }));
 
-import { ScreenPropostas, ScreenVendas, ScreenResultados } from '@/components/screens/ScreensBiz';
+import { ScreenVendas, ScreenResultados } from '@/components/screens/ScreensBiz';
 
 beforeEach(() => {
   m.isLocalCommercialDataAllowed.mockReset();
@@ -72,25 +79,6 @@ beforeEach(() => {
   m.sales.mockReset().mockReturnValue([]);
   m.sellers.mockReset().mockReturnValue([]);
   m.isManager.mockReset().mockReturnValue(false);
-});
-
-describe('ScreenPropostas — isolamento por modo', () => {
-  it('modo NÃO local: não chama DealService.getAll, mostra estado indisponível, nenhuma ação de aprovar', () => {
-    m.isLocalCommercialDataAllowed.mockReturnValue(false);
-    m.deals.mockReturnValue([{ id: 'd1', client: 'Cliente Antigo', car: 'Onix', value: 'R$ 1', seller: 'Marcos Silva', status: 'aprovacao', last: 'hoje', disc: '8%' }]);
-    render(<ScreenPropostas go={() => {}} />);
-    expect(m.deals).not.toHaveBeenCalled();
-    expect(screen.getByTestId('local-commercial-unavailable')).toBeInTheDocument();
-    expect(screen.queryByText('Cliente Antigo')).toBeNull();
-    expect(screen.queryByText('Nova proposta')).toBeNull();
-  });
-
-  it('modo local: renderiza propostas normalmente', () => {
-    m.isLocalCommercialDataAllowed.mockReturnValue(true);
-    m.deals.mockReturnValue([{ id: 'd1', client: 'Ana Paula', car: 'Onix', value: 'R$ 1', seller: 'Marcos Silva', status: 'aberta', last: 'hoje' }]);
-    render(<ScreenPropostas go={() => {}} />);
-    expect(screen.getByText('Ana Paula')).toBeInTheDocument();
-  });
 });
 
 describe('ScreenVendas — isolamento por modo', () => {

@@ -27,6 +27,14 @@ import {
   VISIT_REMOTE_STATUS_LABEL,
   resolveVisitSellerDisplayName,
 } from '@/lib/visits/visitScreenGrouping';
+import { useRemoteDealsScreenState } from '@/lib/hooks/useRemoteDealsScreenState';
+import type { RemoteDealModel } from '@/lib/deals/adapter';
+import { formatCentsToBRL } from '@/lib/deals/money';
+import {
+  groupDealsForScreen,
+  resolveDealSellerDisplayName,
+  formatDealUpdatedAt,
+} from '@/lib/deals/dealScreenGrouping';
 
 // M1-E E5-B2-A1 — Barreira 1 (UI) para Visitas/Propostas/Vendas: Visit/Deal/
 // Sale não têm company_id nem backend remoto (auditoria E5-B2-A0). Fora do
@@ -502,8 +510,171 @@ function DealRow({ d, go, approval, decided, canDecide }: any) {
   );
 }
 
+// COMMERCIAL-REMOTE-DEALS-B3 — card neutro para loading/erro/config-erro/
+// identidade-indisponível/vazio do modo remoto de Deals. Mesmo padrão
+// exato de VisitStateCard (não exportado, reimplementado aqui em vez de
+// importado — mesma independência de domínio já documentada em
+// lib/visits/remoteVisitsMode.ts).
+function DealStateCard({ testId, children, onRetry }: { testId: string; children: React.ReactNode; onRetry?: () => void }) {
+  return (
+    <LCard style={{ minHeight: 360, display: 'grid', placeItems: 'center' }}>
+      <div data-testid={testId} style={{ display: 'grid', placeItems: 'center', gap: 14, textAlign: 'center' }}>
+        <div style={{ color: 'var(--t-500)', fontSize: 14, maxWidth: 420 }}>{children}</div>
+        {onRetry && <LBtn kind="primary" icon="refresh" onClick={onRetry}>Tentar novamente</LBtn>}
+      </div>
+    </LCard>
+  );
+}
+
+// COMMERCIAL-REMOTE-DEALS-B3 — linha de uma Deal remota. Somente leitura:
+// nenhum botão de ação (create/update/mark-lost entram em B4/B5, fora de
+// escopo deste lote, B3-PRECHECK §11/§12/§19). Cliente é texto
+// não-clicável de propósito — mesma decisão já tomada por
+// RemoteVisitRow/TaskRow (abrir o Lead completo exigiria uma segunda
+// dependência de hook que este lote deliberadamente não introduz). Sem
+// badge de status (B3-PRECHECK §10/§16): cada seção da tela já corresponde
+// a exatamente um status, diferente de Visits (onde uma mesma seção pode
+// misturar scheduled/confirmed) — repetir o status no card seria
+// informação duplicada.
+function RemoteDealRow({ deal, sellersById, showSeller, now }: {
+  deal: RemoteDealModel;
+  sellersById: Readonly<Record<string, { id: string; name: string }>>;
+  showSeller: boolean;
+  now: Date;
+}) {
+  const sellerDisplay = resolveDealSellerDisplayName(deal.assignedSellerId, sellersById);
+  const updatedDisplay = formatDealUpdatedAt(deal.updatedAt, now);
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 16, padding: '15px 18px', borderRadius: 11,
+      background: 'var(--surface)', border: '1px solid var(--border)',
+    }}>
+      <Avatar name={deal.clientName} size={40} ring="#6B7280" />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{deal.clientName}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Icon name="car" size={13} stroke={2} /> {deal.vehicle}{showSeller && <> · {sellerDisplay}</>}
+        </div>
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{formatCentsToBRL(deal.valueCents)}</div>
+        <div style={{ fontSize: 11, color: 'var(--t-400)' }}>atualizada {updatedDisplay}</div>
+      </div>
+    </div>
+  );
+}
+
+// COMMERCIAL-REMOTE-DEALS-B3 — gate de página inteira, mesmo padrão exato
+// de ScreenVisitas (COMMERCIAL-REMOTE-VISITS-B3): useRemoteDealsScreenState
+// chamado INCONDICIONALMENTE, antes de qualquer return. Branches remotos
+// (blocked/misconfigured/unavailable_identity/loading/error/configError)
+// tratados primeiro; deal_local cai no bloco legado ao final, sem checagem
+// explícita de mode === 'deal_local' — o mesmo raciocínio já registrado
+// para visit_local se aplica aqui (deal_local implica, por construção,
+// Leads também local, então isLocalCommercialDataAllowed() nunca seria
+// false neste ramo). Read-only: nenhum CTA de criação, nenhuma ação "Ver",
+// nenhuma mutation (B3-PRECHECK §11/§12/§17/§18/§19) — B4/B5 conectarão
+// create/update/mark-lost e um detalhe remoto futuramente.
 export function ScreenPropostas({ go }: any) {
   useStore();
+  const currentUser = AuthService.getCurrentUser();
+  const remoteDealsScreen = useRemoteDealsScreenState(currentUser);
+  const mode = remoteDealsScreen.mode;
+
+  // Mesma identidade já usada por useRemoteDealsScreenState internamente —
+  // chamado SEMPRE, antes de qualquer return (Rules of Hooks). Fora do
+  // modo remoto a query interna fica desabilitada, zero chamadas de rede
+  // (mesmo padrão exato de ScreenVisitas, linha ~326).
+  const sellerLabels = useCurrentCompanySellerLabels({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: currentUser?.activeMembership?.role ?? null,
+    userIsActive: Boolean(currentUser),
+  });
+
+  const pageHeadTitle = 'Negociações';
+  const pageHeadSub = 'Acompanhe as negociações em andamento e o histórico.';
+
+  if (mode === 'deal_blocked' || mode === 'deal_remote_misconfigured') {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <LocalCommercialUnavailableCard />
+      </LightScreen>
+    );
+  }
+  if (mode === 'deal_remote_unavailable_identity') {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="negociacoes-state-unavailable-identity">Negociações indisponíveis nesta sessão.</DealStateCard>
+      </LightScreen>
+    );
+  }
+
+  const remoteActive = mode === 'deal_remote_active';
+  if (remoteActive && remoteDealsScreen.isLoading) {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="negociacoes-state-loading">Carregando negociações…</DealStateCard>
+      </LightScreen>
+    );
+  }
+  if (remoteActive && remoteDealsScreen.isError) {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="negociacoes-state-error" onRetry={remoteDealsScreen.refetch}>Não foi possível carregar as negociações.</DealStateCard>
+      </LightScreen>
+    );
+  }
+  if (remoteActive && remoteDealsScreen.configError !== null) {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="negociacoes-state-config-error">Uma ou mais negociações remotas estão com configuração inválida.</DealStateCard>
+      </LightScreen>
+    );
+  }
+
+  // Daqui em diante: mode === 'deal_local' OU (remoteActive && pronto —
+  // não-loading/não-erro/sem configError, já tratados acima).
+  if (remoteActive) {
+    const now = new Date();
+    const groups = groupDealsForScreen(remoteDealsScreen.deals);
+    const sellersById = sellerLabels.sellersById;
+    const isManager = currentUser?.activeMembership?.role === 'manager';
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div>
+            <SubHead icon="handshake">Em negociação · {groups.open.length}</SubHead>
+            {groups.open.length === 0
+              ? <DealStateCard testId="negociacoes-open-empty">Nenhuma negociação em andamento.</DealStateCard>
+              : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {groups.open.map((d) => <RemoteDealRow key={d.id} deal={d} sellersById={sellersById} showSeller={isManager} now={now} />)}
+                </div>}
+          </div>
+          {groups.lost.length > 0 && <div>
+            <SubHead icon="xCircle">Perdidas · {groups.lost.length}</SubHead>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {groups.lost.map((d) => <RemoteDealRow key={d.id} deal={d} sellersById={sellersById} showSeller={isManager} now={now} />)}
+            </div>
+          </div>}
+          {groups.sold.length > 0 && <div>
+            <SubHead icon="trophy">Vendidas · {groups.sold.length}</SubHead>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {groups.sold.map((d) => <RemoteDealRow key={d.id} deal={d} sellersById={sellersById} showSeller={isManager} now={now} />)}
+            </div>
+          </div>}
+        </div>
+      </LightScreen>
+    );
+  }
+
+  // deal_local: caminho legado, inalterado.
   if (!isLocalCommercialDataAllowed()) {
     return (
       <LightScreen>
