@@ -647,7 +647,13 @@ export function ScreenPropostas({ go }: any) {
     const isManager = currentUser?.activeMembership?.role === 'manager';
     return (
       <LightScreen>
-        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        {/* COMMERCIAL-REMOTE-DEALS-B4: "Nova negociação" abre o mesmo flow
+            id local ('nova-proposta'), que decide sozinho local/remoto via
+            resolveDealRemoteMode() (FlowNovaProposta) — nunca chama
+            DealService. Ausente nos demais 5 modos desta tela (blocked/
+            misconfigured/unavailable_identity/loading/error/configError),
+            herdado do B3 (nenhum deles renderiza actions no PageHead). */}
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-proposta')}>Nova negociação</LBtn>} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <div>
             <SubHead icon="handshake">Em negociação · {groups.open.length}</SubHead>

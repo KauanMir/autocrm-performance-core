@@ -5,7 +5,8 @@
 // coberta em seus próprios arquivos de teste). isLocalCommercialDataAllowed
 // é mockado para controlar o modo determinística; resolveVisitRemoteMode
 // idem (COMMERCIAL-REMOTE-VISITS-B4) — só o gate dedicado de criar-visita
-// o consulta.
+// o consulta. resolveDealRemoteMode idem (COMMERCIAL-REMOTE-DEALS-B4) — só
+// o gate dedicado de nova-proposta o consulta.
 import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -13,6 +14,7 @@ import { render, screen } from '@testing-library/react';
 const mocks = vi.hoisted(() => ({
   isLocalCommercialDataAllowed: vi.fn(),
   resolveVisitRemoteMode: vi.fn(),
+  resolveDealRemoteMode: vi.fn(),
 }));
 
 vi.mock('@/lib/leads/localCommercialAccess', () => ({
@@ -21,6 +23,10 @@ vi.mock('@/lib/leads/localCommercialAccess', () => ({
 
 vi.mock('@/lib/visits/remoteVisitsMode', () => ({
   resolveVisitRemoteMode: mocks.resolveVisitRemoteMode,
+}));
+
+vi.mock('@/lib/deals/remoteDealsMode', () => ({
+  resolveDealRemoteMode: mocks.resolveDealRemoteMode,
 }));
 
 function stub(label: string) {
@@ -73,9 +79,11 @@ import { FlowLayer } from '@/components/flows/FlowLayer';
 // 'criar-visita' SAIU desta lista (COMMERCIAL-REMOTE-VISITS-B4) — não é
 // mais gated por isLocalCommercialDataAllowed(); tem seu próprio gate
 // dedicado (resolveVisitRemoteMode()), testado separadamente abaixo.
+// 'nova-proposta' SAIU pelo mesmo motivo (COMMERCIAL-REMOTE-DEALS-B4) —
+// gate dedicado (resolveDealRemoteMode()), testado separadamente abaixo.
 const COMMERCIAL_FLOW_IDS = [
   'confirmar-visita', 'registrar-resultado',
-  'nova-proposta', 'aprovar-proposta', 'registrar-venda',
+  'aprovar-proposta', 'registrar-venda',
   'criar-acompanhamento',
 ];
 
@@ -96,6 +104,8 @@ beforeEach(() => {
   // criar-visita consulta este resolver); mantém os demais determinísticos
   // sem precisar mockar em cada teste que não fala sobre Visits.
   mocks.resolveVisitRemoteMode.mockReset().mockReturnValue('visit_local');
+  // Default 'deal_local' — mesmo raciocínio, só nova-proposta consulta.
+  mocks.resolveDealRemoteMode.mockReset().mockReturnValue('deal_local');
 });
 
 describe('FlowLayer — flow.id nulo/desconhecido', () => {
@@ -219,6 +229,58 @@ describe('FlowLayer — criar-visita: gate caller-independent (B4-PRECHECK-R1 §
     renderFlow('criar-visita', { lead: { id: 'lead-1', name: 'Nome Real' } });
     expect(screen.queryByText('Nome Real')).toBeNull();
     expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+  });
+});
+
+// COMMERCIAL-REMOTE-DEALS-B4 — 'nova-proposta' SAIU de
+// LOCAL_COMMERCIAL_FLOW_IDS e ganhou um gate DEDICADO baseado em
+// resolveDealRemoteMode(), mesmo contrato exato de criar-visita (Visits
+// B4): a abertura é bloqueada, não só a mutation.
+// isLocalCommercialDataAllowed é irrelevante aqui de propósito (o gate de
+// nova-proposta nunca a consulta).
+describe.each(['deal_local', 'deal_remote_ready'] as const)('FlowLayer — nova-proposta permitido em %s', (mode) => {
+  it('monta o componente real, independente de isLocalCommercialDataAllowed', () => {
+    mocks.resolveDealRemoteMode.mockReturnValue(mode);
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(mode === 'deal_local');
+    renderFlow('nova-proposta');
+    expect(screen.getByText('FlowNovaProposta')).toBeInTheDocument();
+    expect(screen.queryByText('Módulo indisponível')).toBeNull();
+  });
+});
+
+describe.each(['deal_blocked', 'deal_remote_misconfigured'] as const)('FlowLayer — nova-proposta bloqueado em %s', (mode) => {
+  it('mostra estado indisponível, nunca monta o componente real', () => {
+    mocks.resolveDealRemoteMode.mockReturnValue(mode);
+    // isLocalCommercialDataAllowed=true não pode "salvar" a abertura — o
+    // gate de nova-proposta depende só do modo de Deals.
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(true);
+    renderFlow('nova-proposta');
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+    expect(screen.queryByText('FlowNovaProposta')).toBeNull();
+  });
+});
+
+describe('FlowLayer — nova-proposta: gate caller-independent', () => {
+  it('bloqueia mesmo com um payload.lead anexado, sem lê-lo', () => {
+    mocks.resolveDealRemoteMode.mockReturnValue('deal_blocked');
+    renderFlow('nova-proposta', { lead: { id: 'lead-1', name: 'Nome Real' } });
+    expect(screen.queryByText('Nome Real')).toBeNull();
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+  });
+
+  it('criar-visita continua correto (regressão B4 de Visits, não afetado pelo B4 de Deals)', () => {
+    mocks.resolveDealRemoteMode.mockReturnValue('deal_blocked');
+    mocks.resolveVisitRemoteMode.mockReturnValue('visit_local');
+    renderFlow('criar-visita');
+    expect(screen.getByText('FlowCriarVisita')).toBeInTheDocument();
+  });
+
+  it('aprovar-proposta/registrar-venda continuam local-only (regressão)', () => {
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(false);
+    renderFlow('aprovar-proposta');
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+    renderFlow('registrar-venda');
+    expect(screen.getAllByText('Módulo indisponível').length).toBeGreaterThan(0);
   });
 });
 

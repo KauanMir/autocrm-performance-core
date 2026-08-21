@@ -10,9 +10,12 @@
 // necessário, sem retestar a composição já coberta em
 // tests/hooks/useRemoteDealsScreenState.test.tsx.
 //
-// B3 é READ-ONLY (create/update/mark-lost entram em B4/B5, fora de
-// escopo): nenhum hook de mutation é mockado aqui porque nenhum é
-// importado por ScreenPropostas neste lote.
+// COMMERCIAL-REMOTE-DEALS-B4: o branch deal_remote_active ganhou o CTA
+// "Nova negociação" (openFlow('nova-proposta') — mesmo flow id do local,
+// que decide sozinho local/remoto via resolveDealRemoteMode(), coberto em
+// tests/flows/FlowNovaPropostaRemote.test.tsx). ScreenPropostas em si
+// continua sem importar nenhum hook de mutation — só dispara o clique.
+// update/mark-lost permanecem fora de escopo (B5).
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -144,6 +147,7 @@ describe.each([
     expect(m.deals).not.toHaveBeenCalled();
     expect(screen.queryByText('Cliente Antigo')).toBeNull();
     expect(screen.queryByText('Nova proposta')).toBeNull();
+    expect(screen.queryByText('Nova negociação')).toBeNull();
   });
 });
 
@@ -158,11 +162,12 @@ describe('ScreenPropostas — deal_remote_unavailable_identity', () => {
     expect(m.deals).not.toHaveBeenCalled();
     expect(screen.queryByText('X')).toBeNull();
     expect(screen.queryByText(/0 negociaç/)).toBeNull();
+    expect(screen.queryByText('Nova negociação')).toBeNull();
   });
 });
 
 describe('ScreenPropostas — deal_remote_active loading', () => {
-  it('mostra loading, ignora Deals locais, DealService.getAll não chamado', () => {
+  it('mostra loading, ignora Deals locais, DealService.getAll não chamado, CTA ausente', () => {
     m.deals.mockReturnValue([{ id: 'd1', client: 'Local', car: 'Onix', value: 'R$ 1', seller: 'Y', status: 'aberta', last: 'hoje' }]);
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isLoading: true }));
 
@@ -171,6 +176,7 @@ describe('ScreenPropostas — deal_remote_active loading', () => {
     expect(screen.getByTestId('negociacoes-state-loading')).toBeInTheDocument();
     expect(m.deals).not.toHaveBeenCalled();
     expect(screen.queryByText('Local')).toBeNull();
+    expect(screen.queryByText('Nova negociação')).toBeNull();
   });
 });
 
@@ -333,7 +339,7 @@ describe('ScreenPropostas — deal_remote_active com dado', () => {
     expect(screen.getByText('Nenhuma negociação em andamento.')).toBeInTheDocument();
   });
 
-  it('zero CTA remoto: "Nova proposta"/"Nova negociação" ausentes, nenhum openFlow(nova-proposta)', () => {
+  it('CTA remoto: "Nova negociação" presente (não "Nova proposta"), clique abre openFlow(nova-proposta)', () => {
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
       hasData: true, deals: [remoteDeal()],
     }));
@@ -341,8 +347,10 @@ describe('ScreenPropostas — deal_remote_active com dado', () => {
     render(<ScreenPropostas go={() => {}} />);
 
     expect(screen.queryByText('Nova proposta')).toBeNull();
-    expect(screen.queryByText('Nova negociação')).toBeNull();
-    expect(m.openFlow).not.toHaveBeenCalledWith('nova-proposta', expect.anything());
+    expect(screen.getByText('Nova negociação')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Nova negociação'));
+    expect(m.openFlow).toHaveBeenCalledWith('nova-proposta');
   });
 
   it('zero vocabulário de aprovação e zero footer fake', () => {

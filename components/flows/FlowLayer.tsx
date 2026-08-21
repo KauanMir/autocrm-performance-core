@@ -15,6 +15,7 @@ import {
 } from './Flows3';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { resolveVisitRemoteMode } from '@/lib/visits/remoteVisitsMode';
+import { resolveDealRemoteMode } from '@/lib/deals/remoteDealsMode';
 
 const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'ligar': FlowLigar,
@@ -83,9 +84,16 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
 // 'registrar-resultado' permanece aqui, inalterado — continua abrindo
 // FlowRegistrarResultado local (que ainda encaminha para registrar-venda/
 // nova-proposta/criar-acompanhamento LOCAIS, nenhum dos três alterado).
+//
+// COMMERCIAL-REMOTE-DEALS-B4: 'nova-proposta' SAIU deste set pelo mesmo
+// motivo de 'criar-visita' (B4 de Visits) — Deal ganhou create remoto
+// próprio (migration #53) e FlowNovaProposta agora decide local/remoto
+// sozinho (resolveDealRemoteMode()), com gate DEDICADO logo abaixo
+// (isDealCreateFlowAllowed). 'aprovar-proposta'/'registrar-venda'/
+// 'criar-acompanhamento' permanecem aqui — nenhum dos três foi migrado.
 const LOCAL_COMMERCIAL_FLOW_IDS = new Set<string>([
   'confirmar-visita', 'registrar-resultado',
-  'nova-proposta', 'aprovar-proposta', 'registrar-venda',
+  'aprovar-proposta', 'registrar-venda',
   'criar-acompanhamento',
 ]);
 
@@ -146,6 +154,21 @@ function isVisitRegisterResultFlowAllowed(): boolean {
   return resolveVisitRemoteMode() === 'visit_remote_ready';
 }
 
+// COMMERCIAL-REMOTE-DEALS-B4 — gate DEDICADO de 'nova-proposta', mesmo
+// padrão exato de isVisitCreateFlowAllowed (B4 de Visits): decide só por
+// flow.id + resolveDealRemoteMode(), nunca por quem chamou openFlow — se
+// um entry point hoje não-remote-reachable se tornar remote-reachable no
+// futuro, este gate continua protegendo do mesmo jeito. Identidade
+// (deal_remote_unavailable_identity) fica deliberadamente FORA deste gate,
+// mesmo raciocínio já registrado para Visits: a defesa real já existe em
+// duas camadas mais profundas — (1) o CTA de ScreenPropostas só é
+// renderizado em deal_remote_active, e (2) useCreateDeal falha fechado com
+// 'forbidden' antes de qualquer RPC se a identidade estiver incompleta.
+function isDealCreateFlowAllowed(): boolean {
+  const mode = resolveDealRemoteMode();
+  return mode === 'deal_local' || mode === 'deal_remote_ready';
+}
+
 export function FlowLayer({ flow, close, openFlow, go }: {
   flow: { id: string; payload: any } | null;
   close: () => void;
@@ -168,6 +191,9 @@ export function FlowLayer({ flow, close, openFlow, go }: {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   if (flow.id === 'registrar-resultado-remoto' && !isVisitRegisterResultFlowAllowed()) {
+    return <LocalCommercialFlowUnavailable close={close} />;
+  }
+  if (flow.id === 'nova-proposta' && !isDealCreateFlowAllowed()) {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   return <Comp payload={flow.payload || {}} close={close} openFlow={openFlow} go={go} />;

@@ -33,6 +33,11 @@ import type { LeadModel } from '@/lib/leads/adapter';
 import type { RemoteVisitModel } from '@/lib/visits/adapter';
 import type { Database } from '@/lib/supabase/database.types';
 import { startOfVisitLocalDay, formatVisitTime, formatVisitShortDate } from '@/lib/visits/visitScreenGrouping';
+import { useCreateDeal } from '@/lib/hooks/useCreateDeal';
+import { resolveDealRemoteMode } from '@/lib/deals/remoteDealsMode';
+import { isRemoteDealsError, REMOTE_DEALS_MUTATION_ERROR_MESSAGES_PT } from '@/lib/deals/errors';
+import type { RemoteDealRow } from '@/lib/deals/adapter';
+import { DEAL_PAYMENT_METHOD_LABELS_PT } from '@/lib/deals/labels';
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
 const TEMP_INFO: Record<string, string> = {
@@ -1494,7 +1499,49 @@ function parseCurrency(v: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+// COMMERCIAL-REMOTE-DEALS-B4 — parser de valor monetário do branch REMOTO,
+// deliberadamente SEM fallback comercial (diferente de parseCurrency
+// acima, cujo `fallback` foi desenhado para pré-preencher a partir de um
+// Lead local, nunca para "entrada vazia/ inválida"). Campo vazio ou não
+// numérico retorna null — nunca 120000 nem qualquer outro valor inventado
+// (B4-PRECHECK §12/§42: proibição crítica de fallback silencioso).
+// `canCreateRemoteDeal` exige `!== null` antes de habilitar o submit.
+function parseDealValueReais(input: string): number | null {
+  const digits = input.replace(/[^\d]/g, '');
+  if (digits === '') return null;
+  const n = parseInt(digits, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// Reusa as strings PT-BR já congeladas em lib/deals/errors.ts (B2-B) —
+// nenhuma string nova, nenhuma duplicação. `identity_changed` nunca chega
+// aqui (fechado antes, no catch de handleCreateRemoteDeal).
+function remoteDealCreateErrorMessage(error: unknown): string {
+  const code = isRemoteDealsError(error) ? error.code : undefined;
+  return REMOTE_DEALS_MUTATION_ERROR_MESSAGES_PT[code ?? 'remote_deals_mutation_generic_error'];
+}
+
+// Pares [enum, label] na ordem de exibição congelada no B4-PRECHECK §14 —
+// mesmos 4 valores/labels de DEAL_PAYMENT_METHOD_LABELS_PT (lib/deals/
+// labels.ts), nenhuma string nova. Segmented já suporta pares [value,
+// label] nativamente (FlowsShared.tsx) — zero componente novo.
+const DEAL_PAYMENT_METHOD_OPTIONS: [RemoteDealRow['payment_method'], string][] = [
+  ['a_vista', DEAL_PAYMENT_METHOD_LABELS_PT.a_vista],
+  ['financiamento_100', DEAL_PAYMENT_METHOD_LABELS_PT.financiamento_100],
+  ['entrada_financiamento', DEAL_PAYMENT_METHOD_LABELS_PT.entrada_financiamento],
+  ['troca', DEAL_PAYMENT_METHOD_LABELS_PT.troca],
+];
+
 export function FlowNovaProposta({ payload, close, openFlow }: any) {
+  // COMMERCIAL-REMOTE-DEALS-B4 — mesmo padrão exato de FlowCriarVisita
+  // (Visits B4): um único componente, dois branches completos, decidido
+  // por resolveDealRemoteMode(). Todos os hooks (locais e remotos) são
+  // chamados SEMPRE, na mesma ordem, antes de qualquer return (Rules of
+  // Hooks) — em modo local os hooks remotos simplesmente nunca são
+  // exercitados via submit.
+  const dealDataSource: 'local' | 'remote' = resolveDealRemoteMode() === 'deal_local' ? 'local' : 'remote';
+
+  // ── Estado do branch LOCAL — intocado ────────────────────────────────
   const [lead, setLead] = useState<any>(payload.lead || null);
   const [step, setStep] = useState(0);
   const [clientQuery, setClientQuery] = useState(lead ? lead.name : '');
@@ -1543,87 +1590,327 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
     setStep(3);
   };
 
-  if (step === 3) {
+  // ── Estado do branch REMOTO ───────────────────────────────────────────
+  // Hooks/identidade chamados SEMPRE, na mesma ordem (Rules of Hooks) —
+  // em modo local eles simplesmente nunca são exercitados via submit.
+  // Mesmo padrão exato de FlowCriarVisita (COMMERCIAL-REMOTE-VISITS-B4).
+  const user = AuthService.getCurrentUser();
+  const isSeller = user?.activeMembership?.role === 'seller';
+  const identityUserId = user?.id ?? null;
+  const identityCompanyId = user?.activeMembership?.companyId ?? null;
+  const identityMembershipRole = user?.activeMembership?.role ?? null;
+  const identityUserIsActive = Boolean(user);
+  const identityKey = identityUserId && identityCompanyId ? `${identityUserId}:${identityCompanyId}` : null;
+
+  const remoteLeadsScreen = useRemoteLeadsScreenState(user);
+  const assignableSellers = useCurrentCompanyAssignableSellers({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  const createDealHook = useCreateDeal({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  useCloseOnIdentityChange(identityKey, close);
+
+  // B4-PRECHECK §7/§10: aceita um Lead remoto já preselecionado via
+  // payload (mesma chave `payload.lead` que o branch local já lê) — B6
+  // (Visit negotiating → Nova negociação) é quem efetivamente vai passar
+  // isso no futuro; nenhuma integração com Visits nasce aqui, só a
+  // arquitetura não fecha a porta.
+  const [remoteSelectedLead, setRemoteSelectedLead] = useState<LeadModel | null>(payload.lead ?? null);
+  const [remoteClientQuery, setRemoteClientQuery] = useState(remoteSelectedLead ? remoteSelectedLead.name : '');
+  const [remoteVehicle, setRemoteVehicle] = useState(remoteSelectedLead?.car ?? '');
+  const [remoteValueInput, setRemoteValueInput] = useState('');
+  const [remotePaymentMethod, setRemotePaymentMethod] = useState<RemoteDealRow['payment_method'] | null>(null);
+  const [remoteDownPaymentInput, setRemoteDownPaymentInput] = useState('');
+  const [remoteInstallments, setRemoteInstallments] = useState('');
+  const [remoteDiscountExpanded, setRemoteDiscountExpanded] = useState(false);
+  const [remoteDiscountPercent, setRemoteDiscountPercent] = useState(0);
+  const [remoteNote, setRemoteNote] = useState('');
+  const [remoteAssignedSellerId, setRemoteAssignedSellerId] = useState<string | null>(null);
+  const [remoteSubmitting, setRemoteSubmitting] = useState(false);
+  const [remoteDone, setRemoteDone] = useState(false);
+  const [remoteGlobalError, setRemoteGlobalError] = useState<string | null>(null);
+  const [remoteLeadFieldError, setRemoteLeadFieldError] = useState<string | null>(null);
+  const [remoteSellerFieldError, setRemoteSellerFieldError] = useState<string | null>(null);
+  const [remoteVehicleFieldError, setRemoteVehicleFieldError] = useState<string | null>(null);
+  const [remoteValueFieldError, setRemoteValueFieldError] = useState<string | null>(null);
+  const [remoteDiscountFieldError, setRemoteDiscountFieldError] = useState<string | null>(null);
+
+  const remoteSellerItems: SellerPickerItem[] = assignableSellers.assignableSellers.map((s) => ({ id: s.seller_id, name: s.name }));
+
+  const pickRemoteDealLead = (l: LeadModel) => {
+    setRemoteSelectedLead(l);
+    setRemoteClientQuery(l.name);
+    if (l.car) setRemoteVehicle(l.car);
+    setRemoteLeadFieldError(null);
+  };
+  const clearRemoteDealLead = () => { setRemoteSelectedLead(null); setRemoteClientQuery(''); };
+
+  const remoteVehicleTrimmed = remoteVehicle.trim();
+  const remoteValueReais = parseDealValueReais(remoteValueInput);
+  // paymentMethod dita entrada/parcelas (B4-PRECHECK §12/§13/§18) — nenhum
+  // dos dois é validado pelo backend contra payment_method (confirmado por
+  // leitura direta dos check constraints da migration #53), decisão
+  // puramente de apresentação.
+  const remoteShowDownPayment = remotePaymentMethod === 'entrada_financiamento';
+  const remoteShowInstallments = remotePaymentMethod === 'financiamento_100' || remotePaymentMethod === 'entrada_financiamento';
+  const remoteDownPaymentReais = remoteShowDownPayment ? parseDealValueReais(remoteDownPaymentInput) : null;
+  const remoteInstallmentsTrimmed = remoteShowInstallments ? remoteInstallments.trim() : '';
+  const remoteNoteTrimmed = remoteNote.trim();
+
+  // Seller (ator) nunca entra nesta condição — variante 'seller' do input
+  // não tem assignedSellerId, o backend sempre autoatribui. Manager pode
+  // submeter SEM escolher Seller (create_deal tenta o Seller do Lead
+  // automaticamente, migration #53) — nunca reproduzido aqui como
+  // autoridade, só uma UX menos burocrática.
+  const canCreateRemoteDeal = Boolean(
+    remoteSelectedLead !== null
+    && remoteVehicleTrimmed !== ''
+    && remoteValueReais !== null
+    && remotePaymentMethod !== null
+    && !remoteSubmitting
+    && !createDealHook.isPending,
+  );
+
+  const handleCreateRemoteDeal = async () => {
+    if (!canCreateRemoteDeal || remoteSubmitting || createDealHook.isPending) return;
+    if (remoteSelectedLead === null || remoteValueReais === null || remotePaymentMethod === null) return;
+    setRemoteSubmitting(true);
+    setRemoteGlobalError(null);
+    setRemoteLeadFieldError(null);
+    setRemoteSellerFieldError(null);
+    setRemoteVehicleFieldError(null);
+    setRemoteValueFieldError(null);
+    setRemoteDiscountFieldError(null);
+    try {
+      const commonFields = {
+        leadId: remoteSelectedLead.id,
+        vehicle: remoteVehicleTrimmed,
+        valueCents: remoteValueReais * 100,
+        discountPercent: remoteDiscountPercent,
+        paymentMethod: remotePaymentMethod,
+        downPaymentCents: remoteDownPaymentReais !== null ? remoteDownPaymentReais * 100 : null,
+        installments: remoteInstallmentsTrimmed !== '' ? remoteInstallmentsTrimmed : null,
+        note: remoteNoteTrimmed,
+      };
+      if (isSeller) {
+        await createDealHook.createDeal({ ...commonFields, actorRole: 'seller' });
+      } else {
+        await createDealHook.createDeal({ ...commonFields, actorRole: 'manager', assignedSellerId: remoteAssignedSellerId });
+      }
+      setRemoteDone(true);
+    } catch (err) {
+      // Mesmo padrão de FlowCriarVisita: identity_changed fecha o flow
+      // diretamente, nunca mostra o erro da sessão antiga.
+      if (isRemoteDealsError(err) && err.code === 'remote_deals_mutation_identity_changed') {
+        close();
+        return;
+      }
+      const code = isRemoteDealsError(err) ? err.code : undefined;
+      if (code === 'remote_deals_mutation_lead_not_found' || code === 'remote_deals_mutation_lead_archived') {
+        // B4-PRECHECK §21/§26: Lead ficou inválido entre a seleção e o
+        // submit — limpa para forçar nova escolha, erro fica no picker.
+        setRemoteSelectedLead(null);
+        setRemoteClientQuery('');
+        setRemoteLeadFieldError(remoteDealCreateErrorMessage(err));
+      } else if (code === 'remote_deals_mutation_seller_required' || code === 'remote_deals_mutation_seller_not_found') {
+        if (code === 'remote_deals_mutation_seller_not_found') setRemoteAssignedSellerId(null);
+        setRemoteSellerFieldError(remoteDealCreateErrorMessage(err));
+      } else if (code === 'remote_deals_mutation_invalid_vehicle') {
+        setRemoteVehicleFieldError(remoteDealCreateErrorMessage(err));
+      } else if (code === 'remote_deals_mutation_invalid_value') {
+        setRemoteValueFieldError(remoteDealCreateErrorMessage(err));
+      } else if (code === 'remote_deals_mutation_invalid_discount') {
+        // O controle de desconto começa OCULTO (progressive disclosure,
+        // B4-PRECHECK §19) — sem isto, um erro de desconto voltando do
+        // backend seria invisível (o painel nunca se revela sozinho).
+        setRemoteDiscountExpanded(true);
+        setRemoteDiscountFieldError(remoteDealCreateErrorMessage(err));
+      } else {
+        setRemoteGlobalError(remoteDealCreateErrorMessage(err));
+      }
+    } finally {
+      setRemoteSubmitting(false);
+    }
+  };
+
+  if (dealDataSource === 'local') {
+    if (step === 3) {
+      return (
+        <FlowShell eyebrow="MONTAR PROPOSTA" title="Proposta criada" icon="handshake" accent="#27C75F" onClose={close}>
+          <FlowSuccess title="Proposta enviada!" sub={needsApproval ? 'A proposta foi enviada para aprovação do gestor (desconto acima do limite).' : `Proposta de ${finalCar} pronta. Envie ao cliente e acompanhe pela tela de Propostas.`}
+            actions={<><LBtn kind="gold" size="lg" icon="message" onClick={() => openFlow('enviar-mensagem', { lead })}>Enviar ao cliente</LBtn><LBtn kind="ghost" size="lg" icon="check" onClick={close}>Concluir</LBtn></>} />
+        </FlowShell>
+      );
+    }
     return (
-      <FlowShell eyebrow="MONTAR PROPOSTA" title="Proposta criada" icon="handshake" accent="#27C75F" onClose={close}>
-        <FlowSuccess title="Proposta enviada!" sub={needsApproval ? 'A proposta foi enviada para aprovação do gestor (desconto acima do limite).' : `Proposta de ${finalCar} pronta. Envie ao cliente e acompanhe pela tela de Propostas.`}
-          actions={<><LBtn kind="gold" size="lg" icon="message" onClick={() => openFlow('enviar-mensagem', { lead })}>Enviar ao cliente</LBtn><LBtn kind="ghost" size="lg" icon="check" onClick={close}>Concluir</LBtn></>} />
+      <FlowShell eyebrow="MONTAR PROPOSTA" title="Montar uma proposta" icon="handshake" accent="#E8CE72" onClose={close}
+        footer={<>
+          {step > 0 ? <LBtn kind="ghost" size="lg" onClick={() => setStep(step - 1)}>Voltar</LBtn> : <span />}
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 13, color: 'var(--t-500)' }}>Passo {step + 1} de 3</span>
+          <LBtn kind="gold" size="lg" icon={step === 2 ? 'check' : 'arrowRight'}
+            onClick={() => { if (!canNext) return; if (step === 2) handleCreateDeal(); else setStep(step + 1); }}
+            style={{ opacity: canNext ? 1 : .5 }}>
+            {step === 2 ? 'Criar proposta' : 'Continuar'}
+          </LBtn>
+        </>}>
+        <StepRail steps={steps} current={step} />
+        <div style={{ maxWidth: 760 }}>
+          {step === 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {lead ? <div>
+              <ClientChip lead={lead} size="lg" />
+              <button onClick={clearLead} style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: 'var(--t-500)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Trocar cliente</button>
+            </div> : <FPanel>
+              <LeadPicker value={clientQuery} onChange={setClientQuery} onPick={pickLead} placeholder="Buscar cliente pelo nome..." />
+              {clientQuery.trim() && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--amber)' }}>Selecione um cliente cadastrado para criar a proposta.</div>}
+            </FPanel>}
+            <FPanel title="Veículo da proposta" icon="car" accent="#E8CE72">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
+                {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 4).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={!customCar.trim() && car === c} onClick={() => { setCar(c); setCustomCar(''); }} />)}
+              </div>
+              <div style={{ marginTop: 14 }}>
+                <FField label="Outro veículo (opcional)" icon="edit" placeholder="Digitar um veículo diferente" value={customCar} onChange={(e: any) => setCustomCar(e.target.value)} />
+              </div>
+            </FPanel>
+          </div>}
+          {step === 1 && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <FPanel title="Condições" icon="card" accent="#E8CE72">
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Forma de pagamento</div>
+              <div style={{ marginBottom: 22 }}><Segmented options={PAYS.map(p => p[0])} value={pay} onChange={setPay} /></div>
+              <FField label="Valor do veículo (R$)" icon="dollar" placeholder="120000" value={baseValueInput} onChange={(e: any) => setBaseValueInput(e.target.value)} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <FField label="Entrada (opcional)" icon="card" placeholder="Ex.: R$ 20.000" value={downPayment} onChange={(e: any) => setDownPayment(e.target.value)} />
+                <FField label="Parcelas / condição (opcional)" icon="refresh" placeholder="Ex.: 48x de R$ 2.100" value={installments} onChange={(e: any) => setInstallments(e.target.value)} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)' }}>Desconto aplicado</span>
+                <span className="display tnum" style={{ fontSize: 22, fontWeight: 800, color: needsApproval ? 'var(--amber)' : 'var(--gold-ink)' }}>{disc}%</span>
+              </div>
+              <input type="range" min="0" max="10" step="1" value={disc} onChange={e => setDisc(+e.target.value)} style={{ width: '100%', accentColor: needsApproval ? '#FFA31F' : '#D4AF37' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--t-400)', marginTop: 4 }}><span>0%</span><span>limite 5%</span><span>10%</span></div>
+              {needsApproval && <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--amber-bg)', border: '1px solid var(--amber-line)' }}>
+                <Icon name="shield" size={18} stroke={2.2} style={{ color: 'var(--amber)' }} />
+                <span style={{ fontSize: 13, color: 'var(--t-700)' }}>Desconto acima de 5% precisará de <b>aprovação do gestor</b>.</span>
+              </div>}
+            </FPanel>
+            <FPanel title="Observação interna (opcional)" icon="clipboard" accent="#E8CE72">
+              <FArea placeholder="Comentário interno sobre a proposta..." value={note} onChange={(e: any) => setNote(e.target.value)} />
+            </FPanel>
+          </div>}
+          {step === 2 && <FPanel title="Resumo da proposta" icon="checkCircle" accent="#27C75F">
+            <SummaryRow label="Cliente" value={lead?.name || '—'} />
+            <SummaryRow label="Veículo" value={finalCar} />
+            <SummaryRow label="Pagamento" value={pay} />
+            {downPayment.trim() && <SummaryRow label="Entrada" value={downPayment} />}
+            {installments.trim() && <SummaryRow label="Parcelas" value={installments} />}
+            <SummaryRow label="Desconto" value={`${disc}%`} accent={needsApproval ? 'var(--amber)' : undefined} />
+            {note.trim() && <SummaryRow label="Observação" value={note} />}
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 12, color: 'var(--t-400)' }}>Valor final (referência)</span>
+              <span className="display tnum" style={{ fontSize: 22, fontWeight: 700, color: 'var(--t-700)' }}>{fmt(finalV)}</span>
+            </div>
+            <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: needsApproval ? 'var(--amber-bg)' : 'var(--green-bg)', border: `1px solid ${needsApproval ? 'var(--amber-line)' : 'var(--green-line)'}` }}>
+              <Icon name={needsApproval ? 'shield' : 'checkCircle'} size={18} stroke={2.2} style={{ color: needsApproval ? 'var(--amber)' : 'var(--green)' }} />
+              <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{needsApproval ? 'Será enviada para aprovação do gestor.' : 'Dentro do seu limite — pode enviar direto ao cliente.'}</span>
+            </div>
+          </FPanel>}
+        </div>
       </FlowShell>
     );
   }
+
+  // ── Branch REMOTO ─────────────────────────────────────────────────────
+  if (remoteDone) {
+    return (
+      <FlowShell eyebrow="NOVA NEGOCIAÇÃO" title="Negociação criada" icon="handshake" accent="#27C75F" onClose={close}>
+        <FlowSuccess title="Negociação criada!" sub={`${remoteSelectedLead?.name ?? ''} · ${remoteVehicleTrimmed}.`}
+          actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      </FlowShell>
+    );
+  }
+
   return (
-    <FlowShell eyebrow="MONTAR PROPOSTA" title="Montar uma proposta" icon="handshake" accent="#E8CE72" onClose={close}
+    <FlowShell eyebrow="NOVA NEGOCIAÇÃO" title="Nova negociação" icon="handshake" accent="#E8CE72" onClose={close}
       footer={<>
-        {step > 0 ? <LBtn kind="ghost" size="lg" onClick={() => setStep(step - 1)}>Voltar</LBtn> : <span />}
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 13, color: 'var(--t-500)' }}>Passo {step + 1} de 3</span>
-        <LBtn kind="gold" size="lg" icon={step === 2 ? 'check' : 'arrowRight'}
-          onClick={() => { if (!canNext) return; if (step === 2) handleCreateDeal(); else setStep(step + 1); }}
-          style={{ opacity: canNext ? 1 : .5 }}>
-          {step === 2 ? 'Criar proposta' : 'Continuar'}
+        <LBtn kind="gold" size="lg" icon="check" onClick={handleCreateRemoteDeal} style={{ opacity: canCreateRemoteDeal ? 1 : .5 }}>
+          {(remoteSubmitting || createDealHook.isPending) ? 'Criando…' : 'Criar negociação'}
         </LBtn>
       </>}>
-      <StepRail steps={steps} current={step} />
-      <div style={{ maxWidth: 760 }}>
-        {step === 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {lead ? <div>
-            <ClientChip lead={lead} size="lg" />
-            <button onClick={clearLead} style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: 'var(--t-500)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Trocar cliente</button>
-          </div> : <FPanel>
-            <LeadPicker value={clientQuery} onChange={setClientQuery} onPick={pickLead} placeholder="Buscar cliente pelo nome..." />
-            {clientQuery.trim() && <div style={{ marginTop: 10, fontSize: 12.5, color: 'var(--amber)' }}>Selecione um cliente cadastrado para criar a proposta.</div>}
-          </FPanel>}
-          <FPanel title="Veículo da proposta" icon="car" accent="#E8CE72">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10 }}>
-              {(lead ? [lead.car, ...CARS.filter((c: string) => c !== lead.car)] : CARS).slice(0, 4).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={!customCar.trim() && car === c} onClick={() => { setCar(c); setCustomCar(''); }} />)}
-            </div>
-            <div style={{ marginTop: 14 }}>
-              <FField label="Outro veículo (opcional)" icon="edit" placeholder="Digitar um veículo diferente" value={customCar} onChange={(e: any) => setCustomCar(e.target.value)} />
-            </div>
-          </FPanel>
-        </div>}
-        {step === 1 && <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <FPanel title="Condições" icon="card" accent="#E8CE72">
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Forma de pagamento</div>
-            <div style={{ marginBottom: 22 }}><Segmented options={PAYS.map(p => p[0])} value={pay} onChange={setPay} /></div>
-            <FField label="Valor do veículo (R$)" icon="dollar" placeholder="120000" value={baseValueInput} onChange={(e: any) => setBaseValueInput(e.target.value)} />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-              <FField label="Entrada (opcional)" icon="card" placeholder="Ex.: R$ 20.000" value={downPayment} onChange={(e: any) => setDownPayment(e.target.value)} />
-              <FField label="Parcelas / condição (opcional)" icon="refresh" placeholder="Ex.: 48x de R$ 2.100" value={installments} onChange={(e: any) => setInstallments(e.target.value)} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)' }}>Desconto aplicado</span>
-              <span className="display tnum" style={{ fontSize: 22, fontWeight: 800, color: needsApproval ? 'var(--amber)' : 'var(--gold-ink)' }}>{disc}%</span>
-            </div>
-            <input type="range" min="0" max="10" step="1" value={disc} onChange={e => setDisc(+e.target.value)} style={{ width: '100%', accentColor: needsApproval ? '#FFA31F' : '#D4AF37' }} />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--t-400)', marginTop: 4 }}><span>0%</span><span>limite 5%</span><span>10%</span></div>
-            {needsApproval && <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--amber-bg)', border: '1px solid var(--amber-line)' }}>
-              <Icon name="shield" size={18} stroke={2.2} style={{ color: 'var(--amber)' }} />
-              <span style={{ fontSize: 13, color: 'var(--t-700)' }}>Desconto acima de 5% precisará de <b>aprovação do gestor</b>.</span>
-            </div>}
-          </FPanel>
-          <FPanel title="Observação interna (opcional)" icon="clipboard" accent="#E8CE72">
-            <FArea placeholder="Comentário interno sobre a proposta..." value={note} onChange={(e: any) => setNote(e.target.value)} />
-          </FPanel>
-        </div>}
-        {step === 2 && <FPanel title="Resumo da proposta" icon="checkCircle" accent="#27C75F">
-          <SummaryRow label="Cliente" value={lead?.name || '—'} />
-          <SummaryRow label="Veículo" value={finalCar} />
-          <SummaryRow label="Pagamento" value={pay} />
-          {downPayment.trim() && <SummaryRow label="Entrada" value={downPayment} />}
-          {installments.trim() && <SummaryRow label="Parcelas" value={installments} />}
-          <SummaryRow label="Desconto" value={`${disc}%`} accent={needsApproval ? 'var(--amber)' : undefined} />
-          {note.trim() && <SummaryRow label="Observação" value={note} />}
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-            <span style={{ fontSize: 12, color: 'var(--t-400)' }}>Valor final (referência)</span>
-            <span className="display tnum" style={{ fontSize: 22, fontWeight: 700, color: 'var(--t-700)' }}>{fmt(finalV)}</span>
+      <div style={{ maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {remoteSelectedLead ? (
+          <div>
+            <ClientChip lead={remoteSelectedLead} size="lg" />
+            <button onClick={clearRemoteDealLead} style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: 'var(--t-500)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Trocar cliente</button>
           </div>
-          <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: needsApproval ? 'var(--amber-bg)' : 'var(--green-bg)', border: `1px solid ${needsApproval ? 'var(--amber-line)' : 'var(--green-line)'}` }}>
-            <Icon name={needsApproval ? 'shield' : 'checkCircle'} size={18} stroke={2.2} style={{ color: needsApproval ? 'var(--amber)' : 'var(--green)' }} />
-            <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{needsApproval ? 'Será enviada para aprovação do gestor.' : 'Dentro do seu limite — pode enviar direto ao cliente.'}</span>
-          </div>
-        </FPanel>}
+        ) : (
+          <FPanel>
+            <RemoteLeadPicker
+              items={remoteLeadsScreen.leads.leads}
+              value={remoteClientQuery}
+              onChange={setRemoteClientQuery}
+              onPick={pickRemoteDealLead}
+              loading={remoteLeadsScreen.leads.isLoading}
+              error={remoteLeadFieldError ?? (remoteLeadsScreen.leads.isError ? 'Não foi possível carregar os clientes.' : null)}
+              placeholder="Buscar cliente pelo nome ou telefone..."
+            />
+          </FPanel>
+        )}
+        <FPanel title="Veículo" icon="car" accent="#E8CE72">
+          <FField label="Veículo" icon="car" placeholder="Ex.: Onix Premier 2025" value={remoteVehicle} onChange={(e: any) => setRemoteVehicle(e.target.value)} />
+          {remoteVehicleFieldError && <div style={{ marginTop: -6, marginBottom: 10, fontSize: 12, color: 'var(--red)' }}>{remoteVehicleFieldError}</div>}
+        </FPanel>
+        <FPanel title="Valor negociado" icon="dollar" accent="#E8CE72">
+          <FField label="Valor negociado (R$)" icon="dollar" placeholder="Ex.: 120000" value={remoteValueInput} onChange={(e: any) => setRemoteValueInput(e.target.value)} />
+          {remoteValueFieldError && <div style={{ marginTop: -6, marginBottom: 10, fontSize: 12, color: 'var(--red)' }}>{remoteValueFieldError}</div>}
+        </FPanel>
+        <FPanel title="Forma de pagamento" icon="card" accent="#E8CE72">
+          <Segmented options={DEAL_PAYMENT_METHOD_OPTIONS} value={remotePaymentMethod} onChange={setRemotePaymentMethod} />
+          {remotePaymentMethod === null && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--t-400)' }}>Selecione uma forma de pagamento.</div>}
+          {remoteShowDownPayment && <div style={{ marginTop: 14 }}>
+            <FField label="Entrada (R$)" icon="card" placeholder="Ex.: 20000" value={remoteDownPaymentInput} onChange={(e: any) => setRemoteDownPaymentInput(e.target.value)} />
+          </div>}
+          {remoteShowInstallments && <div style={{ marginTop: 14 }}>
+            <FField label="Parcelas / condição" icon="refresh" placeholder="Ex.: 48x de R$ 2.100" value={remoteInstallments} onChange={(e: any) => setRemoteInstallments(e.target.value)} />
+          </div>}
+        </FPanel>
+        {!isSeller && (
+          <FPanel title="Vendedor responsável (opcional)" icon="user" accent="#E8CE72">
+            <SellerPicker
+              items={remoteSellerItems}
+              value={remoteAssignedSellerId}
+              onChange={setRemoteAssignedSellerId}
+              loading={assignableSellers.isLoading}
+              disabled={remoteSubmitting || createDealHook.isPending}
+              error={remoteSellerFieldError ?? (assignableSellers.isError ? 'Não foi possível carregar os vendedores.' : null)}
+              allowNone
+              noneLabel="Deixar em aberto (usar responsável do cliente)"
+              placeholder="Selecione o vendedor…"
+            />
+          </FPanel>
+        )}
+        <FPanel accent="#E8CE72">
+          {!remoteDiscountExpanded ? (
+            <button onClick={() => setRemoteDiscountExpanded(true)} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--t-500)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Aplicar desconto</button>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)' }}>Desconto aplicado</span>
+                <span className="display tnum" style={{ fontSize: 20, fontWeight: 800, color: 'var(--gold-ink)' }}>{remoteDiscountPercent}%</span>
+              </div>
+              <input type="range" min="0" max="10" step="1" value={remoteDiscountPercent} onChange={(e) => setRemoteDiscountPercent(+e.target.value)} style={{ width: '100%', accentColor: '#D4AF37' }} />
+              {remoteDiscountFieldError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--red)' }}>{remoteDiscountFieldError}</div>}
+            </>
+          )}
+        </FPanel>
+        <FPanel title="Observação (opcional)" icon="clipboard" accent="#E8CE72">
+          <FArea placeholder="Comentário interno sobre a negociação..." value={remoteNote} onChange={(e: any) => setRemoteNote(e.target.value)} />
+        </FPanel>
       </div>
+      {remoteGlobalError && <ErrorBanner>{remoteGlobalError}</ErrorBanner>}
     </FlowShell>
   );
 }
