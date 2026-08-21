@@ -316,7 +316,13 @@ describe('FlowCriarVisita — remote Seller', () => {
 
     fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Avulso' } });
     pickVehicle('Golf GTI 2022');
-    fillWhenRemote('Hoje', { time: '09:00' });
+    // 'Amanhã' (não 'Hoje') — resolveRemoteVisitScheduledAt usa a data de
+    // amanhã para qualquer slot fixo, então o resultado é sempre futuro
+    // relativo ao relógio real do runner, em qualquer hora do dia (achado
+    // do B7-0-TEST-CLOCK-FIX: 'Hoje'+'09:00' ficava no passado depois das
+    // 09:00 locais). O dia agendado não é asserted por este teste — só
+    // actorRole/assignedSellerId.
+    fillWhenRemote('Amanhã', { time: '09:00' });
     fireEvent.click(screen.getByText('Agendar visita'));
     await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
 
@@ -330,7 +336,8 @@ describe('FlowCriarVisita — remote Seller', () => {
     renderFlow();
     fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente' } });
     fireEvent.click(screen.getByText('Cliente Remoto'));
-    fillWhenRemote('Hoje', { time: '09:00' });
+    // 'Amanhã' pelo mesmo motivo do teste acima (B7-0-TEST-CLOCK-FIX).
+    fillWhenRemote('Amanhã', { time: '09:00' });
     fireEvent.click(screen.getByText('Agendar visita'));
     await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
 
