@@ -490,6 +490,56 @@ describe.each([
   });
 });
 
+// COMMERCIAL-REMOTE-DEALS-B8-R1 — bug real encontrado no smoke autenticado
+// (B8-SMOKE-EXEC): SellerPicker ficava permanentemente desabilitado após
+// seller_required/seller_not_found (isDisabled incluía `error`), forçando
+// o Manager a fechar/reabrir o flow inteiro para corrigir o vendedor.
+// Regressão: erro aparece, picker continua clicável, Manager corrige e
+// reenvia SEM fechar o formulário — sucesso na segunda tentativa.
+describe('FlowNovaProposta — SellerPicker reabilitado após erro de validação (B8-R1)', () => {
+  beforeEach(() => {
+    m.resolveDealRemoteMode.mockReturnValue('deal_remote_ready');
+  });
+
+  it('seller_required: erro aparece, picker continua interativo, corrigir e reenviar tem sucesso', async () => {
+    createDealSpy.mockRejectedValueOnce(new RemoteDealsError('remote_deals_mutation_seller_required'));
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead()]));
+    renderFlow();
+    fillMinimum();
+    fireEvent.click(screen.getByText('Criar negociação'));
+    await waitFor(() => expect(screen.getByText('Selecione um vendedor responsável.')).toBeInTheDocument());
+
+    // Corrige sem fechar/reabrir o flow: clica no próprio trigger (que
+    // agora mostra a mensagem de erro) e escolhe um vendedor válido.
+    fireEvent.click(screen.getByText('Selecione um vendedor responsável.'));
+    fireEvent.click(screen.getByText('Ana Assignable'));
+    // Selecionar já limpa a mensagem antiga — nunca fica parecendo válida.
+    expect(screen.queryByText('Selecione um vendedor responsável.')).toBeNull();
+
+    fireEvent.click(screen.getByText('Criar negociação'));
+    await waitFor(() => expect(screen.getByText('Negociação criada!')).toBeInTheDocument());
+    expect(createDealSpy).toHaveBeenCalledTimes(2);
+    expect(createDealSpy.mock.calls[1][0].assignedSellerId).toBe('s1');
+  });
+
+  it('seller_not_found: erro aparece, picker reabilitado, Manager escolhe outro vendedor e reenvia com sucesso', async () => {
+    createDealSpy.mockRejectedValueOnce(new RemoteDealsError('remote_deals_mutation_seller_not_found'));
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead()]));
+    renderFlow();
+    fillMinimum();
+    fireEvent.click(screen.getByText('Deixar em aberto (usar responsável do cliente)'));
+    fireEvent.click(screen.getByText('Ana Assignable'));
+    fireEvent.click(screen.getByText('Criar negociação'));
+    await waitFor(() => expect(screen.getByText('O vendedor selecionado não está disponível.')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('O vendedor selecionado não está disponível.'));
+    fireEvent.click(screen.getByText('Ana Assignable'));
+    fireEvent.click(screen.getByText('Criar negociação'));
+    await waitFor(() => expect(screen.getByText('Negociação criada!')).toBeInTheDocument());
+    expect(createDealSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('FlowNovaProposta — identity_changed', () => {
   beforeEach(() => {
     m.resolveDealRemoteMode.mockReturnValue('deal_remote_ready');

@@ -1988,7 +1988,7 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
             <SellerPicker
               items={remoteSellerItems}
               value={remoteAssignedSellerId}
-              onChange={setRemoteAssignedSellerId}
+              onChange={(id: string | null) => { setRemoteAssignedSellerId(id); setRemoteSellerFieldError(null); }}
               loading={assignableSellers.isLoading}
               disabled={remoteSubmitting || createDealHook.isPending}
               error={remoteSellerFieldError ?? (assignableSellers.isError ? 'Não foi possível carregar os vendedores.' : null)}
@@ -2324,7 +2324,7 @@ export function FlowVerNegociacao({ payload, close, openFlow }: any) {
               <SellerPicker
                 items={remoteSellerItems}
                 value={editAssignedSellerId}
-                onChange={setEditAssignedSellerId}
+                onChange={(id: string | null) => { setEditAssignedSellerId(id); setEditSellerFieldError(null); }}
                 loading={assignableSellers.isLoading}
                 disabled={editSubmitting || updateDealHook.isPending}
                 error={editSellerFieldError ?? (assignableSellers.isError ? 'Não foi possível carregar os vendedores.' : null)}

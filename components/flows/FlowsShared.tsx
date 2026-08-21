@@ -301,7 +301,12 @@ export function SellerPicker({
 }) {
   const [show, setShow] = useState(false);
   const selected = value ? items.find((s) => s.id === value) ?? null : null;
-  const isDisabled = Boolean(disabled) || Boolean(loading) || Boolean(error);
+  // COMMERCIAL-REMOTE-DEALS-B8-R1: `error` sozinho NUNCA desabilita — uma
+  // mensagem de validação (ex.: seller_required/seller_not_found) existe
+  // justamente para ser corrigida por este campo; bloqueá-lo prendia o
+  // usuário num formulário sem saída. Só `disabled`/`loading` (motivo
+  // operacional real: mutation em voo, lista ainda carregando) desabilitam.
+  const isDisabled = Boolean(disabled) || Boolean(loading);
 
   let triggerLabel: React.ReactNode;
   if (loading) {

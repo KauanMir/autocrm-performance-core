@@ -269,6 +269,32 @@ describe('FlowVerNegociacao — Manager update', () => {
   });
 });
 
+// COMMERCIAL-REMOTE-DEALS-B8-R1 — mesmo bug do FlowNovaProposta, reproduzido
+// aqui na edição: seller_not_found deixava o SellerPicker permanentemente
+// desabilitado. Regressão: erro aparece, picker reabilitado, Manager troca
+// o vendedor e salva de novo SEM fechar/reabrir o flow.
+describe('FlowVerNegociacao — SellerPicker reabilitado após erro de validação (B8-R1)', () => {
+  it('seller_not_found: erro aparece, picker reabilitado, trocar vendedor e salvar de novo tem sucesso', async () => {
+    updateDealSpy.mockRejectedValueOnce(new RemoteDealsError('remote_deals_mutation_seller_not_found'));
+    renderFlow(remoteDeal({ assignedSellerId: 's1' }));
+    fireEvent.click(screen.getByText('Editar'));
+    fireEvent.click(screen.getByText('Salvar alterações'));
+    await waitFor(() => expect(screen.getByText('O vendedor selecionado não está disponível.')).toBeInTheDocument());
+
+    // Corrige sem fechar/reabrir o flow: clica no próprio trigger (que
+    // agora mostra a mensagem de erro) e escolhe outro vendedor válido.
+    fireEvent.click(screen.getByText('O vendedor selecionado não está disponível.'));
+    fireEvent.click(screen.getByText('Beto Vendedor'));
+    // Trocar já limpa a mensagem antiga — nunca fica parecendo válida.
+    expect(screen.queryByText('O vendedor selecionado não está disponível.')).toBeNull();
+
+    fireEvent.click(screen.getByText('Salvar alterações'));
+    await waitFor(() => expect(screen.getByText('Alterações salvas.')).toBeInTheDocument());
+    expect(updateDealSpy).toHaveBeenCalledTimes(2);
+    expect(updateDealSpy.mock.calls[1][0].assignedSellerId).toBe('s2');
+  });
+});
+
 describe('FlowVerNegociacao — payload de update', () => {
   it('payload exato: sem leadId/companyId/status/actors/lost metadata', async () => {
     renderFlow(remoteDeal({ id: 'deal-9', version: 5, vehicle: 'Onix', valueCents: 9000000, paymentMethod: 'a_vista', discountPercent: 0, note: '', assignedSellerId: 's1' }));

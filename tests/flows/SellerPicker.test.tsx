@@ -33,11 +33,32 @@ describe('SellerPicker (presentacional) — estados', () => {
     expect(screen.queryByText('Sem vendedor')).toBeNull();
   });
 
-  it('error: mensagem sanitizada, sem dropdown', () => {
+  // §9 do B8-R1: `disabled` (mutation em voo) continua bloqueando o
+  // trigger normalmente — a remoção de `error` do cálculo não enfraquece a
+  // proteção real contra double-submit.
+  it('disabled (mutation em voo): trigger desabilitado, sem dropdown, mesmo sem error/loading', () => {
+    render(<SellerPicker items={[{ id: 's1', name: 'Ana' }]} value={null} onChange={vi.fn()} disabled />);
+    openTrigger();
+    expect(screen.queryByText('Ana')).toBeNull();
+  });
+
+  // COMMERCIAL-REMOTE-DEALS-B8-R1: `error` sozinho NUNCA desabilita mais —
+  // uma mensagem de validação (ex.: seller_required/seller_not_found)
+  // precisa continuar corrigível pelo próprio campo. Só `disabled`/
+  // `loading` (motivo operacional real) desabilitam (ver testes acima).
+  it('error: mensagem sanitizada, mas trigger continua interativo (permite corrigir)', () => {
     render(<SellerPicker items={[]} value={null} onChange={vi.fn()} error="Não foi possível carregar os vendedores." allowNone={false} />);
     expect(screen.getByText('Não foi possível carregar os vendedores.')).toBeInTheDocument();
     openTrigger();
-    expect(screen.queryByText('Nenhum vendedor disponível no momento.')).toBeNull();
+    expect(screen.getByText('Nenhum vendedor disponível no momento.')).toBeInTheDocument();
+  });
+
+  it('error + items reais: trigger clicável, dropdown lista os vendedores para correção imediata', () => {
+    const onChange = vi.fn();
+    render(<SellerPicker items={[{ id: 's1', name: 'Ana' }]} value={null} onChange={onChange} error="O vendedor selecionado não está disponível." />);
+    openTrigger();
+    fireEvent.click(screen.getByText('Ana'));
+    expect(onChange).toHaveBeenCalledWith('s1');
   });
 
   it('vazio (allowNone): trigger já mostra "Sem vendedor"; dropdown oferece a mesma opção', () => {
