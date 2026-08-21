@@ -96,6 +96,22 @@ function addDaysForTest(d: Date, days: number): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
 }
 
+// COMMERCIAL-REMOTE-BASELINE-RECOVERY-REAGENDAR-VISITA-EXEC: 'Hoje'+'17:00'
+// fica no passado assim que o relógio real da máquina passa das 17:00
+// locais — resolveRemoteVisitScheduledAt (Flows2.tsx) bloqueia scheduledAt
+// passado de propósito (mesma família do fix aff47dd em
+// FlowCriarVisitaRemote.test.tsx). vi.setSystemTime SEM
+// vi.useFakeTimers() só mocka Date/Date.now — setTimeout continua real,
+// então waitFor (que depende de polling por timer real) não precisa de
+// advanceTimersByTimeAsync. Fixa a hora em 08:00 do mesmo dia real (nunca
+// muda o dia local), sempre antes de qualquer slot fixo usado no arquivo.
+function freezeMorningToday(): Date {
+  const real = new Date();
+  const frozen = new Date(real.getFullYear(), real.getMonth(), real.getDate(), 8, 0, 0, 0);
+  vi.setSystemTime(frozen);
+  return frozen;
+}
+
 beforeEach(() => {
   m.visitServiceUpdate.mockReset();
   m.leadServiceAddToTimeline.mockReset();
@@ -213,17 +229,21 @@ describe('FlowReagendarVisita — no-op explícito', () => {
 
 describe('FlowReagendarVisita — data/hora: futuro válido e passado rejeitado', () => {
   it('Hoje com novo horário -> scheduledAt no dia local de hoje', async () => {
-    const now = new Date();
-    renderFlow({ visit: remoteVisit() });
-    fillWhen('Hoje', { time: '17:00' });
-    fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
-    await waitFor(() => expect(updateVisitSpy).toHaveBeenCalled());
+    try {
+      const now = freezeMorningToday();
+      renderFlow({ visit: remoteVisit() });
+      fillWhen('Hoje', { time: '17:00' });
+      fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
+      await waitFor(() => expect(updateVisitSpy).toHaveBeenCalled());
 
-    const scheduledAt = new Date(updateVisitSpy.mock.calls[0][0].scheduledAt);
-    expect(scheduledAt.getFullYear()).toBe(now.getFullYear());
-    expect(scheduledAt.getMonth()).toBe(now.getMonth());
-    expect(scheduledAt.getDate()).toBe(now.getDate());
-    expect(scheduledAt.getHours()).toBe(17);
+      const scheduledAt = new Date(updateVisitSpy.mock.calls[0][0].scheduledAt);
+      expect(scheduledAt.getFullYear()).toBe(now.getFullYear());
+      expect(scheduledAt.getMonth()).toBe(now.getMonth());
+      expect(scheduledAt.getDate()).toBe(now.getDate());
+      expect(scheduledAt.getHours()).toBe(17);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('Amanhã -> próximo dia de calendário local', async () => {
