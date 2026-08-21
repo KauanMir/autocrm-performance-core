@@ -8,18 +8,24 @@
 // necessário, sem retestar a composição já coberta em
 // tests/hooks/useRemoteVisitsScreenState.test.tsx.
 //
-// Este é um lote READ-ONLY: nenhuma mutation (create/confirm/reagendar/
-// cancelar/registrar resultado) está conectada em visit_remote_active —
-// diferente do precedente de Tasks (B1-B3-D/E), que já tinha create/update
-// remotos próprios. "Agendar visita"/"Confirmar"/"Registrar" ficam
-// ausentes no modo remoto, não desabilitados.
+// COMMERCIAL-REMOTE-VISITS-B4/B5/B6-A: create/reagendar/confirmar/cancelar
+// já estão conectados em visit_remote_active — useConfirmVisit/
+// useCancelVisit são mockados aqui (mesmo motivo dos demais: RemoteVisitRow
+// os chama direto, sem QueryClientProvider real neste arquivo). O
+// comportamento de Confirmar/Cancelar em si (payload/erros/pending) tem
+// sua própria suíte dedicada — este arquivo só prova a integração com a
+// tela (visibilidade por elegibilidade, wiring). Registrar resultado
+// permanece fora de escopo até B6-B.
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { RemoteVisitsError } from '@/lib/visits/errors';
 
 const m = vi.hoisted(() => ({
   useRemoteVisitsScreenState: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
+  useConfirmVisit: vi.fn(),
+  useCancelVisit: vi.fn(),
   visits: vi.fn(() => [] as any[]),
   user: { current: null as any },
   openFlow: vi.fn(),
@@ -30,6 +36,12 @@ vi.mock('@/lib/hooks/useRemoteVisitsScreenState', () => ({
 }));
 vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
   useCurrentCompanySellerLabels: m.useCurrentCompanySellerLabels,
+}));
+vi.mock('@/lib/hooks/useConfirmVisit', () => ({
+  useConfirmVisit: m.useConfirmVisit,
+}));
+vi.mock('@/lib/hooks/useCancelVisit', () => ({
+  useCancelVisit: m.useCancelVisit,
 }));
 
 vi.mock('@/lib/store', () => ({ useStore: () => ({}) }));
@@ -104,10 +116,24 @@ function remoteVisit(over: Partial<Record<string, unknown>> = {}) {
 
 const LOCAL_MANAGER = { id: 'user-1', name: 'Gerente', email: 'g@a.com', activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
 
+function confirmHookResult(confirmVisit: any, over: Partial<Record<string, unknown>> = {}) {
+  return { confirmVisit, isPending: false, isError: false, isSuccess: false, error: null, reset: vi.fn(), ...over };
+}
+function cancelHookResult(cancelVisit: any, over: Partial<Record<string, unknown>> = {}) {
+  return { cancelVisit, isPending: false, isError: false, isSuccess: false, error: null, reset: vi.fn(), ...over };
+}
+
+let confirmVisitSpy: ReturnType<typeof vi.fn>;
+let cancelVisitSpy: ReturnType<typeof vi.fn>;
+
 beforeEach(() => {
   m.visits.mockReset().mockReturnValue([]);
   m.useRemoteVisitsScreenState.mockReset().mockReturnValue(visitScreenState('visit_local'));
   m.useCurrentCompanySellerLabels.mockReset().mockReturnValue(sellerLabelsState());
+  confirmVisitSpy = vi.fn().mockResolvedValue({});
+  cancelVisitSpy = vi.fn().mockResolvedValue({});
+  m.useConfirmVisit.mockReset().mockImplementation(() => confirmHookResult(confirmVisitSpy));
+  m.useCancelVisit.mockReset().mockImplementation(() => cancelHookResult(cancelVisitSpy));
   m.user.current = LOCAL_MANAGER;
   (window as any).__openFlow = m.openFlow;
   m.openFlow.mockReset();
@@ -290,12 +316,14 @@ describe('ScreenVisitas — visit_remote_active com dado', () => {
   // COMMERCIAL-REMOTE-VISITS-B4: "Agendar visita" voltou a aparecer aqui
   // (create_visit conectado) — abre o create flow remoto via openFlow,
   // nunca chama VisitService diretamente (a implementação local/remota é
-  // decidida dentro de FlowCriarVisita, fora do escopo desta tela). Row
-  // actions (Confirmar/Registrar/Ver) continuam ausentes — só CREATE/
-  // UPDATE (B5) foram conectados até aqui.
-  it('"Agendar visita" abre o create flow remoto; nenhuma ação de mutation por row salvo Remarcar (Confirmar/Registrar/Ver)', () => {
+  // decidida dentro de FlowCriarVisita, fora do escopo desta tela).
+  // "Registrar"/"Ver" continuam ausentes — Registrar resultado é B6-B;
+  // "Ver" nunca existiu no remote path (§17 do B3, texto não-clicável).
+  // "Confirmar" tem sua própria suíte de elegibilidade abaixo — não
+  // testado aqui.
+  it('"Agendar visita" abre o create flow remoto; nenhuma ação de mutation por row salvo Remarcar/Confirmar (Registrar/Ver)', () => {
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
-      hasData: true, visits: [remoteVisit()],
+      hasData: true, visits: [remoteVisit({ scheduledAt: new Date(2026, 7, 21, 18, 0, 0).toISOString() })],
     }));
 
     render(<ScreenVisitas go={() => {}} />);
@@ -304,7 +332,6 @@ describe('ScreenVisitas — visit_remote_active com dado', () => {
     expect(m.openFlow).toHaveBeenCalledWith('criar-visita');
     expect(VisitService.create).not.toHaveBeenCalled();
 
-    expect(screen.queryByText('Confirmar')).toBeNull();
     expect(screen.queryByText('Registrar')).toBeNull();
     expect(screen.queryByText('Ver')).toBeNull();
     expect(VisitService.update).not.toHaveBeenCalled();
@@ -315,7 +342,7 @@ describe('ScreenVisitas — visit_remote_active com dado', () => {
   // VisitService.update diretamente (a mutation real acontece dentro de
   // FlowReagendarVisita, fora do escopo desta tela).
   it('"Remarcar" abre reagendar-visita com a Visit remota completa; VisitService.update nunca chamado', () => {
-    const visit = remoteVisit({ id: 'visit-remarcar-1' });
+    const visit = remoteVisit({ id: 'visit-remarcar-1', scheduledAt: new Date(2026, 7, 21, 18, 0, 0).toISOString() });
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
       hasData: true, visits: [visit],
     }));
@@ -325,6 +352,203 @@ describe('ScreenVisitas — visit_remote_active com dado', () => {
     fireEvent.click(screen.getByText('Remarcar'));
     expect(m.openFlow).toHaveBeenCalledWith('reagendar-visita', { visit });
     expect(VisitService.update).not.toHaveBeenCalled();
+  });
+});
+
+// COMMERCIAL-REMOTE-VISITS-B6-A — Confirmar/Cancelar inline por row.
+describe('ScreenVisitas — visit_remote_active: Confirmar/Cancelar (B6-A)', () => {
+  // A suíte "action matrix" usa fake timers para fixar Hoje/Pendentes de
+  // resultado deterministicamente. As suítes de Confirmar/Cancelar
+  // precisam de relógio REAL (waitFor/findBy dependem de polling por timer
+  // real — misturar com fake timers sem vi.advanceTimersByTimeAsync trava
+  // o teste, mesmo achado já documentado em
+  // tests/flows/FlowNovaPendenciaRemote.test.tsx) — por isso usam uma data
+  // futura relativa ao relógio real (`Date.now() + 1 dia`), nunca as
+  // constantes fake-timed abaixo.
+  describe('action matrix (§18 do EXEC)', () => {
+    const NOW = new Date(2026, 7, 21, 12, 0, 0);
+    const FUTURE_TODAY = new Date(2026, 7, 21, 18, 0, 0).toISOString();
+    const PAST_TODAY = new Date(2026, 7, 21, 9, 0, 0).toISOString();
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+    afterEach(() => {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    });
+
+    it('A) scheduled, ativa (não-pending): Confirmar + Remarcar + Cancelar, sem Registrar', () => {
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: FUTURE_TODAY })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+      expect(screen.getByText('Confirmar')).toBeInTheDocument();
+      expect(screen.getByText('Remarcar')).toBeInTheDocument();
+      expect(screen.getByText('Cancelar')).toBeInTheDocument();
+      expect(screen.queryByText('Registrar')).toBeNull();
+    });
+
+    it('B) confirmed, ativa: Remarcar + Cancelar, sem Confirmar, sem Registrar', () => {
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'confirmed', scheduledAt: FUTURE_TODAY })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+      expect(screen.queryByText('Confirmar')).toBeNull();
+      expect(screen.getByText('Remarcar')).toBeInTheDocument();
+      expect(screen.getByText('Cancelar')).toBeInTheDocument();
+      expect(screen.queryByText('Registrar')).toBeNull();
+    });
+
+    it('C) scheduled, Pendentes de resultado: Remarcar + Cancelar, sem Confirmar, sem Registrar (B6-B)', () => {
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: PAST_TODAY })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+      expect(screen.queryByText('Confirmar')).toBeNull();
+      expect(screen.getByText('Remarcar')).toBeInTheDocument();
+      expect(screen.getByText('Cancelar')).toBeInTheDocument();
+      expect(screen.queryByText('Registrar')).toBeNull();
+    });
+
+    it('D) confirmed, Pendentes de resultado: Remarcar + Cancelar, sem Confirmar, sem Registrar (B6-B)', () => {
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'confirmed', scheduledAt: PAST_TODAY })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+      expect(screen.queryByText('Confirmar')).toBeNull();
+      expect(screen.getByText('Remarcar')).toBeInTheDocument();
+      expect(screen.getByText('Cancelar')).toBeInTheDocument();
+      expect(screen.queryByText('Registrar')).toBeNull();
+    });
+  });
+
+  // Relógio REAL nas duas suítes abaixo (nunca fake timers, ver comentário
+  // no topo do describe pai) — data futura relativa a Date.now(), não às
+  // constantes fake-timed da action matrix.
+  const REAL_FUTURE = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+  describe('Confirmar', () => {
+    it('chama useConfirmVisit com {visitId, expectedVersion} exatos; zero VisitService/LeadService', async () => {
+      const visit = remoteVisit({ id: 'visit-confirm-1', status: 'scheduled', scheduledAt: REAL_FUTURE, version: 4 });
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { hasData: true, visits: [visit] }));
+      render(<ScreenVisitas go={() => {}} />);
+
+      fireEvent.click(screen.getByText('Confirmar'));
+      await waitFor(() => expect(confirmVisitSpy).toHaveBeenCalledWith({ visitId: 'visit-confirm-1', expectedVersion: 4 }));
+      expect(VisitService.update).not.toHaveBeenCalled();
+    });
+
+    it('isPending=true: clique não gera segunda chamada', () => {
+      m.useConfirmVisit.mockImplementation(() => confirmHookResult(confirmVisitSpy, { isPending: true }));
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: REAL_FUTURE })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+
+      fireEvent.click(screen.getByText('Confirmando…'));
+      expect(confirmVisitSpy).not.toHaveBeenCalled();
+    });
+
+    it('erro (ex.: stale_write) mostra mensagem inline, sem VisitService', async () => {
+      confirmVisitSpy.mockRejectedValueOnce(new RemoteVisitsError('remote_visits_mutation_stale_write', { operation: 'confirm_visit' }));
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: REAL_FUTURE })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+
+      fireEvent.click(screen.getByText('Confirmar'));
+      expect(await screen.findByTestId('visit-confirm-error')).toHaveTextContent('Esta visita foi alterada. Os dados foram atualizados.');
+      expect(VisitService.update).not.toHaveBeenCalled();
+    });
+
+    it('identity_changed: nenhuma mensagem de erro é mostrada', async () => {
+      confirmVisitSpy.mockRejectedValueOnce(new RemoteVisitsError('remote_visits_mutation_identity_changed', { operation: 'confirm_visit' }));
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: REAL_FUTURE })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+
+      fireEvent.click(screen.getByText('Confirmar'));
+      await waitFor(() => expect(confirmVisitSpy).toHaveBeenCalled());
+      expect(screen.queryByTestId('visit-confirm-error')).toBeNull();
+    });
+  });
+
+  describe('Cancelar — confirmação em duas etapas', () => {
+    it('primeiro clique não muta; mostra Sim/Voltar', () => {
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: REAL_FUTURE })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+
+      fireEvent.click(screen.getByText('Cancelar'));
+      expect(cancelVisitSpy).not.toHaveBeenCalled();
+      expect(screen.getByText('Sim')).toBeInTheDocument();
+      expect(screen.getByText('Voltar')).toBeInTheDocument();
+    });
+
+    it('Voltar descarta sem mutation nenhuma, volta ao estado normal', () => {
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: REAL_FUTURE })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+
+      fireEvent.click(screen.getByText('Cancelar'));
+      fireEvent.click(screen.getByText('Voltar'));
+      expect(cancelVisitSpy).not.toHaveBeenCalled();
+      expect(screen.getByText('Cancelar')).toBeInTheDocument();
+    });
+
+    it('Cancelar + Sim chama useCancelVisit com {visitId, expectedVersion} exatos; zero VisitService/LeadService/DELETE', async () => {
+      const visit = remoteVisit({ id: 'visit-cancel-1', status: 'confirmed', scheduledAt: REAL_FUTURE, version: 9 });
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { hasData: true, visits: [visit] }));
+      render(<ScreenVisitas go={() => {}} />);
+
+      fireEvent.click(screen.getByText('Cancelar'));
+      fireEvent.click(screen.getByText('Sim'));
+      await waitFor(() => expect(cancelVisitSpy).toHaveBeenCalledWith({ visitId: 'visit-cancel-1', expectedVersion: 9 }));
+      expect(VisitService.update).not.toHaveBeenCalled();
+    });
+
+    it('isPending=true: segundo "Sim" não gera outra mutation', () => {
+      m.useCancelVisit.mockImplementation(() => cancelHookResult(cancelVisitSpy, { isPending: true }));
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: REAL_FUTURE })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+
+      fireEvent.click(screen.getByText('Cancelar'));
+      fireEvent.click(screen.getByText('Cancelando…'));
+      expect(cancelVisitSpy).not.toHaveBeenCalled();
+    });
+
+    it('erro (ex.: visit_closed) mostra mensagem inline, sem fechar como sucesso, sem VisitService', async () => {
+      cancelVisitSpy.mockRejectedValueOnce(new RemoteVisitsError('remote_visits_mutation_visit_closed', { operation: 'cancel_visit' }));
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: REAL_FUTURE })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+
+      fireEvent.click(screen.getByText('Cancelar'));
+      fireEvent.click(screen.getByText('Sim'));
+      expect(await screen.findByTestId('visit-cancel-error')).toHaveTextContent('Esta visita já foi encerrada.');
+      expect(VisitService.update).not.toHaveBeenCalled();
+    });
+
+    it('identity_changed: nenhuma mensagem de erro é mostrada', async () => {
+      cancelVisitSpy.mockRejectedValueOnce(new RemoteVisitsError('remote_visits_mutation_identity_changed', { operation: 'cancel_visit' }));
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+        hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: REAL_FUTURE })],
+      }));
+      render(<ScreenVisitas go={() => {}} />);
+
+      fireEvent.click(screen.getByText('Cancelar'));
+      fireEvent.click(screen.getByText('Sim'));
+      await waitFor(() => expect(cancelVisitSpy).toHaveBeenCalled());
+      expect(screen.queryByTestId('visit-cancel-error')).toBeNull();
+    });
   });
 });
 

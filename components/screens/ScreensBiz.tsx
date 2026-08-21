@@ -16,6 +16,9 @@ import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } 
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
 import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
+import { useConfirmVisit } from '@/lib/hooks/useConfirmVisit';
+import { useCancelVisit } from '@/lib/hooks/useCancelVisit';
+import { isRemoteVisitsError } from '@/lib/visits/errors';
 import type { RemoteVisitModel } from '@/lib/visits/adapter';
 import {
   groupVisitsForScreen,
@@ -113,41 +116,174 @@ function VisitRow({ v, go }: any) {
 // id/nome — leadsById do adapter só carrega {id,name}), uma segunda
 // dependência de hook que este lote deliberadamente não introduz — mesma
 // decisão já tomada por TaskRow (ScreensOps.tsx) para o mesmo motivo.
-function RemoteVisitRow({ visit, sellersById, showDate }: {
+// COMMERCIAL-REMOTE-VISITS-B6-A — mensagens sanitizadas fixas de
+// Confirmar/Cancelar remoto — mesmo modelo de remoteTaskCompleteErrorMessage
+// (ScreensOps.tsx, ação inline de row, não compartilhado com os mappers de
+// Flows2.tsx) e dos mappers próprios de cada flow desta série. Cobrem
+// exatamente os códigos reais das respectivas RPCs (migration #52,
+// comentário "Erros estáveis" de cada função) — confirm_visit inclui
+// invalid_status_transition, cancel_visit NÃO (confirmado por leitura
+// direta, nunca adivinhado).
+function remoteVisitConfirmErrorMessage(error: unknown): string {
+  const code = isRemoteVisitsError(error) ? error.code : undefined;
+  switch (code) {
+    case 'remote_visits_mutation_forbidden':
+      return 'Você não tem permissão para confirmar esta visita.';
+    case 'remote_visits_mutation_visit_not_found':
+      return 'Esta visita não está mais disponível.';
+    case 'remote_visits_mutation_visit_closed':
+      return 'Esta visita já foi encerrada.';
+    case 'remote_visits_mutation_invalid_status_transition':
+      return 'Esta visita não está mais aguardando confirmação.';
+    case 'remote_visits_mutation_stale_write':
+      return 'Esta visita foi alterada. Os dados foram atualizados.';
+    default:
+      return 'Não foi possível confirmar a visita. Tente novamente.';
+  }
+}
+
+function remoteVisitCancelErrorMessage(error: unknown): string {
+  const code = isRemoteVisitsError(error) ? error.code : undefined;
+  switch (code) {
+    case 'remote_visits_mutation_forbidden':
+      return 'Você não tem permissão para cancelar esta visita.';
+    case 'remote_visits_mutation_visit_not_found':
+      return 'Esta visita não está mais disponível.';
+    case 'remote_visits_mutation_visit_closed':
+      return 'Esta visita já foi encerrada.';
+    case 'remote_visits_mutation_stale_write':
+      return 'Esta visita foi alterada. Os dados foram atualizados.';
+    default:
+      return 'Não foi possível cancelar a visita. Tente novamente.';
+  }
+}
+
+// COMMERCIAL-REMOTE-VISITS-B6-A — Confirmar/Cancelar viram ações INLINE
+// desta row (nenhum flow id novo, B6-PRECHECK §6/§8/§11):
+//   - Confirmar segue o padrão real de TaskRow/useCompleteTask
+//     (ScreensOps.tsx) — hook chamado direto da row, erro exibido inline,
+//     identity_changed nunca mostrado (a nova identidade/query já assume a
+//     renderização sozinha).
+//   - Cancelar NÃO reusa o FlowConfirmar genérico (Flows3.tsx): aquele
+//     fecha o diálogo ANTES de aguardar onConfirm, incompatível com uma
+//     mutation assíncrona e falível como cancelVisit (um erro real seria
+//     engolido em silêncio) — confirmado por leitura direta do componente
+//     no B6-PRECHECK §8. Em vez disso, um estado de confirmação em DUAS
+//     ETAPAS inteiramente dentro da própria row (clique 1: "Cancelar" só
+//     alterna para o estado de confirmação, zero mutation; clique 2: "Sim"
+//     dispara cancelVisit; "Voltar" descarta sem mutation nenhuma).
+//
+// Identidade: mesma derivação de sempre (userId/companyId/membershipRole/
+// userIsActive via AuthService.getCurrentUser()) — não existe helper
+// compartilhado de identidade de Visits a reusar (mesmo raciocínio já
+// registrado para TaskRow); reimplementar estas 4 linhas é o padrão já
+// estabelecido, não duplicação indevida.
+function RemoteVisitRow({ visit, sellersById, showDate, isPendingResult }: {
   visit: RemoteVisitModel;
   sellersById: Readonly<Record<string, { id: string; name: string }>>;
   showDate: boolean;
+  isPendingResult: boolean;
 }) {
   const scheduledAtDate = new Date(visit.scheduledAt);
   const statusInfo = VISIT_REMOTE_STATUS_LABEL[visit.status];
   const sellerDisplay = resolveVisitSellerDisplayName(visit.assignedSellerId, sellersById);
   const vehicleDisplay = visit.vehicles.length > 1 ? visit.vehicles.join(' + ') : (visit.vehicles[0] ?? '');
+
+  const user = AuthService.getCurrentUser();
+  const identityUserId = user?.id ?? null;
+  const identityCompanyId = user?.activeMembership?.companyId ?? null;
+  const identityMembershipRole = user?.activeMembership?.role ?? null;
+  const identityUserIsActive = Boolean(user);
+
+  const confirmHook = useConfirmVisit({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  const cancelHook = useCancelVisit({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [cancelConfirming, setCancelConfirming] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  // B6-PRECHECK §5/§23: backend (confirm_visit) só aceita status===
+  // 'scheduled', mas confirmar uma visita já passada (Pendentes de
+  // resultado) não faz sentido de produto — narrado aqui na UI, backend
+  // continua a autoridade real caso algo escape esta checagem.
+  const canConfirm = visit.status === 'scheduled' && !isPendingResult;
+
+  const handleConfirm = async () => {
+    if (confirmHook.isPending) return;
+    setConfirmError(null);
+    try {
+      await confirmHook.confirmVisit({ visitId: visit.id, expectedVersion: visit.version });
+    } catch (err) {
+      if (isRemoteVisitsError(err) && err.code === 'remote_visits_mutation_identity_changed') return;
+      setConfirmError(remoteVisitConfirmErrorMessage(err));
+    }
+  };
+
+  const handleCancelConfirm = async () => {
+    if (cancelHook.isPending) return;
+    setCancelError(null);
+    try {
+      await cancelHook.cancelVisit({ visitId: visit.id, expectedVersion: visit.version });
+      setCancelConfirming(false);
+    } catch (err) {
+      if (isRemoteVisitsError(err) && err.code === 'remote_visits_mutation_identity_changed') {
+        setCancelConfirming(false);
+        return;
+      }
+      setCancelError(remoteVisitCancelErrorMessage(err));
+    }
+  };
+
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderRadius: 11,
-      background: 'var(--surface)', border: '1px solid var(--border)',
-    }}>
-      <div style={{ width: 62, textAlign: 'center' }}>
-        {showDate && <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--t-400)', marginBottom: 2 }}>{formatVisitShortDate(scheduledAtDate)}</div>}
-        <div className="display tnum" style={{ fontSize: 18, fontWeight: 800, color: 'var(--t-900)' }}>{formatVisitTime(scheduledAtDate)}</div>
-      </div>
-      <div style={{ width: 1, height: 34, background: 'var(--border)' }} />
-      <Avatar name={visit.clientName} size={38} ring="#6B7280" />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{visit.clientName}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', gap: 10, marginTop: 2 }}>
-          <span><Icon name="car" size={12} stroke={2} style={{ verticalAlign: -2 }} /> {vehicleDisplay}</span>
-          <span>· {sellerDisplay}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderRadius: 11,
+        background: 'var(--surface)', border: '1px solid var(--border)',
+      }}>
+        <div style={{ width: 62, textAlign: 'center' }}>
+          {showDate && <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--t-400)', marginBottom: 2 }}>{formatVisitShortDate(scheduledAtDate)}</div>}
+          <div className="display tnum" style={{ fontSize: 18, fontWeight: 800, color: 'var(--t-900)' }}>{formatVisitTime(scheduledAtDate)}</div>
         </div>
+        <div style={{ width: 1, height: 34, background: 'var(--border)' }} />
+        <Avatar name={visit.clientName} size={38} ring="#6B7280" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{visit.clientName}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', gap: 10, marginTop: 2 }}>
+            <span><Icon name="car" size={12} stroke={2} style={{ verticalAlign: -2 }} /> {vehicleDisplay}</span>
+            <span>· {sellerDisplay}</span>
+          </div>
+        </div>
+        <LBadge tone={statusInfo.tone} solid={statusInfo.solid}>{statusInfo.label}</LBadge>
+        {canConfirm && (
+          <LBtn size="sm" kind="primary" icon="checkCircle" onClick={handleConfirm} style={{ opacity: confirmHook.isPending ? 0.6 : 1 }}>
+            {confirmHook.isPending ? 'Confirmando…' : 'Confirmar'}
+          </LBtn>
+        )}
+        <LBtn size="sm" kind="ghost" icon="refresh" onClick={() => (window as any).__openFlow('reagendar-visita', { visit })}>Remarcar</LBtn>
+        {!cancelConfirming ? (
+          <LBtn size="sm" kind="ghost" icon="xCircle" onClick={() => setCancelConfirming(true)}>Cancelar</LBtn>
+        ) : (
+          <>
+            <span style={{ fontSize: 12.5, color: 'var(--t-500)', whiteSpace: 'nowrap' }}>Cancelar esta visita?</span>
+            <LBtn size="sm" kind="danger" onClick={handleCancelConfirm} style={{ opacity: cancelHook.isPending ? 0.6 : 1 }}>
+              {cancelHook.isPending ? 'Cancelando…' : 'Sim'}
+            </LBtn>
+            <LBtn size="sm" kind="ghost" onClick={() => { setCancelConfirming(false); setCancelError(null); }}>Voltar</LBtn>
+          </>
+        )}
       </div>
-      <LBadge tone={statusInfo.tone} solid={statusInfo.solid}>{statusInfo.label}</LBadge>
-      {/* COMMERCIAL-REMOTE-VISITS-B5: único controle de mutation nas rows
-          remotas até aqui — Confirmar/Cancelar/Registrar seguem fora de
-          escopo (B6). Seguro incondicionalmente: todo row que chega aqui
-          já tem status IN ('scheduled','confirmed') por construção
-          (groupVisitsForScreen nunca inclui completed/canceled em
-          nenhum dos 4 grupos), o mesmo universo que update_visit aceita. */}
-      <LBtn size="sm" kind="ghost" icon="refresh" onClick={() => (window as any).__openFlow('reagendar-visita', { visit })}>Remarcar</LBtn>
+      {confirmError && (
+        <div data-testid="visit-confirm-error" style={{ fontSize: 12, color: 'var(--red)', padding: '0 4px' }}>{confirmError}</div>
+      )}
+      {cancelError && (
+        <div data-testid="visit-cancel-error" style={{ fontSize: 12, color: 'var(--red)', padding: '0 4px' }}>{cancelError}</div>
+      )}
     </div>
   );
 }
@@ -239,22 +375,23 @@ export function ScreenVisitas({ go }: any) {
     const groups = groupVisitsForScreen(remoteVisitsScreen.visits, now);
     const sellersById = sellerLabels.sellersById;
     const remoteGroups = [
-      { key: 'today', name: 'Hoje', items: groups.today, showDate: false },
-      { key: 'tomorrow', name: 'Amanhã', items: groups.tomorrow, showDate: false },
-      { key: 'future', name: 'Próximos dias', items: groups.future, showDate: true },
-      { key: 'pendingResult', name: 'Pendentes de resultado', items: groups.pendingResult, warn: true, showDate: true },
+      { key: 'today', name: 'Hoje', items: groups.today, showDate: false, isPendingResult: false },
+      { key: 'tomorrow', name: 'Amanhã', items: groups.tomorrow, showDate: false, isPendingResult: false },
+      { key: 'future', name: 'Próximos dias', items: groups.future, showDate: true, isPendingResult: false },
+      { key: 'pendingResult', name: 'Pendentes de resultado', items: groups.pendingResult, warn: true, showDate: true, isPendingResult: true },
     ];
     return (
       <LightScreen>
-        {/* COMMERCIAL-REMOTE-VISITS-B4/B5: "Agendar visita" (create_visit)
-            e "Remarcar" por row (update_visit) estão conectados —
-            FlowCriarVisita/FlowReagendarVisita decidem sozinhos via
-            resolveVisitRemoteMode(), FlowLayer autoriza a abertura via os
-            gates dedicados de 'criar-visita'/'reagendar-visita'. Nenhuma
-            row abaixo renderiza Confirmar/Cancelar/Registrar resultado
-            (fora de escopo até B6) — FlowLayer continua bloqueando
-            'confirmar-visita'/'registrar-resultado' fora do modo local de
-            qualquer forma. */}
+        {/* COMMERCIAL-REMOTE-VISITS-B4/B5/B6-A: "Agendar visita"
+            (create_visit), "Confirmar"/"Cancelar" inline por row
+            (confirm_visit/cancel_visit) e "Remarcar" por row
+            (update_visit) estão conectados. Confirmar/Cancelar são ações
+            INLINE desta tela (nenhum flow id novo) — FlowCriarVisita/
+            FlowReagendarVisita continuam decidindo sozinhos via
+            resolveVisitRemoteMode() para os dois que SÃO flows.
+            "Registrar resultado" segue fora de escopo até B6-B — FlowLayer
+            continua bloqueando 'confirmar-visita'/'registrar-resultado'
+            (os flows LOCAIS) fora do modo local de qualquer forma. */}
         <PageHead title="Visitas" sub={pageHeadSub} actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {remoteGroups.map((g) => (
@@ -265,7 +402,7 @@ export function ScreenVisitas({ go }: any) {
                 <span style={{ fontSize: 12.5, color: 'var(--t-400)' }}>{g.items.length} {g.items.length === 1 ? 'visita' : 'visitas'}</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {g.items.map((v) => <RemoteVisitRow key={v.id} visit={v} sellersById={sellersById} showDate={g.showDate} />)}
+                {g.items.map((v) => <RemoteVisitRow key={v.id} visit={v} sellersById={sellersById} showDate={g.showDate} isPendingResult={g.isPendingResult} />)}
               </div>
             </div>
           ))}
