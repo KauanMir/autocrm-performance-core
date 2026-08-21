@@ -118,6 +118,23 @@ function fillWhenRemote(when: string, opts: { date?: string; time?: string } = {
   if (opts.time !== undefined) fireEvent.click(screen.getByText(opts.time));
 }
 
+// COMMERCIAL-REMOTE-BASELINE-RECOVERY-VISITS-EXEC: 'Hoje'+'14:00' fica no
+// passado assim que o relógio real da máquina passa das 14:00 locais —
+// resolveRemoteVisitScheduledAt (Flows2.tsx) bloqueia scheduledAt passado de
+// propósito (mesma família do achado B7-0-TEST-CLOCK-FIX, que já resolveu o
+// caso análogo do Seller trocando para 'Amanhã'; aqui preservamos 'Hoje'
+// porque é o próprio comportamento sob teste). vi.setSystemTime SEM
+// vi.useFakeTimers() só mocka Date/Date.now — setTimeout continua real,
+// então waitFor (que depende de polling por timer real) não precisa de
+// advanceTimersByTimeAsync. Fixa a hora em 08:00 do mesmo dia real (nunca
+// muda o dia local), sempre antes de qualquer slot fixo usado no arquivo.
+function freezeMorningToday(): Date {
+  const real = new Date();
+  const frozen = new Date(real.getFullYear(), real.getMonth(), real.getDate(), 8, 0, 0, 0);
+  vi.setSystemTime(frozen);
+  return frozen;
+}
+
 function pickVehicle(name: string) {
   fireEvent.click(screen.getByText(name));
 }
@@ -173,23 +190,28 @@ describe('FlowCriarVisita — remote Manager, standalone', () => {
   });
 
   it('cria standalone: {actorRole:"manager", leadId:null, clientName, assignedSellerId, scheduledAt, vehicles}', async () => {
-    renderFlow();
-    fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Avulso' } });
-    pickVehicle('Golf GTI 2022');
-    fireEvent.click(screen.getByText('Selecione o vendedor…'));
-    fireEvent.click(screen.getByText('Ana Assignable'));
-    fillWhenRemote('Hoje', { time: '14:00' });
+    freezeMorningToday();
+    try {
+      renderFlow();
+      fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Avulso' } });
+      pickVehicle('Golf GTI 2022');
+      fireEvent.click(screen.getByText('Selecione o vendedor…'));
+      fireEvent.click(screen.getByText('Ana Assignable'));
+      fillWhenRemote('Hoje', { time: '14:00' });
 
-    fireEvent.click(screen.getByText('Agendar visita'));
-    await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
+      fireEvent.click(screen.getByText('Agendar visita'));
+      await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
 
-    const call = createVisitSpy.mock.calls[0][0];
-    expect(call.actorRole).toBe('manager');
-    expect(call.leadId).toBeNull();
-    expect(call.clientName).toBe('Cliente Avulso');
-    expect(call.assignedSellerId).toBe('s1');
-    expect(call.vehicles).toEqual(['Golf GTI 2022']);
-    expect(m.visitServiceCreate).not.toHaveBeenCalled();
+      const call = createVisitSpy.mock.calls[0][0];
+      expect(call.actorRole).toBe('manager');
+      expect(call.leadId).toBeNull();
+      expect(call.clientName).toBe('Cliente Avulso');
+      expect(call.assignedSellerId).toBe('s1');
+      expect(call.vehicles).toEqual(['Golf GTI 2022']);
+      expect(m.visitServiceCreate).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('sem cliente/lead: createVisit 0 calls', () => {
@@ -244,19 +266,24 @@ describe('FlowCriarVisita — remote Manager + Lead', () => {
   });
 
   it('cria vinculado ao Lead: leadId correto, clientName omitido, vehicle pré-preenchido do Lead', async () => {
-    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead({ id: 'lead-99', car: 'Toyota Corolla 2023', sellerId: 's1' })]));
-    renderFlow();
-    fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente' } });
-    fireEvent.click(screen.getByText('Cliente Remoto'));
-    fillWhenRemote('Hoje', { time: '14:00' });
-    fireEvent.click(screen.getByText('Agendar visita'));
-    await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
+    freezeMorningToday();
+    try {
+      m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead({ id: 'lead-99', car: 'Toyota Corolla 2023', sellerId: 's1' })]));
+      renderFlow();
+      fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente' } });
+      fireEvent.click(screen.getByText('Cliente Remoto'));
+      fillWhenRemote('Hoje', { time: '14:00' });
+      fireEvent.click(screen.getByText('Agendar visita'));
+      await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
 
-    const call = createVisitSpy.mock.calls[0][0];
-    expect(call.leadId).toBe('lead-99');
-    expect(call.clientName).toBeUndefined();
-    expect(call.vehicles).toEqual(['Toyota Corolla 2023']);
-    expect(call.assignedSellerId).toBe('s1');
+      const call = createVisitSpy.mock.calls[0][0];
+      expect(call.leadId).toBe('lead-99');
+      expect(call.clientName).toBeUndefined();
+      expect(call.vehicles).toEqual(['Toyota Corolla 2023']);
+      expect(call.assignedSellerId).toBe('s1');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('trocar de Lead A (com seller) para Lead B (sem seller assignable) recalcula e limpa o Seller', () => {
@@ -276,23 +303,28 @@ describe('FlowCriarVisita — remote Manager + Lead', () => {
   });
 
   it('limpar o Lead (voltar a standalone) mantém o Seller já selecionado', async () => {
-    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead({ sellerId: 's1' })]));
-    renderFlow();
-    fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente' } });
-    fireEvent.click(screen.getByText('Cliente Remoto'));
-    expect(screen.getByText('Ana Assignable')).toBeInTheDocument();
+    freezeMorningToday();
+    try {
+      m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead({ sellerId: 's1' })]));
+      renderFlow();
+      fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente' } });
+      fireEvent.click(screen.getByText('Cliente Remoto'));
+      expect(screen.getByText('Ana Assignable')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Trocar cliente'));
-    // Seller continua "Ana Assignable" (mantido), não volta a "Selecione o vendedor…".
-    expect(screen.getByText('Ana Assignable')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('Trocar cliente'));
+      // Seller continua "Ana Assignable" (mantido), não volta a "Selecione o vendedor…".
+      expect(screen.getByText('Ana Assignable')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Standalone' } });
-    pickVehicle('Golf GTI 2022');
-    fillWhenRemote('Hoje', { time: '14:00' });
-    fireEvent.click(screen.getByText('Agendar visita'));
-    await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
-    expect(createVisitSpy.mock.calls[0][0].leadId).toBeNull();
-    expect(createVisitSpy.mock.calls[0][0].assignedSellerId).toBe('s1');
+      fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Standalone' } });
+      pickVehicle('Golf GTI 2022');
+      fillWhenRemote('Hoje', { time: '14:00' });
+      fireEvent.click(screen.getByText('Agendar visita'));
+      await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
+      expect(createVisitSpy.mock.calls[0][0].leadId).toBeNull();
+      expect(createVisitSpy.mock.calls[0][0].assignedSellerId).toBe('s1');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('Lead arquivado/ausente não aparece no picker (snapshot já filtra) — sem fallback local', () => {
@@ -360,18 +392,22 @@ describe('FlowCriarVisita — data/hora remota', () => {
   }
 
   it('Hoje -> scheduledAt no dia local de hoje, no horário escolhido', async () => {
-    const now = new Date();
-    renderFlow();
-    fillMinimum();
-    fillWhenRemote('Hoje', { time: '14:00' });
-    fireEvent.click(screen.getByText('Agendar visita'));
-    await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
+    const now = freezeMorningToday();
+    try {
+      renderFlow();
+      fillMinimum();
+      fillWhenRemote('Hoje', { time: '14:00' });
+      fireEvent.click(screen.getByText('Agendar visita'));
+      await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
 
-    const scheduledAt = new Date(createVisitSpy.mock.calls[0][0].scheduledAt);
-    expect(scheduledAt.getFullYear()).toBe(now.getFullYear());
-    expect(scheduledAt.getMonth()).toBe(now.getMonth());
-    expect(scheduledAt.getDate()).toBe(now.getDate());
-    expect(scheduledAt.getHours()).toBe(14);
+      const scheduledAt = new Date(createVisitSpy.mock.calls[0][0].scheduledAt);
+      expect(scheduledAt.getFullYear()).toBe(now.getFullYear());
+      expect(scheduledAt.getMonth()).toBe(now.getMonth());
+      expect(scheduledAt.getDate()).toBe(now.getDate());
+      expect(scheduledAt.getHours()).toBe(14);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('Amanhã -> próximo dia de calendário local', async () => {
@@ -434,18 +470,23 @@ describe('FlowCriarVisita — veículos', () => {
   });
 
   it('múltiplos veículos + "outro veículo" -> vehicles trimmed, sem vazios', async () => {
-    renderFlow();
-    fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Avulso' } });
-    pickVehicle('Golf GTI 2022');
-    pickVehicle('Honda HR-V 2023');
-    fireEvent.change(screen.getByPlaceholderText('Cliente também quer ver...'), { target: { value: '  Fusca 1978  ' } });
-    fireEvent.click(screen.getByText('Selecione o vendedor…'));
-    fireEvent.click(screen.getByText('Ana Assignable'));
-    fillWhenRemote('Hoje', { time: '14:00' });
-    fireEvent.click(screen.getByText('Agendar visita'));
-    await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
+    freezeMorningToday();
+    try {
+      renderFlow();
+      fireEvent.change(screen.getByPlaceholderText('Buscar cliente existente ou digitar o nome de um cliente avulso...'), { target: { value: 'Cliente Avulso' } });
+      pickVehicle('Golf GTI 2022');
+      pickVehicle('Honda HR-V 2023');
+      fireEvent.change(screen.getByPlaceholderText('Cliente também quer ver...'), { target: { value: '  Fusca 1978  ' } });
+      fireEvent.click(screen.getByText('Selecione o vendedor…'));
+      fireEvent.click(screen.getByText('Ana Assignable'));
+      fillWhenRemote('Hoje', { time: '14:00' });
+      fireEvent.click(screen.getByText('Agendar visita'));
+      await waitFor(() => expect(createVisitSpy).toHaveBeenCalled());
 
-    expect(createVisitSpy.mock.calls[0][0].vehicles).toEqual(['Golf GTI 2022', 'Honda HR-V 2023', 'Fusca 1978']);
+      expect(createVisitSpy.mock.calls[0][0].vehicles).toEqual(['Golf GTI 2022', 'Honda HR-V 2023', 'Fusca 1978']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
