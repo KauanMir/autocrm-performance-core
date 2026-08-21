@@ -10,6 +10,7 @@ import type { User } from '@/lib/data';
 import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
 import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState';
 import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
+import { useRemoteDealsScreenState } from '@/lib/hooks/useRemoteDealsScreenState';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
@@ -148,6 +149,39 @@ function useHomeVisitsSummary(currentUser: User | null): HomeVisitsSummary {
     status: 'ready',
     unconfirmedCount: remote.visits.filter((v) => v.status === 'scheduled').length,
     openCount: remote.visits.filter((v) => v.status === 'scheduled' || v.status === 'confirmed').length,
+  };
+}
+
+// COMMERCIAL-REMOTE-DEALS-B7-B1 — resumo de Deals da Home, independente de
+// leadsSummary/tasksSummary/visitsSummary (mesmo raciocínio de
+// useHomeTasksSummary/useHomeVisitsSummary — B7-B-PRECHECK §5: cada domínio
+// comercial resolve seu próprio estado, nunca um proxy de outro). Wrapper
+// fino sobre useRemoteDealsScreenState, a mesma composição já usada por
+// ScreenPropostas/Negociações — nenhuma query nova, nenhuma segunda fonte,
+// nenhuma contagem por Seller (isso é B7-B2, fora de escopo aqui).
+type HomeDealsSummary =
+  | { status: 'local' }
+  | { status: 'unavailable' }
+  | { status: 'loading' }
+  | { status: 'error'; retry: () => void }
+  | { status: 'ready'; openCount: number };
+
+function useHomeDealsSummary(currentUser: User | null): HomeDealsSummary {
+  const remote = useRemoteDealsScreenState(currentUser);
+
+  if (remote.mode === 'deal_local') return { status: 'local' };
+  if (remote.mode === 'deal_blocked') return { status: 'unavailable' };
+  if (remote.mode === 'deal_remote_misconfigured') return { status: 'unavailable' };
+  if (remote.mode === 'deal_remote_unavailable_identity') return { status: 'unavailable' };
+
+  // mode === 'deal_remote_active' daqui em diante.
+  if (remote.isLoading) return { status: 'loading' };
+  if (remote.isError) return { status: 'error', retry: remote.refetch };
+  if (remote.configError !== null) return { status: 'unavailable' };
+
+  return {
+    status: 'ready',
+    openCount: remote.deals.filter((deal) => deal.status === 'open').length,
   };
 }
 
@@ -406,7 +440,7 @@ function UrgentMetricCard({ it, i, go }: { it: { n: number; label: string; sub: 
   );
 }
 
-function UrgentAttention({ go, leadsSummary, tasksSummary, visitsSummary }: { go: (id: string) => void; leadsSummary: HomeLeadsSummary; tasksSummary: HomeTasksSummary; visitsSummary: HomeVisitsSummary }) {
+function UrgentAttention({ go, leadsSummary, tasksSummary, visitsSummary, dealsSummary }: { go: (id: string) => void; leadsSummary: HomeLeadsSummary; tasksSummary: HomeTasksSummary; visitsSummary: HomeVisitsSummary; dealsSummary: HomeDealsSummary }) {
   // COMMERCIAL-REMOTE-B1-B3-G-R1 — Tasks é resolvido SEMPRE por
   // tasksSummary, NUNCA por leadsSummary.status==='local' (o G-EXEC tinha
   // reintroduzido esse acoplamento por engano). A suposição "Leads local
@@ -471,7 +505,26 @@ function UrgentAttention({ go, leadsSummary, tasksSummary, visitsSummary }: { go
   // 'unavailable': célula omitida — nunca um card mostrando zero/
   // indisponível como dado real (mesmo padrão de Tasks/Leads acima).
 
-  const cells = [...leadCells, ...(visitCell ? [visitCell] : []), ...(taskCell ? [taskCell] : [])];
+  // COMMERCIAL-REMOTE-DEALS-B7-B1 — Negociações resolvido SEMPRE por
+  // dealsSummary, NUNCA por leadsSummary.status (mesmo princípio de Tasks/
+  // Visits acima). 'local' não produz célula aqui: o card local legado de
+  // "propostas aguardando aprovação" já cobre o modo local dentro de
+  // leadCells acima (vocabulário/contagem diferentes, LEGACY LOCAL ONLY,
+  // intocado por este lote) — mostrar as duas seria duplicar a mesma
+  // informação com rótulos incoerentes. DealService.getAll() nunca é
+  // chamado aqui.
+  let dealCell: React.ReactNode | null = null;
+  if (dealsSummary.status === 'loading') {
+    dealCell = <CommercialWidgetNotice key="negociacoes">Carregando negociações…</CommercialWidgetNotice>;
+  } else if (dealsSummary.status === 'error') {
+    dealCell = <CommercialWidgetNotice key="negociacoes" onRetry={dealsSummary.retry}>Não foi possível carregar as negociações.</CommercialWidgetNotice>;
+  } else if (dealsSummary.status === 'ready') {
+    dealCell = <UrgentMetricCard key="negociacoes" i={2} go={go} it={{ n: dealsSummary.openCount, label: 'negociações em andamento', sub: 'Acompanhe até o fechamento', icon: 'handshake', to: 'propostas' }} />;
+  }
+  // 'local'/'unavailable': célula omitida — nunca um card mostrando zero/
+  // indisponível como dado real (mesmo padrão de Tasks/Visits acima).
+
+  const cells = [...leadCells, ...(visitCell ? [visitCell] : []), ...(taskCell ? [taskCell] : []), ...(dealCell ? [dealCell] : [])];
 
   return (
     <div>
@@ -625,6 +678,11 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // design (B7-PRECHECK §18 — Leads/Tasks/Visits nunca voltam a
   // compartilhar um proxy de estado).
   const visitsSummary = useHomeVisitsSummary(currentUser ?? null);
+  // COMMERCIAL-REMOTE-DEALS-B7-B1 — chamado SEMPRE (Rules of Hooks), mesma
+  // garantia de leadsSummary/tasksSummary/visitsSummary acima; independente
+  // de todas por design (B7-B-PRECHECK §5 — cada domínio comercial resolve
+  // seu próprio estado, nunca um proxy de outro).
+  const dealsSummary = useHomeDealsSummary(currentUser ?? null);
   const variant = t.podium;
   // M1-E E7-B1 — Podium/Ranking/MinhaDisputa dependem exclusivamente do
   // catálogo LOCAL de Sellers (getStore().sellers, sem company_id, sem
@@ -696,7 +754,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
 
         <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} /></div>
         {isSellersLocal && <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>}
-        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} /></div>
+        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} dealsSummary={dealsSummary} /></div>
         <QuickActions go={go} />
       </div>
     </div>

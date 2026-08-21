@@ -15,6 +15,7 @@ const m = vi.hoisted(() => ({
   useRemoteLeadsScreenState: vi.fn(),
   useRemoteTasksScreenState: vi.fn(),
   useRemoteVisitsScreenState: vi.fn(),
+  useRemoteDealsScreenState: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   leadServiceGetAll: vi.fn(),
   visitServiceGetAll: vi.fn(),
@@ -36,6 +37,10 @@ vi.mock('@/lib/hooks/useRemoteTasksScreenState', () => ({
 
 vi.mock('@/lib/hooks/useRemoteVisitsScreenState', () => ({
   useRemoteVisitsScreenState: m.useRemoteVisitsScreenState,
+}));
+
+vi.mock('@/lib/hooks/useRemoteDealsScreenState', () => ({
+  useRemoteDealsScreenState: m.useRemoteDealsScreenState,
 }));
 
 vi.mock('@/lib/leads/localCommercialAccess', () => ({
@@ -143,6 +148,20 @@ function visitScreenState(mode: string, over: Partial<Record<string, unknown>> =
   };
 }
 
+// COMMERCIAL-REMOTE-DEALS-B7-B1 — resultado padrão de
+// useRemoteDealsScreenState, mesmo formato de taskScreenState/
+// visitScreenState acima, próprio de Deals (mode/deals/isLoading/
+// isFetching/isError/error/configError/isEmpty/hasData/refetch).
+function dealScreenState(mode: string, over: Partial<Record<string, unknown>> = {}) {
+  return {
+    mode,
+    deals: [],
+    isLoading: false, isFetching: false, isError: false, error: null,
+    configError: null, isEmpty: false, hasData: false, refetch: vi.fn(),
+    ...over,
+  };
+}
+
 // variant 'B' evita o caminho FitBox/ResizeObserver do Podium (fora do
 // escopo do E7-A1 — ResizeObserver não existe no jsdom por padrão e nenhum
 // teste no projeto ainda exercitava o render real de Home/Podium).
@@ -187,6 +206,12 @@ beforeEach(() => {
   // para um mode não-local próprio (nunca 'visit_local' junto de Leads
   // remoto — violaria a garantia estrutural de resolveVisitRemoteMode()).
   m.useRemoteVisitsScreenState.mockReset().mockReturnValue(visitScreenState('visit_local'));
+  // COMMERCIAL-REMOTE-DEALS-B7-B1 — default 'deal_local', mesmo raciocínio
+  // do default de Tasks/Visits acima: preserva o baseline local de todos os
+  // testes escritos antes do B7-B1. Toda describe com Leads remoto
+  // sobrescreve para um mode não-local próprio (nunca 'deal_local' junto de
+  // Leads remoto — violaria a garantia estrutural de resolveDealRemoteMode()).
+  m.useRemoteDealsScreenState.mockReset().mockReturnValue(dealScreenState('deal_local'));
 });
 
 // ── A. Home local ────────────────────────────────────────────────────────
@@ -253,6 +278,10 @@ describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
     // Leads remoto ⟹ Visits nunca 'visit_local'. Esta suíte não testa
     // Visits especificamente, então usa 'unavailable'.
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    // COMMERCIAL-REMOTE-DEALS-B7-B1 — mesma garantia estrutural para Deals:
+    // Leads remoto ⟹ Deals nunca 'deal_local'. Esta suíte não testa Deals
+    // especificamente, então usa 'unavailable'.
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
   });
 
   it('nunca chama SellerService.getAll/getById', () => {
@@ -295,6 +324,9 @@ describe('Home — remote_active (Manager e Seller)', () => {
     // COMMERCIAL-REMOTE-VISITS-B7 — idem para Visits: Leads remoto nunca
     // convive com Visits 'visit_local'.
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    // COMMERCIAL-REMOTE-DEALS-B7-B1 — idem para Deals: Leads remoto nunca
+    // convive com Deals 'deal_local'.
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
   });
 
   it.each([['Manager', manager()], ['Seller', seller('s1')]])('%s: nunca chama serviços locais bloqueados nem LeadService.getAll(), usa a fonte remota', (_label, user) => {
@@ -351,6 +383,7 @@ describe('Home — Super Admin sem companyId operacional', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_unavailable_identity'));
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
     renderHome(superAdmin());
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
     expect(m.visitServiceGetAll).not.toHaveBeenCalled();
@@ -367,6 +400,7 @@ describe('Home — remote_misconfigured (REMOTE_LEADS=true, REMOTE_STAGES=false)
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_misconfigured'));
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_misconfigured'));
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_misconfigured'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_misconfigured'));
     renderHome(manager());
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
     expect(m.visitServiceGetAll).not.toHaveBeenCalled();
@@ -380,10 +414,11 @@ describe('Home — remote_misconfigured (REMOTE_LEADS=true, REMOTE_STAGES=false)
 // ── F. Snapshot/query ainda carregando ──────────────────────────────────
 describe('Home — remote_active, ainda carregando', () => {
   beforeEach(() => {
-    // COMMERCIAL-REMOTE-B1-B3-G/B7 — mesma garantia estrutural das suítes
-    // remotas acima; estes testes cobrem só o estado de Leads.
+    // COMMERCIAL-REMOTE-B1-B3-G/B7/B7-B1 — mesma garantia estrutural das
+    // suítes remotas acima; estes testes cobrem só o estado de Leads.
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
   });
 
   it('stages carregando: estado de loading seguro, nenhum acesso síncrono ao snapshot, nenhum throw', () => {
@@ -430,6 +465,9 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
     // Tasks; Visits usa 'unavailable' (garantia estrutural: Leads remoto
     // nunca convive com 'visit_local').
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    // COMMERCIAL-REMOTE-DEALS-B7-B1 — idem para Deals: Leads remoto nunca
+    // convive com 'deal_local'.
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
   });
 
   it('99 Tasks locais vs 2 remotas atrasadas: Home mostra 2, TaskService.getAll nunca é chamado no branch remoto', () => {
@@ -554,6 +592,7 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
     );
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isLoading: true }));
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
     rerender(<Home {...props} />);
 
     expect(screen.getByText('Carregando pendências…')).toBeInTheDocument();
@@ -632,6 +671,9 @@ describe('Home — Visits summary remoto (independente de Leads)', () => {
       screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
     );
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    // COMMERCIAL-REMOTE-DEALS-B7-B1 — idem para Deals: Leads remoto nunca
+    // convive com 'deal_local'. Esta suíte não testa Deals especificamente.
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
     // Podium/Ranking/MinhaDisputa (SellerService) reproduzem os mesmos
     // labels de coluna "Leads"/"Visitas" (Col, Home.tsx) — desligado aqui
     // para isolar as asserções desta suíte dos dois cards reais de Visits,
@@ -767,5 +809,185 @@ describe('Home — Visits summary remoto (independente de Leads)', () => {
     }));
     renderHome(manager());
     expect(screen.queryByText(/Pendentes de resultado/)).toBeNull();
+  });
+});
+
+// ── J. Home Deals Summary remoto (COMMERCIAL-REMOTE-DEALS-B7-B1) ───────
+// useHomeDealsSummary substitui a ausência total de Deals na Home por um
+// resumo próprio, independente de leadsSummary/tasksSummary/visitsSummary
+// (mesmo padrão de Tasks/Visits nas seções G/I — B7-B-PRECHECK §5). Único
+// dado exposto: openCount (status==='open' exclusivamente) — nenhum
+// agrupamento por Seller (isso é B7-B2, fora de escopo aqui).
+describe('Home — Deals summary remoto (independente de Leads/Tasks/Visits)', () => {
+  function remoteDeal(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 'd1', status: 'open', assignedSellerId: 's1', ...over };
+  }
+
+  beforeEach(() => {
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
+    );
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    // Desligado para isolar as asserções desta suíte do Ranking (mesma
+    // razão da suíte de Visits acima — Podium/Ranking fora de escopo).
+    m.isLocalCommercialDataAllowed.mockReturnValue(false);
+  });
+
+  it('4 Deals [open, open, lost, sold]: openCount=2, terminal statuses nunca contam', () => {
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true,
+      deals: [
+        remoteDeal({ id: 'd1', status: 'open' }),
+        remoteDeal({ id: 'd2', status: 'open' }),
+        remoteDeal({ id: 'd3', status: 'lost' }),
+        remoteDeal({ id: 'd4', status: 'sold' }),
+      ],
+    }));
+    renderHome(manager());
+    const card = screen.getByText('negociações em andamento').closest('button');
+    expect(card?.textContent).toContain('2');
+    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('Seller: conta somente o snapshot já RLS-scoped recebido, nenhum filtro de empresa no frontend', () => {
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true,
+      deals: [remoteDeal({ id: 'd1', status: 'open', assignedSellerId: 's1' })],
+    }));
+    renderHome(seller('s1'));
+    const card = screen.getByText('negociações em andamento').closest('button');
+    expect(card?.textContent).toContain('1');
+  });
+
+  it('Manager: conta o conjunto company-wide recebido, sem agrupar por Seller', () => {
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true,
+      deals: [
+        remoteDeal({ id: 'd1', status: 'open', assignedSellerId: 's1' }),
+        remoteDeal({ id: 'd2', status: 'open', assignedSellerId: 's2' }),
+        remoteDeal({ id: 'd3', status: 'open', assignedSellerId: 's3' }),
+      ],
+    }));
+    renderHome(manager());
+    const card = screen.getByText('negociações em andamento').closest('button');
+    expect(card?.textContent).toContain('3');
+    // Prova de "nenhum agrupamento por Seller ainda" (B7-B2, fora de
+    // escopo): só um card de Negociações existe, nenhum nome de Seller
+    // aparece associado a uma contagem individual.
+    expect(screen.getAllByText('negociações em andamento').length).toBe(1);
+  });
+
+  it('openCount=0 é sucesso (ready), não indisponibilidade', () => {
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: false, isEmpty: true, deals: [] }));
+    renderHome(manager());
+    const card = screen.getByText('negociações em andamento').closest('button');
+    expect(card?.textContent).toContain('0');
+  });
+
+  it('loading: nenhuma contagem falsa, notice dedicado de Negociações', () => {
+    m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isLoading: true }));
+    renderHome(manager());
+    expect(screen.getByText('Carregando negociações…')).toBeInTheDocument();
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
+    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('erro: mensagem sanitizada com retry, sem fallback local, sem detalhe técnico', () => {
+    const refetch = vi.fn();
+    m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isError: true, refetch }));
+    renderHome(manager());
+    expect(screen.getByText('Não foi possível carregar as negociações.')).toBeInTheDocument();
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
+    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
+    expect(screen.queryByText(/supabase/i)).toBeNull();
+    expect(screen.queryByText(/RLS/)).toBeNull();
+    const [retryBtn] = screen.getAllByText('Tentar novamente');
+    fireEvent.click(retryBtn);
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it('configError: unavailable, sem contagem parcial', () => {
+    m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { configError: { code: 'x' } as any }));
+    renderHome(manager());
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
+    expect(screen.queryByText('Carregando negociações…')).toBeNull();
+    expect(screen.queryByText('Não foi possível carregar as negociações.')).toBeNull();
+    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  // 'deal_blocked' reproduz o rollout atual: NEXT_PUBLIC_FF_REMOTE_DEALS
+  // OFF com Leads já remote_ready (lib/deals/remoteDealsMode.ts) — nunca
+  // tratado como erro, célula simplesmente ausente, nenhum DealService novo.
+  it.each(['deal_blocked', 'deal_remote_misconfigured', 'deal_remote_unavailable_identity'])(
+    '%s: unavailable, DealService.getAll nunca chamado, nenhum zero falso',
+    (mode) => {
+      m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
+      m.useRemoteDealsScreenState.mockReturnValue(dealScreenState(mode));
+      renderHome(manager());
+      expect(screen.queryByText('negociações em andamento')).toBeNull();
+      expect(m.dealServiceGetAll).not.toHaveBeenCalled();
+    },
+  );
+
+  it('click em "Negociações em andamento" navega para go(\'propostas\'), nunca abre flow', () => {
+    const go = vi.fn();
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true,
+      deals: [remoteDeal({ id: 'd1', status: 'open' })],
+    }));
+    const props: any = { t: { podium: 'B' }, setTweak: vi.fn(), go, active: false, currentUser: manager() };
+    render(<Home {...props} />);
+    fireEvent.click(screen.getByText('negociações em andamento'));
+    expect(go).toHaveBeenCalledWith('propostas');
+  });
+
+  it('independência: Leads error + Deals ready — Deals summary continua disponível', () => {
+    const refetch = vi.fn();
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { isError: true, isEmpty: false, refetch } }),
+    );
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal({ id: 'd1', status: 'open' })],
+    }));
+    renderHome(manager());
+    expect(screen.getByText('Não foi possível carregar as métricas.')).toBeInTheDocument();
+    const card = screen.getByText('negociações em andamento').closest('button');
+    expect(card?.textContent).toContain('1');
+  });
+
+  it('nenhuma linguagem de aprovação/relação Task-Deal na nova seção remota', () => {
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true,
+      deals: [remoteDeal({ id: 'd1', status: 'open' })],
+    }));
+    renderHome(manager());
+    expect(screen.queryByText(/Negociações sem acompanhamento/)).toBeNull();
+    expect(screen.queryByText(/Negociações paradas/)).toBeNull();
+    expect(screen.queryByText(/Aguardando aprovação/)).toBeNull();
+    expect(screen.queryByText(/^Aprovar$/)).toBeNull();
+    expect(screen.queryByText(/Desconto pendente/)).toBeNull();
+  });
+});
+
+// ── K. Home Deals — modo local / flag OFF (regressão) ───────────────────
+describe('Home — Deals summary local/OFF preserva o legado (COMMERCIAL-REMOTE-DEALS-B7-B1)', () => {
+  it('Leads local: card legado "propostas aguardando aprovação" continua, "Negociações em andamento" NUNCA aparece', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+    renderHome(manager());
+    expect(screen.getByText('propostas aguardando aprovação')).toBeInTheDocument();
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
+  });
+
+  it('Home local completa (Podium/Ranking/MinhaDisputa/QuickActions) permanece intacta com Deals summary sempre chamado', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+    renderHome(manager());
+    expect(screen.getByText('PÓDIO DE CAMPEÕES')).toBeInTheDocument();
+    expect(screen.getByText('Ranking completo')).toBeInTheDocument();
+    expect(screen.getByText('Minha disputa')).toBeInTheDocument();
+    expect(screen.getByText('Ações rápidas')).toBeInTheDocument();
   });
 });
