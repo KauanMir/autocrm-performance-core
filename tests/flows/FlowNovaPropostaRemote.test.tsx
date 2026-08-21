@@ -378,6 +378,36 @@ describe('FlowNovaProposta — remote Manager', () => {
   });
 });
 
+// COMMERCIAL-REMOTE-DEALS-B6 — payload.vehicle é a autoridade da ponte
+// Visits→Negociações sobre o fallback remoteSelectedLead?.car
+// (B6-PRECHECK §11/§42). Abertura normal (sem a propriedade `vehicle`
+// no payload, como toda abertura via CTA/ScreenPropostas) precisa
+// continuar preenchendo o campo a partir do car do Lead — regressão do
+// B4, nunca quebrada pela distinção nova.
+describe('FlowNovaProposta — prefill de veículo via payload (ponte B6)', () => {
+  beforeEach(() => {
+    m.resolveDealRemoteMode.mockReturnValue('deal_remote_ready');
+  });
+
+  it('sem propriedade payload.vehicle: prefill normal a partir do car do Lead (regressão B4)', () => {
+    const lead = remoteLead({ car: 'HB20' });
+    renderFlow({ lead });
+    expect((screen.getByLabelText('Veículo') as HTMLInputElement).value).toBe('HB20');
+  });
+
+  it('payload.vehicle explicitamente vazio: campo Veículo vazio, NUNCA cai no car do Lead', () => {
+    const lead = remoteLead({ car: 'HB20' });
+    renderFlow({ lead, vehicle: '' });
+    expect((screen.getByLabelText('Veículo') as HTMLInputElement).value).toBe('');
+  });
+
+  it('payload.vehicle explícito (não vazio): usado como prefill, tem prioridade sobre o car do Lead', () => {
+    const lead = remoteLead({ car: 'HB20' });
+    renderFlow({ lead, vehicle: 'Onix Premier' });
+    expect((screen.getByLabelText('Veículo') as HTMLInputElement).value).toBe('Onix Premier');
+  });
+});
+
 describe('FlowNovaProposta — remote Seller', () => {
   beforeEach(() => {
     m.resolveDealRemoteMode.mockReturnValue('deal_remote_ready');

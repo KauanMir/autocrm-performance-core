@@ -36,7 +36,7 @@ import { startOfVisitLocalDay, formatVisitTime, formatVisitShortDate } from '@/l
 import { useCreateDeal } from '@/lib/hooks/useCreateDeal';
 import { useUpdateDeal } from '@/lib/hooks/useUpdateDeal';
 import { useMarkDealLost } from '@/lib/hooks/useMarkDealLost';
-import { resolveDealRemoteMode } from '@/lib/deals/remoteDealsMode';
+import { resolveDealRemoteMode, type DealRemoteMode } from '@/lib/deals/remoteDealsMode';
 import { isRemoteDealsError, REMOTE_DEALS_MUTATION_ERROR_MESSAGES_PT } from '@/lib/deals/errors';
 import { adaptRemoteDealRow, type RemoteDealRow, type RemoteDealModel } from '@/lib/deals/adapter';
 import { DEAL_STATUS_LABELS_PT, DEAL_PAYMENT_METHOD_LABELS_PT } from '@/lib/deals/labels';
@@ -1227,18 +1227,43 @@ function isRemoteVisitResultRetryable(error: unknown): boolean {
 }
 
 // B6-PRECHECK §14/§16-20: mensagem de continuidade adiada por outcome —
-// os três primeiros destinos (Venda/Proposta/Acompanhamento) não têm
-// backend remoto (confirmado por grep: zero tabela `deals`/`sales`, zero
-// hook useCreateDeal/useCreateSale; `criar-acompanhamento` em si nunca
+// sold/thinking não têm backend remoto (confirmado por grep: zero tabela
+// `sales`, zero hook useCreateSale; `criar-acompanhamento` em si nunca
 // ganhou branch local/remoto, mesmo Tasks tendo infra remota própria em
-// OUTRO fluxo — FlowNovaPendencia). no_interest não tem follow-up nem no
-// local hoje, então não precisa de nenhuma mensagem extra.
-const REMOTE_VISIT_RESULT_FOLLOWUP_MESSAGE: Record<VisitOutcome, string> = {
+// OUTRO fluxo — FlowNovaPendencia, reservado para o B7). no_interest não
+// tem follow-up nem no local hoje, então não precisa de nenhuma mensagem
+// extra. `negotiating` SAIU deste mapa fixo (COMMERCIAL-REMOTE-DEALS-B6) —
+// Deal ganhou backend remoto próprio (B2-A a B5) e agora tem até três
+// desfechos possíveis (ponte direta / Deals ainda não pronto / Lead não
+// resolvido), calculados dinamicamente por
+// remoteNegotiatingFollowupMessage logo abaixo, nunca uma string fixa.
+const REMOTE_VISIT_RESULT_FOLLOWUP_MESSAGE: Record<Exclude<VisitOutcome, 'negotiating'>, string> = {
   sold: ' A continuidade para Venda será disponibilizada após a migração desse módulo.',
-  negotiating: ' A continuidade para Proposta/Negociação será disponibilizada após a migração desse módulo.',
   thinking: ' A continuidade para Acompanhamento será disponibilizada após a migração desse fluxo.',
   no_interest: '',
 };
+
+// COMMERCIAL-REMOTE-DEALS-B6 — mensagem de sucesso para outcome
+// 'negotiating' quando a ponte para Nova negociação NÃO dispara (os três
+// cenários em que FlowRegistrarResultadoRemoto ainda mostra o success
+// state normal em vez de já ter chamado openFlow('nova-proposta', ...)).
+// B6-PRECHECK §18: nunca menciona migração/flag/Supabase/rollout — o
+// vendedor não precisa saber por que a negociação não abriu sozinha,
+// só o que fazer a seguir quando há algo acionável (vincular a um
+// cliente). Quando os três requisitos da ponte já estão satisfeitos
+// (Deals pronto + leadId presente + Lead resolvido), este helper nunca é
+// chamado — a ponte já teria dado openFlow antes de qualquer render deste
+// bloco.
+function remoteNegotiatingFollowupMessage(
+  dealMode: DealRemoteMode,
+  visitLeadId: string | null,
+  resolvedLead: LeadModel | null,
+): string {
+  if (dealMode !== 'deal_remote_ready') return '';
+  if (visitLeadId === null) return ' Para criar uma negociação, vincule esta visita a um cliente cadastrado.';
+  if (resolvedLead === null) return ' Não foi possível preparar a negociação automaticamente.';
+  return '';
+}
 
 const REMOTE_VISIT_RESULT_OPTS: ReadonlyArray<{ id: VisitOutcome; icon: string; title: string; desc: string; accent: string }> = [
   { id: 'sold', icon: 'trophy', title: 'Fechou negócio', desc: 'Cliente vai comprar', accent: '#E8CE72' },
@@ -1252,15 +1277,22 @@ const REMOTE_VISIT_RESULT_OPTS: ReadonlyArray<{ id: VisitOutcome; icon: string; 
 // NOVO, REMOTE-ONLY (mesmo padrão de FlowReagendarVisita, B5): o registro
 // local continua inteiramente dentro de FlowRegistrarResultado (abaixo,
 // intocado), que abre registrar-venda/nova-proposta/criar-acompanhamento
-// — este flow NUNCA abre nenhum deles, mesmo com outcome sold/negotiating/
-// thinking (REGRA ABSOLUTA do B6-PRECHECK §15): nenhum desses três
-// destinos tem backend remoto (confirmado por grep — zero infraestrutura
-// de Deal/Sale, e o entry point de Task usado aqui nunca foi migrado). O
-// success state mostra uma mensagem de continuidade adiada em vez de
-// qualquer botão "próximo passo" — o outcome já está persistido de forma
-// atômica e durável na própria Visit assim que a RPC responde; não é uma
-// etapa pendente da mesma mutation, nem precisa ser.
-export function FlowRegistrarResultadoRemoto({ payload, close }: any) {
+// — este flow NUNCA abre nenhum deles para os outcomes sold/thinking
+// (mesma regra de sempre: nenhum dos dois tem backend remoto). O outcome
+// já está persistido de forma atômica e durável na própria Visit assim
+// que a RPC responde; não é uma etapa pendente da mesma mutation.
+//
+// COMMERCIAL-REMOTE-DEALS-B6 — 'negotiating' deixou de ser uma regra
+// absoluta de "nunca abre nada": Deal ganhou backend remoto completo
+// (B2-A a B5). A ponte SÓ dispara depois que register_visit_result já
+// respondeu com sucesso (B6-PRECHECK §4) — nunca um Visit result
+// otimista — e só quando os três requisitos abaixo (linha
+// `canBridgeToNegotiation`) estão satisfeitos simultaneamente. Fora
+// disso, o success state normal aparece com uma mensagem apropriada ao
+// motivo (Deals ainda não pronto / Visit standalone / Lead não
+// resolvido), nunca chamando create_deal automaticamente nem caindo em
+// FlowNovaProposta local/DealService (B6-PRECHECK §5/§21).
+export function FlowRegistrarResultadoRemoto({ payload, close, openFlow }: any) {
   const visit: RemoteVisitModel | undefined = payload.visit;
 
   const [outcome, setOutcome] = useState<VisitOutcome | null>(null);
@@ -1277,17 +1309,38 @@ export function FlowRegistrarResultadoRemoto({ payload, close }: any) {
   const identityUserIsActive = Boolean(user);
   const identityKey = identityUserId && identityCompanyId ? `${identityUserId}:${identityCompanyId}` : null;
 
-  // Hook SEMPRE chamado, incondicionalmente, antes de qualquer return
-  // (inclusive o `!visit` abaixo) — Rules of Hooks.
+  // Hooks SEMPRE chamados, incondicionalmente, antes de qualquer return
+  // (inclusive o `!visit` abaixo) — Rules of Hooks. useRemoteLeadsScreenState
+  // reusa o MESMO snapshot já usado por RemoteLeadPicker em
+  // FlowCriarVisita/FlowNovaProposta (B6-PRECHECK §7) — nenhuma query
+  // nova por Visit, nenhum LeadService local.
   const registerHook = useRegisterVisitResult({
     userId: identityUserId, companyId: identityCompanyId,
     membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
   });
+  const remoteLeadsScreen = useRemoteLeadsScreenState(user);
   useCloseOnIdentityChange(identityKey, close);
 
   if (!visit) return null;
 
   const canSave = Boolean(outcome && !submitting && !registerHook.isPending && !blocked);
+
+  // B6-PRECHECK §6/§17: modo de Deals recalculado neste render — só
+  // 'deal_remote_ready' habilita a ponte. Lead "resolvido" exige o
+  // snapshot já carregado sem erro (nunca esperar indefinidamente:
+  // loading/error colapsam para null, mesmo tratamento de "não
+  // encontrado" — o Visit result não fica bloqueado por isso).
+  const dealMode = resolveDealRemoteMode();
+  const resolvedLead: LeadModel | null =
+    visit.leadId !== null && !remoteLeadsScreen.leads.isLoading && !remoteLeadsScreen.leads.isError
+      ? (remoteLeadsScreen.leads.leads.find((l) => l.id === visit.leadId) ?? null)
+      : null;
+  // B6-PRECHECK §10/§12: 1 veículo útil -> prefill; 0 ou 2+ -> vazio,
+  // nunca escolhido arbitrariamente. Trim + remoção de vazios antes de
+  // contar (mesma sanitização já usada em vehicles[] alhures).
+  const usefulVisitVehicles = visit.vehicles.map((v) => v.trim()).filter((v) => v !== '');
+  const bridgeVehicle = usefulVisitVehicles.length === 1 ? usefulVisitVehicles[0] : '';
+  const canBridgeToNegotiation = dealMode === 'deal_remote_ready' && visit.leadId !== null && resolvedLead !== null;
 
   const handleSave = async () => {
     if (!canSave || !outcome) return;
@@ -1300,11 +1353,26 @@ export function FlowRegistrarResultadoRemoto({ payload, close }: any) {
         outcome,
         resultNote: note.trim(),
       });
+      // B6-PRECHECK §8/§19: transição direta, SEM success state
+      // intermediário da Visit — flow substitui atomicamente
+      // (App.tsx: openFlow -> setFlow, um único objeto de estado, nunca
+      // dois flows simultâneos). §20: encerra submitting antes de trocar
+      // de flow (o componente atual está prestes a desmontar).
+      if (outcome === 'negotiating' && canBridgeToNegotiation) {
+        setSubmitting(false);
+        // B6-PRECHECK §9/§11: chave `lead` já congelada pelo B4 (nenhuma
+        // segunda convenção), `vehicle` sempre explícito (mesmo quando
+        // '') para nunca cair no fallback do car do Lead dentro de
+        // FlowNovaProposta quando a Visit tinha 0 ou 2+ veículos.
+        openFlow('nova-proposta', { lead: resolvedLead, vehicle: bridgeVehicle });
+        return;
+      }
       setDone(outcome);
     } catch (err) {
       // Mesmo padrão de FlowReagendarVisita/FlowNovaPendencia:
       // identity_changed fecha o flow diretamente, nunca mostra o erro da
-      // sessão antiga.
+      // sessão antiga (e nunca chega perto da ponte — ela só é avaliada
+      // depois de um `await` que já teria lançado aqui).
       if (isRemoteVisitsError(err) && err.code === 'remote_visits_mutation_identity_changed') {
         close();
         return;
@@ -1319,10 +1387,13 @@ export function FlowRegistrarResultadoRemoto({ payload, close }: any) {
   if (done) {
     const o = REMOTE_VISIT_RESULT_OPTS.find((x) => x.id === done)!;
     const successAccent = o.accent === '#8B8B93' ? '#27C75F' : o.accent;
+    const followupMessage = done === 'negotiating'
+      ? remoteNegotiatingFollowupMessage(dealMode, visit.leadId, resolvedLead)
+      : REMOTE_VISIT_RESULT_FOLLOWUP_MESSAGE[done];
     return (
       <FlowShell eyebrow="RESULTADO DA VISITA" title="Resultado registrado" icon="clipboard" accent={successAccent} onClose={close}>
         <FlowSuccess icon="checkCircle" accent={successAccent} title={`Resultado registrado: ${o.title}`}
-          sub={`O resultado da visita foi salvo.${REMOTE_VISIT_RESULT_FOLLOWUP_MESSAGE[done]}`}
+          sub={`O resultado da visita foi salvo.${followupMessage}`}
           actions={<LBtn kind="ghost" size="lg" icon="check" onClick={close}>Fechar</LBtn>} />
       </FlowShell>
     );
@@ -1623,12 +1694,22 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
 
   // B4-PRECHECK §7/§10: aceita um Lead remoto já preselecionado via
   // payload (mesma chave `payload.lead` que o branch local já lê) — B6
-  // (Visit negotiating → Nova negociação) é quem efetivamente vai passar
-  // isso no futuro; nenhuma integração com Visits nasce aqui, só a
-  // arquitetura não fecha a porta.
+  // (Visit negotiating → Nova negociação) é o consumidor real desta
+  // ponte, chamando openFlow('nova-proposta', { lead, vehicle }).
   const [remoteSelectedLead, setRemoteSelectedLead] = useState<LeadModel | null>(payload.lead ?? null);
   const [remoteClientQuery, setRemoteClientQuery] = useState(remoteSelectedLead ? remoteSelectedLead.name : '');
-  const [remoteVehicle, setRemoteVehicle] = useState(remoteSelectedLead?.car ?? '');
+  // COMMERCIAL-REMOTE-DEALS-B6 — `payload.vehicle` (quando a PROPRIEDADE
+  // existe, mesmo que '') é sempre a autoridade sobre o fallback
+  // remoteSelectedLead?.car: a ponte de Visits precisa conseguir dizer
+  // "não faça fallback aqui" quando a Visit tinha 0 ou 2+ veículos úteis
+  // (B6-PRECHECK §11) — `payload.vehicle ?? remoteSelectedLead?.car`
+  // não distinguiria isso de uma abertura normal sem essa propriedade,
+  // já que '' e undefined colapsariam no mesmo `?? fallback`. Toda
+  // abertura fora da ponte nunca inclui `vehicle` no payload, preservando
+  // o comportamento já testado do B4 sem nenhuma mudança.
+  const [remoteVehicle, setRemoteVehicle] = useState(
+    'vehicle' in payload ? (payload.vehicle ?? '') : (remoteSelectedLead?.car ?? ''),
+  );
   const [remoteValueInput, setRemoteValueInput] = useState('');
   const [remotePaymentMethod, setRemotePaymentMethod] = useState<RemoteDealRow['payment_method'] | null>(null);
   const [remoteDownPaymentInput, setRemoteDownPaymentInput] = useState('');

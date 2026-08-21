@@ -1,15 +1,26 @@
 // Testes de FlowRegistrarResultadoRemoto — cutover de registro remoto de
-// resultado (COMMERCIAL-REMOTE-VISITS-B6-B). useRegisterVisitResult é
-// mockado diretamente no nível do componente — mesmo padrão de
-// tests/flows/FlowReagendarVisitaRemote.test.tsx (evita QueryClientProvider
+// resultado (COMMERCIAL-REMOTE-VISITS-B6-B) + ponte Visits→Negociações
+// (COMMERCIAL-REMOTE-DEALS-B6). useRegisterVisitResult/
+// useRemoteLeadsScreenState/resolveDealRemoteMode são mockados
+// diretamente no nível do componente — mesmo padrão de
+// tests/flows/FlowNovaPropostaRemote.test.tsx (evita QueryClientProvider
 // real; a integração completa da mutation já está coberta em
 // tests/hooks/useRegisterVisitResult.test.tsx). Este flow é REMOTE-ONLY
 // (nenhum branch local): FlowRegistrarResultado local, intocada, continua
 // abrindo registrar-venda/nova-proposta/criar-acompanhamento LOCAIS, fora
-// do escopo deste arquivo — a regra absoluta provada aqui é o oposto:
-// NENHUM desses três (nem SaleService/DealService/TaskService/
-// LeadService.updateHealth) é chamado a partir deste flow, em nenhum dos
-// 4 outcomes.
+// do escopo deste arquivo.
+//
+// Regra absoluta preservada para sold/thinking/no_interest: NENHUM
+// destino local (nem SaleService/DealService/TaskService/
+// LeadService.updateHealth) é chamado a partir deste flow. `negotiating`
+// deixou de ser absoluto no B6: a ponte para Nova negociação SÓ dispara
+// quando resolveDealRemoteMode()==='deal_remote_ready' E o Lead da Visit
+// é resolvido a partir do snapshot remoto já carregado — testado à
+// exaustão nas suítes "ponte" abaixo. Por padrão (beforeEach),
+// resolveDealRemoteMode retorna 'deal_local' e o snapshot de Leads vem
+// vazio — todos os testes genéricos herdados do B6-B continuam
+// corretos sem qualquer mudança de setup (a ponte nunca dispara sob o
+// default).
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -18,6 +29,8 @@ import { RemoteVisitsError } from '@/lib/visits/errors';
 const m = vi.hoisted(() => ({
   user: { current: null as any },
   useRegisterVisitResult: vi.fn(),
+  useRemoteLeadsScreenState: vi.fn(),
+  resolveDealRemoteMode: vi.fn(),
   visitServiceUpdate: vi.fn(),
   leadServiceAddToTimeline: vi.fn(),
   leadServiceUpdateHealth: vi.fn(),
@@ -29,6 +42,12 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks/useRegisterVisitResult', () => ({
   useRegisterVisitResult: m.useRegisterVisitResult,
+}));
+vi.mock('@/lib/hooks/useRemoteLeadsScreenState', () => ({
+  useRemoteLeadsScreenState: m.useRemoteLeadsScreenState,
+}));
+vi.mock('@/lib/deals/remoteDealsMode', () => ({
+  resolveDealRemoteMode: m.resolveDealRemoteMode,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -53,6 +72,30 @@ function manager(overrides: Partial<Record<string, unknown>> = {}) {
 
 function registerHookResult(registerVisitResult: any, over: Partial<Record<string, unknown>> = {}) {
   return { registerVisitResult, isPending: false, isError: false, isSuccess: false, error: null, reset: vi.fn(), ...over };
+}
+
+function leadsScreenResult(leads: any[] = [], over: Partial<Record<string, unknown>> = {}) {
+  return {
+    mode: 'remote_active',
+    pipeline: {},
+    sellerLabels: {},
+    leads: {
+      remoteLeadsEnabled: true, queryEnabled: true, queryKey: [],
+      leads, isLoading: false, isFetching: false, isError: false, error: null, configError: null,
+      isEmpty: leads.length === 0, hasData: leads.length > 0, refetch: vi.fn(),
+      ...over,
+    },
+  };
+}
+
+function remoteLead(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'lead-1', name: 'Cliente Remoto', phone: '11999990000', car: 'Onix', stage: 'Novo', seller: 'Vendedor Um',
+    sellerId: 's1', urgency: 'green', last: '-', alert: '-', pay: '-', value: '-',
+    stageId: 'stage-1', stageCode: 'novo', valueAmount: null, archivedAt: null, version: 1,
+    createdAt: '2026-08-01T00:00:00Z', createdByUserId: null, updatedAt: '2026-08-01T00:00:00Z', updatedByProfileId: null,
+    ...over,
+  };
 }
 
 function remoteVisit(over: Partial<Record<string, unknown>> = {}) {
@@ -90,6 +133,8 @@ beforeEach(() => {
   m.openFlow.mockReset();
   registerVisitResultSpy = vi.fn().mockResolvedValue({});
   m.useRegisterVisitResult.mockReset().mockImplementation(() => registerHookResult(registerVisitResultSpy));
+  m.useRemoteLeadsScreenState.mockReset().mockImplementation(() => leadsScreenResult([]));
+  m.resolveDealRemoteMode.mockReset().mockReturnValue('deal_local');
   m.user.current = manager();
 });
 
@@ -198,13 +243,19 @@ describe('FlowRegistrarResultadoRemoto — success UX por outcome', () => {
     expect(screen.queryByText('Registrar venda')).toBeNull();
   });
 
-  it('negotiating: título "Em negociação", mensagem de continuidade de Proposta adiada', async () => {
+  it('negotiating (Deals ainda não pronto): título "Em negociação", sem mensagem de migração/flag/rollout', async () => {
+    // COMMERCIAL-REMOTE-DEALS-B6: a antiga mensagem "será disponibilizada
+    // após a migração deste módulo" foi removida de propósito para
+    // negotiating (B6-PRECHECK §18) — Deals já migrou, só não está
+    // remote-ready nesta sessão. Mesmo tratamento neutro de no_interest.
     renderFlow({ visit: remoteVisit() });
     pickOutcome('Em negociação');
     submit();
     expect(await screen.findByText('Resultado registrado: Em negociação')).toBeInTheDocument();
-    expect(screen.getByText(/continuidade para Proposta\/Negociação será disponibilizada/)).toBeInTheDocument();
+    expect(screen.queryByText(/será disponibilizad/)).toBeNull();
+    expect(screen.queryByText(/migração|migration|flag|Supabase|rollout/i)).toBeNull();
     expect(screen.queryByText('Montar proposta')).toBeNull();
+    expect(m.openFlow).not.toHaveBeenCalled();
   });
 
   it('thinking: título "Vai pensar", mensagem de continuidade de Acompanhamento adiada', async () => {
@@ -293,5 +344,143 @@ describe('FlowRegistrarResultadoRemoto — identity_changed', () => {
 
     await waitFor(() => expect(close).toHaveBeenCalled());
     expect(screen.queryByText(/Resultado registrado/)).toBeNull();
+  });
+
+  it('identity_changed durante a ponte: zero Nova negociação, zero mutation Deals (B6-PRECHECK §22)', async () => {
+    m.resolveDealRemoteMode.mockReturnValue('deal_remote_ready');
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead()]));
+    registerVisitResultSpy.mockRejectedValueOnce(new RemoteVisitsError('remote_visits_mutation_identity_changed', { operation: 'register_visit_result' }));
+    const { close } = renderFlow({ visit: remoteVisit({ leadId: 'lead-1' }) });
+    pickOutcome('Em negociação');
+    submit();
+
+    await waitFor(() => expect(close).toHaveBeenCalled());
+    expect(m.openFlow).not.toHaveBeenCalled();
+  });
+});
+
+// ── COMMERCIAL-REMOTE-DEALS-B6 — ponte Visits → Negociações ─────────────
+
+describe('FlowRegistrarResultadoRemoto — ponte: Visit vinculada + Deals pronto', () => {
+  beforeEach(() => {
+    m.resolveDealRemoteMode.mockReturnValue('deal_remote_ready');
+  });
+
+  it('negotiating + Lead resolvido: transição direta para Nova negociação, ZERO create_deal automático', async () => {
+    const lead = remoteLead({ id: 'lead-1', name: 'Cliente Remoto' });
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([lead]));
+    renderFlow({ visit: remoteVisit({ leadId: 'lead-1', vehicles: ['Golf GTI 2022'] }) });
+    pickOutcome('Em negociação');
+    submit();
+
+    await waitFor(() => expect(m.openFlow).toHaveBeenCalledTimes(1));
+    expect(m.openFlow).toHaveBeenCalledWith('nova-proposta', { lead, vehicle: 'Golf GTI 2022' });
+    expect(m.dealServiceCreate).not.toHaveBeenCalled();
+    // Transição direta: nenhum success state intermediário da Visit.
+    expect(screen.queryByText(/Resultado registrado/)).toBeNull();
+  });
+
+  it('resultado da Visit falha: zero Nova negociação, zero create Deal (B6-PRECHECK §21)', async () => {
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead()]));
+    registerVisitResultSpy.mockRejectedValueOnce(new RemoteVisitsError('remote_visits_mutation_generic_error', { operation: 'register_visit_result' }));
+    renderFlow({ visit: remoteVisit({ leadId: 'lead-1' }) });
+    pickOutcome('Em negociação');
+    submit();
+
+    await screen.findByText('Não foi possível registrar o resultado. Tente novamente.');
+    expect(m.openFlow).not.toHaveBeenCalled();
+    expect(m.dealServiceCreate).not.toHaveBeenCalled();
+  });
+
+  it('Visit standalone (leadId null): zero Nova negociação, mensagem orienta a vincular um cliente', async () => {
+    renderFlow({ visit: remoteVisit({ leadId: null }) });
+    pickOutcome('Em negociação');
+    submit();
+
+    expect(await screen.findByText('Resultado registrado: Em negociação')).toBeInTheDocument();
+    expect(m.openFlow).not.toHaveBeenCalled();
+    expect(screen.getByText(/vincule esta visita a um cliente cadastrado/)).toBeInTheDocument();
+  });
+
+  it('Visit vinculada mas Lead não resolvido no snapshot (ex.: arquivado): zero Nova negociação, mensagem neutra', async () => {
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([])); // Lead não está no snapshot
+    renderFlow({ visit: remoteVisit({ leadId: 'lead-arquivado' }) });
+    pickOutcome('Em negociação');
+    submit();
+
+    expect(await screen.findByText('Resultado registrado: Em negociação')).toBeInTheDocument();
+    expect(m.openFlow).not.toHaveBeenCalled();
+    expect(screen.getByText(/Não foi possível preparar a negociação automaticamente\./)).toBeInTheDocument();
+    // Nunca a mensagem de standalone — a Visit TEM leadId, só não achou o Lead.
+    expect(screen.queryByText(/vincule esta visita a um cliente cadastrado/)).toBeNull();
+  });
+
+  it('snapshot de Leads em loading: mesmo tratamento de não-resolvido, Visit result não fica bloqueada', async () => {
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead()], { isLoading: true }));
+    renderFlow({ visit: remoteVisit({ leadId: 'lead-1' }) });
+    pickOutcome('Em negociação');
+    submit();
+
+    expect(await screen.findByText('Resultado registrado: Em negociação')).toBeInTheDocument();
+    expect(m.openFlow).not.toHaveBeenCalled();
+    expect(registerVisitResultSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('snapshot de Leads em erro: mesmo tratamento de não-resolvido', async () => {
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead()], { isError: true }));
+    renderFlow({ visit: remoteVisit({ leadId: 'lead-1' }) });
+    pickOutcome('Em negociação');
+    submit();
+
+    expect(await screen.findByText('Resultado registrado: Em negociação')).toBeInTheDocument();
+    expect(m.openFlow).not.toHaveBeenCalled();
+  });
+});
+
+describe.each(['deal_local', 'deal_blocked', 'deal_remote_misconfigured'] as const)(
+  'FlowRegistrarResultadoRemoto — ponte bloqueada: Deals em %s (CRÍTICO — zero fallback local)',
+  (dealMode) => {
+    it('negotiating + Lead resolvido: resultado salvo normalmente, zero Nova negociação, zero FlowNovaProposta local, zero DealService', async () => {
+      m.resolveDealRemoteMode.mockReturnValue(dealMode);
+      m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead()]));
+      renderFlow({ visit: remoteVisit({ leadId: 'lead-1' }) });
+      pickOutcome('Em negociação');
+      submit();
+
+      expect(await screen.findByText('Resultado registrado: Em negociação')).toBeInTheDocument();
+      expect(m.openFlow).not.toHaveBeenCalled();
+      expect(m.dealServiceCreate).not.toHaveBeenCalled();
+    });
+  },
+);
+
+describe('FlowRegistrarResultadoRemoto — ponte: prefill de veículo (CRÍTICO)', () => {
+  beforeEach(() => {
+    m.resolveDealRemoteMode.mockReturnValue('deal_remote_ready');
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead({ id: 'lead-1', car: 'HB20' })]));
+  });
+
+  it('exatamente 1 veículo útil (com espaços): prefilled, trimmed', async () => {
+    renderFlow({ visit: remoteVisit({ leadId: 'lead-1', vehicles: [' Onix Premier '] }) });
+    pickOutcome('Em negociação');
+    submit();
+    await waitFor(() => expect(m.openFlow).toHaveBeenCalledTimes(1));
+    expect(m.openFlow.mock.calls[0][1].vehicle).toBe('Onix Premier');
+  });
+
+  it('0 veículos: vazio, NUNCA usa o car do Lead (HB20) como fallback', async () => {
+    renderFlow({ visit: remoteVisit({ leadId: 'lead-1', vehicles: [] }) });
+    pickOutcome('Em negociação');
+    submit();
+    await waitFor(() => expect(m.openFlow).toHaveBeenCalledTimes(1));
+    expect(m.openFlow.mock.calls[0][1].vehicle).toBe('');
+  });
+
+  it('2+ veículos: vazio, nenhuma escolha arbitrária, NUNCA usa o car do Lead (HB20)', async () => {
+    renderFlow({ visit: remoteVisit({ leadId: 'lead-1', vehicles: ['Onix', 'Polo'] }) });
+    pickOutcome('Em negociação');
+    submit();
+    await waitFor(() => expect(m.openFlow).toHaveBeenCalledTimes(1));
+    expect(m.openFlow.mock.calls[0][1].vehicle).toBe('');
   });
 });
