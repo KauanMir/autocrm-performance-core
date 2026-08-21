@@ -1,11 +1,19 @@
 // Testes de FlowVerNegociacao — detalhe/edição/marcar-perdida remoto de
-// uma Negociação existente (COMMERCIAL-REMOTE-DEALS-B5). useUpdateDeal/
+// uma Negociação existente (COMMERCIAL-REMOTE-DEALS-B5) + CTA opcional de
+// acompanhamento (COMMERCIAL-REMOTE-DEALS-B7-A). useUpdateDeal/
 // useMarkDealLost/useCurrentCompanyAssignableSellers/
-// useCurrentCompanySellerLabels são mockados diretamente no nível do
-// componente — mesmo padrão de tests/flows/FlowNovaPropostaRemote.test.tsx
-// (evita QueryClientProvider real). Flow REMOTE-ONLY: nenhum branch local,
-// gate fica inteiramente em FlowLayer (coberto em FlowLayer.test.tsx) —
-// aqui só a lógica interna do componente.
+// useCurrentCompanySellerLabels/useRemoteLeadsScreenState são mockados
+// diretamente no nível do componente — mesmo padrão de
+// tests/flows/FlowNovaPropostaRemote.test.tsx (evita QueryClientProvider
+// real). Flow REMOTE-ONLY: nenhum branch local, gate fica inteiramente em
+// FlowLayer (coberto em FlowLayer.test.tsx) — aqui só a lógica interna do
+// componente.
+//
+// useRemoteLeadsScreenState tem default de snapshot VAZIO (leadsScreenResult
+// vazio) — "Agendar acompanhamento" fica ausente por padrão em todos os
+// testes herdados do B5 (nenhuma mudança de comportamento neles); os
+// testes dedicados da suíte "ponte de acompanhamento" abaixo fornecem um
+// Lead correspondente explicitamente.
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -17,6 +25,7 @@ const m = vi.hoisted(() => ({
   useMarkDealLost: vi.fn(),
   useCurrentCompanyAssignableSellers: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
+  useRemoteLeadsScreenState: vi.fn(),
   dealServiceCreate: vi.fn(),
   dealServiceGetAll: vi.fn(() => [] as any[]),
   leadServiceGetAll: vi.fn(() => [] as any[]),
@@ -29,6 +38,9 @@ vi.mock('@/lib/hooks/useCurrentCompanyAssignableSellers', () => ({
 }));
 vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
   useCurrentCompanySellerLabels: m.useCurrentCompanySellerLabels,
+}));
+vi.mock('@/lib/hooks/useRemoteLeadsScreenState', () => ({
+  useRemoteLeadsScreenState: m.useRemoteLeadsScreenState,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -103,6 +115,30 @@ function sellerLabelsResult(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+function leadsScreenResult(leads: any[] = [], over: Partial<Record<string, unknown>> = {}) {
+  return {
+    mode: 'remote_active',
+    pipeline: {},
+    sellerLabels: {},
+    leads: {
+      remoteLeadsEnabled: true, queryEnabled: true, queryKey: [],
+      leads, isLoading: false, isFetching: false, isError: false, error: null, configError: null,
+      isEmpty: leads.length === 0, hasData: leads.length > 0, refetch: vi.fn(),
+      ...over,
+    },
+  };
+}
+
+function remoteLead(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'lead-1', name: 'Carlos Andrade', phone: '11999990000', car: 'Golf GTI 2022', stage: 'Em negociação', seller: 'Ana Assignable',
+    sellerId: 's1', urgency: 'green', last: '-', alert: '-', pay: '-', value: '-',
+    stageId: 'stage-1', stageCode: 'negociacao', valueAmount: null, archivedAt: null, version: 1,
+    createdAt: '2026-08-01T00:00:00Z', createdByUserId: null, updatedAt: '2026-08-01T00:00:00Z', updatedByProfileId: null,
+    ...over,
+  };
+}
+
 let updateDealSpy: ReturnType<typeof vi.fn>;
 let markDealLostSpy: ReturnType<typeof vi.fn>;
 
@@ -123,6 +159,7 @@ beforeEach(() => {
   m.useMarkDealLost.mockReset().mockImplementation(() => lostHookResult(markDealLostSpy));
   m.useCurrentCompanyAssignableSellers.mockReset().mockImplementation(() => assignableSellersResult());
   m.useCurrentCompanySellerLabels.mockReset().mockImplementation(() => sellerLabelsResult());
+  m.useRemoteLeadsScreenState.mockReset().mockImplementation(() => leadsScreenResult([]));
   m.user.current = manager();
 });
 
@@ -453,5 +490,76 @@ describe('FlowVerNegociacao — zero fetch novo, zero fallback local', () => {
     expect(m.dealServiceGetAll).not.toHaveBeenCalled();
     expect(m.dealServiceCreate).not.toHaveBeenCalled();
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
+  });
+});
+
+// ── COMMERCIAL-REMOTE-DEALS-B7-A — CTA opcional de acompanhamento ───────
+
+describe('FlowVerNegociacao — CTA "Agendar acompanhamento" (detalhe OPEN)', () => {
+  it('Lead resolvido: CTA presente junto de Editar/Marcar como perdida, clique abre nova-pendencia com {lead}, zero Deal mutation', async () => {
+    const lead = remoteLead({ id: 'lead-1' });
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([lead]));
+    const { openFlow } = renderFlow(remoteDeal({ leadId: 'lead-1', status: 'open' }));
+
+    expect(screen.getByText('Editar')).toBeInTheDocument();
+    expect(screen.getByText('Marcar como perdida')).toBeInTheDocument();
+    const cta = screen.getByText('Agendar acompanhamento');
+    fireEvent.click(cta);
+
+    expect(openFlow).toHaveBeenCalledTimes(1);
+    expect(openFlow).toHaveBeenCalledWith('nova-pendencia', { lead });
+    expect(m.dealServiceCreate).not.toHaveBeenCalled();
+    expect(updateDealSpy).not.toHaveBeenCalled();
+    expect(markDealLostSpy).not.toHaveBeenCalled();
+  });
+
+  it('payload nunca contém dealId/deal_id/sourceDealId — Task nasce Lead-scoped', async () => {
+    const lead = remoteLead({ id: 'lead-1' });
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([lead]));
+    const { openFlow } = renderFlow(remoteDeal({ id: 'deal-should-not-leak', leadId: 'lead-1' }));
+
+    fireEvent.click(screen.getByText('Agendar acompanhamento'));
+
+    const payload = openFlow.mock.calls[0][1];
+    expect(Object.keys(payload)).toEqual(['lead']);
+    expect('dealId' in payload).toBe(false);
+    expect('deal_id' in payload).toBe(false);
+    expect('sourceDealId' in payload).toBe(false);
+  });
+
+  it('Lead NÃO resolvido (snapshot vazio): CTA ausente, Editar/Marcar como perdida continuam disponíveis', () => {
+    renderFlow(remoteDeal({ leadId: 'lead-1', status: 'open' }));
+    expect(screen.getByText('Editar')).toBeInTheDocument();
+    expect(screen.getByText('Marcar como perdida')).toBeInTheDocument();
+    expect(screen.queryByText('Agendar acompanhamento')).toBeNull();
+  });
+
+  it('snapshot de Leads em loading/erro: mesmo tratamento de não-resolvido, CTA ausente', () => {
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead({ id: 'lead-1' })], { isLoading: true }));
+    renderFlow(remoteDeal({ leadId: 'lead-1', status: 'open' }));
+    expect(screen.queryByText('Agendar acompanhamento')).toBeNull();
+  });
+});
+
+describe.each(['lost', 'sold'] as const)('FlowVerNegociacao — CTA ausente em %s (terminal)', (status) => {
+  it('mesmo com Lead resolvido, "Agendar acompanhamento" nunca aparece', () => {
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead({ id: 'lead-1' })]));
+    renderFlow(remoteDeal({ leadId: 'lead-1', status, lostBy: status === 'lost' ? 'profile-1' : null, lostAt: status === 'lost' ? '2026-08-20T10:00:00Z' : null }));
+    expect(screen.queryByText('Agendar acompanhamento')).toBeNull();
+  });
+});
+
+describe('FlowVerNegociacao — CTA ausente após snapshot inoperável (terminal error)', () => {
+  it('stale_write no update: mesmo com Lead resolvido, CTA some junto de Editar/Marcar como perdida', async () => {
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([remoteLead({ id: 'lead-1' })]));
+    updateDealSpy.mockRejectedValue(new RemoteDealsError('remote_deals_mutation_stale_write' as any));
+    renderFlow(remoteDeal({ leadId: 'lead-1' }));
+    fireEvent.click(screen.getByText('Editar'));
+    fireEvent.click(screen.getByText('Salvar alterações'));
+
+    await waitFor(() => expect(screen.getByText('Esta negociação foi alterada. Os dados foram atualizados.')).toBeInTheDocument());
+    expect(screen.queryByText('Editar')).toBeNull();
+    expect(screen.queryByText('Marcar como perdida')).toBeNull();
+    expect(screen.queryByText('Agendar acompanhamento')).toBeNull();
   });
 });

@@ -1916,7 +1916,24 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
     return (
       <FlowShell eyebrow="NOVA NEGOCIAÇÃO" title="Negociação criada" icon="handshake" accent="#27C75F" onClose={close}>
         <FlowSuccess title="Negociação criada!" sub={`${remoteSelectedLead?.name ?? ''} · ${remoteVehicleTrimmed}.`}
-          actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+          actions={<>
+            {/* COMMERCIAL-REMOTE-DEALS-B7-A — acompanhamento OPCIONAL,
+                nunca obrigatório (B7-A-PRECHECK §4/§21): reusa
+                remoteSelectedLead já resolvido neste componente, zero
+                LeadService, zero query nova. Task nasce Lead-scoped
+                (payload.lead já é o contrato existente de
+                FlowNovaPendencia) — nenhum dealId/deal_id/sourceDealId é
+                passado, nunca uma relação Task→Deal fabricada
+                (B7-A-PRECHECK §2/§19: Task nunca "pertence" a esta
+                negociação, só ao cliente). CTA só existe quando há um
+                RemoteLeadModel real (create_deal já exige Lead, mas o
+                guard abaixo é defensivo — nunca um objeto {id,name}
+                parcial). */}
+            {remoteSelectedLead && (
+              <LBtn kind="ghost" size="lg" icon="clipboard" onClick={() => openFlow('nova-pendencia', { lead: remoteSelectedLead })}>Agendar acompanhamento</LBtn>
+            )}
+            <LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>
+          </>} />
       </FlowShell>
     );
   }
@@ -2025,7 +2042,7 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
 // mutation na mesma sessão do flow (ex.: editar depois marcar perdida)
 // sempre usa a version mais recente devolvida pelo servidor, nunca a
 // version com que o flow foi aberto.
-export function FlowVerNegociacao({ payload, close }: any) {
+export function FlowVerNegociacao({ payload, close, openFlow }: any) {
   const initialDeal: RemoteDealModel = payload.deal;
 
   const user = AuthService.getCurrentUser();
@@ -2058,6 +2075,13 @@ export function FlowVerNegociacao({ payload, close }: any) {
     userId: identityUserId, companyId: identityCompanyId,
     membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
   });
+  // COMMERCIAL-REMOTE-DEALS-B7-A — mesmo snapshot remoto já usado pelo
+  // bridge Visits→Negociações (B6) para resolver o RemoteLeadModel do CTA
+  // "Agendar acompanhamento": nenhuma query nova, nenhum LeadService,
+  // nenhum Lead fabricado — loading/error/não-encontrado colapsam para
+  // "não resolvido" (mesmo tratamento do B6), nunca bloqueando o detalhe
+  // da Deal em si (B7-A-PRECHECK §12).
+  const remoteLeadsScreen = useRemoteLeadsScreenState(user);
   useCloseOnIdentityChange(identityKey, close);
 
   const [currentDeal, setCurrentDeal] = useState<RemoteDealModel>(initialDeal);
@@ -2095,6 +2119,17 @@ export function FlowVerNegociacao({ payload, close }: any) {
   // continua disponível mesmo com terminalError (o usuário ainda pode ver
   // os últimos dados conhecidos, só não pode mais agir sobre eles).
   const canMutate = terminalError === null && currentDeal.status === 'open';
+
+  // B7-A-PRECHECK §11/§17: resolução best-effort do Lead para o CTA de
+  // acompanhamento — nunca bloqueia Editar/Marcar como perdida (que
+  // dependem só de canMutate, nunca deste valor). Ausente também quando o
+  // snapshot já está inoperável (terminalError setado) — usuário precisa
+  // fechar e reabrir a Deal atualizada antes de continuar qualquer ação.
+  const resolvedLead: LeadModel | null =
+    terminalError === null && !remoteLeadsScreen.leads.isLoading && !remoteLeadsScreen.leads.isError
+      ? (remoteLeadsScreen.leads.leads.find((l) => l.id === currentDeal.leadId) ?? null)
+      : null;
+  const canScheduleFollowUp = canMutate && resolvedLead !== null;
 
   // B5-PRECHECK §15/§16: prefill exato da condição comercial atual —
   // Cliente nunca entra aqui (imutável). discountPercent > 0 já nasce
@@ -2348,6 +2383,15 @@ export function FlowVerNegociacao({ payload, close }: any) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <LBtn kind="gold" icon="edit" onClick={enterEditMode}>Editar</LBtn>
             <LBtn kind="ghost" icon="xCircle" onClick={() => setLostConfirming(true)}>Marcar como perdida</LBtn>
+            {/* COMMERCIAL-REMOTE-DEALS-B7-A — mesmo espírito do CTA de
+                sucesso do B4: opcional, nunca obrigatório, Lead-scoped
+                (payload.lead já é o contrato existente de
+                FlowNovaPendencia, zero dealId). Ausente em lost/sold
+                (canMutate já exige open) e quando o Lead não resolve
+                (canScheduleFollowUp). */}
+            {canScheduleFollowUp && (
+              <LBtn kind="ghost" icon="clipboard" onClick={() => openFlow('nova-pendencia', { lead: resolvedLead })}>Agendar acompanhamento</LBtn>
+            )}
           </div>
         )}
         {canMutate && lostConfirming && (

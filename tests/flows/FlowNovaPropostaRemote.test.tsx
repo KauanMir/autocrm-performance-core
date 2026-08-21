@@ -167,6 +167,10 @@ describe('FlowNovaProposta — deal_local (preservado)', () => {
     }));
     expect(screen.getByText('Proposta enviada!')).toBeInTheDocument();
     expect(createDealSpy).not.toHaveBeenCalled();
+    // COMMERCIAL-REMOTE-DEALS-B7-A: CTA remoto nunca introduzido no
+    // success local — "Enviar ao cliente"/"Concluir" continuam os únicos
+    // botões, exatamente como antes do B7-A.
+    expect(screen.queryByText('Agendar acompanhamento')).toBeNull();
   });
 });
 
@@ -361,6 +365,34 @@ describe('FlowNovaProposta — remote Manager', () => {
     await waitFor(() => expect(screen.getByText('Negociação criada!')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Concluir'));
     expect(close).toHaveBeenCalled();
+  });
+
+  // COMMERCIAL-REMOTE-DEALS-B7-A — CTA opcional de acompanhamento.
+  it('sucesso: "Agendar acompanhamento" presente junto de "Concluir", opcional (Concluir direto não cria Task)', async () => {
+    const lead = remoteLead();
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([lead]));
+    const { close } = renderFlow();
+    fillMinimum();
+    fireEvent.click(screen.getByText('Criar negociação'));
+    await waitFor(() => expect(screen.getByText('Negociação criada!')).toBeInTheDocument());
+
+    expect(screen.getByText('Agendar acompanhamento')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Concluir'));
+    expect(close).toHaveBeenCalled();
+  });
+
+  it('"Agendar acompanhamento": abre nova-pendencia com {lead: remoteSelectedLead}, zero dealId no payload', async () => {
+    const lead = remoteLead();
+    m.useRemoteLeadsScreenState.mockImplementation(() => leadsScreenResult([lead]));
+    const { openFlow } = renderFlow();
+    fillMinimum();
+    fireEvent.click(screen.getByText('Criar negociação'));
+    await waitFor(() => expect(screen.getByText('Negociação criada!')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Agendar acompanhamento'));
+    expect(openFlow).toHaveBeenCalledWith('nova-pendencia', { lead });
+    const payload = openFlow.mock.calls.find((call) => call[0] === 'nova-pendencia')![1];
+    expect(Object.keys(payload)).toEqual(['lead']);
   });
 
   it('double-submit: clique repetido não gera segunda chamada', async () => {
