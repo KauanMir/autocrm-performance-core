@@ -47,6 +47,7 @@ vi.mock('@/components/flows/Flows2', () => ({
   FlowNovoCliente: stub('FlowNovoCliente'),
   FlowEditarCliente: stub('FlowEditarCliente'),
   FlowCriarVisita: stub('FlowCriarVisita'),
+  FlowReagendarVisita: stub('FlowReagendarVisita'),
   FlowConfirmarVisita: stub('FlowConfirmarVisita'),
   FlowRegistrarResultado: stub('FlowRegistrarResultado'),
   FlowNovaProposta: stub('FlowNovaProposta'),
@@ -217,6 +218,53 @@ describe('FlowLayer — criar-visita: gate caller-independent (B4-PRECHECK-R1 §
     renderFlow('criar-visita', { lead: { id: 'lead-1', name: 'Nome Real' } });
     expect(screen.queryByText('Nome Real')).toBeNull();
     expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+  });
+});
+
+// COMMERCIAL-REMOTE-VISITS-B5 — 'reagendar-visita' é um flow id NOVO
+// (nunca existiu em LOCAL_COMMERCIAL_FLOW_IDS), REMOTE-ONLY: diferente de
+// criar-visita, 'visit_local' também BLOQUEIA aqui — não existe
+// implementação local deste flow (o reagendamento local continua dentro
+// de FlowConfirmarVisita, que abre 'criar-visita', nunca este id).
+describe('FlowLayer — reagendar-visita permitido em visit_remote_ready', () => {
+  it('monta o componente real', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue('visit_remote_ready');
+    renderFlow('reagendar-visita', { visit: { id: 'v1' } });
+    expect(screen.getByText('FlowReagendarVisita')).toBeInTheDocument();
+    expect(screen.queryByText('Módulo indisponível')).toBeNull();
+  });
+});
+
+describe.each(['visit_local', 'visit_blocked', 'visit_remote_misconfigured'] as const)('FlowLayer — reagendar-visita bloqueado em %s', (mode) => {
+  it('mostra estado indisponível, nunca monta o componente real', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue(mode);
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(true);
+    renderFlow('reagendar-visita', { visit: { id: 'v1' } });
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+    expect(screen.queryByText('FlowReagendarVisita')).toBeNull();
+  });
+});
+
+describe('FlowLayer — reagendar-visita: gate caller-independent, e criar-visita/confirmar-visita/registrar-resultado sem widening', () => {
+  it('bloqueia reagendar-visita mesmo com payload.visit anexado, sem lê-lo', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue('visit_blocked');
+    renderFlow('reagendar-visita', { visit: { id: 'v1', clientName: 'Nome Real' } });
+    expect(screen.queryByText('Nome Real')).toBeNull();
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+  });
+
+  it('criar-visita continua permitido em visit_local e visit_remote_ready (regressão B4, não afetado por B5)', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue('visit_local');
+    renderFlow('criar-visita');
+    expect(screen.getByText('FlowCriarVisita')).toBeInTheDocument();
+  });
+
+  it('confirmar-visita/registrar-resultado continuam bloqueados fora do modo local (regressão)', () => {
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(false);
+    renderFlow('confirmar-visita');
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+    renderFlow('registrar-resultado');
+    expect(screen.getAllByText('Módulo indisponível').length).toBeGreaterThan(0);
   });
 });
 

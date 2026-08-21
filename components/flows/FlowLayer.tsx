@@ -5,7 +5,7 @@ import {
   FlowVerClienteArquivado, FlowRestaurarLead, FlowShell,
 } from './FlowsShared';
 import {
-  FlowNovoCliente, FlowEditarCliente, FlowCriarVisita, FlowConfirmarVisita,
+  FlowNovoCliente, FlowEditarCliente, FlowCriarVisita, FlowReagendarVisita, FlowConfirmarVisita,
   FlowRegistrarResultado, FlowNovaProposta, FlowAprovarProposta,
   FlowRegistrarVenda, FlowNovaPendencia, FlowReagendarPendencia, FlowCriarAcompanhamento,
 } from './Flows2';
@@ -26,6 +26,7 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'novo-cliente': FlowNovoCliente,
   'editar-cliente': FlowEditarCliente,
   'criar-visita': FlowCriarVisita,
+  'reagendar-visita': FlowReagendarVisita,
   'confirmar-visita': FlowConfirmarVisita,
   'registrar-resultado': FlowRegistrarResultado,
   'nova-proposta': FlowNovaProposta,
@@ -64,6 +65,12 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
 // a mutation, quando Visits não puder operar (visit_blocked/
 // visit_remote_misconfigured). Deal/Sale (Proposta/Venda) e
 // 'criar-acompanhamento' permanecem aqui — nenhum dos dois foi migrado.
+//
+// COMMERCIAL-REMOTE-VISITS-B5: 'reagendar-visita' é um flow id NOVO
+// (nunca esteve neste Set) — REMOTE-ONLY, gate dedicado próprio logo
+// abaixo (isVisitRescheduleFlowAllowed). 'confirmar-visita'/
+// 'registrar-resultado' permanecem aqui, inalterados — B5 não libera
+// Confirmar/Cancelar/Registrar resultado remotamente.
 const LOCAL_COMMERCIAL_FLOW_IDS = new Set<string>([
   'confirmar-visita', 'registrar-resultado',
   'nova-proposta', 'aprovar-proposta', 'registrar-venda',
@@ -102,6 +109,21 @@ function isVisitCreateFlowAllowed(): boolean {
   return mode === 'visit_local' || mode === 'visit_remote_ready';
 }
 
+// COMMERCIAL-REMOTE-VISITS-B5 — gate DEDICADO de 'reagendar-visita', mesmo
+// espírito de isVisitCreateFlowAllowed acima, mas mais estrito: este flow
+// é REMOTE-ONLY (B5-PRECHECK §24/§25) — não existe implementação local
+// (o reagendamento local continua inteiramente dentro do tile "Remarcar"
+// de FlowConfirmarVisita, que abre 'criar-visita', nunca este id). Por
+// isso 'visit_local' também bloqueia aqui — diferente de
+// isVisitCreateFlowAllowed, que precisa permitir local porque
+// FlowCriarVisita TEM um branch local real. Nenhuma row local jamais
+// chama openFlow('reagendar-visita'), então isto é defesa-em-profundidade
+// para um caminho já estruturalmente inalcançável em modo local, não uma
+// restrição funcional nova.
+function isVisitRescheduleFlowAllowed(): boolean {
+  return resolveVisitRemoteMode() === 'visit_remote_ready';
+}
+
 export function FlowLayer({ flow, close, openFlow, go }: {
   flow: { id: string; payload: any } | null;
   close: () => void;
@@ -118,6 +140,9 @@ export function FlowLayer({ flow, close, openFlow, go }: {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   if (flow.id === 'criar-visita' && !isVisitCreateFlowAllowed()) {
+    return <LocalCommercialFlowUnavailable close={close} />;
+  }
+  if (flow.id === 'reagendar-visita' && !isVisitRescheduleFlowAllowed()) {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   return <Comp payload={flow.payload || {}} close={close} openFlow={openFlow} go={go} />;

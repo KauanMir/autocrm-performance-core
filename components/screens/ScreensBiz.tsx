@@ -141,6 +141,13 @@ function RemoteVisitRow({ visit, sellersById, showDate }: {
         </div>
       </div>
       <LBadge tone={statusInfo.tone} solid={statusInfo.solid}>{statusInfo.label}</LBadge>
+      {/* COMMERCIAL-REMOTE-VISITS-B5: único controle de mutation nas rows
+          remotas até aqui — Confirmar/Cancelar/Registrar seguem fora de
+          escopo (B6). Seguro incondicionalmente: todo row que chega aqui
+          já tem status IN ('scheduled','confirmed') por construção
+          (groupVisitsForScreen nunca inclui completed/canceled em
+          nenhum dos 4 grupos), o mesmo universo que update_visit aceita. */}
+      <LBtn size="sm" kind="ghost" icon="refresh" onClick={() => (window as any).__openFlow('reagendar-visita', { visit })}>Remarcar</LBtn>
     </div>
   );
 }
@@ -239,14 +246,15 @@ export function ScreenVisitas({ go }: any) {
     ];
     return (
       <LightScreen>
-        {/* COMMERCIAL-REMOTE-VISITS-B4: "Agendar visita" volta a aparecer —
-            create_visit está conectado (FlowCriarVisita decide local/
-            remoto sozinho via resolveVisitRemoteMode(), FlowLayer autoriza
-            a abertura via o gate dedicado de 'criar-visita'). Nenhuma row
-            abaixo ainda renderiza Confirmar/Registrar (B4 é só CREATE,
-            update/confirm/cancel/register ficam para B5/B6) — FlowLayer
-            continua bloqueando 'confirmar-visita'/'registrar-resultado'
-            fora do modo local de qualquer forma. */}
+        {/* COMMERCIAL-REMOTE-VISITS-B4/B5: "Agendar visita" (create_visit)
+            e "Remarcar" por row (update_visit) estão conectados —
+            FlowCriarVisita/FlowReagendarVisita decidem sozinhos via
+            resolveVisitRemoteMode(), FlowLayer autoriza a abertura via os
+            gates dedicados de 'criar-visita'/'reagendar-visita'. Nenhuma
+            row abaixo renderiza Confirmar/Cancelar/Registrar resultado
+            (fora de escopo até B6) — FlowLayer continua bloqueando
+            'confirmar-visita'/'registrar-resultado' fora do modo local de
+            qualquer forma. */}
         <PageHead title="Visitas" sub={pageHeadSub} actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {remoteGroups.map((g) => (

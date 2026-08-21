@@ -24,10 +24,13 @@ import { combineLocalDateAndTimeToIso } from '@/lib/tasks/dueAtHelpers';
 import { startOfLocalDay } from '@/lib/tasks/deriveTaskState';
 import { isRemoteTasksError } from '@/lib/tasks/errors';
 import { useCreateVisit } from '@/lib/hooks/useCreateVisit';
+import { useUpdateVisit } from '@/lib/hooks/useUpdateVisit';
 import { resolveVisitRemoteMode } from '@/lib/visits/remoteVisitsMode';
 import { isRemoteVisitsError } from '@/lib/visits/errors';
 import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
 import type { LeadModel } from '@/lib/leads/adapter';
+import type { RemoteVisitModel } from '@/lib/visits/adapter';
+import { startOfVisitLocalDay, formatVisitTime, formatVisitShortDate } from '@/lib/visits/visitScreenGrouping';
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
 const TEMP_INFO: Record<string, string> = {
@@ -974,6 +977,209 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
       )}
     </FlowShell>
   );
+}
+
+// COMMERCIAL-REMOTE-VISITS-B5 — reagendamento remoto de uma Visit
+// EXISTENTE (mesma row, mesmo id, nunca cria uma segunda Visit). Flow
+// NOVO, REMOTE-ONLY (B5-PRECHECK §3/§24-25): o reagendamento local
+// continua inteiramente dentro do tile "Remarcar" de FlowConfirmarVisita
+// (abaixo, intocado) — marca a Visit antiga como RESCHEDULED e reabre
+// 'criar-visita' do zero, mesmo comportamento de sempre, este flow nunca
+// é chamado a partir dali.
+//
+// Escopo editável: SOMENTE data/hora (B5-PRECHECK §5) — vehicles/note/
+// assignedSellerId são sempre reenviados EXATAMENTE como já estão na
+// Visit (update_visit é full-replace no banco, mas a UI não expõe esses
+// campos aqui: não existe precedente local de editá-los durante
+// "Remarcar", e FlowReagendarPendencia — o precedente real mais próximo —
+// segue a mesma disciplina para Tasks, sem Seller picker e sem editar
+// title/note/priority). Seller enviado sempre = visit.assignedSellerId,
+// nunca alterado — confirmado contra a RPC (migration #52, update_visit):
+// reenviar o valor atual sem mudança nunca aciona a checagem de Seller
+// ativo/assignable, então um Seller histórico inativo nunca bloqueia o
+// reagendamento (B5-PRECHECK §15/§20).
+export function FlowReagendarVisita({ payload, close }: any) {
+  const visit: RemoteVisitModel | undefined = payload.visit;
+  const slots = ['09:00', '10:30', '14:00', '15:30', '17:00', '18:30'];
+
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // REOPEN REQUIRED (mesmo padrão de FlowReagendarPendencia): true após
+  // qualquer erro que não seja generic_error — bloqueia novos submits
+  // NESTA instância do flow (retry com o mesmo expectedVersion nunca
+  // teria sucesso).
+  const [blocked, setBlocked] = useState(false);
+
+  const user = AuthService.getCurrentUser();
+  const identityUserId = user?.id ?? null;
+  const identityCompanyId = user?.activeMembership?.companyId ?? null;
+  const identityMembershipRole = user?.activeMembership?.role ?? null;
+  const identityUserIsActive = Boolean(user);
+  const identityKey = identityUserId && identityCompanyId ? `${identityUserId}:${identityCompanyId}` : null;
+
+  // Hooks SEMPRE chamados, incondicionalmente, antes de qualquer return
+  // (inclusive o `!visit` abaixo) — Rules of Hooks.
+  const updateHook = useUpdateVisit({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  useCloseOnIdentityChange(identityKey, close);
+
+  // Prefill (B5-PRECHECK §7-9/§11-12): construído a partir do scheduledAt
+  // ATUAL da Visit via componentes LOCAIS do Date (nunca getUTCHours/
+  // getUTCDate) — tolerante a `visit` ausente (defaults neutros) só para
+  // manter os hooks de estado abaixo sempre chamáveis; o guard `!visit`
+  // real vem depois, após todos os hooks.
+  const prefillDate = visit ? new Date(visit.scheduledAt) : null;
+  const initialWhen = (() => {
+    if (!prefillDate) return 'Amanhã';
+    const now = new Date();
+    const diffDays = Math.round(
+      (startOfVisitLocalDay(prefillDate).getTime() - startOfVisitLocalDay(now).getTime()) / (24 * 60 * 60 * 1000),
+    );
+    if (diffDays === 0) return 'Hoje';
+    if (diffDays === 1) return 'Amanhã';
+    return 'Personalizado';
+  })();
+  const initialCustomDate = prefillDate
+    ? `${prefillDate.getFullYear()}-${String(prefillDate.getMonth() + 1).padStart(2, '0')}-${String(prefillDate.getDate()).padStart(2, '0')}`
+    : '';
+  const initialTimeValue = prefillDate ? formatVisitTime(prefillDate) : '';
+  const initialSlot = slots.includes(initialTimeValue) ? initialTimeValue : '';
+  const initialCustomTime = prefillDate && !slots.includes(initialTimeValue) ? initialTimeValue : '';
+
+  const [when, setWhen] = useState(initialWhen);
+  const [customDate, setCustomDate] = useState(initialCustomDate);
+  const [timeSlot, setTimeSlot] = useState(initialSlot);
+  const [customTime, setCustomTime] = useState(initialCustomTime);
+
+  if (!visit) return null;
+
+  const currentScheduledAtDate = new Date(visit.scheduledAt);
+  const finalTime = customTime.trim() || timeSlot;
+  const scheduled = resolveRemoteVisitScheduledAt(when, customDate, finalTime);
+  const hasRealChange = scheduled.result.ok
+    && new Date(scheduled.result.iso).getTime() !== currentScheduledAtDate.getTime();
+
+  const canSave = Boolean(
+    scheduled.result.ok
+    && !scheduled.isPast
+    && hasRealChange
+    && !submitting
+    && !updateHook.isPending
+    && !blocked,
+  );
+
+  const handleSave = async () => {
+    if (!canSave || !scheduled.result.ok) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await updateHook.updateVisit({
+        visitId: visit.id,
+        expectedVersion: visit.version,
+        scheduledAt: scheduled.result.iso,
+        vehicles: visit.vehicles,
+        note: visit.note,
+        assignedSellerId: visit.assignedSellerId,
+      });
+      close();
+    } catch (err) {
+      // Mesmo padrão de FlowReagendarPendencia/FlowNovaPendencia:
+      // identity_changed fecha o flow diretamente, nunca mostra erro da
+      // sessão antiga.
+      if (isRemoteVisitsError(err) && err.code === 'remote_visits_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(remoteVisitUpdateErrorMessage(err));
+      if (!isRemoteVisitUpdateRetryable(err)) setBlocked(true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const currentLabel = `${formatVisitShortDate(currentScheduledAtDate)}, ${formatVisitTime(currentScheduledAtDate)}`;
+
+  return (
+    <FlowShell eyebrow="REAGENDAR VISITA" title="Remarcar visita" icon="refresh" accent="#3B82F6" onClose={close}
+      footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="check"
+        onClick={handleSave}
+        style={{ opacity: canSave ? 1 : .5 }}>
+        {(submitting || updateHook.isPending) ? 'Reagendando…' : 'Reagendar'}
+      </LBtn></>}>
+      <div style={{ maxWidth: 520 }}>
+        <FPanel>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-900)', marginBottom: 4 }}>{visit.clientName}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginBottom: 16 }}>Atualmente: {currentLabel}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 9 }}>Nova data</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            {['Hoje', 'Amanhã', 'Personalizado'].map(d => <button key={d} onClick={() => setWhen(d)} className="lift" style={{ flex: '1 1 100px', padding: '14px 8px', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', border: `1px solid ${when === d ? 'rgba(59,130,246,.6)' : 'var(--border)'}`, background: when === d ? 'rgba(59,130,246,.12)' : 'rgba(255,255,255,.03)', color: when === d ? '#3B82F6' : 'var(--t-700)', fontWeight: 700, fontSize: 13.5 }} disabled={blocked}>{d}</button>)}
+          </div>
+          {when === 'Personalizado' && (
+            <FField label="Data" icon="calendar" type="date" value={customDate} onChange={(e: any) => setCustomDate(e.target.value)} min={scheduled.todayYMD} disabled={blocked} />
+          )}
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '4px 0 9px' }}>Horário disponível</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 12 }}>
+            {slots.map(s => <button key={s} onClick={() => { setTimeSlot(s); setCustomTime(''); }} className="lift" style={{ padding: '14px 8px', borderRadius: 12, cursor: 'pointer', fontFamily: 'Archivo, sans-serif', border: `1px solid ${!customTime && timeSlot === s ? 'rgba(59,130,246,.6)' : 'var(--border)'}`, background: !customTime && timeSlot === s ? 'rgba(59,130,246,.16)' : 'rgba(255,255,255,.03)', color: !customTime && timeSlot === s ? '#3B82F6' : 'var(--t-700)', fontWeight: 800, fontSize: 16 }} disabled={blocked}>{s}</button>)}
+          </div>
+          <FField label="Outro horário" icon="clock" type="time" value={customTime} onChange={(e: any) => setCustomTime(e.target.value)} disabled={blocked} />
+          {scheduled.isPast && <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--amber)' }}>Escolha uma data e horário futuros.</div>}
+          {scheduled.result.ok && !hasRealChange && !scheduled.isPast && (
+            <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--t-500)' }}>Escolha uma nova data ou horário para reagendar.</div>
+          )}
+          {submitError && (
+            <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--red-bg, rgba(255,59,59,.08))', border: '1px solid var(--red-line, rgba(255,59,59,.3))' }}>
+              <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{submitError}</span>
+            </div>
+          )}
+        </FPanel>
+      </div>
+    </FlowShell>
+  );
+}
+
+// Mensagens sanitizadas fixas do reagendamento remoto de Visit — mesmo
+// modelo de remoteVisitCreateErrorMessage/remoteTaskUpdateErrorMessage
+// (helper próprio deste flow, não compartilhado — mesma convenção usada
+// em toda a série). Cobre exatamente os códigos reais de update_visit
+// (migration #52, comentário "Erros estáveis" da função): forbidden,
+// visit_not_found, visit_closed, seller_required, seller_not_found,
+// invalid_vehicles, stale_write. identity_changed nunca chega aqui —
+// tratado antes, no catch do handler.
+function remoteVisitUpdateErrorMessage(error: unknown): string {
+  const code = isRemoteVisitsError(error) ? error.code : undefined;
+  switch (code) {
+    case 'remote_visits_mutation_forbidden':
+      return 'Você não tem permissão para reagendar esta visita.';
+    case 'remote_visits_mutation_visit_not_found':
+      return 'Esta visita não está mais disponível.';
+    case 'remote_visits_mutation_visit_closed':
+      return 'Esta visita já foi encerrada.';
+    case 'remote_visits_mutation_seller_required':
+      return 'Esta visita está sem um vendedor responsável válido.';
+    case 'remote_visits_mutation_seller_not_found':
+      return 'O vendedor responsável desta visita não está mais disponível.';
+    case 'remote_visits_mutation_invalid_vehicles':
+      return 'Esta visita possui dados de veículo inválidos e precisa ser atualizada.';
+    case 'remote_visits_mutation_stale_write':
+      return 'Esta visita foi alterada. Os dados foram atualizados.';
+    default:
+      return 'Não foi possível reagendar a visita. Tente novamente.';
+  }
+}
+
+// B5-PRECHECK §32: dentro deste flow o usuário não consegue corrigir
+// permissão/veículo/seller — resubmeter com o MESMO payload depois de
+// qualquer um desses erros sempre falharia de novo (stale_write em
+// particular: expectedVersion ficaria definitivamente obsoleto). Único
+// código genuinamente transitório é generic_error (ou qualquer erro não
+// reconhecido) — só ele permite nova tentativa na mesma instância do
+// flow; todos os outros exigem fechar e reabrir. Mesmo padrão exato de
+// isRemoteTaskUpdateRetryable.
+function isRemoteVisitUpdateRetryable(error: unknown): boolean {
+  const code = isRemoteVisitsError(error) ? error.code : undefined;
+  return code === undefined || code === 'remote_visits_mutation_generic_error';
 }
 
 export function FlowConfirmarVisita({ payload, close, openFlow }: any) {

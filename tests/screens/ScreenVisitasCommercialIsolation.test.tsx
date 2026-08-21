@@ -291,9 +291,9 @@ describe('ScreenVisitas — visit_remote_active com dado', () => {
   // (create_visit conectado) — abre o create flow remoto via openFlow,
   // nunca chama VisitService diretamente (a implementação local/remota é
   // decidida dentro de FlowCriarVisita, fora do escopo desta tela). Row
-  // actions (Confirmar/Registrar/Ver) continuam ausentes — só CREATE foi
-  // conectado neste lote.
-  it('"Agendar visita" abre o create flow remoto; nenhuma ação de mutation por row (Confirmar/Registrar/Ver)', () => {
+  // actions (Confirmar/Registrar/Ver) continuam ausentes — só CREATE/
+  // UPDATE (B5) foram conectados até aqui.
+  it('"Agendar visita" abre o create flow remoto; nenhuma ação de mutation por row salvo Remarcar (Confirmar/Registrar/Ver)', () => {
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
       hasData: true, visits: [remoteVisit()],
     }));
@@ -307,6 +307,23 @@ describe('ScreenVisitas — visit_remote_active com dado', () => {
     expect(screen.queryByText('Confirmar')).toBeNull();
     expect(screen.queryByText('Registrar')).toBeNull();
     expect(screen.queryByText('Ver')).toBeNull();
+    expect(VisitService.update).not.toHaveBeenCalled();
+  });
+
+  // COMMERCIAL-REMOTE-VISITS-B5: "Remarcar" por row abre o flow dedicado
+  // de reagendamento, passando a Visit remota completa — nunca chama
+  // VisitService.update diretamente (a mutation real acontece dentro de
+  // FlowReagendarVisita, fora do escopo desta tela).
+  it('"Remarcar" abre reagendar-visita com a Visit remota completa; VisitService.update nunca chamado', () => {
+    const visit = remoteVisit({ id: 'visit-remarcar-1' });
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [visit],
+    }));
+
+    render(<ScreenVisitas go={() => {}} />);
+
+    fireEvent.click(screen.getByText('Remarcar'));
+    expect(m.openFlow).toHaveBeenCalledWith('reagendar-visita', { visit });
     expect(VisitService.update).not.toHaveBeenCalled();
   });
 });
