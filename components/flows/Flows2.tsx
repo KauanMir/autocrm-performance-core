@@ -6,7 +6,7 @@ import { STAGES, VISIT_STATUS, DEAL_STATUS, SALE_STATUS, TASK_STATE } from '@/li
 import { AuthService, LeadService, VisitService, DealService, SaleService, TaskService, SellerService } from '@/lib/services';
 import {
   CARS, ORIGINS, PAYS,
-  FField, FArea, Segmented, ChoiceTile, ClientChip, LeadPicker, LocalSellerPicker, SellerPicker,
+  FField, FArea, Segmented, ChoiceTile, ClientChip, LeadPicker, RemoteLeadPicker, LocalSellerPicker, SellerPicker,
   FPanel, StepRail, SummaryRow, FlowShell, FlowSuccess, type SellerPickerItem,
 } from './FlowsShared';
 import { useCurrentCompanyAssignableSellers } from '@/lib/hooks/useCurrentCompanyAssignableSellers';
@@ -23,6 +23,11 @@ import { resolveTaskRemoteMode } from '@/lib/tasks/remoteTasksMode';
 import { combineLocalDateAndTimeToIso } from '@/lib/tasks/dueAtHelpers';
 import { startOfLocalDay } from '@/lib/tasks/deriveTaskState';
 import { isRemoteTasksError } from '@/lib/tasks/errors';
+import { useCreateVisit } from '@/lib/hooks/useCreateVisit';
+import { resolveVisitRemoteMode } from '@/lib/visits/remoteVisitsMode';
+import { isRemoteVisitsError } from '@/lib/visits/errors';
+import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
+import type { LeadModel } from '@/lib/leads/adapter';
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
 const TEMP_INFO: Record<string, string> = {
@@ -592,7 +597,76 @@ function FlowEditarClienteRemote({ payload, close, ctx }: { payload: any; close:
   );
 }
 
+// COMMERCIAL-REMOTE-VISITS-B4 — mensagens sanitizadas fixas da criação
+// remota de Visit, mesmo modelo de remoteTaskCreateErrorMessage (acima) —
+// helper próprio deste flow, não compartilhado (mesma convenção). Cobre
+// exatamente os códigos que create_visit pode produzir (migration #52,
+// comentário "Erros estáveis" da função): forbidden, seller_required,
+// seller_not_found, lead_not_found, lead_archived, client_name_required,
+// invalid_vehicles. identity_changed nunca chega aqui — tratado antes, no
+// catch do handler (fecha o flow, mesmo padrão de FlowNovaPendencia).
+function remoteVisitCreateErrorMessage(error: unknown): string {
+  const code = isRemoteVisitsError(error) ? error.code : undefined;
+  switch (code) {
+    case 'remote_visits_mutation_forbidden':
+      return 'Você não tem permissão para agendar esta visita.';
+    case 'remote_visits_mutation_seller_required':
+      return 'Selecione um vendedor responsável.';
+    case 'remote_visits_mutation_seller_not_found':
+      return 'O vendedor selecionado não está mais disponível.';
+    case 'remote_visits_mutation_lead_not_found':
+      return 'O cliente selecionado não está mais disponível.';
+    case 'remote_visits_mutation_lead_archived':
+      return 'Não é possível agendar uma nova visita para um cliente arquivado.';
+    case 'remote_visits_mutation_client_name_required':
+      return 'Informe o nome do cliente.';
+    case 'remote_visits_mutation_invalid_vehicles':
+      return 'Informe pelo menos um veículo válido.';
+    default:
+      return 'Não foi possível agendar a visita. Tente novamente.';
+  }
+}
+
+// COMMERCIAL-REMOTE-VISITS-B4 — mesmo padrão de resolveRemoteDueAt (Tasks,
+// mais abaixo neste arquivo): Hoje/Amanhã derivam a DATA do calendário
+// local REAL (nunca strings hardcoded tipo 'Qui 18'/'Sex 19'/'Sáb 20', que
+// é o que o branch local ainda usa — intocado, só o branch remoto evita
+// essas strings falsas), Personalizado usa a data escolhida pelo usuário.
+// combineLocalDateAndTimeToIso continua a única autoridade de parsing —
+// nenhum parser duplicado. Reimplementado aqui (não compartilhado com
+// Tasks nem com resolveRemoteDueAt) — único consumidor é FlowCriarVisita,
+// mesmo raciocínio que manteve resolveRemoteDueAt privado até ganhar um
+// segundo consumidor real (nunca compartilhar antecipadamente).
+function resolveRemoteVisitScheduledAt(when: string, customDate: string, time: string, now: Date = new Date()) {
+  const todayYMD = localYMD(now);
+  const tomorrowYMD = localYMD(addLocalDays(now, 1));
+  const dateForWhen = when === 'Hoje' ? todayYMD : when === 'Amanhã' ? tomorrowYMD : customDate;
+  const result = combineLocalDateAndTimeToIso({ date: dateForWhen, time });
+  // Regra do B4-PRECHECK §9/§24: comparação por INSTANTE real (nunca
+  // string), client-side apenas — create_visit (migration #52) não valida
+  // isso no backend, decisão consciente de não alterar a migration neste
+  // lote (mesma lacuna já existe no branch local, que nunca validou isto).
+  const isPast = result.ok && new Date(result.iso).getTime() < now.getTime();
+  return { todayYMD, tomorrowYMD, result, isPast };
+}
+
+// COMMERCIAL-REMOTE-VISITS-B4 — cutover de CREATE. `visitDataSource`
+// decide local/remoto do mesmo jeito que `taskDataSource` em
+// FlowNovaPendencia (resolveVisitRemoteMode(), nunca fallback local sob
+// modo remoto). O branch local abaixo é BYTE-IDÊNTICO ao código anterior a
+// este lote (só movido para dentro de `if (visitDataSource === 'local')
+// return (...)`) — nenhuma linha do caminho local foi reescrita.
+//
+// Entry points remotos (B4-PRECHECK §3): hoje só o botão "Agendar visita"
+// de ScreenVisitas abre este flow em modo remoto, sempre sem payload.lead
+// (LeadCard/FlowVerCliente continuam atrás de capabilities.canApplyEvents,
+// sempre false, fora de escopo aqui) — por isso o branch remoto nunca lê
+// payload.lead; a vinculação a um Lead acontece inteiramente DENTRO do
+// formulário via RemoteLeadPicker (B4-PRECHECK-R1 §1-3), nunca por prop.
 export function FlowCriarVisita({ payload, close, openFlow }: any) {
+  const visitDataSource: 'local' | 'remote' = resolveVisitRemoteMode() === 'visit_local' ? 'local' : 'remote';
+
+  // ── Estado do branch LOCAL — intocado ────────────────────────────────
   const [lead, setLead] = useState<any>(payload.lead || null);
   const [done, setDone] = useState(false);
   const [client, setClient] = useState(lead ? lead.name : '');
@@ -646,13 +720,139 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
     setDone(true);
   };
 
-  if (done) return (
-    <FlowShell eyebrow="AGENDAR VISITA" title="Visita agendada" icon="calendar" accent="#27C75F" onClose={close}>
-      <FlowSuccess title="Visita agendada!" sub={`${client} · ${finalDay} às ${finalTime}. Enviamos um lembrete e criamos uma pendência para confirmar a presença.`}
-          actions={<><LBtn kind="gold" size="lg" icon="message" onClick={() => openFlow('enviar-mensagem', { name: client })}>Enviar confirmação</LBtn><LBtn kind="ghost" size="lg" icon="check" onClick={close}>Concluir</LBtn></>} />
-    </FlowShell>
+  // ── Estado do branch REMOTO ───────────────────────────────────────────
+  // Hooks/identidade chamados SEMPRE, na mesma ordem (Rules of Hooks) —
+  // em modo local eles simplesmente nunca são exercitados via submit.
+  const user = AuthService.getCurrentUser();
+  const isSeller = user?.activeMembership?.role === 'seller';
+  const identityUserId = user?.id ?? null;
+  const identityCompanyId = user?.activeMembership?.companyId ?? null;
+  const identityMembershipRole = user?.activeMembership?.role ?? null;
+  const identityUserIsActive = Boolean(user);
+  const identityKey = identityUserId && identityCompanyId ? `${identityUserId}:${identityCompanyId}` : null;
+
+  const remoteLeadsScreen = useRemoteLeadsScreenState(user);
+  const assignableSellers = useCurrentCompanyAssignableSellers({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  const createHook = useCreateVisit({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  useCloseOnIdentityChange(identityKey, close);
+
+  const [remoteSelectedLead, setRemoteSelectedLead] = useState<LeadModel | null>(null);
+  const [remoteClient, setRemoteClient] = useState('');
+  const [remoteVehicles, setRemoteVehicles] = useState<string[]>([]);
+  const [remoteCustomCar, setRemoteCustomCar] = useState('');
+  const [remoteWhen, setRemoteWhen] = useState('Amanhã');
+  const [remoteCustomDate, setRemoteCustomDate] = useState('');
+  const [remoteTime, setRemoteTime] = useState('');
+  const [remoteCustomTime, setRemoteCustomTime] = useState('');
+  const [remoteNote, setRemoteNote] = useState('');
+  const [remoteAssignedSellerId, setRemoteAssignedSellerId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const remoteSellerItems: SellerPickerItem[] = assignableSellers.assignableSellers.map((s) => ({ id: s.seller_id, name: s.name }));
+
+  // B4-PRECHECK-R1 §5-§7/§13-§15: selecionar um Lead pré-preenche veículo
+  // (mesmo comportamento do pickLead local) e recalcula o default de
+  // Seller a cada troca — mesmo Lead sem seller assignable limpa a
+  // seleção, forçando escolha explícita. Limpar o Lead NUNCA reseta o
+  // Seller já escolhido (standalone Manager também exige Seller — não há
+  // "vazio" mais correto para onde voltar).
+  const pickRemoteLead = (l: LeadModel) => {
+    setRemoteSelectedLead(l);
+    setRemoteClient(l.name);
+    if (l.car) setRemoteVehicles([l.car]);
+    setRemoteCustomCar('');
+    if (!isSeller) {
+      const leadSellerAssignable = l.sellerId !== null
+        && assignableSellers.assignableSellers.some((s) => s.seller_id === l.sellerId);
+      setRemoteAssignedSellerId(leadSellerAssignable ? l.sellerId : null);
+    }
+  };
+  const clearRemoteLead = () => { setRemoteSelectedLead(null); setRemoteClient(''); setRemoteVehicles([]); };
+
+  const toggleRemoteVehicle = (c: string) => {
+    setRemoteVehicles(vs => vs.includes(c) ? vs.filter(v => v !== c) : [...vs, c]);
+  };
+
+  const remoteFinalTime = remoteCustomTime.trim() || remoteTime;
+  const remoteScheduled = resolveRemoteVisitScheduledAt(remoteWhen, remoteCustomDate, remoteFinalTime);
+  const remoteFinalVehiclesRaw = remoteCustomCar.trim() ? [...remoteVehicles, remoteCustomCar.trim()] : remoteVehicles;
+  const remoteFinalVehicles = remoteFinalVehiclesRaw.map((v) => v.trim()).filter((v) => v !== '');
+  const remoteClientNameTrimmed = remoteClient.trim();
+  const remoteSellerOk = isSeller || (remoteAssignedSellerId !== null && !assignableSellers.isLoading);
+  const remoteLeadOrClientOk = remoteSelectedLead !== null || remoteClientNameTrimmed !== '';
+  const canCreateRemote = Boolean(
+    remoteScheduled.result.ok
+    && !remoteScheduled.isPast
+    && remoteFinalVehicles.length > 0
+    && remoteLeadOrClientOk
+    && remoteSellerOk
+    && !submitting
+    && !createHook.isPending,
   );
-  return (
+
+  const handleScheduleRemote = async () => {
+    if (!canCreateRemote || submitting || createHook.isPending || !remoteScheduled.result.ok) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const commonFields = {
+        scheduledAt: remoteScheduled.result.iso,
+        vehicles: remoteFinalVehicles,
+        leadId: remoteSelectedLead?.id ?? null,
+        // clientName nunca é autoridade quando leadId existe (B4-PRECHECK-
+        // R1 §8/§9) — RPC descarta p_client_name nesse caso de qualquer
+        // forma (migration #52, linha do insert), omitido aqui só para
+        // não sugerir que teria efeito.
+        clientName: remoteSelectedLead ? undefined : remoteClientNameTrimmed,
+        note: remoteNote.trim(),
+      };
+      if (isSeller) {
+        await createHook.createVisit({ ...commonFields, actorRole: 'seller' });
+      } else {
+        if (!remoteAssignedSellerId) return;
+        await createHook.createVisit({ ...commonFields, actorRole: 'manager', assignedSellerId: remoteAssignedSellerId });
+      }
+      setDone(true);
+    } catch (err) {
+      // Mesmo padrão de FlowNovaPendencia: identity_changed fecha o flow
+      // diretamente, nunca mostra o erro da sessão antiga.
+      if (isRemoteVisitsError(err) && err.code === 'remote_visits_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(remoteVisitCreateErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (done) {
+    // Branch LOCAL — byte-idêntico ao original, apenas movido para dentro
+    // deste `if`.
+    if (visitDataSource === 'local') return (
+      <FlowShell eyebrow="AGENDAR VISITA" title="Visita agendada" icon="calendar" accent="#27C75F" onClose={close}>
+        <FlowSuccess title="Visita agendada!" sub={`${client} · ${finalDay} às ${finalTime}. Enviamos um lembrete e criamos uma pendência para confirmar a presença.`}
+            actions={<><LBtn kind="gold" size="lg" icon="message" onClick={() => openFlow('enviar-mensagem', { name: client })}>Enviar confirmação</LBtn><LBtn kind="ghost" size="lg" icon="check" onClick={close}>Concluir</LBtn></>} />
+      </FlowShell>
+    );
+    const doneClientName = remoteSelectedLead ? remoteSelectedLead.name : remoteClient;
+    const doneWhenLabel = `${remoteWhen === 'Personalizado' ? remoteCustomDate : remoteWhen} às ${remoteFinalTime}`;
+    return (
+      <FlowShell eyebrow="AGENDAR VISITA" title="Visita agendada" icon="calendar" accent="#27C75F" onClose={close}>
+        <FlowSuccess title="Visita agendada!" sub={`${doneClientName} · ${doneWhenLabel}.`}
+          actions={<LBtn kind="ghost" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      </FlowShell>
+    );
+  }
+
+  if (visitDataSource === 'local') return (
     <FlowShell eyebrow="AGENDAR VISITA" title="Agendar uma visita" icon="calendar" accent="#E8CE72" onClose={close}
       sub="Escolha o dia e o horário. Visita confirmada é o passo que mais aproxima da venda."
       footer={<><div style={{ flex: 1 }} /><span style={{ fontSize: 13, color: 'var(--t-500)' }}>{ok ? `${finalDay} às ${finalTime}` : 'Selecione veículo, dia e horário'}</span><LBtn kind="gold" size="lg" icon="check" onClick={handleSchedule} style={{ opacity: ok ? 1 : .5 }}>Agendar visita</LBtn></>}>
@@ -686,6 +886,92 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
           <FField label="Outro horário (opcional)" icon="clock" placeholder="Ex.: 19:30" value={customTime} onChange={(e: any) => setCustomTime(e.target.value)} />
         </FPanel>
       </div>
+    </FlowShell>
+  );
+
+  // ── Branch REMOTO ─────────────────────────────────────────────────────
+  return (
+    <FlowShell eyebrow="AGENDAR VISITA" title="Agendar uma visita" icon="calendar" accent="#E8CE72" onClose={close}
+      sub="Escolha o dia e o horário. Visita confirmada é o passo que mais aproxima da venda."
+      footer={<>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 13, color: 'var(--t-500)' }}>
+          {remoteScheduled.isPast
+            ? 'Escolha uma data e horário futuros'
+            : canCreateRemote
+              ? `${remoteWhen === 'Personalizado' ? remoteCustomDate : remoteWhen} às ${remoteFinalTime}`
+              : 'Selecione cliente, veículo, data e horário'}
+        </span>
+        <LBtn kind="gold" size="lg" icon="check" onClick={handleScheduleRemote} style={{ opacity: canCreateRemote ? 1 : .5 }}>
+          {(submitting || createHook.isPending) ? 'Agendando…' : 'Agendar visita'}
+        </LBtn>
+      </>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start', maxWidth: 900 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {remoteSelectedLead ? (
+            <div>
+              <ClientChip lead={remoteSelectedLead} size="lg" />
+              <button onClick={clearRemoteLead} style={{ marginTop: 8, background: 'none', border: 'none', padding: 0, color: 'var(--t-500)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Trocar cliente</button>
+            </div>
+          ) : (
+            <FPanel>
+              <RemoteLeadPicker
+                items={remoteLeadsScreen.leads.leads}
+                value={remoteClient}
+                onChange={setRemoteClient}
+                onPick={pickRemoteLead}
+                loading={remoteLeadsScreen.leads.isLoading}
+                error={remoteLeadsScreen.leads.isError ? 'Não foi possível carregar os clientes.' : null}
+                placeholder="Buscar cliente existente ou digitar o nome de um cliente avulso..."
+              />
+            </FPanel>
+          )}
+          <FPanel title="Veículo(s) de interesse" icon="car" accent="#E8CE72">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {(remoteSelectedLead?.car ? [remoteSelectedLead.car, ...CARS.filter((c: string) => c !== remoteSelectedLead.car)] : CARS).slice(0, 4).map((c: string) => <ChoiceTile key={c} icon="car" title={c} active={remoteVehicles.includes(c)} onClick={() => toggleRemoteVehicle(c)} />)}
+            </div>
+            <div style={{ marginTop: 14 }}>
+              <FField label="Outro veículo (opcional)" icon="edit" placeholder="Cliente também quer ver..." value={remoteCustomCar} onChange={(e: any) => setRemoteCustomCar(e.target.value)} />
+            </div>
+          </FPanel>
+          {!isSeller && (
+            <FPanel>
+              <SellerPicker
+                items={remoteSellerItems}
+                value={remoteAssignedSellerId}
+                onChange={setRemoteAssignedSellerId}
+                loading={assignableSellers.isLoading}
+                disabled={submitting || createHook.isPending}
+                error={assignableSellers.isError ? 'Não foi possível carregar os vendedores.' : null}
+                allowNone={false}
+                placeholder="Selecione o vendedor…"
+              />
+            </FPanel>
+          )}
+          <FPanel title="Observações (opcional)" icon="clipboard" accent="#E8CE72">
+            <FArea placeholder="Ex.: cliente quer ver Golf e Civic, levar simulação de financiamento, vem com esposa..." value={remoteNote} onChange={(e: any) => setRemoteNote(e.target.value)} />
+          </FPanel>
+        </div>
+        <FPanel title="Dia e horário" icon="calendar" accent="#E8CE72">
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            {['Hoje', 'Amanhã', 'Personalizado'].map(d => <button key={d} onClick={() => setRemoteWhen(d)} className="lift" style={{ flex: '1 1 100px', padding: '14px 8px', borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', border: `1px solid ${remoteWhen === d ? 'rgba(212,175,55,.6)' : 'var(--border)'}`, background: remoteWhen === d ? 'var(--gold-bg)' : 'rgba(255,255,255,.03)', color: remoteWhen === d ? 'var(--gold-ink)' : 'var(--t-700)', fontWeight: 700, fontSize: 13.5 }}>{d}</button>)}
+          </div>
+          {remoteWhen === 'Personalizado' && (
+            <FField label="Data" icon="calendar" type="date" value={remoteCustomDate} onChange={(e: any) => setRemoteCustomDate(e.target.value)} min={remoteScheduled.todayYMD} />
+          )}
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '4px 0 9px' }}>Horário disponível</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 12 }}>
+            {slots.map(s => <button key={s} onClick={() => { setRemoteTime(s); setRemoteCustomTime(''); }} className="lift" style={{ padding: '14px 8px', borderRadius: 12, cursor: 'pointer', fontFamily: 'Archivo, sans-serif', border: `1px solid ${!remoteCustomTime && remoteTime === s ? 'rgba(212,175,55,.6)' : 'var(--border)'}`, background: !remoteCustomTime && remoteTime === s ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : 'rgba(255,255,255,.03)', color: !remoteCustomTime && remoteTime === s ? '#241c04' : 'var(--t-700)', fontWeight: 800, fontSize: 16 }}>{s}</button>)}
+          </div>
+          <FField label="Outro horário (opcional)" icon="clock" type="time" value={remoteCustomTime} onChange={(e: any) => setRemoteCustomTime(e.target.value)} />
+          {remoteScheduled.isPast && <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--amber)' }}>Escolha uma data e horário futuros.</div>}
+        </FPanel>
+      </div>
+      {submitError && (
+        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--red-bg, rgba(255,59,59,.08))', border: '1px solid var(--red-line, rgba(255,59,59,.3))' }}>
+          <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{submitError}</span>
+        </div>
+      )}
     </FlowShell>
   );
 }

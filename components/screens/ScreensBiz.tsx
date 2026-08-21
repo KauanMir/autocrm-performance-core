@@ -239,12 +239,15 @@ export function ScreenVisitas({ go }: any) {
     ];
     return (
       <LightScreen>
-        {/* COMMERCIAL-REMOTE-VISITS-B3 §16/§26: "Agendar visita" fica
-            OCULTO (não desabilitado) aqui — create_visit só é conectado no
-            B4. Nenhuma row abaixo renderiza Confirmar/Registrar (§27) —
-            FlowLayer (intocado, §28) continua bloqueando os 3 flows locais
-            de qualquer forma, esta omissão é só UX, não é a única defesa. */}
-        <PageHead title="Visitas" sub={pageHeadSub} />
+        {/* COMMERCIAL-REMOTE-VISITS-B4: "Agendar visita" volta a aparecer —
+            create_visit está conectado (FlowCriarVisita decide local/
+            remoto sozinho via resolveVisitRemoteMode(), FlowLayer autoriza
+            a abertura via o gate dedicado de 'criar-visita'). Nenhuma row
+            abaixo ainda renderiza Confirmar/Registrar (B4 é só CREATE,
+            update/confirm/cancel/register ficam para B5/B6) — FlowLayer
+            continua bloqueando 'confirmar-visita'/'registrar-resultado'
+            fora do modo local de qualquer forma. */}
+        <PageHead title="Visitas" sub={pageHeadSub} actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {remoteGroups.map((g) => (
             <div key={g.key}>

@@ -287,20 +287,27 @@ describe('ScreenVisitas — visit_remote_active com dado', () => {
     expect(m.openFlow).not.toHaveBeenCalled();
   });
 
-  it('"Agendar visita" ausente e nenhuma ação de mutation (Confirmar/Registrar) renderizada', () => {
+  // COMMERCIAL-REMOTE-VISITS-B4: "Agendar visita" voltou a aparecer aqui
+  // (create_visit conectado) — abre o create flow remoto via openFlow,
+  // nunca chama VisitService diretamente (a implementação local/remota é
+  // decidida dentro de FlowCriarVisita, fora do escopo desta tela). Row
+  // actions (Confirmar/Registrar/Ver) continuam ausentes — só CREATE foi
+  // conectado neste lote.
+  it('"Agendar visita" abre o create flow remoto; nenhuma ação de mutation por row (Confirmar/Registrar/Ver)', () => {
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
       hasData: true, visits: [remoteVisit()],
     }));
 
     render(<ScreenVisitas go={() => {}} />);
 
-    expect(screen.queryByText('Agendar visita')).toBeNull();
+    fireEvent.click(screen.getByText('Agendar visita'));
+    expect(m.openFlow).toHaveBeenCalledWith('criar-visita');
+    expect(VisitService.create).not.toHaveBeenCalled();
+
     expect(screen.queryByText('Confirmar')).toBeNull();
     expect(screen.queryByText('Registrar')).toBeNull();
     expect(screen.queryByText('Ver')).toBeNull();
-    expect(VisitService.create).not.toHaveBeenCalled();
     expect(VisitService.update).not.toHaveBeenCalled();
-    expect(m.openFlow).not.toHaveBeenCalled();
   });
 });
 

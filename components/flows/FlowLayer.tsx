@@ -14,6 +14,7 @@ import {
   FlowEnviarMensagem, FlowConfirmar, FlowEstados,
 } from './Flows3';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
+import { resolveVisitRemoteMode } from '@/lib/visits/remoteVisitsMode';
 
 const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'ligar': FlowLigar,
@@ -52,11 +53,19 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
 // resolveLeadFlowContext), nunca mais lançando em modo remoto.
 //
 // COMMERCIAL-REMOTE-B1-B3-E: 'reagendar-pendencia' SAIU pelo mesmo motivo —
-// FlowReagendarPendencia agora decide local/remoto sozinho. Visit/Deal/Sale
-// (Visita/Proposta/Venda) E 'criar-acompanhamento' permanecem aqui —
-// nenhum dos dois foi migrado ainda.
+// FlowReagendarPendencia agora decide local/remoto sozinho.
+//
+// COMMERCIAL-REMOTE-VISITS-B4: 'criar-visita' SAIU pelo mesmo motivo — Visit
+// também ganhou backend remoto próprio (migration #52) e FlowCriarVisita
+// agora decide local/remoto sozinho (resolveVisitRemoteMode()). Diferente
+// de Tasks, porém, criar-visita ganha um gate DEDICADO logo abaixo (não
+// apenas "sai do Set e vira responsabilidade só do submit") — decisão
+// explícita do B4-PRECHECK-R1 §9: bloquear a ABERTURA do flow, não somente
+// a mutation, quando Visits não puder operar (visit_blocked/
+// visit_remote_misconfigured). Deal/Sale (Proposta/Venda) e
+// 'criar-acompanhamento' permanecem aqui — nenhum dos dois foi migrado.
 const LOCAL_COMMERCIAL_FLOW_IDS = new Set<string>([
-  'criar-visita', 'confirmar-visita', 'registrar-resultado',
+  'confirmar-visita', 'registrar-resultado',
   'nova-proposta', 'aprovar-proposta', 'registrar-venda',
   'criar-acompanhamento',
 ]);
@@ -69,6 +78,28 @@ function LocalCommercialFlowUnavailable({ close }: { close: () => void }) {
       </div>
     </FlowShell>
   );
+}
+
+// COMMERCIAL-REMOTE-VISITS-B4 — gate DEDICADO de 'criar-visita', separado
+// de LOCAL_COMMERCIAL_FLOW_IDS (que é orientado só por isLocalCommercial-
+// DataAllowed()/modo de Leads, sem noção de visit_remote_ready).
+// Caller-independent (B4-PRECHECK-R1 §11): decide só por flow.id +
+// resolveVisitRemoteMode(), nunca por quem chamou openFlow — se um entry
+// point hoje não-remote-reachable (LeadCard/FlowVerCliente, atrás de
+// capabilities.canApplyEvents) se tornar remote-reachable no futuro, este
+// gate continua protegendo do mesmo jeito.
+//
+// Identidade (visit_remote_unavailable_identity) é deliberadamente FORA do
+// escopo deste gate — FlowLayer não tem currentUser (nunca teve, para
+// nenhum flow, nem o gate antigo de isLocalCommercialDataAllowed) e não é
+// o momento de introduzir isso só para Visits. A defesa real de identidade
+// já existe em duas camadas mais profundas: (1) o botão de ScreenVisitas só
+// é renderizado com identidade completa (visit_remote_unavailable_identity
+// não mostra nenhuma ação de criar), e (2) useCreateVisit falha fechado com
+// 'forbidden' antes de qualquer RPC se a identidade estiver incompleta.
+function isVisitCreateFlowAllowed(): boolean {
+  const mode = resolveVisitRemoteMode();
+  return mode === 'visit_local' || mode === 'visit_remote_ready';
 }
 
 export function FlowLayer({ flow, close, openFlow, go }: {
@@ -84,6 +115,9 @@ export function FlowLayer({ flow, close, openFlow, go }: {
   // local é lido antes desta checagem (a decisão vem só do resolver de
   // flags, nunca do payload do flow).
   if (LOCAL_COMMERCIAL_FLOW_IDS.has(flow.id) && !isLocalCommercialDataAllowed()) {
+    return <LocalCommercialFlowUnavailable close={close} />;
+  }
+  if (flow.id === 'criar-visita' && !isVisitCreateFlowAllowed()) {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   return <Comp payload={flow.payload || {}} close={close} openFlow={openFlow} go={go} />;

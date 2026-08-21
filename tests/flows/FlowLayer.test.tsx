@@ -3,15 +3,24 @@
 // stubs simples (identificam-se pelo texto) — o teste cobre exclusivamente
 // o roteamento/gate do FlowLayer, nunca a lógica interna de cada flow (já
 // coberta em seus próprios arquivos de teste). isLocalCommercialDataAllowed
-// é mockado para controlar o modo determinística.
+// é mockado para controlar o modo determinística; resolveVisitRemoteMode
+// idem (COMMERCIAL-REMOTE-VISITS-B4) — só o gate dedicado de criar-visita
+// o consulta.
 import React from 'react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-const mocks = vi.hoisted(() => ({ isLocalCommercialDataAllowed: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  isLocalCommercialDataAllowed: vi.fn(),
+  resolveVisitRemoteMode: vi.fn(),
+}));
 
 vi.mock('@/lib/leads/localCommercialAccess', () => ({
   isLocalCommercialDataAllowed: mocks.isLocalCommercialDataAllowed,
+}));
+
+vi.mock('@/lib/visits/remoteVisitsMode', () => ({
+  resolveVisitRemoteMode: mocks.resolveVisitRemoteMode,
 }));
 
 function stub(label: string) {
@@ -59,8 +68,11 @@ vi.mock('@/components/flows/Flows3', () => ({
 
 import { FlowLayer } from '@/components/flows/FlowLayer';
 
+// 'criar-visita' SAIU desta lista (COMMERCIAL-REMOTE-VISITS-B4) — não é
+// mais gated por isLocalCommercialDataAllowed(); tem seu próprio gate
+// dedicado (resolveVisitRemoteMode()), testado separadamente abaixo.
 const COMMERCIAL_FLOW_IDS = [
-  'criar-visita', 'confirmar-visita', 'registrar-resultado',
+  'confirmar-visita', 'registrar-resultado',
   'nova-proposta', 'aprovar-proposta', 'registrar-venda',
   'criar-acompanhamento',
 ];
@@ -78,6 +90,10 @@ function renderFlow(id: string, payload: any = {}) {
 
 beforeEach(() => {
   mocks.isLocalCommercialDataAllowed.mockReset();
+  // Default 'visit_local' — irrelevante para a maioria destes testes (só
+  // criar-visita consulta este resolver); mantém os demais determinísticos
+  // sem precisar mockar em cada teste que não fala sobre Visits.
+  mocks.resolveVisitRemoteMode.mockReset().mockReturnValue('visit_local');
 });
 
 describe('FlowLayer — flow.id nulo/desconhecido', () => {
@@ -135,7 +151,7 @@ describe('FlowLayer — modo NÃO local: gate bloqueia todos os flows comerciais
   it('estado indisponível tem botão de fechar funcional', () => {
     mocks.isLocalCommercialDataAllowed.mockReturnValue(false);
     const close = vi.fn();
-    render(<FlowLayer flow={{ id: 'criar-visita', payload: {} }} close={close} openFlow={() => {}} go={() => {}} />);
+    render(<FlowLayer flow={{ id: 'confirmar-visita', payload: {} }} close={close} openFlow={() => {}} go={() => {}} />);
     // FlowShell real (não mockado) renderiza dois botões de fechar (header) —
     // qualquer um deles deve chamar close.
     const buttons = screen.getAllByRole('button');
@@ -164,6 +180,43 @@ describe.each(['nova-pendencia', 'reagendar-pendencia'])('FlowLayer — %s não 
     renderFlow(id, { task: { id: 't1' } });
     expect(screen.getByText(STUB_LABEL_BY_FLOW_ID[id])).toBeInTheDocument();
     expect(screen.queryByText('Módulo indisponível')).toBeNull();
+  });
+});
+
+// COMMERCIAL-REMOTE-VISITS-B4 — 'criar-visita' SAIU de
+// LOCAL_COMMERCIAL_FLOW_IDS mas, diferente de nova-pendencia/reagendar-
+// pendencia (que não ganharam gate nenhum em FlowLayer), ganhou um gate
+// DEDICADO baseado em resolveVisitRemoteMode() (B4-PRECHECK-R1 §9) — a
+// abertura é bloqueada, não só a mutation. isLocalCommercialDataAllowed é
+// irrelevante aqui de propósito (o gate de criar-visita nunca a consulta).
+describe.each(['visit_local', 'visit_remote_ready'] as const)('FlowLayer — criar-visita permitido em %s', (mode) => {
+  it('monta o componente real, independente de isLocalCommercialDataAllowed', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue(mode);
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(mode === 'visit_local');
+    renderFlow('criar-visita');
+    expect(screen.getByText('FlowCriarVisita')).toBeInTheDocument();
+    expect(screen.queryByText('Módulo indisponível')).toBeNull();
+  });
+});
+
+describe.each(['visit_blocked', 'visit_remote_misconfigured'] as const)('FlowLayer — criar-visita bloqueado em %s', (mode) => {
+  it('mostra estado indisponível, nunca monta o componente real', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue(mode);
+    // isLocalCommercialDataAllowed=true não pode "salvar" a abertura — o
+    // gate de criar-visita depende só do modo de Visits.
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(true);
+    renderFlow('criar-visita');
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+    expect(screen.queryByText('FlowCriarVisita')).toBeNull();
+  });
+});
+
+describe('FlowLayer — criar-visita: gate caller-independent (B4-PRECHECK-R1 §11)', () => {
+  it('bloqueia mesmo com um payload.lead anexado, sem lê-lo', () => {
+    mocks.resolveVisitRemoteMode.mockReturnValue('visit_blocked');
+    renderFlow('criar-visita', { lead: { id: 'lead-1', name: 'Nome Real' } });
+    expect(screen.queryByText('Nome Real')).toBeNull();
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
   });
 });
 

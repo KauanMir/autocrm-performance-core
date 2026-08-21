@@ -17,6 +17,7 @@ import { useArchiveLead } from '@/lib/hooks/useArchiveLead';
 import { useUnarchiveLead } from '@/lib/hooks/useUnarchiveLead';
 import { useLeadTimeline } from '@/lib/hooks/useLeadTimeline';
 import { useAddLeadTimelineEntry } from '@/lib/hooks/useAddLeadTimelineEntry';
+import type { LeadModel } from '@/lib/leads/adapter';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -137,6 +138,56 @@ export function LeadPicker({ value, onChange, onPick, placeholder }: {
       {show && matches.length > 0 && (
         <div style={{ position: 'absolute', left: 0, right: 0, top: 74, zIndex: 5, background: '#1a1a1d', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
           {matches.map((l: any) => (
+            <button key={l.id} onClick={() => { onPick(l); setShow(false); }} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
+              onMouseEnter={(e: any) => { e.currentTarget.style.background = 'rgba(255,255,255,.05)'; }}
+              onMouseLeave={(e: any) => { e.currentTarget.style.background = 'transparent'; }}>
+              <Avatar name={l.name} size={28} ring="#3B82F6" />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff' }}>{l.name}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--t-500)' }}>{l.car}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// COMMERCIAL-REMOTE-VISITS-B4 — picker remoto de Lead, puramente
+// presentacional: recebe os Leads por prop (LeadModel[], já RLS-scoped e
+// já sem arquivados — o próprio snapshot de useRemoteLeadsScreenState
+// nunca carrega Lead arquivado), nunca importa LeadService. Mesmo padrão
+// exato de SellerPicker vs LocalSellerPicker (abaixo): o local (LeadPicker,
+// acima) continua hardcoded em LeadService.getAll() de propósito, nunca
+// usado no caminho remoto — nenhum dos dois é modificado para servir os
+// dois casos. Busca client-side por nome OU telefone (ambos já presentes
+// em LeadModel, nenhum campo novo inventado), mesma UX de LeadPicker.
+export function RemoteLeadPicker({ items, value, onChange, onPick, loading, error, placeholder }: {
+  items: readonly LeadModel[];
+  value: string;
+  onChange: (v: string) => void;
+  onPick: (lead: LeadModel) => void;
+  loading?: boolean;
+  error?: string | null;
+  placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  const q = value.trim().toLowerCase();
+  const matches = (q
+    ? items.filter((l) => l.name.toLowerCase().includes(q) || l.phone.toLowerCase().includes(q))
+    : items
+  ).slice(0, 8);
+  return (
+    <div style={{ position: 'relative' }}>
+      <FField label="Cliente" icon="user" placeholder={placeholder || 'Buscar cliente pelo nome ou telefone...'} value={value}
+        onChange={(e: any) => { onChange(e.target.value); setShow(true); }}
+        onFocus={() => setShow(true)} />
+      {loading && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--t-500)' }}>Carregando clientes…</div>}
+      {error && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--red, #FF3B3B)' }}>{error}</div>}
+      {show && !loading && !error && matches.length > 0 && (
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 74, zIndex: 5, background: '#1a1a1d', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
+          {matches.map((l) => (
             <button key={l.id} onClick={() => { onPick(l); setShow(false); }} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
               onMouseEnter={(e: any) => { e.currentTarget.style.background = 'rgba(255,255,255,.05)'; }}
               onMouseLeave={(e: any) => { e.currentTarget.style.background = 'transparent'; }}>
