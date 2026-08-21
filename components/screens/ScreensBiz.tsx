@@ -14,6 +14,16 @@ import { UsersTabSection } from '@/components/users/UsersTabSection';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
+import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
+import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
+import type { RemoteVisitModel } from '@/lib/visits/adapter';
+import {
+  groupVisitsForScreen,
+  formatVisitTime,
+  formatVisitShortDate,
+  VISIT_REMOTE_STATUS_LABEL,
+  resolveVisitSellerDisplayName,
+} from '@/lib/visits/visitScreenGrouping';
 
 // M1-E E5-B2-A1 — Barreira 1 (UI) para Visitas/Propostas/Vendas: Visit/Deal/
 // Sale não têm company_id nem backend remoto (auditoria E5-B2-A0). Fora do
@@ -24,6 +34,23 @@ function LocalCommercialUnavailableCard() {
     <LCard style={{ maxWidth: 640 }}>
       <div data-testid="local-commercial-unavailable" style={{ padding: '28px 14px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
         Visitas, propostas, vendas e acompanhamentos serão disponibilizados após a migração deste módulo.
+      </div>
+    </LCard>
+  );
+}
+
+// COMMERCIAL-REMOTE-VISITS-B3 — mesmo padrão de KanbanStateCard
+// (ScreensOps.tsx, módulo-privado lá também): card neutro para
+// loading/erro/config-erro/identidade-indisponível do modo remoto de
+// Visits. Não exportado — reimplementar aqui em vez de importar de
+// ScreensOps.tsx segue a mesma independência de domínio já documentada em
+// lib/visits/remoteVisitsMode.ts.
+function VisitStateCard({ testId, children, onRetry }: { testId: string; children: React.ReactNode; onRetry?: () => void }) {
+  return (
+    <LCard style={{ minHeight: 360, display: 'grid', placeItems: 'center' }}>
+      <div data-testid={testId} style={{ display: 'grid', placeItems: 'center', gap: 14, textAlign: 'center' }}>
+        <div style={{ color: 'var(--t-500)', fontSize: 14, maxWidth: 420 }}>{children}</div>
+        {onRetry && <LBtn kind="primary" icon="refresh" onClick={onRetry}>Tentar novamente</LBtn>}
       </div>
     </LCard>
   );
@@ -78,16 +105,165 @@ function VisitRow({ v, go }: any) {
   );
 }
 
+// COMMERCIAL-REMOTE-VISITS-B3 — linha de uma Visit remota. Somente leitura:
+// nenhum botão de mutation (Confirmar/Remarcar/Cancelar/Registrar) —
+// nenhum deles está conectado neste lote (B4-B6, fora de escopo). Cliente
+// é texto não-clicável de propósito (§25 do EXEC): abrir o Lead exigiria
+// resolver o Lead COMPLETO (FlowVerCliente exige o objeto inteiro, não só
+// id/nome — leadsById do adapter só carrega {id,name}), uma segunda
+// dependência de hook que este lote deliberadamente não introduz — mesma
+// decisão já tomada por TaskRow (ScreensOps.tsx) para o mesmo motivo.
+function RemoteVisitRow({ visit, sellersById, showDate }: {
+  visit: RemoteVisitModel;
+  sellersById: Readonly<Record<string, { id: string; name: string }>>;
+  showDate: boolean;
+}) {
+  const scheduledAtDate = new Date(visit.scheduledAt);
+  const statusInfo = VISIT_REMOTE_STATUS_LABEL[visit.status];
+  const sellerDisplay = resolveVisitSellerDisplayName(visit.assignedSellerId, sellersById);
+  const vehicleDisplay = visit.vehicles.length > 1 ? visit.vehicles.join(' + ') : (visit.vehicles[0] ?? '');
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderRadius: 11,
+      background: 'var(--surface)', border: '1px solid var(--border)',
+    }}>
+      <div style={{ width: 62, textAlign: 'center' }}>
+        {showDate && <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--t-400)', marginBottom: 2 }}>{formatVisitShortDate(scheduledAtDate)}</div>}
+        <div className="display tnum" style={{ fontSize: 18, fontWeight: 800, color: 'var(--t-900)' }}>{formatVisitTime(scheduledAtDate)}</div>
+      </div>
+      <div style={{ width: 1, height: 34, background: 'var(--border)' }} />
+      <Avatar name={visit.clientName} size={38} ring="#6B7280" />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{visit.clientName}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', gap: 10, marginTop: 2 }}>
+          <span><Icon name="car" size={12} stroke={2} style={{ verticalAlign: -2 }} /> {vehicleDisplay}</span>
+          <span>· {sellerDisplay}</span>
+        </div>
+      </div>
+      <LBadge tone={statusInfo.tone} solid={statusInfo.solid}>{statusInfo.label}</LBadge>
+    </div>
+  );
+}
+
+// COMMERCIAL-REMOTE-VISITS-B3 — gate de página inteira passou de
+// isLocalCommercialDataAllowed() (modo de LEADS) para
+// remoteVisitsScreen.mode (resolveVisitRemoteMode(), via
+// useRemoteVisitsScreenState — chamado INCONDICIONALMENTE, antes de
+// qualquer return, mesmo padrão de ScreenPendencias/ScreenClientes/
+// ScreenAndamento). visit_local implica, por construção,
+// leadsMode==='local' (resolveVisitRemoteMode: visitsEnabled=false +
+// leadsMode==='local' é o ÚNICO caminho para 'visit_local') — logo
+// isLocalCommercialDataAllowed() nunca poderia ser false neste ramo; o
+// gate antigo não é reproduzido aqui de propósito (checagem redundante
+// para um estado inalcançável), mesma decisão já tomada por
+// ScreenPendencias (que não reproduz nenhuma checagem análoga no ramo
+// task_local). isLocalCommercialDataAllowed continua em uso por
+// ScreenPropostas/ScreenVendas/ScreenResultados (Deal/Sale/SellerService
+// ainda não migraram) — intocado.
 export function ScreenVisitas({ go }: any) {
   useStore();
-  if (!isLocalCommercialDataAllowed()) {
+  const currentUser = AuthService.getCurrentUser();
+  const remoteVisitsScreen = useRemoteVisitsScreenState(currentUser);
+  const mode = remoteVisitsScreen.mode;
+
+  // Mesma identidade (userId/companyId/membershipRole/userIsActive) já
+  // usada por useRemoteVisitsScreenState internamente — chamado SEMPRE,
+  // antes de qualquer return (Rules of Hooks). Fora de visit_remote_active
+  // a query interna fica desabilitada (remoteLeadsEnabled/hasCompany/
+  // hasUser/userIsActive/isManagerOrSeller), zero chamadas de rede.
+  const sellerLabels = useCurrentCompanySellerLabels({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: currentUser?.activeMembership?.role ?? null,
+    userIsActive: Boolean(currentUser),
+  });
+
+  const pageHeadSub = 'A agenda do dia e o que precisa ser confirmado.';
+
+  if (mode === 'visit_blocked' || mode === 'visit_remote_misconfigured') {
     return (
       <LightScreen>
-        <PageHead title="Visitas" sub="A agenda do dia e o que precisa ser confirmado." />
+        <PageHead title="Visitas" sub={pageHeadSub} />
         <LocalCommercialUnavailableCard />
       </LightScreen>
     );
   }
+  if (mode === 'visit_remote_unavailable_identity') {
+    return (
+      <LightScreen>
+        <PageHead title="Visitas" sub={pageHeadSub} />
+        <VisitStateCard testId="visitas-state-unavailable-identity">Visitas indisponíveis nesta sessão.</VisitStateCard>
+      </LightScreen>
+    );
+  }
+
+  const remoteActive = mode === 'visit_remote_active';
+  if (remoteActive && remoteVisitsScreen.isLoading) {
+    return (
+      <LightScreen>
+        <PageHead title="Visitas" sub={pageHeadSub} />
+        <VisitStateCard testId="visitas-state-loading">Carregando visitas…</VisitStateCard>
+      </LightScreen>
+    );
+  }
+  if (remoteActive && remoteVisitsScreen.isError) {
+    return (
+      <LightScreen>
+        <PageHead title="Visitas" sub={pageHeadSub} />
+        <VisitStateCard testId="visitas-state-error" onRetry={remoteVisitsScreen.refetch}>Não foi possível carregar as visitas.</VisitStateCard>
+      </LightScreen>
+    );
+  }
+  if (remoteActive && remoteVisitsScreen.configError !== null) {
+    return (
+      <LightScreen>
+        <PageHead title="Visitas" sub={pageHeadSub} />
+        <VisitStateCard testId="visitas-state-config-error">Uma ou mais visitas remotas estão com configuração inválida.</VisitStateCard>
+      </LightScreen>
+    );
+  }
+
+  // Daqui em diante: mode === 'visit_local' OU (remoteActive && pronto —
+  // não-loading/não-erro/sem configError, já tratados acima). Fonte única
+  // em cada caso — nunca VisitService.getAll() no ramo remoto, nunca
+  // remoteVisitsScreen.visits no local.
+  if (remoteActive) {
+    const now = new Date();
+    const groups = groupVisitsForScreen(remoteVisitsScreen.visits, now);
+    const sellersById = sellerLabels.sellersById;
+    const remoteGroups = [
+      { key: 'today', name: 'Hoje', items: groups.today, showDate: false },
+      { key: 'tomorrow', name: 'Amanhã', items: groups.tomorrow, showDate: false },
+      { key: 'future', name: 'Próximos dias', items: groups.future, showDate: true },
+      { key: 'pendingResult', name: 'Pendentes de resultado', items: groups.pendingResult, warn: true, showDate: true },
+    ];
+    return (
+      <LightScreen>
+        {/* COMMERCIAL-REMOTE-VISITS-B3 §16/§26: "Agendar visita" fica
+            OCULTO (não desabilitado) aqui — create_visit só é conectado no
+            B4. Nenhuma row abaixo renderiza Confirmar/Registrar (§27) —
+            FlowLayer (intocado, §28) continua bloqueando os 3 flows locais
+            de qualquer forma, esta omissão é só UX, não é a única defesa. */}
+        <PageHead title="Visitas" sub={pageHeadSub} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {remoteGroups.map((g) => (
+            <div key={g.key}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12 }}>
+                {g.warn && <Icon name="alert" size={16} stroke={2.4} style={{ color: 'var(--amber)' }} />}
+                <span style={{ fontSize: 14, fontWeight: 700, color: g.warn ? 'var(--amber)' : 'var(--t-900)' }}>{g.name}</span>
+                <span style={{ fontSize: 12.5, color: 'var(--t-400)' }}>{g.items.length} {g.items.length === 1 ? 'visita' : 'visitas'}</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {g.items.map((v) => <RemoteVisitRow key={v.id} visit={v} sellersById={sellersById} showDate={g.showDate} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </LightScreen>
+    );
+  }
+
+  // visit_local: caminho legado, inalterado.
   const visits = VisitService.getAll();
   const KNOWN_DAYS = ['hoje', 'amanha', 'passado'];
   const groups = [
@@ -101,7 +277,7 @@ export function ScreenVisitas({ go }: any) {
   const unconfirmed = visits.filter((v: any) => v.status === VISIT_STATUS.PENDING).length;
   return (
     <LightScreen>
-      <PageHead title="Visitas" sub="A agenda do dia e o que precisa ser confirmado." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
+      <PageHead title="Visitas" sub={pageHeadSub} actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
       <Guide tone="red" icon="calendar" text={<span>Você tem <b>{unconfirmed} visitas não confirmadas</b> para hoje. Ligue para confirmar antes do horário — visita confirmada vende mais.</span>} action="Confirmar agora" onAction={() => { const v = visits.find((x: any) => x.status === VISIT_STATUS.PENDING); (window as any).__openFlow('confirmar-visita', { visit: v }); }} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         {groups.map((g: any) => (
