@@ -34,10 +34,15 @@ import type { RemoteVisitModel } from '@/lib/visits/adapter';
 import type { Database } from '@/lib/supabase/database.types';
 import { startOfVisitLocalDay, formatVisitTime, formatVisitShortDate } from '@/lib/visits/visitScreenGrouping';
 import { useCreateDeal } from '@/lib/hooks/useCreateDeal';
+import { useUpdateDeal } from '@/lib/hooks/useUpdateDeal';
+import { useMarkDealLost } from '@/lib/hooks/useMarkDealLost';
 import { resolveDealRemoteMode } from '@/lib/deals/remoteDealsMode';
 import { isRemoteDealsError, REMOTE_DEALS_MUTATION_ERROR_MESSAGES_PT } from '@/lib/deals/errors';
-import type { RemoteDealRow } from '@/lib/deals/adapter';
-import { DEAL_PAYMENT_METHOD_LABELS_PT } from '@/lib/deals/labels';
+import { adaptRemoteDealRow, type RemoteDealRow, type RemoteDealModel } from '@/lib/deals/adapter';
+import { DEAL_STATUS_LABELS_PT, DEAL_PAYMENT_METHOD_LABELS_PT } from '@/lib/deals/labels';
+import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
+import { resolveDealSellerDisplayName, formatDealUpdatedAt } from '@/lib/deals/dealScreenGrouping';
+import { formatCentsToBRL } from '@/lib/deals/money';
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
 const TEMP_INFO: Record<string, string> = {
@@ -1515,8 +1520,11 @@ function parseDealValueReais(input: string): number | null {
 
 // Reusa as strings PT-BR já congeladas em lib/deals/errors.ts (B2-B) —
 // nenhuma string nova, nenhuma duplicação. `identity_changed` nunca chega
-// aqui (fechado antes, no catch de handleCreateRemoteDeal).
-function remoteDealCreateErrorMessage(error: unknown): string {
+// aqui (fechado antes, em todo catch de mutation deste arquivo). Genérico
+// o bastante para create/update/mark-lost (B2-B mapeia os três nos mesmos
+// códigos namespaced) — reusado por FlowNovaProposta E FlowVerNegociacao
+// (COMMERCIAL-REMOTE-DEALS-B5), nunca duplicado por flow.
+function remoteDealMutationErrorMessage(error: unknown): string {
   const code = isRemoteDealsError(error) ? error.code : undefined;
   return REMOTE_DEALS_MUTATION_ERROR_MESSAGES_PT[code ?? 'remote_deals_mutation_generic_error'];
 }
@@ -1714,22 +1722,22 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
         // submit — limpa para forçar nova escolha, erro fica no picker.
         setRemoteSelectedLead(null);
         setRemoteClientQuery('');
-        setRemoteLeadFieldError(remoteDealCreateErrorMessage(err));
+        setRemoteLeadFieldError(remoteDealMutationErrorMessage(err));
       } else if (code === 'remote_deals_mutation_seller_required' || code === 'remote_deals_mutation_seller_not_found') {
         if (code === 'remote_deals_mutation_seller_not_found') setRemoteAssignedSellerId(null);
-        setRemoteSellerFieldError(remoteDealCreateErrorMessage(err));
+        setRemoteSellerFieldError(remoteDealMutationErrorMessage(err));
       } else if (code === 'remote_deals_mutation_invalid_vehicle') {
-        setRemoteVehicleFieldError(remoteDealCreateErrorMessage(err));
+        setRemoteVehicleFieldError(remoteDealMutationErrorMessage(err));
       } else if (code === 'remote_deals_mutation_invalid_value') {
-        setRemoteValueFieldError(remoteDealCreateErrorMessage(err));
+        setRemoteValueFieldError(remoteDealMutationErrorMessage(err));
       } else if (code === 'remote_deals_mutation_invalid_discount') {
         // O controle de desconto começa OCULTO (progressive disclosure,
         // B4-PRECHECK §19) — sem isto, um erro de desconto voltando do
         // backend seria invisível (o painel nunca se revela sozinho).
         setRemoteDiscountExpanded(true);
-        setRemoteDiscountFieldError(remoteDealCreateErrorMessage(err));
+        setRemoteDiscountFieldError(remoteDealMutationErrorMessage(err));
       } else {
-        setRemoteGlobalError(remoteDealCreateErrorMessage(err));
+        setRemoteGlobalError(remoteDealMutationErrorMessage(err));
       }
     } finally {
       setRemoteSubmitting(false);
@@ -1911,6 +1919,367 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
         </FPanel>
       </div>
       {remoteGlobalError && <ErrorBanner>{remoteGlobalError}</ErrorBanner>}
+    </FlowShell>
+  );
+}
+
+// COMMERCIAL-REMOTE-DEALS-B5 — detalhe/edição/marcar-perdida de uma
+// Negociação remota EXISTENTE. Flow NOVO, REMOTE-ONLY (B5-PRECHECK §8):
+// não existe equivalente local (o "Ver" local abre 'ver-cliente', nunca
+// este id) — um único componente controla leitura, edição e a
+// confirmação de perda, nunca três flows separados (mesma decisão de
+// simplicidade do B5-PRECHECK, evitando o padrão FlowVerCliente/
+// FlowEditarCliente, desproporcional para uma superfície de só 2 ações).
+//
+// payload.deal já é o RemoteDealModel completo vindo da própria lista
+// (ScreensBiz.tsx) — nenhuma query nova (B5-PRECHECK §2/§9/§38):
+// stale_write/deal_closed/deal_not_found já protegem concorrência via
+// expectedVersion, sem precisar de fetch-by-id.
+//
+// `currentDeal` é o estado ativo (nunca payload.deal diretamente após a
+// primeira mutation) — toda resposta de sucesso do servidor (update_deal/
+// mark_deal_lost) SUBSTITUI currentDeal integralmente via
+// adaptRemoteDealRow(row), nunca reconstruído a partir do formulário
+// (B5-PRECHECK §8: servidor é autoridade). Isso garante que uma segunda
+// mutation na mesma sessão do flow (ex.: editar depois marcar perdida)
+// sempre usa a version mais recente devolvida pelo servidor, nunca a
+// version com que o flow foi aberto.
+export function FlowVerNegociacao({ payload, close }: any) {
+  const initialDeal: RemoteDealModel = payload.deal;
+
+  const user = AuthService.getCurrentUser();
+  const isSeller = user?.activeMembership?.role === 'seller';
+  const isManager = user?.activeMembership?.role === 'manager';
+  const identityUserId = user?.id ?? null;
+  const identityCompanyId = user?.activeMembership?.companyId ?? null;
+  const identityMembershipRole = user?.activeMembership?.role ?? null;
+  const identityUserIsActive = Boolean(user);
+  const identityKey = identityUserId && identityCompanyId ? `${identityUserId}:${identityCompanyId}` : null;
+
+  // Dois catálogos de Seller distintos, mesmo padrão já estabelecido:
+  // sellerLabels é o catálogo de EXIBIÇÃO (usado pela própria lista,
+  // ScreensBiz.tsx, para mostrar o responsável no detalhe read-only);
+  // assignableSellers é o catálogo de ATRIBUIÇÃO (só quem pode
+  // legitimamente virar responsável, usado pelo SellerPicker em edição).
+  const sellerLabels = useCurrentCompanySellerLabels({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  const assignableSellers = useCurrentCompanyAssignableSellers({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  const updateDealHook = useUpdateDeal({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  const markLostHook = useMarkDealLost({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  useCloseOnIdentityChange(identityKey, close);
+
+  const [currentDeal, setCurrentDeal] = useState<RemoteDealModel>(initialDeal);
+  const [mode, setMode] = useState<'detail' | 'edit'>('detail');
+  // Uma vez setado, NENHUMA mutation volta a ficar disponível neste flow
+  // (B5-PRECHECK §22/§23/§28/§31 CRÍTICO) — o snapshot inteiro é
+  // considerado obsoleto, não só o campo que falhou. Usuário precisa
+  // fechar e reabrir a partir da lista (já invalidada pelo hook).
+  const [terminalError, setTerminalError] = useState<string | null>(null);
+  const [editSuccessMessage, setEditSuccessMessage] = useState<string | null>(null);
+
+  const [editVehicle, setEditVehicle] = useState('');
+  const [editValueInput, setEditValueInput] = useState('');
+  const [editPaymentMethod, setEditPaymentMethod] = useState<RemoteDealRow['payment_method'] | null>(null);
+  const [editDownPaymentInput, setEditDownPaymentInput] = useState('');
+  const [editInstallments, setEditInstallments] = useState('');
+  const [editDiscountExpanded, setEditDiscountExpanded] = useState(false);
+  const [editDiscountPercent, setEditDiscountPercent] = useState(0);
+  const [editNote, setEditNote] = useState('');
+  const [editAssignedSellerId, setEditAssignedSellerId] = useState<string | null>(null);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editGlobalError, setEditGlobalError] = useState<string | null>(null);
+  const [editSellerFieldError, setEditSellerFieldError] = useState<string | null>(null);
+  const [editVehicleFieldError, setEditVehicleFieldError] = useState<string | null>(null);
+  const [editValueFieldError, setEditValueFieldError] = useState<string | null>(null);
+  const [editDiscountFieldError, setEditDiscountFieldError] = useState<string | null>(null);
+
+  const [lostConfirming, setLostConfirming] = useState(false);
+  const [lostSubmitting, setLostSubmitting] = useState(false);
+  const [lostGlobalError, setLostGlobalError] = useState<string | null>(null);
+
+  const remoteSellerItems: SellerPickerItem[] = assignableSellers.assignableSellers.map((s) => ({ id: s.seller_id, name: s.name }));
+
+  // canMutate: só Editar/Marcar como perdida — nunca a leitura em si, que
+  // continua disponível mesmo com terminalError (o usuário ainda pode ver
+  // os últimos dados conhecidos, só não pode mais agir sobre eles).
+  const canMutate = terminalError === null && currentDeal.status === 'open';
+
+  // B5-PRECHECK §15/§16: prefill exato da condição comercial atual —
+  // Cliente nunca entra aqui (imutável). discountPercent > 0 já nasce
+  // revelado (nunca esconder um dado real existente).
+  const enterEditMode = () => {
+    setEditVehicle(currentDeal.vehicle);
+    setEditValueInput(String(currentDeal.valueCents / 100));
+    setEditPaymentMethod(currentDeal.paymentMethod);
+    setEditDownPaymentInput(currentDeal.downPaymentCents !== null ? String(currentDeal.downPaymentCents / 100) : '');
+    setEditInstallments(currentDeal.installments ?? '');
+    setEditDiscountExpanded(currentDeal.discountPercent > 0);
+    setEditDiscountPercent(currentDeal.discountPercent);
+    setEditNote(currentDeal.note);
+    setEditAssignedSellerId(currentDeal.assignedSellerId);
+    setEditGlobalError(null);
+    setEditSellerFieldError(null);
+    setEditVehicleFieldError(null);
+    setEditValueFieldError(null);
+    setEditDiscountFieldError(null);
+    setEditSuccessMessage(null);
+    setMode('edit');
+  };
+  const cancelEdit = () => { setMode('detail'); };
+
+  const editVehicleTrimmed = editVehicle.trim();
+  const editValueReais = parseDealValueReais(editValueInput);
+  const editShowDownPayment = editPaymentMethod === 'entrada_financiamento';
+  const editShowInstallments = editPaymentMethod === 'financiamento_100' || editPaymentMethod === 'entrada_financiamento';
+  const editDownPaymentReais = editShowDownPayment ? parseDealValueReais(editDownPaymentInput) : null;
+  const editInstallmentsTrimmed = editShowInstallments ? editInstallments.trim() : '';
+  const editNoteTrimmed = editNote.trim();
+
+  const canSaveEdit = Boolean(
+    editVehicleTrimmed !== ''
+    && editValueReais !== null
+    && editPaymentMethod !== null
+    && (isSeller || editAssignedSellerId !== null)
+    && !editSubmitting
+    && !updateDealHook.isPending,
+  );
+
+  const handleSaveEdit = async () => {
+    if (!canSaveEdit || editSubmitting || updateDealHook.isPending) return;
+    if (editValueReais === null || editPaymentMethod === null) return;
+    // B5-PRECHECK §18 CRÍTICO: Seller nunca vê SellerPicker, mas
+    // update_deal (full-replace) exige p_assigned_seller_id EXATAMENTE
+    // igual ao atual da Deal para Seller — ecoado aqui sem UI nenhuma,
+    // nunca null, nunca outro valor (confirmado por leitura direta da RPC,
+    // migration #53: IS DISTINCT FROM levanta 'forbidden').
+    const sellerForPayload = isSeller ? currentDeal.assignedSellerId : editAssignedSellerId;
+    if (sellerForPayload === null) return;
+    setEditSubmitting(true);
+    setEditGlobalError(null);
+    setEditSellerFieldError(null);
+    setEditVehicleFieldError(null);
+    setEditValueFieldError(null);
+    setEditDiscountFieldError(null);
+    try {
+      const row = await updateDealHook.updateDeal({
+        dealId: currentDeal.id,
+        expectedVersion: currentDeal.version,
+        vehicle: editVehicleTrimmed,
+        valueCents: editValueReais * 100,
+        discountPercent: editDiscountPercent,
+        paymentMethod: editPaymentMethod,
+        downPaymentCents: editDownPaymentReais !== null ? editDownPaymentReais * 100 : null,
+        installments: editInstallmentsTrimmed !== '' ? editInstallmentsTrimmed : null,
+        note: editNoteTrimmed,
+        assignedSellerId: sellerForPayload,
+      });
+      // Servidor é autoridade (B5-PRECHECK §8/§26): currentDeal é
+      // SUBSTITUÍDO integralmente pela row retornada, nunca reconstruído
+      // a partir dos campos do formulário — version/updatedAt/status daqui
+      // em diante são os do servidor.
+      const adapted = adaptRemoteDealRow(row);
+      if (adapted.ok) {
+        setCurrentDeal(adapted.deal);
+        setEditSuccessMessage('Alterações salvas.');
+        setMode('detail');
+      } else {
+        setEditGlobalError(REMOTE_DEALS_MUTATION_ERROR_MESSAGES_PT.remote_deals_mutation_generic_error);
+      }
+    } catch (err) {
+      if (isRemoteDealsError(err) && err.code === 'remote_deals_mutation_identity_changed') {
+        close();
+        return;
+      }
+      const code = isRemoteDealsError(err) ? err.code : undefined;
+      if (
+        code === 'remote_deals_mutation_stale_write'
+        || code === 'remote_deals_mutation_deal_closed'
+        || code === 'remote_deals_mutation_deal_not_found'
+      ) {
+        // B5-PRECHECK §28/§29/§31 CRÍTICO: snapshot inteiro vira
+        // inoperável — nunca só desabilitar Salvar. Editar/Marcar como
+        // perdida somem junto (via canMutate), nunca reaparecem neste
+        // flow.
+        setTerminalError(remoteDealMutationErrorMessage(err));
+        setMode('detail');
+      } else if (code === 'remote_deals_mutation_seller_not_found') {
+        setEditSellerFieldError(remoteDealMutationErrorMessage(err));
+      } else if (code === 'remote_deals_mutation_invalid_vehicle') {
+        setEditVehicleFieldError(remoteDealMutationErrorMessage(err));
+      } else if (code === 'remote_deals_mutation_invalid_value') {
+        setEditValueFieldError(remoteDealMutationErrorMessage(err));
+      } else if (code === 'remote_deals_mutation_invalid_discount') {
+        setEditDiscountExpanded(true);
+        setEditDiscountFieldError(remoteDealMutationErrorMessage(err));
+      } else {
+        // forbidden / lead_archived / generic — erro de payload/
+        // autorização, não de cache desatualizado (B5-PRECHECK §32):
+        // inputs preservados, snapshot continua operável.
+        setEditGlobalError(remoteDealMutationErrorMessage(err));
+      }
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleConfirmLost = async () => {
+    if (lostSubmitting || markLostHook.isPending) return;
+    setLostSubmitting(true);
+    setLostGlobalError(null);
+    try {
+      const row = await markLostHook.markDealLost({ dealId: currentDeal.id, expectedVersion: currentDeal.version });
+      const adapted = adaptRemoteDealRow(row);
+      if (adapted.ok) setCurrentDeal(adapted.deal);
+      // B5-PRECHECK §28: feedback é a própria tela fechando — nada mais a
+      // fazer aqui, a Deal virou histórico. Refetch/invalidação já é
+      // responsabilidade do hook (B2-B).
+      close();
+    } catch (err) {
+      if (isRemoteDealsError(err) && err.code === 'remote_deals_mutation_identity_changed') {
+        close();
+        return;
+      }
+      const code = isRemoteDealsError(err) ? err.code : undefined;
+      if (
+        code === 'remote_deals_mutation_stale_write'
+        || code === 'remote_deals_mutation_deal_closed'
+        || code === 'remote_deals_mutation_deal_not_found'
+      ) {
+        setTerminalError(remoteDealMutationErrorMessage(err));
+        setLostConfirming(false);
+      } else {
+        // forbidden / generic
+        setLostGlobalError(remoteDealMutationErrorMessage(err));
+      }
+    } finally {
+      setLostSubmitting(false);
+    }
+  };
+
+  const now = new Date();
+  const statusLabel = DEAL_STATUS_LABELS_PT[currentDeal.status];
+  const sellerDisplay = resolveDealSellerDisplayName(currentDeal.assignedSellerId, sellerLabels.sellersById);
+
+  if (mode === 'edit') {
+    return (
+      <FlowShell eyebrow="NEGOCIAÇÃO" title="Editar negociação" icon="handshake" accent="#E8CE72" onClose={close}
+        footer={<>
+          <LBtn kind="ghost" size="lg" onClick={cancelEdit}>Cancelar</LBtn>
+          <div style={{ flex: 1 }} />
+          <LBtn kind="gold" size="lg" icon="check" onClick={handleSaveEdit} style={{ opacity: canSaveEdit ? 1 : .5 }}>
+            {(editSubmitting || updateDealHook.isPending) ? 'Salvando…' : 'Salvar alterações'}
+          </LBtn>
+        </>}>
+        <div style={{ maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <FPanel title="Cliente" icon="user" accent="#E8CE72">
+            <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--t-900)' }}>{currentDeal.clientName}</div>
+            <div style={{ fontSize: 12, color: 'var(--t-500)', marginTop: 4 }}>O cliente de uma negociação não pode ser alterado.</div>
+          </FPanel>
+          <FPanel title="Veículo" icon="car" accent="#E8CE72">
+            <FField label="Veículo" icon="car" value={editVehicle} onChange={(e: any) => setEditVehicle(e.target.value)} />
+            {editVehicleFieldError && <div style={{ marginTop: -6, marginBottom: 10, fontSize: 12, color: 'var(--red)' }}>{editVehicleFieldError}</div>}
+          </FPanel>
+          <FPanel title="Valor negociado" icon="dollar" accent="#E8CE72">
+            <FField label="Valor negociado (R$)" icon="dollar" value={editValueInput} onChange={(e: any) => setEditValueInput(e.target.value)} />
+            {editValueFieldError && <div style={{ marginTop: -6, marginBottom: 10, fontSize: 12, color: 'var(--red)' }}>{editValueFieldError}</div>}
+          </FPanel>
+          <FPanel title="Forma de pagamento" icon="card" accent="#E8CE72">
+            <Segmented options={DEAL_PAYMENT_METHOD_OPTIONS} value={editPaymentMethod} onChange={setEditPaymentMethod} />
+            {editShowDownPayment && <div style={{ marginTop: 14 }}>
+              <FField label="Entrada (R$)" icon="card" value={editDownPaymentInput} onChange={(e: any) => setEditDownPaymentInput(e.target.value)} />
+            </div>}
+            {editShowInstallments && <div style={{ marginTop: 14 }}>
+              <FField label="Parcelas / condição" icon="refresh" value={editInstallments} onChange={(e: any) => setEditInstallments(e.target.value)} />
+            </div>}
+          </FPanel>
+          {!isSeller && (
+            <FPanel title="Vendedor responsável" icon="user" accent="#E8CE72">
+              <SellerPicker
+                items={remoteSellerItems}
+                value={editAssignedSellerId}
+                onChange={setEditAssignedSellerId}
+                loading={assignableSellers.isLoading}
+                disabled={editSubmitting || updateDealHook.isPending}
+                error={editSellerFieldError ?? (assignableSellers.isError ? 'Não foi possível carregar os vendedores.' : null)}
+                allowNone={false}
+                placeholder="Selecione o vendedor…"
+              />
+            </FPanel>
+          )}
+          <FPanel accent="#E8CE72">
+            {!editDiscountExpanded ? (
+              <button onClick={() => setEditDiscountExpanded(true)} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--t-500)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Aplicar desconto</button>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)' }}>Desconto aplicado</span>
+                  <span className="display tnum" style={{ fontSize: 20, fontWeight: 800, color: 'var(--gold-ink)' }}>{editDiscountPercent}%</span>
+                </div>
+                <input type="range" min="0" max="10" step="1" value={editDiscountPercent} onChange={(e) => setEditDiscountPercent(+e.target.value)} style={{ width: '100%', accentColor: '#D4AF37' }} />
+                {editDiscountFieldError && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--red)' }}>{editDiscountFieldError}</div>}
+              </>
+            )}
+          </FPanel>
+          <FPanel title="Observação (opcional)" icon="clipboard" accent="#E8CE72">
+            <FArea placeholder="Comentário interno sobre a negociação..." value={editNote} onChange={(e: any) => setEditNote(e.target.value)} />
+          </FPanel>
+        </div>
+        {editGlobalError && <ErrorBanner>{editGlobalError}</ErrorBanner>}
+      </FlowShell>
+    );
+  }
+
+  return (
+    <FlowShell eyebrow="NEGOCIAÇÃO" title={currentDeal.clientName} icon="handshake" accent="#E8CE72" onClose={close}>
+      <div style={{ maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {terminalError && <ErrorBanner>{terminalError}</ErrorBanner>}
+        {editSuccessMessage && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--green-bg)', border: '1px solid var(--green-line)' }}>
+            <Icon name="checkCircle" size={16} stroke={2.2} style={{ color: 'var(--green)' }} />
+            <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{editSuccessMessage}</span>
+          </div>
+        )}
+        <FPanel>
+          <SummaryRow label="Cliente" value={currentDeal.clientName} />
+          <SummaryRow label="Veículo" value={currentDeal.vehicle} />
+          <SummaryRow label="Valor negociado" value={formatCentsToBRL(currentDeal.valueCents)} />
+          <SummaryRow label="Forma de pagamento" value={DEAL_PAYMENT_METHOD_LABELS_PT[currentDeal.paymentMethod]} />
+          {currentDeal.downPaymentCents !== null && <SummaryRow label="Entrada" value={formatCentsToBRL(currentDeal.downPaymentCents)} />}
+          {currentDeal.installments && <SummaryRow label="Parcelas" value={currentDeal.installments} />}
+          {currentDeal.discountPercent > 0 && <SummaryRow label="Desconto" value={`${currentDeal.discountPercent}%`} />}
+          {currentDeal.note.trim() !== '' && <SummaryRow label="Observação" value={currentDeal.note} />}
+          {isManager && <SummaryRow label="Vendedor responsável" value={sellerDisplay} />}
+          <SummaryRow label="Status" value={statusLabel} />
+          <SummaryRow label="Atualização" value={`Atualizada ${formatDealUpdatedAt(currentDeal.updatedAt, now)}`} />
+        </FPanel>
+        {canMutate && !lostConfirming && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <LBtn kind="gold" icon="edit" onClick={enterEditMode}>Editar</LBtn>
+            <LBtn kind="ghost" icon="xCircle" onClick={() => setLostConfirming(true)}>Marcar como perdida</LBtn>
+          </div>
+        )}
+        {canMutate && lostConfirming && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 13, color: 'var(--t-700)' }}>Marcar esta negociação como perdida?</span>
+            <LBtn kind="ghost" onClick={() => { setLostConfirming(false); setLostGlobalError(null); }}>Voltar</LBtn>
+            <LBtn kind="danger" onClick={handleConfirmLost} style={{ opacity: (lostSubmitting || markLostHook.isPending) ? 0.6 : 1 }}>
+              {(lostSubmitting || markLostHook.isPending) ? 'Marcando…' : 'Marcar como perdida'}
+            </LBtn>
+          </div>
+        )}
+        {lostGlobalError && <ErrorBanner>{lostGlobalError}</ErrorBanner>}
+      </div>
     </FlowShell>
   );
 }

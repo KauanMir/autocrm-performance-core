@@ -58,6 +58,7 @@ vi.mock('@/components/flows/Flows2', () => ({
   FlowRegistrarResultado: stub('FlowRegistrarResultado'),
   FlowRegistrarResultadoRemoto: stub('FlowRegistrarResultadoRemoto'),
   FlowNovaProposta: stub('FlowNovaProposta'),
+  FlowVerNegociacao: stub('FlowVerNegociacao'),
   FlowAprovarProposta: stub('FlowAprovarProposta'),
   FlowRegistrarVenda: stub('FlowRegistrarVenda'),
   FlowNovaPendencia: stub('FlowNovaPendencia'),
@@ -281,6 +282,45 @@ describe('FlowLayer — nova-proposta: gate caller-independent', () => {
     expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
     renderFlow('registrar-venda');
     expect(screen.getAllByText('Módulo indisponível').length).toBeGreaterThan(0);
+  });
+});
+
+// COMMERCIAL-REMOTE-DEALS-B5 — 'ver-negociacao' é um flow id NOVO (nunca
+// existiu em LOCAL_COMMERCIAL_FLOW_IDS), REMOTE-ONLY: diferente de
+// nova-proposta, 'deal_local' também BLOQUEIA aqui — não existe
+// implementação local deste flow (o "Ver" local continua abrindo
+// 'ver-cliente', nunca este id).
+describe('FlowLayer — ver-negociacao permitido em deal_remote_ready', () => {
+  it('monta o componente real', () => {
+    mocks.resolveDealRemoteMode.mockReturnValue('deal_remote_ready');
+    renderFlow('ver-negociacao', { deal: { id: 'd1' } });
+    expect(screen.getByText('FlowVerNegociacao')).toBeInTheDocument();
+    expect(screen.queryByText('Módulo indisponível')).toBeNull();
+  });
+});
+
+describe.each(['deal_local', 'deal_blocked', 'deal_remote_misconfigured'] as const)('FlowLayer — ver-negociacao bloqueado em %s', (mode) => {
+  it('mostra estado indisponível, nunca monta o componente real', () => {
+    mocks.resolveDealRemoteMode.mockReturnValue(mode);
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(true);
+    renderFlow('ver-negociacao', { deal: { id: 'd1' } });
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+    expect(screen.queryByText('FlowVerNegociacao')).toBeNull();
+  });
+});
+
+describe('FlowLayer — ver-negociacao: gate caller-independent, e nova-proposta sem widening', () => {
+  it('bloqueia mesmo com um payload.deal anexado, sem lê-lo', () => {
+    mocks.resolveDealRemoteMode.mockReturnValue('deal_blocked');
+    renderFlow('ver-negociacao', { deal: { id: 'd1', clientName: 'Nome Real' } });
+    expect(screen.queryByText('Nome Real')).toBeNull();
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+  });
+
+  it('nova-proposta continua permitido em deal_local (regressão B4, não afetado pelo B5)', () => {
+    mocks.resolveDealRemoteMode.mockReturnValue('deal_local');
+    renderFlow('nova-proposta');
+    expect(screen.getByText('FlowNovaProposta')).toBeInTheDocument();
   });
 });
 

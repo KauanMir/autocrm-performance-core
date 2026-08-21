@@ -302,6 +302,25 @@ describe('ScreenPropostas — deal_remote_active com dado', () => {
     expect(m.leads).not.toHaveBeenCalled();
   });
 
+  it('"Abrir" presente nos três status, clique abre ver-negociacao com a Deal, zero LeadService/DealService', () => {
+    const openDeal = remoteDeal({ id: 'open-1', status: 'open' });
+    const lostDeal = remoteDeal({ id: 'lost-1', status: 'lost', lostBy: 'profile-1', lostAt: '2026-08-20T10:00:00Z' });
+    const soldDeal = remoteDeal({ id: 'sold-1', status: 'sold' });
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [openDeal, lostDeal, soldDeal],
+    }));
+
+    render(<ScreenPropostas go={() => {}} />);
+
+    const abrirButtons = screen.getAllByText('Abrir');
+    expect(abrirButtons).toHaveLength(3);
+
+    fireEvent.click(abrirButtons[0]);
+    expect(m.openFlow).toHaveBeenCalledWith('ver-negociacao', { deal: openDeal });
+    expect(m.deals).not.toHaveBeenCalled();
+    expect(m.leads).not.toHaveBeenCalled();
+  });
+
   it('zero badge de status por card — nenhum "Perdida"/"Vendida" singular fora do header de seção', () => {
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
       hasData: true,

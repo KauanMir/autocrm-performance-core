@@ -8,6 +8,7 @@ import {
   FlowNovoCliente, FlowEditarCliente, FlowCriarVisita, FlowReagendarVisita, FlowConfirmarVisita,
   FlowRegistrarResultado, FlowRegistrarResultadoRemoto, FlowNovaProposta, FlowAprovarProposta,
   FlowRegistrarVenda, FlowNovaPendencia, FlowReagendarPendencia, FlowCriarAcompanhamento,
+  FlowVerNegociacao,
 } from './Flows2';
 import {
   FlowPerfilVendedor, FlowNotificacoes, FlowBusca,
@@ -32,6 +33,7 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'registrar-resultado': FlowRegistrarResultado,
   'registrar-resultado-remoto': FlowRegistrarResultadoRemoto,
   'nova-proposta': FlowNovaProposta,
+  'ver-negociacao': FlowVerNegociacao,
   'aprovar-proposta': FlowAprovarProposta,
   'registrar-venda': FlowRegistrarVenda,
   'nova-pendencia': FlowNovaPendencia,
@@ -169,6 +171,18 @@ function isDealCreateFlowAllowed(): boolean {
   return mode === 'deal_local' || mode === 'deal_remote_ready';
 }
 
+// COMMERCIAL-REMOTE-DEALS-B5 — gate DEDICADO de 'ver-negociacao', mesmo
+// espírito de isVisitRescheduleFlowAllowed/isVisitRegisterResultFlowAllowed
+// (B5/B6-B de Visits): flow id NOVO, REMOTE-ONLY — não existe equivalente
+// local (o "Ver" local abre 'ver-cliente', nunca este id), então
+// 'deal_local' também bloqueia aqui, diferente de isDealCreateFlowAllowed.
+// Nenhuma row local jamais chama openFlow('ver-negociacao') — defesa em
+// profundidade para um caminho já estruturalmente inalcançável em modo
+// local.
+function isDealDetailFlowAllowed(): boolean {
+  return resolveDealRemoteMode() === 'deal_remote_ready';
+}
+
 export function FlowLayer({ flow, close, openFlow, go }: {
   flow: { id: string; payload: any } | null;
   close: () => void;
@@ -194,6 +208,9 @@ export function FlowLayer({ flow, close, openFlow, go }: {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   if (flow.id === 'nova-proposta' && !isDealCreateFlowAllowed()) {
+    return <LocalCommercialFlowUnavailable close={close} />;
+  }
+  if (flow.id === 'ver-negociacao' && !isDealDetailFlowAllowed()) {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   return <Comp payload={flow.payload || {}} close={close} openFlow={openFlow} go={go} />;

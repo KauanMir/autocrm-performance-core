@@ -536,6 +536,11 @@ function DealStateCard({ testId, children, onRetry }: { testId: string; children
 // a exatamente um status, diferente de Visits (onde uma mesma seção pode
 // misturar scheduled/confirmed) — repetir o status no card seria
 // informação duplicada.
+// COMMERCIAL-REMOTE-DEALS-B5 — "Abrir" presente nos três status (open/
+// lost/sold), mesmo label/estilo/posição do "Ver" local (LBtn ghost) —
+// nunca o card inteiro clicável (B5-PRECHECK §6/§41). Abre o flow remoto
+// dedicado 'ver-negociacao' com a própria row já carregada (nenhuma query
+// nova, B5-PRECHECK §2/§9/§38) — nunca LeadService/DealService.
 function RemoteDealRow({ deal, sellersById, showSeller, now }: {
   deal: RemoteDealModel;
   sellersById: Readonly<Record<string, { id: string; name: string }>>;
@@ -560,6 +565,7 @@ function RemoteDealRow({ deal, sellersById, showSeller, now }: {
         <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{formatCentsToBRL(deal.valueCents)}</div>
         <div style={{ fontSize: 11, color: 'var(--t-400)' }}>atualizada {updatedDisplay}</div>
       </div>
+      <LBtn size="sm" kind="ghost" icon="arrowRight" onClick={() => (window as any).__openFlow('ver-negociacao', { deal })}>Abrir</LBtn>
     </div>
   );
 }
