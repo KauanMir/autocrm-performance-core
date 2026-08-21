@@ -197,8 +197,6 @@ export type Database = {
       }
       deals: {
         Row: {
-          approved_at: string | null
-          approved_by: string | null
           assigned_seller_id: string
           client_name_snapshot: string
           company_id: string
@@ -209,10 +207,10 @@ export type Database = {
           id: string
           installments: string | null
           lead_id: string
+          lost_at: string | null
+          lost_by: string | null
           note: string
           payment_method: Database["public"]["Enums"]["deal_payment_method"]
-          rejected_at: string | null
-          rejected_by: string | null
           status: Database["public"]["Enums"]["deal_status"]
           updated_at: string
           updated_by: string
@@ -221,8 +219,6 @@ export type Database = {
           version: number
         }
         Insert: {
-          approved_at?: string | null
-          approved_by?: string | null
           assigned_seller_id: string
           client_name_snapshot: string
           company_id: string
@@ -233,10 +229,10 @@ export type Database = {
           id?: string
           installments?: string | null
           lead_id: string
+          lost_at?: string | null
+          lost_by?: string | null
           note?: string
           payment_method: Database["public"]["Enums"]["deal_payment_method"]
-          rejected_at?: string | null
-          rejected_by?: string | null
           status?: Database["public"]["Enums"]["deal_status"]
           updated_at?: string
           updated_by: string
@@ -245,8 +241,6 @@ export type Database = {
           version?: number
         }
         Update: {
-          approved_at?: string | null
-          approved_by?: string | null
           assigned_seller_id?: string
           client_name_snapshot?: string
           company_id?: string
@@ -257,10 +251,10 @@ export type Database = {
           id?: string
           installments?: string | null
           lead_id?: string
+          lost_at?: string | null
+          lost_by?: string | null
           note?: string
           payment_method?: Database["public"]["Enums"]["deal_payment_method"]
-          rejected_at?: string | null
-          rejected_by?: string | null
           status?: Database["public"]["Enums"]["deal_status"]
           updated_at?: string
           updated_by?: string
@@ -269,13 +263,6 @@ export type Database = {
           version?: number
         }
         Relationships: [
-          {
-            foreignKeyName: "deals_approved_by_fk"
-            columns: ["company_id", "approved_by"]
-            isOneToOne: false
-            referencedRelation: "company_memberships"
-            referencedColumns: ["company_id", "profile_id"]
-          },
           {
             foreignKeyName: "deals_company_id_fkey"
             columns: ["company_id"]
@@ -305,8 +292,8 @@ export type Database = {
             referencedColumns: ["company_id", "profile_id"]
           },
           {
-            foreignKeyName: "deals_rejected_by_fk"
-            columns: ["company_id", "rejected_by"]
+            foreignKeyName: "deals_lost_by_fk"
+            columns: ["company_id", "lost_by"]
             isOneToOne: false
             referencedRelation: "company_memberships"
             referencedColumns: ["company_id", "profile_id"]
@@ -1333,8 +1320,6 @@ export type Database = {
           p_vehicle: string
         }
         Returns: {
-          approved_at: string | null
-          approved_by: string | null
           assigned_seller_id: string
           client_name_snapshot: string
           company_id: string
@@ -1345,10 +1330,10 @@ export type Database = {
           id: string
           installments: string | null
           lead_id: string
+          lost_at: string | null
+          lost_by: string | null
           note: string
           payment_method: Database["public"]["Enums"]["deal_payment_method"]
-          rejected_at: string | null
-          rejected_by: string | null
           status: Database["public"]["Enums"]["deal_status"]
           updated_at: string
           updated_by: string
@@ -1499,39 +1484,6 @@ export type Database = {
       current_profile_seller_id_for_company: {
         Args: { p_target_company_id: string }
         Returns: string
-      }
-      decide_deal: {
-        Args: { p_decision: string; p_expected_version: number; p_id: string }
-        Returns: {
-          approved_at: string | null
-          approved_by: string | null
-          assigned_seller_id: string
-          client_name_snapshot: string
-          company_id: string
-          created_at: string
-          created_by: string
-          discount_percent: number
-          down_payment_cents: number | null
-          id: string
-          installments: string | null
-          lead_id: string
-          note: string
-          payment_method: Database["public"]["Enums"]["deal_payment_method"]
-          rejected_at: string | null
-          rejected_by: string | null
-          status: Database["public"]["Enums"]["deal_status"]
-          updated_at: string
-          updated_by: string
-          value_cents: number
-          vehicle: string
-          version: number
-        }
-        SetofOptions: {
-          from: "*"
-          to: "deals"
-          isOneToOne: true
-          isSetofReturn: false
-        }
       }
       get_auth_email_update_state: {
         Args: { p_new_email: string; p_target_user_id: string }
@@ -1702,6 +1654,37 @@ export type Database = {
           name: string
           seller_id: string
         }[]
+      }
+      mark_deal_lost: {
+        Args: { p_expected_version: number; p_id: string }
+        Returns: {
+          assigned_seller_id: string
+          client_name_snapshot: string
+          company_id: string
+          created_at: string
+          created_by: string
+          discount_percent: number
+          down_payment_cents: number | null
+          id: string
+          installments: string | null
+          lead_id: string
+          lost_at: string | null
+          lost_by: string | null
+          note: string
+          payment_method: Database["public"]["Enums"]["deal_payment_method"]
+          status: Database["public"]["Enums"]["deal_status"]
+          updated_at: string
+          updated_by: string
+          value_cents: number
+          vehicle: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "deals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       move_lead_to_stage: {
         Args: {
@@ -2004,6 +1987,48 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      update_deal: {
+        Args: {
+          p_assigned_seller_id?: string
+          p_discount_percent: number
+          p_down_payment_cents?: number
+          p_expected_version: number
+          p_id: string
+          p_installments?: string
+          p_note?: string
+          p_payment_method: Database["public"]["Enums"]["deal_payment_method"]
+          p_value_cents: number
+          p_vehicle: string
+        }
+        Returns: {
+          assigned_seller_id: string
+          client_name_snapshot: string
+          company_id: string
+          created_at: string
+          created_by: string
+          discount_percent: number
+          down_payment_cents: number | null
+          id: string
+          installments: string | null
+          lead_id: string
+          lost_at: string | null
+          lost_by: string | null
+          note: string
+          payment_method: Database["public"]["Enums"]["deal_payment_method"]
+          status: Database["public"]["Enums"]["deal_status"]
+          updated_at: string
+          updated_by: string
+          value_cents: number
+          vehicle: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "deals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       update_lead: {
         Args: {
           p_car: string
@@ -2159,12 +2184,7 @@ export type Database = {
         | "financiamento_100"
         | "entrada_financiamento"
         | "troca"
-      deal_status:
-        | "open"
-        | "pending_approval"
-        | "approved"
-        | "rejected"
-        | "sold"
+      deal_status: "open" | "lost" | "sold"
       invite_delivery_status: "not_sent" | "sent" | "failed"
       invite_role_kind: "super_admin" | "manager" | "seller"
       invite_status:
@@ -2340,7 +2360,7 @@ export const Constants = {
         "entrada_financiamento",
         "troca",
       ],
-      deal_status: ["open", "pending_approval", "approved", "rejected", "sold"],
+      deal_status: ["open", "lost", "sold"],
       invite_delivery_status: ["not_sent", "sent", "failed"],
       invite_role_kind: ["super_admin", "manager", "seller"],
       invite_status: [
