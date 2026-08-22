@@ -1,12 +1,11 @@
 // Testes de isolamento fail-closed dos módulos comerciais locais em
-// ScreensBiz.tsx (M1-E, E5-B2-A1 + E7-B1): ScreenVendas/ScreenResultados.
-// Cobre Barreira 1 (UI) — em modo NÃO local, nenhuma tela chama
-// SaleService.getAll(), nenhum dado antigo aparece, nenhuma ação de
-// cancelar é oferecida. ScreenResultados (E7-B1) ganhou o mesmo isolamento
-// para SellerService (catálogo local sem company_id, sem backend remoto —
-// achado do E7-A0), alcançável pelo Manager mesmo em modo remoto
-// (NAV_ROLES.manager inclui 'resultados'). Em modo local, comportamento
-// preservado integralmente.
+// ScreensBiz.tsx (M1-E, E5-B2-A1 + E7-B1): ScreenResultados. Cobre
+// Barreira 1 (UI) — em modo NÃO local, a tela não chama
+// SellerService.getAll(), nenhum dado antigo aparece. ScreenResultados
+// (E7-B1) ganhou esse isolamento para SellerService (catálogo local sem
+// company_id, sem backend remoto — achado do E7-A0), alcançável pelo
+// Manager mesmo em modo remoto (NAV_ROLES.manager inclui 'resultados').
+// Em modo local, comportamento preservado integralmente.
 //
 // ScreenVisitas SAIU deste arquivo (COMMERCIAL-REMOTE-VISITS-B3): Visit
 // ganhou backend remoto próprio (migration #52, local-only) e o gate
@@ -22,8 +21,16 @@
 // (migration #53, local-only, ainda PENDING REMOTE) e o gate deixou de ser
 // só isLocalCommercialDataAllowed() — passou a ser remoteDealsScreen.mode
 // (via useRemoteDealsScreenState), testado em
-// tests/screens/ScreenPropostasCommercialIsolation.test.tsx. Sale/
-// SellerService ainda não migraram — as 2 telas abaixo continuam por
+// tests/screens/ScreenPropostasCommercialIsolation.test.tsx.
+//
+// ScreenVendas SAIU deste arquivo pelo mesmo motivo (COMMERCIAL-REMOTE-
+// SALES-A2): Sale ganhou backend remoto próprio (migration #54,
+// local-only, ainda PENDING REMOTE) e o gate deixou de ser só
+// isLocalCommercialDataAllowed() — passou a ser remoteSalesScreen.mode
+// (via useRemoteSalesScreenState, que chama useQuery incondicionalmente —
+// exige QueryClientProvider, ausente neste arquivo por design), testado em
+// tests/screens/ScreenVendasCommercialIsolation.test.tsx. SellerService
+// ainda não migrou — a tela abaixo continua por
 // isLocalCommercialDataAllowed().
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -31,9 +38,6 @@ import { render, screen } from '@testing-library/react';
 
 const m = vi.hoisted(() => ({
   isLocalCommercialDataAllowed: vi.fn(),
-  visits: vi.fn(() => [] as any[]),
-  deals: vi.fn(() => [] as any[]),
-  sales: vi.fn(() => [] as any[]),
   sellers: vi.fn(() => [] as any[]),
   isManager: vi.fn(() => false),
 }));
@@ -61,45 +65,21 @@ vi.mock('@/components/invites/InviteList', () => ({ InviteList: () => <div /> })
 
 vi.mock('@/lib/services', () => ({
   LeadService: { getAll: () => [] },
-  VisitService: { getAll: () => m.visits() },
-  DealService: { getAll: () => m.deals() },
-  SaleService: { getAll: () => m.sales() },
+  VisitService: { getAll: () => [] },
+  DealService: { getAll: () => [] },
+  SaleService: { getAll: () => [] },
   SellerService: { getAll: () => m.sellers() },
   AuthService: { getCurrentUser: () => null, isManager: () => m.isManager() },
   CompanyService: { get: () => ({ name: '', cnpj: '', phone: '', timezone: '' }), update: () => {} },
   PipelineService: { reorderStages: () => {}, getStages: () => [] },
 }));
 
-import { ScreenVendas, ScreenResultados } from '@/components/screens/ScreensBiz';
+import { ScreenResultados } from '@/components/screens/ScreensBiz';
 
 beforeEach(() => {
   m.isLocalCommercialDataAllowed.mockReset();
-  m.visits.mockReset().mockReturnValue([]);
-  m.deals.mockReset().mockReturnValue([]);
-  m.sales.mockReset().mockReturnValue([]);
   m.sellers.mockReset().mockReturnValue([]);
   m.isManager.mockReset().mockReturnValue(false);
-});
-
-describe('ScreenVendas — isolamento por modo', () => {
-  it('modo NÃO local: não chama SaleService.getAll, mostra estado indisponível, nenhuma ação de cancelar', () => {
-    m.isLocalCommercialDataAllowed.mockReturnValue(false);
-    m.isManager.mockReturnValue(true);
-    m.sales.mockReturnValue([{ id: 's1', client: 'Cliente Antigo', car: 'Onix', value: 'R$ 1', seller: 'Marcos Silva', pay: 'À vista', date: 'hoje', status: 'aguardando' }]);
-    render(<ScreenVendas go={() => {}} />);
-    expect(m.sales).not.toHaveBeenCalled();
-    expect(screen.getByTestId('local-commercial-unavailable')).toBeInTheDocument();
-    expect(screen.queryByText('Cliente Antigo')).toBeNull();
-    expect(screen.queryByText('Registrar venda')).toBeNull();
-    expect(screen.queryByText('Cancelar')).toBeNull();
-  });
-
-  it('modo local: renderiza vendas normalmente', () => {
-    m.isLocalCommercialDataAllowed.mockReturnValue(true);
-    m.sales.mockReturnValue([{ id: 's1', client: 'Beatriz Lima', car: 'Onix', value: 'R$ 1', seller: 'Marcos Silva', pay: 'À vista', date: 'hoje', status: 'entregue' }]);
-    render(<ScreenVendas go={() => {}} />);
-    expect(screen.getByText('Beatriz Lima')).toBeInTheDocument();
-  });
 });
 
 describe('ScreenResultados — isolamento por modo (M1-E E7-B1)', () => {

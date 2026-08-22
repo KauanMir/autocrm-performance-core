@@ -26,6 +26,7 @@ const m = vi.hoisted(() => ({
   useCurrentCompanyAssignableSellers: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
   useRemoteLeadsScreenState: vi.fn(),
+  resolveSalesRemoteMode: vi.fn(),
   dealServiceCreate: vi.fn(),
   dealServiceGetAll: vi.fn(() => [] as any[]),
   leadServiceGetAll: vi.fn(() => [] as any[]),
@@ -41,6 +42,13 @@ vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
 }));
 vi.mock('@/lib/hooks/useRemoteLeadsScreenState', () => ({
   useRemoteLeadsScreenState: m.useRemoteLeadsScreenState,
+}));
+// COMMERCIAL-REMOTE-SALES-A2 — resolveSalesRemoteMode decide sozinho a
+// visibilidade do botão "Registrar venda" (canRegisterSale). Default
+// 'sale_local' (ausente) — os testes dedicados abaixo fornecem
+// 'sale_remote_ready' explicitamente.
+vi.mock('@/lib/sales/remoteSalesMode', () => ({
+  resolveSalesRemoteMode: m.resolveSalesRemoteMode,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -160,6 +168,7 @@ beforeEach(() => {
   m.useCurrentCompanyAssignableSellers.mockReset().mockImplementation(() => assignableSellersResult());
   m.useCurrentCompanySellerLabels.mockReset().mockImplementation(() => sellerLabelsResult());
   m.useRemoteLeadsScreenState.mockReset().mockImplementation(() => leadsScreenResult([]));
+  m.resolveSalesRemoteMode.mockReset().mockReturnValue('sale_local');
   m.user.current = manager();
 });
 
@@ -192,6 +201,36 @@ describe('FlowVerNegociacao — detalhe (open)', () => {
     expect(screen.queryByText('Desconto')).toBeNull();
     expect(screen.queryByText('Observação')).toBeNull();
     expect(screen.queryByText('Vendedor responsável')).toBeNull();
+  });
+});
+
+// COMMERCIAL-REMOTE-SALES-A2 — "Registrar venda" só aparece quando a Deal
+// está open (canMutate) E Sales está sale_remote_ready. Ausente em lost/
+// sold/terminalError e quando Sales não está pronto (local/blocked/
+// misconfigured), mesmo sem nenhuma mudança na Deal em si.
+describe('FlowVerNegociacao — CTA "Registrar venda" (B8-A2)', () => {
+  it('Deal open + Sales sale_remote_ready: botão aparece e abre registrar-venda com a Deal atual', () => {
+    m.resolveSalesRemoteMode.mockReturnValue('sale_remote_ready');
+    const deal = remoteDeal({ status: 'open' });
+    const { openFlow } = renderFlow(deal);
+    expect(screen.getByText('Registrar venda')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Registrar venda'));
+    expect(openFlow).toHaveBeenCalledWith('registrar-venda', { deal: expect.objectContaining({ id: deal.id, status: 'open' }) });
+  });
+
+  it.each(['sale_local', 'sale_blocked', 'sale_remote_misconfigured'] as const)(
+    'Deal open + Sales %s: botão ausente',
+    (saleMode) => {
+      m.resolveSalesRemoteMode.mockReturnValue(saleMode);
+      renderFlow(remoteDeal({ status: 'open' }));
+      expect(screen.queryByText('Registrar venda')).toBeNull();
+    },
+  );
+
+  it.each(['lost', 'sold'] as const)('Deal %s + Sales sale_remote_ready: botão ausente (canMutate exige open)', (status) => {
+    m.resolveSalesRemoteMode.mockReturnValue('sale_remote_ready');
+    renderFlow(remoteDeal({ status, lostBy: status === 'lost' ? 'profile-1' : null, lostAt: status === 'lost' ? '2026-08-20T10:00:00Z' : null }));
+    expect(screen.queryByText('Registrar venda')).toBeNull();
   });
 });
 

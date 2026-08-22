@@ -35,6 +35,9 @@ import {
   resolveDealSellerDisplayName,
   formatDealUpdatedAt,
 } from '@/lib/deals/dealScreenGrouping';
+import { DEAL_PAYMENT_METHOD_LABELS_PT } from '@/lib/deals/labels';
+import { useRemoteSalesScreenState } from '@/lib/hooks/useRemoteSalesScreenState';
+import type { RemoteSaleModel } from '@/lib/sales/adapter';
 
 // M1-E E5-B2-A1 — Barreira 1 (UI) para Visitas/Propostas/Vendas: Visit/Deal/
 // Sale não têm company_id nem backend remoto (auditoria E5-B2-A0). Fora do
@@ -735,8 +738,141 @@ const SST: Record<string, { tone: string; label: string }> = {
   [SALE_STATUS.CANCELED]:  { tone: 'red',   label: 'Cancelada' },
 };
 
+// COMMERCIAL-REMOTE-SALES-A2 — linha de uma Sale remota. Somente leitura:
+// Sale é imutável neste V1 (nenhum botão de ação — sem cancelar, sem
+// editar, SALES-A1-PRECHECK §19). Cliente/Veículo NÃO existem na própria
+// row de Sales (só deal_id/lead_id) — resolvidos via a Deal correspondente
+// já carregada por useRemoteDealsScreenState (mesmo dado que alimenta
+// Negociações, zero query nova por linha, SALES-A2-PRECHECK §7). `deal`
+// pode ser null (Deals ainda carregando/erro nesta sessão, ou Sale mais
+// antiga que o batch atual) — nunca quebra a linha, cai num rótulo neutro.
+function RemoteSaleRow({ sale, deal, sellersById, showSeller, now }: {
+  sale: RemoteSaleModel;
+  deal: RemoteDealModel | null;
+  sellersById: Readonly<Record<string, { id: string; name: string }>>;
+  showSeller: boolean;
+  now: Date;
+}) {
+  const sellerDisplay = resolveDealSellerDisplayName(sale.assignedSellerId, sellersById);
+  const soldDisplay = formatDealUpdatedAt(sale.soldAt, now);
+  const clientName = deal?.clientName ?? 'Cliente indisponível';
+  const vehicle = deal?.vehicle ?? 'Veículo indisponível';
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 16, padding: '15px 18px', borderRadius: 11,
+      background: 'var(--surface)', border: '1px solid var(--border)',
+    }}>
+      <Avatar name={clientName} size={40} ring="#15924B" />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{clientName}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Icon name="car" size={13} stroke={2} /> {vehicle}{showSeller && <> · {sellerDisplay}</>}
+        </div>
+      </div>
+      <div style={{ fontSize: 12.5, color: 'var(--t-500)' }}>{DEAL_PAYMENT_METHOD_LABELS_PT[sale.paymentMethod]}</div>
+      <div style={{ textAlign: 'right' }}>
+        <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{formatCentsToBRL(sale.soldValueCents)}</div>
+        <div style={{ fontSize: 11, color: 'var(--t-400)' }}>vendida {soldDisplay}</div>
+      </div>
+    </div>
+  );
+}
+
 export function ScreenVendas({ go }: any) {
   useStore();
+  const currentUser = AuthService.getCurrentUser();
+  const remoteSalesScreen = useRemoteSalesScreenState(currentUser);
+  const mode = remoteSalesScreen.mode;
+
+  // Mesma identidade já usada por useRemoteSalesScreenState internamente —
+  // chamados SEMPRE, antes de qualquer return (Rules of Hooks). remoteDeals
+  // resolve Cliente/Veículo por deal_id (mesmo dado de Negociações, zero
+  // query nova); sellerLabels resolve o nome do vendedor (mesma
+  // infraestrutura batch já usada por ScreenPropostas/ScreenVisitas).
+  const remoteDealsForSales = useRemoteDealsScreenState(currentUser);
+  const sellerLabels = useCurrentCompanySellerLabels({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: currentUser?.activeMembership?.role ?? null,
+    userIsActive: Boolean(currentUser),
+  });
+
+  const pageHeadTitle = 'Vendas';
+  const pageHeadSub = 'O que importa primeiro: quantas vendas você fechou.';
+
+  if (mode === 'sale_blocked' || mode === 'sale_remote_misconfigured') {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <LocalCommercialUnavailableCard />
+      </LightScreen>
+    );
+  }
+  if (mode === 'sale_remote_unavailable_identity') {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="vendas-state-unavailable-identity">Vendas indisponíveis nesta sessão.</DealStateCard>
+      </LightScreen>
+    );
+  }
+
+  const remoteActive = mode === 'sale_remote_active';
+  if (remoteActive && remoteSalesScreen.isLoading) {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="vendas-state-loading">Carregando vendas…</DealStateCard>
+      </LightScreen>
+    );
+  }
+  if (remoteActive && remoteSalesScreen.isError) {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="vendas-state-error" onRetry={remoteSalesScreen.refetch}>Não foi possível carregar as vendas.</DealStateCard>
+      </LightScreen>
+    );
+  }
+  if (remoteActive && remoteSalesScreen.configError !== null) {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="vendas-state-config-error">Uma ou mais vendas remotas estão com configuração inválida.</DealStateCard>
+      </LightScreen>
+    );
+  }
+
+  // Daqui em diante: mode === 'sale_local' OU (remoteActive && pronto —
+  // não-loading/não-erro/sem configError, já tratados acima).
+  if (remoteActive) {
+    const now = new Date();
+    const sellersById = sellerLabels.sellersById;
+    const isManager = currentUser?.activeMembership?.role === 'manager';
+    const dealsById: Record<string, RemoteDealModel> = {};
+    for (const d of remoteDealsForSales.deals) dealsById[d.id] = d;
+    return (
+      <LightScreen>
+        {/* COMMERCIAL-REMOTE-SALES-A2 §10 CRÍTICO: Sale remota NUNCA nasce
+            solta — o CTA global aqui navega para Negociações (onde o
+            Manager/Seller abre a Deal OPEN que fechou e usa o botão
+            "Registrar venda" de dentro dela, FlowVerNegociacao), nunca abre
+            um formulário remoto sem Deal. */}
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} actions={<LBtn kind="gold" icon="trophy" size="lg" onClick={() => go('propostas')}>Registrar venda</LBtn>} />
+        {remoteSalesScreen.sales.length === 0
+          ? <DealStateCard testId="vendas-state-empty">Nenhuma venda registrada.</DealStateCard>
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {remoteSalesScreen.sales.map((s) => (
+                <RemoteSaleRow key={s.id} sale={s} deal={dealsById[s.dealId] ?? null} sellersById={sellersById} showSeller={isManager} now={now} />
+              ))}
+            </div>
+          )}
+      </LightScreen>
+    );
+  }
+
+  // sale_local: caminho legado, inalterado.
   if (!isLocalCommercialDataAllowed()) {
     return (
       <LightScreen>

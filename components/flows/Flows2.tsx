@@ -43,6 +43,9 @@ import { DEAL_STATUS_LABELS_PT, DEAL_PAYMENT_METHOD_LABELS_PT } from '@/lib/deal
 import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
 import { resolveDealSellerDisplayName, formatDealUpdatedAt } from '@/lib/deals/dealScreenGrouping';
 import { formatCentsToBRL } from '@/lib/deals/money';
+import { useRegisterSale } from '@/lib/hooks/useRegisterSale';
+import { resolveSalesRemoteMode } from '@/lib/sales/remoteSalesMode';
+import { isRemoteSalesError, REMOTE_SALES_MUTATION_ERROR_MESSAGES_PT } from '@/lib/sales/errors';
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
 const TEMP_INFO: Record<string, string> = {
@@ -1600,6 +1603,14 @@ function remoteDealMutationErrorMessage(error: unknown): string {
   return REMOTE_DEALS_MUTATION_ERROR_MESSAGES_PT[code ?? 'remote_deals_mutation_generic_error'];
 }
 
+// Mesmo papel de remoteDealMutationErrorMessage, para o namespace de erro
+// de Sales (lib/sales/errors.ts) — reusado só por FlowRegistrarVenda
+// (COMMERCIAL-REMOTE-SALES-A2), nenhuma duplicação de string.
+function remoteSaleMutationErrorMessage(error: unknown): string {
+  const code = isRemoteSalesError(error) ? error.code : undefined;
+  return REMOTE_SALES_MUTATION_ERROR_MESSAGES_PT[code ?? 'remote_sales_mutation_generic_error'];
+}
+
 // Pares [enum, label] na ordem de exibição congelada no B4-PRECHECK §14 —
 // mesmos 4 valores/labels de DEAL_PAYMENT_METHOD_LABELS_PT (lib/deals/
 // labels.ts), nenhuma string nova. Segmented já suporta pares [value,
@@ -2120,6 +2131,14 @@ export function FlowVerNegociacao({ payload, close, openFlow }: any) {
   // os últimos dados conhecidos, só não pode mais agir sobre eles).
   const canMutate = terminalError === null && currentDeal.status === 'open';
 
+  // COMMERCIAL-REMOTE-SALES-A2 — "Registrar venda" só aparece quando a
+  // Deal está de fato acionável (canMutate: open, snapshot não-terminal) E
+  // Sales remota está pronta (sale_remote_ready). Ausente em lost/sold
+  // (canMutate já exige open) e quando o snapshot está inoperável/stale/
+  // closed/notfound (mesmo motivo de Editar/Marcar como perdida) — nenhuma
+  // checagem nova além da já existente.
+  const canRegisterSale = canMutate && resolveSalesRemoteMode() === 'sale_remote_ready';
+
   // B7-A-PRECHECK §11/§17: resolução best-effort do Lead para o CTA de
   // acompanhamento — nunca bloqueia Editar/Marcar como perdida (que
   // dependem só de canMutate, nunca deste valor). Ausente também quando o
@@ -2382,6 +2401,9 @@ export function FlowVerNegociacao({ payload, close, openFlow }: any) {
         {canMutate && !lostConfirming && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <LBtn kind="gold" icon="edit" onClick={enterEditMode}>Editar</LBtn>
+            {canRegisterSale && (
+              <LBtn kind="gold" icon="trophy" onClick={() => openFlow('registrar-venda', { deal: currentDeal })} style={{ background: 'linear-gradient(180deg,#E8CE72,#C9A227)' }}>Registrar venda</LBtn>
+            )}
             <LBtn kind="ghost" icon="xCircle" onClick={() => setLostConfirming(true)}>Marcar como perdida</LBtn>
             {/* COMMERCIAL-REMOTE-DEALS-B7-A — mesmo espírito do CTA de
                 sucesso do B4: opcional, nunca obrigatório, Lead-scoped
@@ -2504,6 +2526,15 @@ function bestDealFor(leadId: string) {
 }
 
 export function FlowRegistrarVenda({ payload, close }: any) {
+  // COMMERCIAL-REMOTE-SALES-A2 — mesmo padrão exato de FlowNovaProposta/
+  // FlowCriarVisita: um único componente, dois branches completos,
+  // decidido por resolveSalesRemoteMode(). Todos os hooks (locais e
+  // remotos) são chamados SEMPRE, na mesma ordem, antes de qualquer return
+  // (Rules of Hooks) — em modo local os hooks remotos simplesmente nunca
+  // são exercitados via submit.
+  const salesDataSource: 'local' | 'remote' = resolveSalesRemoteMode() === 'sale_local' ? 'local' : 'remote';
+
+  // ── Estado do branch LOCAL — intocado ────────────────────────────────
   const [lead, setLead] = useState<any>(payload.lead || null);
   const [deal, setDeal] = useState<any>(() => (payload.lead ? bestDealFor(payload.lead.id) : null));
   const [step, setStep] = useState(lead ? 'confirm' : 'pick');
@@ -2617,6 +2648,104 @@ export function FlowRegistrarVenda({ payload, close }: any) {
     setCar(finalCar);
     setStep('done');
   };
+
+  // ── Estado do branch REMOTO ───────────────────────────────────────────
+  // Hooks/identidade chamados SEMPRE, na mesma ordem (Rules of Hooks) — em
+  // modo local eles simplesmente nunca são exercitados via submit. Sale
+  // remota nasce OBRIGATORIAMENTE de uma Deal remota já aberta
+  // (SALES-A1-PRECHECK §6): payload.deal (RemoteDealModel) é a ÚNICA
+  // origem — nenhum LeadPicker/DealPicker remoto neste flow, nenhuma Sale
+  // solta.
+  const remoteDeal: RemoteDealModel | null = payload.deal ?? null;
+  const remoteUser = AuthService.getCurrentUser();
+  const remoteIdentityUserId = remoteUser?.id ?? null;
+  const remoteIdentityCompanyId = remoteUser?.activeMembership?.companyId ?? null;
+  const remoteIdentityMembershipRole = remoteUser?.activeMembership?.role ?? null;
+  const remoteIdentityUserIsActive = Boolean(remoteUser);
+
+  const registerSaleHook = useRegisterSale({
+    userId: remoteIdentityUserId, companyId: remoteIdentityCompanyId,
+    membershipRole: remoteIdentityMembershipRole, userIsActive: remoteIdentityUserIsActive,
+  });
+
+  // Prefill de conveniência visual (SALES-A1-PRECHECK §13) — o payload
+  // final SEMPRE reflete o que está de fato no formulário no momento do
+  // submit, nunca um valor da Deal silenciosamente reenviado por baixo.
+  const [remoteSoldValueInput, setRemoteSoldValueInput] = useState(
+    remoteDeal ? String(remoteDeal.valueCents / 100) : '',
+  );
+  const [remotePaymentMethod, setRemotePaymentMethod] = useState<RemoteDealRow['payment_method'] | null>(
+    remoteDeal?.paymentMethod ?? null,
+  );
+  const [remoteSaleSubmitting, setRemoteSaleSubmitting] = useState(false);
+  const [remoteSaleGlobalError, setRemoteSaleGlobalError] = useState<string | null>(null);
+  const [remoteSaleDone, setRemoteSaleDone] = useState(false);
+
+  const remoteSoldValueReais = parseDealValueReais(remoteSoldValueInput);
+  const canRegisterRemoteSale = Boolean(
+    remoteDeal !== null
+    && remoteSoldValueReais !== null
+    && remotePaymentMethod !== null
+    && !remoteSaleSubmitting
+    && !registerSaleHook.isPending,
+  );
+
+  const handleRegisterRemoteSale = async () => {
+    if (!canRegisterRemoteSale || remoteSaleSubmitting || registerSaleHook.isPending) return;
+    if (remoteDeal === null || remoteSoldValueReais === null || remotePaymentMethod === null) return;
+    setRemoteSaleSubmitting(true);
+    setRemoteSaleGlobalError(null);
+    try {
+      await registerSaleHook.registerSale({
+        dealId: remoteDeal.id,
+        expectedVersion: remoteDeal.version,
+        soldValueCents: remoteSoldValueReais * 100,
+        paymentMethod: remotePaymentMethod,
+      });
+      setRemoteSaleDone(true);
+    } catch (err) {
+      if (isRemoteSalesError(err) && err.code === 'remote_sales_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setRemoteSaleGlobalError(remoteSaleMutationErrorMessage(err));
+    } finally {
+      setRemoteSaleSubmitting(false);
+    }
+  };
+
+  if (salesDataSource === 'remote') {
+    if (remoteSaleDone) {
+      return (
+        <FlowShell eyebrow="REGISTRAR VENDA" title="Venda registrada" icon="trophy" accent="#27C75F" onClose={close}>
+          <FlowSuccess title="Venda registrada." sub={remoteDeal ? `${remoteDeal.clientName} · ${remoteDeal.vehicle}.` : undefined}
+            actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+        </FlowShell>
+      );
+    }
+
+    return (
+      <FlowShell eyebrow="REGISTRAR VENDA" title="Confirmar venda" icon="trophy" accent="#E8CE72" onClose={close}
+        footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="trophy" onClick={handleRegisterRemoteSale} style={{ opacity: canRegisterRemoteSale ? 1 : .5 }}>
+          {(remoteSaleSubmitting || registerSaleHook.isPending) ? 'Registrando…' : 'Registrar venda'}
+        </LBtn></>}>
+        <div style={{ maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <FPanel title="Negociação" icon="handshake" accent="#E8CE72">
+            <SummaryRow label="Cliente" value={remoteDeal?.clientName ?? '—'} />
+            <SummaryRow label="Veículo" value={remoteDeal?.vehicle ?? '—'} />
+          </FPanel>
+          <FPanel title="Valor final da venda" icon="dollar" accent="#E8CE72">
+            <FField label="Valor vendido (R$)" icon="dollar" placeholder="Ex.: 120000" value={remoteSoldValueInput} onChange={(e: any) => setRemoteSoldValueInput(e.target.value)} />
+          </FPanel>
+          <FPanel title="Forma de pagamento" icon="card" accent="#E8CE72">
+            <Segmented options={DEAL_PAYMENT_METHOD_OPTIONS} value={remotePaymentMethod} onChange={setRemotePaymentMethod} />
+            {remotePaymentMethod === null && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--t-400)' }}>Selecione uma forma de pagamento.</div>}
+          </FPanel>
+        </div>
+        {remoteSaleGlobalError && <ErrorBanner>{remoteSaleGlobalError}</ErrorBanner>}
+      </FlowShell>
+    );
+  }
 
   if (step === 'done') {
     return (
