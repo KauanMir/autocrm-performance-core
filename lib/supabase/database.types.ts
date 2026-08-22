@@ -712,6 +712,81 @@ export type Database = {
         }
         Relationships: []
       }
+      sales: {
+        Row: {
+          assigned_seller_id: string
+          company_id: string
+          created_at: string
+          deal_id: string
+          id: string
+          lead_id: string
+          payment_method: Database["public"]["Enums"]["deal_payment_method"]
+          sold_at: string
+          sold_by: string
+          sold_value_cents: number
+        }
+        Insert: {
+          assigned_seller_id: string
+          company_id: string
+          created_at?: string
+          deal_id: string
+          id?: string
+          lead_id: string
+          payment_method: Database["public"]["Enums"]["deal_payment_method"]
+          sold_at?: string
+          sold_by: string
+          sold_value_cents: number
+        }
+        Update: {
+          assigned_seller_id?: string
+          company_id?: string
+          created_at?: string
+          deal_id?: string
+          id?: string
+          lead_id?: string
+          payment_method?: Database["public"]["Enums"]["deal_payment_method"]
+          sold_at?: string
+          sold_by?: string
+          sold_value_cents?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sales_company_deal_fk"
+            columns: ["company_id", "deal_id"]
+            isOneToOne: false
+            referencedRelation: "deals"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "sales_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sales_company_lead_fk"
+            columns: ["company_id", "lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "sales_company_seller_fk"
+            columns: ["company_id", "assigned_seller_id"]
+            isOneToOne: false
+            referencedRelation: "sellers"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "sales_sold_by_fk"
+            columns: ["company_id", "sold_by"]
+            isOneToOne: false
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
+          },
+        ]
+      }
       sellers: {
         Row: {
           company_id: string | null
@@ -1783,6 +1858,42 @@ export type Database = {
           p_lead_id: string
         }
         Returns: undefined
+      }
+      register_sale: {
+        Args: {
+          p_deal_id: string
+          p_expected_version: number
+          p_payment_method: Database["public"]["Enums"]["deal_payment_method"]
+          p_sold_value_cents: number
+        }
+        Returns: {
+          assigned_seller_id: string
+          client_name_snapshot: string
+          company_id: string
+          created_at: string
+          created_by: string
+          discount_percent: number
+          down_payment_cents: number | null
+          id: string
+          installments: string | null
+          lead_id: string
+          lost_at: string | null
+          lost_by: string | null
+          note: string
+          payment_method: Database["public"]["Enums"]["deal_payment_method"]
+          status: Database["public"]["Enums"]["deal_status"]
+          updated_at: string
+          updated_by: string
+          value_cents: number
+          vehicle: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "deals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       register_visit_result: {
         Args: {
