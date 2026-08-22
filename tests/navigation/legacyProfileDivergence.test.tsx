@@ -5,9 +5,15 @@
 // "profiles.role legado divergente" deixou de ser representável (nada
 // além de platformRole/activeMembership decide mais nada). Os dois testes
 // abaixo mantêm o que continua real: platformRole/activeMembership.role
-// são a ÚNICA fonte da lista-base, cada uma isoladamente. 'Resultados' é o
-// sinal mais simples: está na base do Manager e do Super Admin, mas NUNCA
-// na do Seller (lib/data.ts NAV_ROLES).
+// são a ÚNICA fonte da lista-base, cada uma isoladamente.
+//
+// COMMERCIAL-REMOTE-FINAL-AUDIT-A1-R1: 'Resultados' deixou de servir como
+// sinal de "platformRole decide a base" — Super Admin NUNCA recebe
+// 'Resultados' (nem os outros 4 ids operacionais Manager/Seller-only, ver
+// tests/navigation/superAdminOperationalNavGuard.test.tsx), então ele não
+// distingue mais Super Admin de Seller sozinho. 'Ajustes' continua sendo um
+// sinal válido: está na base de NAV_ROLES.admin, mas nunca na de
+// NAV_ROLES.seller.
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -88,14 +94,14 @@ describe('navegação: platformRole/activeMembership.role decidem isoladamente a
     expect(screen.queryByText('Ajustes')).toBeNull();
   });
 
-  it('platformRole=super_admin, sem activeMembership ⇒ nav de Super Admin (com Resultados e Ajustes)', async () => {
+  it('platformRole=super_admin, sem activeMembership ⇒ nav de Super Admin (com Ajustes, sem Resultados)', async () => {
     const user: User = {
       id: 'u-2', name: 'Divergente', email: 'div2@a.com',
       platformRole: 'super_admin',
       activeMembership: null,
     };
     await renderApp(user);
-    expect(screen.getByText('Resultados')).toBeInTheDocument();
     expect(screen.getByText('Ajustes')).toBeInTheDocument();
+    expect(screen.queryByText('Resultados')).toBeNull();
   });
 });

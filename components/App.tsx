@@ -69,13 +69,26 @@ const TWEAK_DEFAULTS = {
 // capability nova envolvida — nenhuma mudança de comportamento).
 const COMMERCIAL_NAV_IDS = ['clientes', 'andamento'];
 
+// COMMERCIAL-REMOTE-FINAL-AUDIT-A1-R1 — achado real da auditoria: o filtro
+// acima só cobria Clientes/Andamento. 'pendencias'/'visitas'/'propostas'/
+// 'vendas'/'resultados' vêm de NAV_ROLES.admin (mesmo array usado pelo
+// legado local, onde AuthService.isManager() retorna true para Super
+// Admin) e passavam direto para a base do Super Admin — diferente de
+// Clientes/Andamento, esses cinco não têm NENHUM caminho de re-concessão
+// (Tasks/Visits/Deals/Sales/Results negam Super Admin por construção no
+// RLS, sem RPC equivalente — auditoria FINAL-AUDIT-A1, §2/§3). Union com
+// COMMERCIAL_NAV_IDS porque a exclusão aqui é permanente (nunca reaparece
+// via capability+flag, ao contrário de clientes/andamento) — nenhum re-add
+// mais abaixo os devolve.
+const SUPER_ADMIN_OPERATIONAL_NAV_IDS = [...COMMERCIAL_NAV_IDS, 'pendencias', 'visitas', 'propostas', 'vendas', 'resultados'];
+
 function allowedNavIds(user: User | null): string[] {
   if (!user) return [];
   const isSuperAdmin = user.platformRole === 'super_admin';
   const membershipRole = user.activeMembership?.role ?? null;
 
   const base = isSuperAdmin
-    ? NAV_ROLES.admin.filter((id) => !COMMERCIAL_NAV_IDS.includes(id))
+    ? NAV_ROLES.admin.filter((id) => !SUPER_ADMIN_OPERATIONAL_NAV_IDS.includes(id))
     : membershipRole === 'manager'
       ? NAV_ROLES.manager
       : membershipRole === 'seller'
