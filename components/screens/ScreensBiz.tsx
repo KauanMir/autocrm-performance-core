@@ -38,6 +38,8 @@ import {
 import { DEAL_PAYMENT_METHOD_LABELS_PT } from '@/lib/deals/labels';
 import { useRemoteSalesScreenState } from '@/lib/hooks/useRemoteSalesScreenState';
 import type { RemoteSaleModel } from '@/lib/sales/adapter';
+import { buildSalesRanking } from '@/lib/sales/salesRanking';
+import type { SalesRankingRow as SalesRankingRowT } from '@/lib/sales/salesRanking';
 
 // M1-E E5-B2-A1 — Barreira 1 (UI) para Visitas/Propostas/Vendas: Visit/Deal/
 // Sale não têm company_id nem backend remoto (auditoria E5-B2-A0). Fora do
@@ -1030,8 +1032,121 @@ function exportResultadosCSV() {
   URL.revokeObjectURL(url);
 }
 
+// COMMERCIAL-REMOTE-RESULTS-R1 — linha do Ranking remoto: SOMENTE saleCount/
+// revenueCents (buildSalesRanking), nenhuma métrica de conversão/score
+// fabricada. Top 3 reaproveita o mesmo PLACE/ring já usado pela tabela local
+// — nenhum componente Podium separado, nenhuma segunda fonte de dado
+// (R1-EXEC §10: não misturar ranking real com podium fixture).
+function SalesRankingRow({ row, pos }: { row: SalesRankingRowT; pos: number }) {
+  return (
+    <div data-testid="resultados-ranking-row" style={{ display: 'grid', gridTemplateColumns: '32px 1fr repeat(2, .8fr)', alignItems: 'center', padding: '11px 18px', borderTop: pos ? '1px solid var(--border-2)' : 'none', background: pos === 0 ? 'linear-gradient(90deg, rgba(212,175,55,.12), transparent)' : 'transparent' }}>
+      <span className="display tnum" style={{ fontWeight: 800, color: pos < 3 ? (PLACE as any[])[pos].ring : 'var(--t-400)' }}>{pos + 1}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Avatar name={row.sellerLabel} size={28} ring={pos < 3 ? (PLACE as any[])[pos].ring : '#3a3a40'} gold={pos === 0} />
+        <span style={{ fontWeight: 600, fontSize: 13.5 }}>{row.sellerLabel}</span>
+      </div>
+      <span className="tnum" style={{ textAlign: 'right', fontWeight: 600 }}>{row.saleCount}</span>
+      <span className="display tnum" style={{ textAlign: 'right', fontWeight: 800, fontSize: 16, color: pos === 0 ? 'var(--gold-ink)' : 'var(--t-900)' }}>{formatCentsToBRL(row.revenueCents)}</span>
+    </div>
+  );
+}
+
 export function ScreenResultados({ go }: any) {
   useStore();
+  const currentUser = AuthService.getCurrentUser();
+  // COMMERCIAL-REMOTE-RESULTS-R1 — mesma fonte já REMOTE VERIFIED de
+  // ScreenVendas (useRemoteSalesScreenState), zero SellerService/SaleService
+  // remoto, zero query por Seller (useCurrentCompanySellerLabels é o mesmo
+  // catálogo batch já usado por Propostas/Visitas/Vendas). Chamados SEMPRE,
+  // na mesma ordem (Rules of Hooks), antes de qualquer branch de modo.
+  const remoteSalesScreen = useRemoteSalesScreenState(currentUser);
+  const mode = remoteSalesScreen.mode;
+  const sellerLabels = useCurrentCompanySellerLabels({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: currentUser?.activeMembership?.role ?? null,
+    userIsActive: Boolean(currentUser),
+  });
+
+  const pageHeadTitle = 'Resultados';
+  const pageHeadSub = 'Como a equipe está performando — em números simples.';
+
+  // Mesmo padrão de barreira de ScreenVendas: blocked/misconfigured
+  // continuam com o aviso genérico de módulo em migração (conversão por
+  // etapa/motivos de perda permanecem fora de escopo neste V1 — nenhum dado
+  // remoto equivalente existe ainda); identidade indisponível ganha um
+  // estado próprio.
+  if (mode === 'sale_blocked' || mode === 'sale_remote_misconfigured') {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <LocalCommercialUnavailableCard />
+      </LightScreen>
+    );
+  }
+  if (mode === 'sale_remote_unavailable_identity') {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="resultados-state-unavailable-identity">Resultados indisponíveis nesta sessão.</DealStateCard>
+      </LightScreen>
+    );
+  }
+
+  const remoteActive = mode === 'sale_remote_active';
+  if (remoteActive && remoteSalesScreen.isLoading) {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="resultados-state-loading">Carregando resultados…</DealStateCard>
+      </LightScreen>
+    );
+  }
+  if (remoteActive && remoteSalesScreen.isError) {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="resultados-state-error" onRetry={remoteSalesScreen.refetch}>Não foi possível carregar os resultados.</DealStateCard>
+      </LightScreen>
+    );
+  }
+  if (remoteActive && remoteSalesScreen.configError !== null) {
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        <DealStateCard testId="resultados-state-config-error">Uma ou mais vendas remotas estão com configuração inválida.</DealStateCard>
+      </LightScreen>
+    );
+  }
+
+  // Daqui em diante: mode === 'sale_local' OU (remoteActive && pronto).
+  if (remoteActive) {
+    // Sales já chegam autorizadas pela RLS (Manager: company-wide; Seller:
+    // só as próprias, R1-EXEC §20) — buildSalesRanking só agrega o que
+    // recebeu, nenhum filtro de role aqui. Sem período: esta tela nunca
+    // teve um ControlBar real (o "— Junho" do fixture não era um filtro
+    // funcional), então o menor range compatível é "todas as Sales visíveis
+    // agora" (R1-EXEC §4) — documentado, não inventado.
+    const ranking = buildSalesRanking(remoteSalesScreen.sales, sellerLabels.sellersById);
+    return (
+      <LightScreen>
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
+        {ranking.length === 0
+          ? <DealStateCard testId="resultados-state-empty">Nenhuma venda registrada no período.</DealStateCard>
+          : (
+            <LCard pad={0} style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14, color: 'var(--t-900)' }}>Desempenho por vendedor</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr repeat(2, .8fr)', padding: '10px 18px', borderBottom: '1px solid var(--border)', fontSize: 11.5, color: 'var(--t-400)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                <span>#</span><span>Vendedor</span><span style={{ textAlign: 'right' }}>Vendas</span><span style={{ textAlign: 'right' }}>Receita</span>
+              </div>
+              {ranking.map((row, i) => <SalesRankingRow key={row.sellerId} row={row} pos={i} />)}
+            </LCard>
+          )}
+      </LightScreen>
+    );
+  }
+
+  // sale_local: caminho legado, inalterado.
   // M1-E E7-B1 — Barreira 1 (UI): esta tela inteira (desempenho por
   // vendedor, conversão por etapa, motivos de perda) depende do catálogo
   // LOCAL de Sellers (SellerService, sem company_id, sem backend remoto —
@@ -1041,7 +1156,7 @@ export function ScreenResultados({ go }: any) {
   if (!isLocalCommercialDataAllowed()) {
     return (
       <LightScreen>
-        <PageHead title="Resultados" sub="Como a equipe está performando — em números simples." />
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} />
         <LocalCommercialUnavailableCard />
       </LightScreen>
     );
@@ -1054,7 +1169,7 @@ export function ScreenResultados({ go }: any) {
   const canExport = isLocalCommercialDataAllowed();
   return (
     <LightScreen>
-      <PageHead title="Resultados" sub="Como a equipe está performando — em números simples." actions={canExport ? <LBtn kind="ghost" icon="file" onClick={exportResultadosCSV}>Exportar</LBtn> : undefined} />
+      <PageHead title={pageHeadTitle} sub={pageHeadSub} actions={canExport ? <LBtn kind="ghost" icon="file" onClick={exportResultadosCSV}>Exportar</LBtn> : undefined} />
       <LCard pad={0} style={{ overflow: 'hidden', marginBottom: 18 }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14, color: 'var(--t-900)' }}>Desempenho por vendedor — Junho</div>
         <div style={{ display: 'grid', gridTemplateColumns: '32px 1.6fr repeat(4, .8fr)', padding: '10px 18px', borderBottom: '1px solid var(--border)', fontSize: 11.5, color: 'var(--t-400)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>
