@@ -82,6 +82,53 @@ describe('PlatformLeadCreateModal — validação', () => {
   });
 });
 
+describe('PlatformLeadCreateModal — veículo obrigatório (SUPER-ADMIN-UX-R1)', () => {
+  it('label indica obrigatoriedade, no mesmo padrão já usado no projeto ("(obrigatório)")', () => {
+    renderModal();
+    expect(screen.getByText('Veículo de interesse (obrigatório)')).toBeInTheDocument();
+  });
+
+  it('tentativa de submit sem veículo: mostra mensagem explícita, nunca verifica duplicidade nem cria o Lead', async () => {
+    renderModal();
+    fireEvent.change(screen.getByPlaceholderText('Nome completo'), { target: { value: 'Cliente Teste' } });
+    fireEvent.change(screen.getByPlaceholderText('(11) 99999-9999'), { target: { value: '11999990000' } });
+    // Veículo deliberadamente em branco.
+    fireEvent.click(screen.getByText('Criar Lead'));
+
+    expect(screen.getByTestId('platform-lead-create-vehicle-required')).toBeInTheDocument();
+    expect(screen.getByText('Informe o veículo de interesse.')).toBeInTheDocument();
+    expect(m.checkDuplicateMock).not.toHaveBeenCalled();
+    expect(m.createLeadMock).not.toHaveBeenCalled();
+  });
+
+  it('mensagem não aparece antes de uma tentativa de submit (campo só vazio, sem clique ainda)', () => {
+    renderModal();
+    expect(screen.queryByTestId('platform-lead-create-vehicle-required')).toBeNull();
+  });
+
+  it('preenchendo o veículo após a mensagem aparecer: mensagem some sozinha e o fluxo segue normalmente', async () => {
+    renderModal();
+    fireEvent.change(screen.getByPlaceholderText('Nome completo'), { target: { value: 'Cliente Teste' } });
+    fireEvent.change(screen.getByPlaceholderText('(11) 99999-9999'), { target: { value: '11999990000' } });
+    fireEvent.click(screen.getByText('Criar Lead'));
+    expect(screen.getByTestId('platform-lead-create-vehicle-required')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Ex.: Golf GTI 2022'), { target: { value: 'Golf GTI' } });
+    expect(screen.queryByTestId('platform-lead-create-vehicle-required')).toBeNull();
+
+    fireEvent.click(screen.getByText('Criar Lead'));
+    await waitFor(() => expect(m.createLeadMock).toHaveBeenCalledTimes(1));
+    expect(m.createLeadMock.mock.calls[0][0].car).toBe('Golf GTI');
+  });
+
+  it('botão continua respeitando canSubmit real (nome/telefone ainda obrigatórios, comportamento intocado)', () => {
+    renderModal();
+    fireEvent.change(screen.getByPlaceholderText('Ex.: Golf GTI 2022'), { target: { value: 'Golf GTI' } });
+    const button = screen.getByText('Criar Lead').closest('button') as HTMLButtonElement;
+    expect(button.style.cursor).toBe('not-allowed');
+  });
+});
+
 describe('PlatformLeadCreateModal — submit', () => {
   it('verifica duplicidade ANTES de criar, escopada à empresa', async () => {
     renderModal();

@@ -73,6 +73,14 @@ export function PlatformLeadCreateModal({ company, onClose, onCreated }: Platfor
   const [showSellerList, setShowSellerList] = useState(false);
   const [duplicateBlocked, setDuplicateBlocked] = useState(false);
   const [lastError, setLastError] = useState<unknown>(null);
+  // SUPER-ADMIN-UX-R1 — achado real do smoke autenticado: "Veículo de
+  // interesse" é obrigatório (canSubmit abaixo) mas ficava indistinguível
+  // dos campos opcionais e um clique em "Criar Lead" sem preenchê-lo era um
+  // no-op silencioso (botão só esmaecido via opacity, sem explicação).
+  // submitAttempted vira true na PRIMEIRA tentativa de submit; a mensagem
+  // some sozinha assim que `car` deixa de estar em branco — nenhum reset
+  // manual necessário.
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const sellersQuery = usePlatformSellers({ companyId: company.id, authorized: true });
 
@@ -96,6 +104,7 @@ export function PlatformLeadCreateModal({ company, onClose, onCreated }: Platfor
   const selectedSeller = sellerId ? sellersQuery.sellers.find((s) => s.seller_id === sellerId) ?? null : null;
 
   const submit = async () => {
+    setSubmitAttempted(true);
     if (!canSubmit || submittingRef.current) return;
     submittingRef.current = true;
     setLastError(null);
@@ -169,8 +178,14 @@ export function PlatformLeadCreateModal({ company, onClose, onCreated }: Platfor
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)} />
       <FField label="Telefone" icon="phone" placeholder="(11) 99999-9999" value={phone}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setPhone(e.target.value); setDuplicateBlocked(false); }} />
-      <FField label="Veículo de interesse" icon="car" placeholder="Ex.: Golf GTI 2022" value={car}
+      <FField label="Veículo de interesse (obrigatório)" icon="car" placeholder="Ex.: Golf GTI 2022" value={car}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCar(e.target.value)} />
+      {submitAttempted && carBlank && (
+        <div role="alert" data-testid="platform-lead-create-vehicle-required" style={{ marginTop: -8, marginBottom: 14, padding: '12px 14px', borderRadius: 10, background: 'var(--red-bg)', border: '1px solid var(--red-line)', color: 'var(--red)', fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Icon name="alert" size={16} stroke={2.2} />
+          Informe o veículo de interesse.
+        </div>
+      )}
 
       <div style={{ marginBottom: 14 }}>
         <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 7 }}>Temperatura (opcional)</span>
