@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   useReorderStages: vi.fn(),
   reorderStagesLocal: vi.fn(),
   getStages: vi.fn(),
+  leadServiceGetAll: vi.fn(() => [] as any[]),
   user: { current: null as any },
 }));
 
@@ -37,7 +38,7 @@ vi.mock('@/components/invites/InviteList', () => ({
 }));
 
 vi.mock('@/lib/services', () => ({
-  LeadService: { getAll: () => [] },
+  LeadService: { getAll: () => m.leadServiceGetAll() },
   VisitService: { getAll: () => [] },
   DealService: { getAll: () => [] },
   SaleService: { getAll: () => [] },
@@ -101,6 +102,7 @@ function dragTo(fromTestId: string, toTestId: string) {
 
 beforeEach(() => {
   m.user.current = { id: 'user-1', name: 'Admin', email: 'a@a.com' };
+  m.leadServiceGetAll.mockReset().mockReturnValue([]);
   m.getStages.mockReturnValue(LOCAL_NAMES);
   m.usePipelineStages.mockReturnValue(pipelineResult({
     source: 'local', remoteStagesEnabled: false, queryEnabled: false,
@@ -547,5 +549,60 @@ describe('ScreenAjustes — M1-F S7-B/S8-D1: companyId deriva exclusivamente de 
     render(<ScreenAjustes go={() => {}} />);
     expect(m.usePipelineStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: null }));
     expect(m.useReorderStages).toHaveBeenLastCalledWith(expect.objectContaining({ companyId: null }));
+  });
+});
+
+// ── G. COMMERCIAL-REMOTE-SUPER-ADMIN-S1-R1 — LeadService.getAll() isolado
+//    do render de Super Admin (achado real do S1 smoke autenticado) ────────
+// Os testes acima sempre mockaram LeadService.getAll como um retorno vazio
+// que nunca lança — por isso nunca capturaram o crash real: em modo remoto
+// o bridge de Leads nunca monta para Super Admin (sem activeMembership, por
+// design) e LeadService.getAll() lança RemoteLeadsError:
+// remote_leads_invalid_context nesse caso. Aqui o mock LANÇA, do mesmo jeito
+// que o real, para provar que ScreenAjustes nunca mais chama a função para
+// quem não tem contexto comercial.
+
+describe('ScreenAjustes — Super Admin nunca toca LeadService (COMMERCIAL-REMOTE-SUPER-ADMIN-S1-R1)', () => {
+  beforeEach(() => {
+    m.leadServiceGetAll.mockReset().mockImplementation(() => {
+      throw new Error('RemoteLeadsError: remote_leads_invalid_context');
+    });
+  });
+
+  it('Super Admin (activeMembership=null): ScreenAjustes monta sem crash, LeadService.getAll zero chamadas', () => {
+    m.user.current = { ...m.user.current, platformRole: 'super_admin', activeMembership: null };
+    render(<ScreenAjustes go={() => {}} />);
+
+    // Aba default 'Empresa' renderiza normalmente — a tela inteira não caiu
+    // no AuthenticatedShellErrorBoundary.
+    expect(screen.getByText('Dados da loja')).toBeInTheDocument();
+    expect(m.leadServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('Super Admin navega até a aba Etapas (onde `leads` seria consumido): ainda sem crash, ainda zero chamadas', () => {
+    m.user.current = { ...m.user.current, platformRole: 'super_admin', activeMembership: null };
+    m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
+    openEtapas();
+
+    expect(screen.getByTestId('stage-row-new')).toBeInTheDocument();
+    expect(m.leadServiceGetAll).not.toHaveBeenCalled();
+  });
+});
+
+describe('ScreenAjustes — Manager preserva a leitura de Leads (COMMERCIAL-REMOTE-SUPER-ADMIN-S1-R1)', () => {
+  it('Manager com membership ativa, aba Etapas: LeadService.getAll É chamado (comportamento existente preservado)', () => {
+    m.leadServiceGetAll.mockReset().mockReturnValue([
+      { id: 'lead-1', stage: 'Novo' },
+      { id: 'lead-2', stage: 'Novo' },
+    ]);
+    m.user.current = {
+      ...m.user.current,
+      activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
+    };
+    m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
+    openEtapas();
+
+    expect(m.leadServiceGetAll).toHaveBeenCalled();
+    expect(screen.getByTestId('stage-row-new')).toHaveTextContent('2 clientes');
   });
 });

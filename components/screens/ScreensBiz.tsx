@@ -1217,8 +1217,19 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
 
 export function ScreenAjustes({ go }: any) {
   useStore();
-  const leads = LeadService.getAll();
   const currentUser = AuthService.getCurrentUser();
+  // COMMERCIAL-REMOTE-SUPER-ADMIN-S1-R1 — LeadService.getAll() exige um
+  // contexto comercial (Manager/Seller com activeMembership); em modo
+  // remoto o bridge de Leads nunca monta para Super Admin (sem membership,
+  // por design) e a chamada incondicional lançava RemoteLeadsError:
+  // remote_leads_invalid_context, derrubando a tela inteira via
+  // AuthenticatedShellErrorBoundary (achado real do S1 smoke autenticado).
+  // `leads` só é lido dentro da aba Etapas (contagem de clientes por
+  // estágio, linha abaixo) — nunca por Super Admin de verdade (Etapas sem
+  // companyId já cai no estado "indisponível" antes de chegar lá), mas a
+  // leitura precisa ser condicional na ORIGEM, não no consumo, porque
+  // LeadService.getAll() já lança ao ser chamada, antes de qualquer JSX.
+  const leads = currentUser?.activeMembership ? LeadService.getAll() : [];
   const [tab, setTab] = useState('Empresa');
   const [companyForm, setCompanyForm] = useState(() => CompanyService.get());
   const [saved, setSaved] = useState(false);
