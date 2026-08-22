@@ -1,8 +1,9 @@
-// tests/invites/fragment.test.ts — parser puro do fragmento de aceite de
-// convite (M1-F S4-C2B). Nenhuma rede, nenhum DOM — função pura sobre
-// string.
+// tests/invites/fragment.test.ts — parser puro dos parâmetros de aceite de
+// convite (M1-F S4-C2B; VERCEL-INVITES-S1-R1 — query string primária,
+// fragmento como fallback legado). Nenhuma rede, nenhum DOM — função pura
+// sobre string.
 import { describe, expect, it } from 'vitest';
-import { parseInviteFragment } from '@/lib/invites/fragment';
+import { parseInviteFragment, parseInviteQuery, resolveInviteLinkParams } from '@/lib/invites/fragment';
 
 const VALID_TOKEN = 'A'.repeat(43);
 const VALID_HASH = 'b'.repeat(40);
@@ -176,5 +177,126 @@ describe('parseInviteFragment — nenhum token na representação de erro', () =
     expect(result.ok).toBe(false);
     expect(JSON.stringify(result)).not.toContain('invalid-token-value');
     expect(JSON.stringify(result)).not.toContain(VALID_HASH);
+  });
+});
+
+// ── parseInviteQuery (VERCEL-INVITES-S1-R1 — contrato primário) ──────────
+function query(overrides: Partial<{ invite_token: string; auth_token_hash: string; auth_type: string }> = {}): string {
+  const params = new URLSearchParams();
+  const values = { invite_token: VALID_TOKEN, auth_token_hash: VALID_HASH, auth_type: 'invite', ...overrides };
+  for (const [k, v] of Object.entries(values)) {
+    if (v !== undefined) params.append(k, v as string);
+  }
+  return `?${params.toString()}`;
+}
+
+describe('parseInviteQuery — casos válidos', () => {
+  it('aceita query válida com "?" inicial', () => {
+    const result = parseInviteQuery(query());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual({ inviteToken: VALID_TOKEN, authTokenHash: VALID_HASH, authType: 'invite' });
+    }
+  });
+
+  it('aceita a string já sem o "?" inicial', () => {
+    const withQuestionMark = query();
+    const result = parseInviteQuery(withQuestionMark.slice(1));
+    expect(result.ok).toBe(true);
+  });
+
+  it('aceita auth_type=magiclink', () => {
+    const result = parseInviteQuery(query({ auth_type: 'magiclink' }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.authType).toBe('magiclink');
+    }
+  });
+
+  it('parâmetros extras fora da whitelist ainda são rejeitados', () => {
+    const raw = `invite_token=${VALID_TOKEN}&auth_token_hash=${VALID_HASH}&auth_type=invite&extra=1`;
+    expect(parseInviteQuery(`?${raw}`).ok).toBe(false);
+  });
+});
+
+describe('parseInviteQuery — mesmas regras de negócio de parseInviteFragment (núcleo compartilhado)', () => {
+  it('rejeita invite_token ausente', () => {
+    const params = new URLSearchParams({ auth_token_hash: VALID_HASH, auth_type: 'invite' });
+    expect(parseInviteQuery(`?${params.toString()}`).ok).toBe(false);
+  });
+
+  it('rejeita campo duplicado', () => {
+    const raw = `invite_token=${VALID_TOKEN}&invite_token=${VALID_TOKEN}&auth_token_hash=${VALID_HASH}&auth_type=invite`;
+    expect(parseInviteQuery(`?${raw}`).ok).toBe(false);
+  });
+
+  it('rejeita token malformado (44 caracteres)', () => {
+    expect(parseInviteQuery(query({ invite_token: 'a'.repeat(44) })).ok).toBe(false);
+  });
+
+  it('rejeita auth_type fora de invite|magiclink', () => {
+    expect(parseInviteQuery(query({ auth_type: 'recovery' })).ok).toBe(false);
+  });
+
+  it('rejeita query vazia', () => {
+    expect(parseInviteQuery('?').ok).toBe(false);
+    expect(parseInviteQuery('').ok).toBe(false);
+  });
+
+  it('rejeita "#" embutido no restante (nunca fragmento dentro de query)', () => {
+    const raw = query().slice(1);
+    expect(parseInviteQuery(`?${raw}#outro`).ok).toBe(false);
+  });
+
+  it('rejeita segundo "?" embutido no restante', () => {
+    const raw = query().slice(1);
+    expect(parseInviteQuery(`?${raw}?outro=1`).ok).toBe(false);
+  });
+
+  it('valor não-string é rejeitado sem lançar', () => {
+    // @ts-expect-error — entrada propositalmente inválida
+    expect(() => parseInviteQuery(null)).not.toThrow();
+    // @ts-expect-error
+    expect(parseInviteQuery(null).ok).toBe(false);
+  });
+
+  it('resultado de erro nunca contém os valores originais', () => {
+    const result = parseInviteQuery(query({ invite_token: 'invalid-token-value' }));
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain('invalid-token-value');
+  });
+});
+
+// ── resolveInviteLinkParams (ponto de entrada do AcceptInviteFlow) ───────
+describe('resolveInviteLinkParams — query primária, fragmento como fallback legado', () => {
+  it('usa a query quando ela é válida, mesmo com um hash também presente', () => {
+    const result = resolveInviteLinkParams({ search: query(), hash: '#lixo-qualquer' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.inviteToken).toBe(VALID_TOKEN);
+    }
+  });
+
+  it('cai para o fragmento legado quando não há query', () => {
+    const result = resolveInviteLinkParams({ search: '', hash: fragment() });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.inviteToken).toBe(VALID_TOKEN);
+    }
+  });
+
+  it('cai para o fragmento legado quando a query é inválida', () => {
+    const result = resolveInviteLinkParams({ search: '?extra=1', hash: fragment() });
+    expect(result.ok).toBe(true);
+  });
+
+  it('sem query e sem fragmento válidos: ok:false', () => {
+    const result = resolveInviteLinkParams({ search: '', hash: '' });
+    expect(result.ok).toBe(false);
+  });
+
+  it('query e fragmento ambos inválidos: ok:false', () => {
+    const result = resolveInviteLinkParams({ search: '?x=1', hash: '#y=2' });
+    expect(result.ok).toBe(false);
   });
 });

@@ -37,9 +37,16 @@ export function generateInviteToken(): InviteToken {
 }
 
 // Link direto para o CRM, nunca para /auth/v1/verify. O token próprio vai
-// SOMENTE no fragmento (nunca na query string) — o template do Supabase
-// Auth (invite.html/magic_link.html) concatena auth_token_hash/auth_type
-// dentro do mesmo fragmento, nunca criando uma segunda query string.
+// na QUERY STRING (nunca no fragmento) — VERCEL-INVITES-S1-R1: o GoTrue não
+// preserva o fragmento de redirectTo/emailRedirectTo ao popular
+// {{ .RedirectTo }} nos templates (invite.html/magic_link.html), que o
+// reserva para sua própria injeção de sessão pós-verificação. A query
+// string sobrevive; o fragmento não — confirmado por um convite público
+// real que chegou sem invite_token. O template concatena
+// auth_token_hash/auth_type dentro da MESMA query string (`&`), nunca
+// criando um segundo `?`.
 export function buildInviteRedirectUrl(appUrl: URL, rawToken: string): string {
-  return `${appUrl.origin}/convite/aceitar#invite_token=${rawToken}`;
+  const url = new URL('/convite/aceitar', appUrl.origin);
+  url.searchParams.set('invite_token', rawToken);
+  return url.toString();
 }

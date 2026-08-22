@@ -11,7 +11,7 @@
 import React, { useEffect, useReducer, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-import { parseInviteFragment, type InviteAuthType } from '@/lib/invites/fragment';
+import { resolveInviteLinkParams, type InviteAuthType } from '@/lib/invites/fragment';
 import { createTemporaryInviteAuthClient } from '@/lib/invites/temporary-auth-client';
 import { validateInvite, acceptInvite, type InviteRoleKind } from '@/lib/invites/acceptance-client';
 import { PasswordStep } from '@/components/invites/PasswordStep';
@@ -164,17 +164,27 @@ export function AcceptInviteFlow() {
   const tempSessionRef = useRef<TemporarySession | null>(null);
   const acceptGuardRef = useRef(false);
 
-  // Mount único: lê o fragmento, remove IMEDIATAMENTE da URL, guarda os
-  // tokens só em refs. Guarda contra Strict Mode: hasParsedRef sobrevive
-  // ao segundo disparo do efeito em dev, que veria location.hash já
-  // vazio (apagado pelo replaceState da primeira execução) — sem a
-  // guarda, isso transformaria um link válido em "link incompleto".
+  // Mount único: lê query string (contrato atual) com fallback para
+  // fragmento (contrato legado, VERCEL-INVITES-S1-R1), remove IMEDIATAMENTE
+  // da URL, guarda os tokens só em refs. O scrub apaga só as 3 chaves
+  // conhecidas da query (preserva qualquer outro parâmetro legítimo) e
+  // sempre zera o fragmento inteiro. Guarda contra Strict Mode:
+  // hasParsedRef sobrevive ao segundo disparo do efeito em dev, que veria
+  // location.search/hash já vazios (apagados pelo replaceState da primeira
+  // execução) — sem a guarda, isso transformaria um link válido em "link
+  // incompleto".
   useEffect(() => {
     if (hasParsedRef.current) return;
     hasParsedRef.current = true;
 
-    const result = parseInviteFragment(window.location.hash);
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    const result = resolveInviteLinkParams({ search: window.location.search, hash: window.location.hash });
+
+    const scrubbedUrl = new URL(window.location.href);
+    scrubbedUrl.searchParams.delete('invite_token');
+    scrubbedUrl.searchParams.delete('auth_token_hash');
+    scrubbedUrl.searchParams.delete('auth_type');
+    scrubbedUrl.hash = '';
+    window.history.replaceState(null, '', scrubbedUrl.pathname + scrubbedUrl.search);
 
     if (!result.ok) {
       dispatch({ type: 'INVALID_LINK' });

@@ -102,27 +102,35 @@ describe('isValidRawInviteToken', () => {
 });
 
 describe('buildInviteRedirectUrl', () => {
-  it('coloca o token SOMENTE no fragmento, nunca na query string', () => {
+  it('coloca o token SOMENTE na query string, nunca no fragmento (VERCEL-INVITES-S1-R1)', () => {
     const appUrl = new URL('http://127.0.0.1:3000');
     const url = buildInviteRedirectUrl(appUrl, 'raw-token-abc');
 
-    expect(url).toBe('http://127.0.0.1:3000/convite/aceitar#invite_token=raw-token-abc');
-    expect(url).not.toContain('?');
+    expect(url).toBe('http://127.0.0.1:3000/convite/aceitar?invite_token=raw-token-abc');
+    expect(url).not.toContain('#');
   });
 
   it('usa a origem do appUrl, ignorando qualquer path/query pré-existente', () => {
     const appUrl = new URL('https://app.example.com/algum/path?x=1');
     const url = buildInviteRedirectUrl(appUrl, 'tok');
 
-    expect(url).toBe('https://app.example.com/convite/aceitar#invite_token=tok');
+    expect(url).toBe('https://app.example.com/convite/aceitar?invite_token=tok');
   });
 
-  it('zero token na query: o fragmento nunca é interpretado como query pelo URL parser', () => {
+  it('zero token no fragmento: a query string é interpretada corretamente pelo URL parser', () => {
     const appUrl = new URL('http://127.0.0.1:3000');
     const url = buildInviteRedirectUrl(appUrl, 'raw-token-xyz');
     const parsed = new URL(url);
 
-    expect(parsed.search).toBe('');
-    expect(parsed.hash).toBe('#invite_token=raw-token-xyz');
+    expect(parsed.hash).toBe('');
+    expect(parsed.search).toBe('?invite_token=raw-token-xyz');
+  });
+
+  it('faz encoding seguro de um rawToken com caracteres reservados de URL', () => {
+    const appUrl = new URL('http://127.0.0.1:3000');
+    const url = buildInviteRedirectUrl(appUrl, 'tok&with=reserved');
+    const parsed = new URL(url);
+
+    expect(parsed.searchParams.get('invite_token')).toBe('tok&with=reserved');
   });
 });

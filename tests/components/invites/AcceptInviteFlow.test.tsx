@@ -52,8 +52,16 @@ function validFragment(authType: 'invite' | 'magiclink' = 'invite'): string {
   return `#invite_token=${RAW_TOKEN}&auth_token_hash=${AUTH_HASH}&auth_type=${authType}`;
 }
 
+function validQuery(authType: 'invite' | 'magiclink' = 'invite'): string {
+  return `?invite_token=${RAW_TOKEN}&auth_token_hash=${AUTH_HASH}&auth_type=${authType}`;
+}
+
 function setLocationHash(hash: string) {
   window.history.replaceState(null, '', `/convite/aceitar${hash}`);
+}
+
+function setLocationQuery(query: string) {
+  window.history.replaceState(null, '', `/convite/aceitar${query}`);
 }
 
 function makeTempClient(opts: {
@@ -135,6 +143,50 @@ describe('MOUNT — fragmento', () => {
     );
     await screen.findByText('Você recebeu um convite');
     expect(screen.queryByText('Link incompleto')).not.toBeInTheDocument();
+  });
+});
+
+describe('MOUNT — query string (VERCEL-INVITES-S1-R1, contrato atual)', () => {
+  it('lê a query e remove da URL imediatamente, nunca entra em invalid_link', async () => {
+    setLocationHash('');
+    setLocationQuery(validQuery('invite'));
+    render(<AcceptInviteFlow />);
+    await screen.findByText('Você recebeu um convite');
+    expect(window.location.search).toBe('');
+    expect(window.location.hash).toBe('');
+  });
+
+  it('query tem prioridade sobre um fragmento também presente', async () => {
+    window.history.replaceState(null, '', `/convite/aceitar${validQuery('invite')}${validFragment('magiclink')}`);
+    render(<AcceptInviteFlow />);
+    await screen.findByText('Você recebeu um convite');
+    await clickContinue();
+    await waitFor(() => expect(m.createTemporaryClient).toHaveBeenCalledTimes(1));
+    const client = m.createTemporaryClient.mock.results[0].value;
+    // authType veio da QUERY (invite), não do fragmento (magiclink).
+    expect(client.auth.verifyOtp).toHaveBeenCalledWith({ token_hash: AUTH_HASH, type: 'invite' });
+  });
+
+  it('query ausente cai para o fragmento legado (fallback)', async () => {
+    setLocationHash(validFragment('invite'));
+    render(<AcceptInviteFlow />);
+    await screen.findByText('Você recebeu um convite');
+  });
+
+  it('nem query nem fragmento válidos: mostra Link incompleto', async () => {
+    setLocationHash('');
+    setLocationQuery('');
+    render(<AcceptInviteFlow />);
+    await screen.findByText('Link incompleto');
+  });
+
+  it('nenhum link completo (query) aparece no DOM', async () => {
+    setLocationHash('');
+    setLocationQuery(validQuery('invite'));
+    render(<AcceptInviteFlow />);
+    await screen.findByText('Você recebeu um convite');
+    expect(document.body.innerHTML).not.toContain('invite_token=');
+    expect(document.body.innerHTML).not.toContain('auth_token_hash=');
   });
 });
 
