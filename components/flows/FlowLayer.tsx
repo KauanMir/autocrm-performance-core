@@ -17,6 +17,7 @@ import {
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { resolveVisitRemoteMode } from '@/lib/visits/remoteVisitsMode';
 import { resolveDealRemoteMode } from '@/lib/deals/remoteDealsMode';
+import { resolveSalesRemoteMode } from '@/lib/sales/remoteSalesMode';
 
 const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'ligar': FlowLigar,
@@ -91,11 +92,21 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
 // motivo de 'criar-visita' (B4 de Visits) — Deal ganhou create remoto
 // próprio (migration #53) e FlowNovaProposta agora decide local/remoto
 // sozinho (resolveDealRemoteMode()), com gate DEDICADO logo abaixo
-// (isDealCreateFlowAllowed). 'aprovar-proposta'/'registrar-venda'/
-// 'criar-acompanhamento' permanecem aqui — nenhum dos três foi migrado.
+// (isDealCreateFlowAllowed). 'aprovar-proposta'/'criar-acompanhamento'
+// permanecem aqui — nenhum dos dois foi migrado.
+//
+// COMMERCIAL-REMOTE-SALES-A3-R1: 'registrar-venda' SAIU deste set — Sale
+// ganhou backend remoto próprio (migration #54) e FlowRegistrarVenda agora
+// decide local/remoto sozinho (resolveSalesRemoteMode()), mesmo padrão de
+// 'nova-proposta' (B4). Gate DEDICADO logo abaixo (isSaleRegisterFlowAllowed).
+// Achado do A3-EXEC smoke: este id ficou esquecido aqui durante o A2-EXEC
+// (que só implementou os branches dentro de FlowRegistrarVenda/
+// FlowVerNegociacao, nunca tocou este arquivo) — o gate genérico bloqueava
+// a abertura do flow remoto antes de resolveSalesRemoteMode() ser
+// consultado, para qualquer ator, independente do estado real de Sales.
 const LOCAL_COMMERCIAL_FLOW_IDS = new Set<string>([
   'confirmar-visita', 'registrar-resultado',
-  'aprovar-proposta', 'registrar-venda',
+  'aprovar-proposta',
   'criar-acompanhamento',
 ]);
 
@@ -183,6 +194,28 @@ function isDealDetailFlowAllowed(): boolean {
   return resolveDealRemoteMode() === 'deal_remote_ready';
 }
 
+// COMMERCIAL-REMOTE-SALES-A3-R1 — gate DEDICADO de 'registrar-venda', mesmo
+// padrão exato de isDealCreateFlowAllowed/isVisitCreateFlowAllowed: decide
+// só por flow.id + resolveSalesRemoteMode(), nunca por quem chamou
+// openFlow. FlowRegistrarVenda TEM um branch local real (SaleService), por
+// isso 'sale_local' também permite aqui — igual isDealCreateFlowAllowed,
+// diferente de isDealDetailFlowAllowed/isVisitRescheduleFlowAllowed (que
+// são remote-only). 'sale_blocked' (rollout parcial: Deals remoto mas
+// REMOTE_SALES ainda off) e 'sale_remote_misconfigured' continuam
+// bloqueados — sem fallback local quando Sales deveria ser remoto.
+// Identidade fica FORA deste gate, mesmo raciocínio já registrado para
+// Visits/Deals: a defesa real já existe em duas camadas mais profundas —
+// (1) o CTA de FlowVerNegociacao só é renderizado quando
+// resolveSalesRemoteMode() === 'sale_remote_ready', e (2) useRegisterSale
+// falha fechado antes de qualquer RPC se a identidade estiver incompleta.
+// payload.deal continua sendo exigido dentro do próprio FlowRegistrarVenda
+// remoto (SALES-A1-PRECHECK §6) — este gate e aquele guard são
+// complementares, nenhum substitui o outro.
+function isSaleRegisterFlowAllowed(): boolean {
+  const mode = resolveSalesRemoteMode();
+  return mode === 'sale_local' || mode === 'sale_remote_ready';
+}
+
 export function FlowLayer({ flow, close, openFlow, go }: {
   flow: { id: string; payload: any } | null;
   close: () => void;
@@ -211,6 +244,9 @@ export function FlowLayer({ flow, close, openFlow, go }: {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   if (flow.id === 'ver-negociacao' && !isDealDetailFlowAllowed()) {
+    return <LocalCommercialFlowUnavailable close={close} />;
+  }
+  if (flow.id === 'registrar-venda' && !isSaleRegisterFlowAllowed()) {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   return <Comp payload={flow.payload || {}} close={close} openFlow={openFlow} go={go} />;
