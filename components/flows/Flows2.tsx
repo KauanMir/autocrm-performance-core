@@ -2545,7 +2545,11 @@ export function FlowRegistrarVenda({ payload, close }: any) {
 
   const user = AuthService.getCurrentUser();
   const isSeller = user?.activeMembership?.role === 'seller';
-  const storeSellers = SellerService.getAll();
+  // SellerService.getAll() é leitura LOCAL (assertLocalCommercialDataAllowed)
+  // — só pode executar no branch local. Chamá-la incondicionalmente aqui
+  // lançava LocalCommercialDataDisabledError e derrubava o form remoto
+  // (COMMERCIAL-REMOTE-SALES-A3-R2, achado do write-smoke).
+  const storeSellers = salesDataSource === 'local' ? SellerService.getAll() : [];
   // A seller's sale is always theirs. A manager/admin has no sellerId of
   // their own — the sale must be attributed to a real Seller, never to the
   // acting manager (that's the exact "Parabéns, Carlos" bug this fixes).

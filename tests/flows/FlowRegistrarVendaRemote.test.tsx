@@ -193,6 +193,39 @@ describe.each([
   });
 });
 
+describe('FlowRegistrarVenda — remoto: isolamento de dependências locais (COMMERCIAL-REMOTE-SALES-A3-R2)', () => {
+  // Regressão exata do bug encontrado no A3 write-smoke: SellerService.getAll()
+  // (e demais serviços locais) são gateados por assertLocalCommercialDataAllowed
+  // e lançam LocalCommercialDataDisabledError fora do modo local. Os mocks do
+  // topo do arquivo NÃO lançam — para capturar de verdade uma leitura local
+  // incondicional, cada serviço aqui lança como o real faria em modo remoto.
+  beforeEach(() => {
+    m.resolveSalesRemoteMode.mockReturnValue('sale_remote_ready');
+    const disabled = (op: string) => {
+      throw new Error(`LocalCommercialDataDisabledError: ${op}`);
+    };
+    m.sellerServiceGetAll.mockImplementation(() => disabled('SellerService.getAll'));
+    m.saleServiceGetAll.mockImplementation(() => disabled('SaleService.getAll'));
+    m.dealServiceGetAll.mockImplementation(() => disabled('DealService.getAll'));
+    m.leadServiceGetAll.mockImplementation(() => disabled('LeadService.getAll'));
+  });
+
+  it('monta o formulário remoto sem chamar SellerService/SaleService/DealService/LeadService locais', () => {
+    renderFlow({ deal: remoteDeal() });
+    expect(screen.getByText('Confirmar venda')).toBeInTheDocument();
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
+    expect(m.saleServiceGetAll).not.toHaveBeenCalled();
+    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
+    expect(m.leadServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('Manager sem Deal (SellerPicker seria local): formulário remoto ainda assim não toca serviços locais', () => {
+    renderFlow({});
+    expect(screen.getByText('Confirmar venda')).toBeInTheDocument();
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
+  });
+});
+
 describe('FlowRegistrarVenda — remoto: identity_changed', () => {
   beforeEach(() => {
     m.resolveSalesRemoteMode.mockReturnValue('sale_remote_ready');
