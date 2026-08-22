@@ -254,10 +254,8 @@ describe('parseInviteQuery — mesmas regras de negócio de parseInviteFragment 
   });
 
   it('valor não-string é rejeitado sem lançar', () => {
-    // @ts-expect-error — entrada propositalmente inválida
-    expect(() => parseInviteQuery(null)).not.toThrow();
-    // @ts-expect-error
-    expect(parseInviteQuery(null).ok).toBe(false);
+    expect(() => parseInviteQuery(null as unknown as string)).not.toThrow();
+    expect(parseInviteQuery(null as unknown as string).ok).toBe(false);
   });
 
   it('resultado de erro nunca contém os valores originais', () => {
