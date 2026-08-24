@@ -227,7 +227,7 @@ describe('App (shell integrado) — Home/Rail sob REMOTE_LEADS=true', () => {
     );
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
 
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
     expect(m.visitServiceGetAll).not.toHaveBeenCalled();
@@ -251,7 +251,7 @@ describe('App (shell integrado) — Home/Rail sob REMOTE_LEADS=true', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { leads: { hasData: true, isEmpty: false } }));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
 
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
     expect(m.visitServiceGetAll).not.toHaveBeenCalled();
@@ -269,7 +269,7 @@ describe('App (shell integrado) — Home/Rail sob REMOTE_LEADS=true', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_unavailable_identity'));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
 
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
@@ -287,7 +287,7 @@ describe('App (shell integrado) — Home/Rail sob REMOTE_LEADS=true', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { pipeline: { hasData: false, isLoading: true } }));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
   });
 
@@ -298,7 +298,7 @@ describe('App (shell integrado) — Home/Rail sob REMOTE_LEADS=true', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_misconfigured'));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
     expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
@@ -317,7 +317,7 @@ describe('App (shell) — Rail no caminho local (REMOTE_LEADS=false)', () => {
     m.taskServiceGetAll.mockReturnValue([{ id: 't1', state: 'late' }, { id: 't2', state: 'late' }]);
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     expect(m.taskServiceGetAll).toHaveBeenCalled();
     expect(screen.getByText('2')).toBeInTheDocument();
   });
@@ -332,7 +332,7 @@ describe('App (shell) — Rail no caminho remoto', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { leads: { hasData: true, isEmpty: false } }));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
     // M1-E E7-B1: getCompetition() (Podium/Ranking de Home) também nunca
     // chama SellerService.getById/getAll em modo remoto.
@@ -347,7 +347,7 @@ describe('App (shell) — Rail no caminho remoto', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_active', { leads: { hasData: true, isEmpty: false } }));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     // M1-E E7-B1: getCompetition() (Podium/Ranking de Home, fora do escopo
     // do Rail) não chama mais SellerService.getById em modo remoto — o que
     // este teste prova é específico do Rail: o texto secundário nunca vira
@@ -372,7 +372,7 @@ describe('App (shell) — Rail: badge de Tasks por mode remoto', () => {
     }));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     expect(pendenciasBadge()?.textContent).toBe('2');
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
   });
@@ -395,7 +395,7 @@ describe('App (shell) — Rail: badge de Tasks por mode remoto', () => {
     }));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     expect(pendenciasBadge()?.textContent).toBe('2');
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
   });
@@ -407,7 +407,7 @@ describe('App (shell) — Rail: badge de Tasks por mode remoto', () => {
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isLoading: true }));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     expect(pendenciasBadge()).toBeNull();
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
   });
@@ -419,7 +419,7 @@ describe('App (shell) — Rail: badge de Tasks por mode remoto', () => {
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isError: true, error: new Error('x') }));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     expect(pendenciasBadge()).toBeNull();
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
   });
@@ -432,7 +432,7 @@ describe('App (shell) — Rail: badge de Tasks por mode remoto', () => {
     }));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     expect(pendenciasBadge()).toBeNull();
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
   });
@@ -448,7 +448,7 @@ describe('App (shell) — Rail: badge de Tasks por mode remoto', () => {
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState(mode));
 
     renderApp();
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
     expect(pendenciasBadge()).toBeNull();
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
   });
@@ -472,7 +472,7 @@ describe('App — Task bridge lifecycle mount', () => {
     expect(m.useTasksRemoteBridgeLifecycle.mock.calls[0][0]).toBeNull();
     expect(m.useTasksRemoteBridgeLifecycle.mock.calls[0][1]).toEqual(expect.any(Function));
 
-    await waitFor(() => expect(screen.getByText('AUTOCRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
 
     const lastCall = m.useTasksRemoteBridgeLifecycle.mock.calls.at(-1)!;
     expect(lastCall[0]).toEqual(manager());

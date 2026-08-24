@@ -45,7 +45,7 @@ export function PasswordStep({ mode, submitting, errorMessage, onSubmit, onSkip 
       </h2>
       <p style={{ margin: '0 0 20px', color: 'var(--t-500)', fontSize: 14 }}>
         {mode === 'required'
-          ? 'Esta senha será usada para acessar o AutoCRM.'
+          ? 'Esta senha será usada para acessar o KAPA CRM.'
           : 'Você pode continuar sem alterar sua senha atual, ou definir uma nova — isso substituirá a senha existente.'}
       </p>
 

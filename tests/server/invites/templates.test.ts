@@ -69,7 +69,7 @@ describe('magic_link.html', () => {
   });
 
   it('mesma resposta visual do convite novo (mesmo texto de botão/estrutura, textos de entrada distintos)', () => {
-    expect(magicLinkHtml).toContain('AutoCRM');
-    expect(inviteHtml).toContain('AutoCRM');
+    expect(magicLinkHtml).toContain('KAPA CRM');
+    expect(inviteHtml).toContain('KAPA CRM');
   });
 });

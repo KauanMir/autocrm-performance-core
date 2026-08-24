@@ -193,7 +193,7 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
           <Icon name="car" size={23} stroke={2.2} style={{ color: '#2a2104' }} />
         </div>
         <div>
-          <div className="display" style={{ fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: '.05em', lineHeight: 1 }}>AUTOCRM</div>
+          <div className="display" style={{ fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: '.05em', lineHeight: 1 }}>KAPA CRM</div>
           <div style={{ fontSize: 9.5, color: 'var(--gold-ink)', letterSpacing: '.22em', marginTop: 4, fontWeight: 700, opacity: .8 }}>PERFORMANCE</div>
         </div>
       </div>

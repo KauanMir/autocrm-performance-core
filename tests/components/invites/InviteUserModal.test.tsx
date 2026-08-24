@@ -78,7 +78,7 @@ describe('InviteUserModal — abre e fecha', () => {
   it('renderiza título e descrição corretos', () => {
     renderModal();
     expect(screen.getByText('Convidar usuário')).toBeInTheDocument();
-    expect(screen.getByText('Envie um convite para uma pessoa acessar o AutoCRM.')).toBeInTheDocument();
+    expect(screen.getByText('Envie um convite para uma pessoa acessar o KAPA CRM.')).toBeInTheDocument();
   });
 
   it('botão Cancelar chama onClose', () => {

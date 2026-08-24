@@ -29,7 +29,7 @@ function AuthHero({ note }: { note?: React.ReactNode }) {
           <Icon name="car" size={28} stroke={2.2} style={{ color: '#2a2104' }} />
         </div>
         <div>
-          <div className="display" style={{ fontSize: 24, fontWeight: 800, color: '#fff', letterSpacing: '.05em', lineHeight: 1 }}>AUTOCRM</div>
+          <div className="display" style={{ fontSize: 24, fontWeight: 800, color: '#fff', letterSpacing: '.05em', lineHeight: 1 }}>KAPA CRM</div>
           <div style={{ fontSize: 10.5, color: 'var(--gold-ink)', letterSpacing: '.24em', marginTop: 4, fontWeight: 700, opacity: .85 }}>PERFORMANCE</div>
         </div>
       </div>

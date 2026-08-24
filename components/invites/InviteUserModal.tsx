@@ -215,7 +215,7 @@ export function InviteUserModal({ userId, actor, onClose, onSent }: InviteUserMo
     <FlowShell
       eyebrow="USUÁRIOS"
       title="Convidar usuário"
-      sub="Envie um convite para uma pessoa acessar o AutoCRM."
+      sub="Envie um convite para uma pessoa acessar o KAPA CRM."
       icon="users"
       onClose={onClose}
       footer={

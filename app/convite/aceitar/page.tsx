@@ -6,8 +6,8 @@ import type { Metadata } from 'next';
 import { AcceptInviteFlow } from '@/components/invites/AcceptInviteFlow';
 
 export const metadata: Metadata = {
-  title: 'Convite — AutoCRM',
-  description: 'Ative sua conta no AutoCRM.',
+  title: 'Convite — KAPA CRM',
+  description: 'Ative sua conta no KAPA CRM.',
 };
 
 export default function AceitarConvitePage() {

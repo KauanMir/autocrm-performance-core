@@ -408,7 +408,7 @@ export function AcceptInviteFlow() {
               Você recebeu um convite
             </h2>
             <p style={{ margin: '0 0 20px', color: 'var(--t-500)', fontSize: 14 }}>
-              Confirme para continuar com a ativação da sua conta no AutoCRM.
+              Confirme para continuar com a ativação da sua conta no KAPA CRM.
             </p>
             <button type="button" onClick={() => void handleContinue()} style={primaryButtonStyle}>
               Continuar
