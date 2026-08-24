@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, CountUp, FitBox } from '@/components/ui/kit';
 import { PLACE, Podium } from '@/components/podiums/Podiums';
@@ -13,7 +13,9 @@ import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenSta
 import { useRemoteDealsScreenState } from '@/lib/hooks/useRemoteDealsScreenState';
 import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
 import { useRemoteSalesScreenState } from '@/lib/hooks/useRemoteSalesScreenState';
+import { useCurrentCompanyTimezone } from '@/lib/hooks/useCurrentCompanyTimezone';
 import { buildSalesRanking, type SalesRankingRow as SalesRankingRowT } from '@/lib/sales/salesRanking';
+import { resolvePresetRange, resolveCustomRange, isWithinRange, type PeriodPreset, type MillisRange } from '@/lib/date/companyPeriod';
 import { formatCentsToBRL } from '@/lib/deals/money';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { groupLateTasksBySeller, groupOpenDealsBySeller, type SellerAttentionRow } from '@/lib/home/managerAttention';
@@ -21,6 +23,9 @@ import type { RemoteTaskModel } from '@/lib/tasks/taskAdapter';
 import type { RemoteDealModel } from '@/lib/deals/adapter';
 
 const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
+// HOME-FILTERS-R1-EXEC — mesmos 4 presets de PERIODS, sem 'Personalizado'
+// (tratado à parte pelo popover de range custom do Pódio real).
+const PODIUM_PRESETS: PeriodPreset[] = ['Hoje', '7 dias', '15 dias', '30 dias'];
 
 const DEFAULT_SELLER = {
   id: '', name: 'Equipe', first: 'Equipe', team: '',
@@ -255,9 +260,23 @@ type HomePodiumRanking =
   | { status: 'empty' }
   | { status: 'ready'; top3: SalesRankingRowT[] };
 
+// HOME-FILTERS-R1-EXEC — resolução do período em uso pelo Pódio real,
+// discriminada para o Pódio saber exatamente por que ainda não tem uma
+// janela pronta: 'loading' enquanto o timezone da empresa carrega (nunca
+// um filtro aplicado com timezone do navegador), 'unavailable'/'error'
+// espelham o próprio status de useCurrentCompanyTimezone, 'ready' carrega
+// o range calculado (preset ou custom, sempre ancorado no timezone real —
+// A1-PRECHECK §6/§13).
+export type ResolvedPeriod =
+  | { kind: 'loading' }
+  | { kind: 'unavailable' }
+  | { kind: 'error'; retry: () => void }
+  | ({ kind: 'ready' } & MillisRange);
+
 function useHomePodiumRanking(
   currentUser: User | null,
   sellersById: Readonly<Record<string, { id: string; name: string }>>,
+  periodResolution: ResolvedPeriod,
 ): HomePodiumRanking {
   const remote = useRemoteSalesScreenState(currentUser);
 
@@ -270,13 +289,27 @@ function useHomePodiumRanking(
   if (remote.isLoading) return { status: 'loading' };
   if (remote.isError) return { status: 'error', retry: remote.refetch };
   if (remote.configError !== null) return { status: 'unavailable' };
-  if (remote.isEmpty) return { status: 'empty' };
 
-  // sellersById vem do MESMO catálogo batch (useCurrentCompanySellerLabels)
-  // já usado pela seção Manager — nenhuma segunda query. Sale com
-  // assignedSellerId não resolvido cai no bucket único "Vendedor
-  // indisponível" (buildSalesRanking), nunca quebra o bloco.
-  const ranking = buildSalesRanking(remote.sales, sellersById);
+  // Timezone da empresa ainda não resolvido: nunca mostrar ranking sem
+  // filtro (isso vazaria Sales fora da janela escolhida) nem um "0"/vazio
+  // fingido enquanto isso — mesmo tratamento de loading/erro/indisponível
+  // já usado no resto da Home.
+  if (periodResolution.kind === 'loading') return { status: 'loading' };
+  if (periodResolution.kind === 'unavailable') return { status: 'unavailable' };
+  if (periodResolution.kind === 'error') return { status: 'error', retry: periodResolution.retry };
+
+  // Filtro de período client-side ANTES da agregação (R1-EXEC §2/§11):
+  // Sales já chegam autorizadas pela RLS (Manager: company-wide; Seller:
+  // só as próprias) — o filtro só reduz o que já foi autorizado, nunca
+  // amplia. sellersById vem do MESMO catálogo batch
+  // (useCurrentCompanySellerLabels) já usado pela seção Manager — nenhuma
+  // segunda query. Sale com assignedSellerId não resolvido cai no bucket
+  // único "Vendedor indisponível" (buildSalesRanking), nunca quebra o
+  // bloco.
+  const salesInWindow = remote.sales.filter((sale) => isWithinRange(sale.soldAt, periodResolution));
+  if (salesInWindow.length === 0) return { status: 'empty' };
+
+  const ranking = buildSalesRanking(salesInWindow, sellersById);
   return { status: 'ready', top3: ranking.slice(0, 3) };
 }
 
@@ -312,19 +345,32 @@ function getCompetition(sellers: any[]) {
   return { meIdx, me, pos: meIdx >= 0 ? meIdx + 1 : 1, rivalAhead, chaser, third, top3Gap, aheadGap, weeklyDone: 2, weeklyGoal: 3, leader: sellers[0] ?? DEFAULT_SELLER };
 }
 
-function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam }: any) {
+// HOME-FILTERS-R1-EXEC — período e segmento saem da ControlBar global no
+// modo remoto: período vira real e se muda de posição para o cabeçalho do
+// próprio Pódio (R1-EXEC §1); segmento (Todos/Novos/Seminovos) some por
+// completo — não representa Lead/Deal/Sale/veículo, é Seller.team, um
+// conceito sem contrato remoto hoje (A1-PRECHECK §9/§17). Local/fixture
+// preserva os dois controles exatamente como estavam, pixel a pixel
+// (§18) — nenhuma mudança de comportamento, só a mesma condicional
+// `isSellersLocal` já usada pelo resto da Home para decidir o que
+// renderizar.
+function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam, isSellersLocal }: any) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', padding: '14px 26px', borderBottom: '1px solid var(--line-dark)', background: 'rgba(8,8,9,.78)', backdropFilter: 'blur(10px)', position: 'sticky', top: 0, zIndex: 8 }}>
-      <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
-        {PERIODS.map(p => (
-          <button key={p} onClick={() => setPeriod(p)} style={{ padding: '8px 14px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: 'none', fontFamily: 'inherit', background: period === p ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : 'transparent', color: period === p ? '#2a2104' : 'var(--txt-mid)', transition: 'all .15s' }}>{p}</button>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
-        {['Todos', 'Novos', 'Seminovos'].map(tm => (
-          <button key={tm} onClick={() => setTeam(tm)} style={{ padding: '8px 13px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: 'none', fontFamily: 'inherit', background: team === tm ? 'rgba(255,255,255,.08)' : 'transparent', color: team === tm ? '#fff' : 'var(--txt-lo)', transition: 'all .15s' }}>{tm}</button>
-        ))}
-      </div>
+      {isSellersLocal && (
+        <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
+          {PERIODS.map(p => (
+            <button key={p} onClick={() => setPeriod(p)} style={{ padding: '8px 14px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: 'none', fontFamily: 'inherit', background: period === p ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : 'transparent', color: period === p ? '#2a2104' : 'var(--txt-mid)', transition: 'all .15s' }}>{p}</button>
+          ))}
+        </div>
+      )}
+      {isSellersLocal && (
+        <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
+          {['Todos', 'Novos', 'Seminovos'].map(tm => (
+            <button key={tm} onClick={() => setTeam(tm)} style={{ padding: '8px 13px', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: 'none', fontFamily: 'inherit', background: team === tm ? 'rgba(255,255,255,.08)' : 'transparent', color: team === tm ? '#fff' : 'var(--txt-lo)', transition: 'all .15s' }}>{tm}</button>
+          ))}
+        </div>
+      )}
       <div style={{ flex: 1 }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 11, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 700 }}>Pódio</span>
@@ -540,6 +586,52 @@ function RealPodiumTop3({ rows }: { rows: readonly SalesRankingRowT[] }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {rows.map((row, i) => <RealPodiumRow key={row.sellerId} row={row} pos={i} />)}
+    </div>
+  );
+}
+
+// HOME-FILTERS-R1-EXEC §1 — "PERÍODO DO RANKING" vive no cabeçalho do
+// próprio Pódio (via SectionTitle right=), nunca mais na ControlBar
+// global: deixa claro que só esse bloco muda quando o período muda. Só os
+// 4 presets diretos ficam como botão; "Personalizado" abre um popover
+// compacto (2 campos de data, sem wizard — §8) só aplicado com "Aplicar"
+// (nunca um range inválido em trânsito vira filtro real — §9).
+function formatShortDate(ymd: string): string {
+  const [, m, d] = ymd.split('-');
+  return `${d}/${m}`;
+}
+
+function PodiumPeriodControl({
+  period, onSelectPreset, appliedCustomRange, customDraft, setCustomDraft,
+  customOpen, setCustomOpen, customError, onApplyCustom,
+}: any) {
+  return (
+    <div style={{ marginLeft: 'auto', position: 'relative', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontSize: 10, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700 }}>Período do ranking</span>
+      <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
+        {PODIUM_PRESETS.map((p) => (
+          <button key={p} onClick={() => onSelectPreset(p)} style={{ padding: '7px 11px', borderRadius: 9, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none', fontFamily: 'inherit', background: period === p ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : 'transparent', color: period === p ? '#2a2104' : 'var(--txt-mid)', transition: 'all .15s' }}>{p}</button>
+        ))}
+        <button onClick={() => setCustomOpen(!customOpen)} style={{ padding: '7px 11px', borderRadius: 9, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none', fontFamily: 'inherit', background: period === 'Personalizado' ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : 'transparent', color: period === 'Personalizado' ? '#2a2104' : 'var(--txt-mid)', transition: 'all .15s' }}>Personalizado</button>
+      </div>
+      {period === 'Personalizado' && appliedCustomRange && (
+        <span style={{ fontSize: 11, color: 'var(--txt-lo)' }}>{formatShortDate(appliedCustomRange.start)} a {formatShortDate(appliedCustomRange.end)}</span>
+      )}
+      {customOpen && (
+        <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 8, zIndex: 20, background: '#161618', border: '1px solid var(--line-dark)', borderRadius: 14, padding: 16, boxShadow: 'var(--shadow-lg)', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 220 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>Escolha uma data inicial e final.</div>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11.5, color: 'var(--txt-lo)' }}>
+            Data inicial
+            <input type="date" value={customDraft.start} onChange={(e: any) => setCustomDraft({ ...customDraft, start: e.target.value })} style={{ background: 'rgba(255,255,255,.04)', border: '1px solid var(--line-dark)', borderRadius: 8, padding: '7px 9px', color: '#fff', fontFamily: 'inherit', fontSize: 13 }} />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11.5, color: 'var(--txt-lo)' }}>
+            Data final
+            <input type="date" value={customDraft.end} onChange={(e: any) => setCustomDraft({ ...customDraft, end: e.target.value })} style={{ background: 'rgba(255,255,255,.04)', border: '1px solid var(--line-dark)', borderRadius: 8, padding: '7px 9px', color: '#fff', fontFamily: 'inherit', fontSize: 13 }} />
+          </label>
+          {customError && <div style={{ fontSize: 11.5, color: '#FF8A8A' }}>{customError}</div>}
+          <button onClick={onApplyCustom} style={{ marginTop: 4, padding: '9px 14px', borderRadius: 9, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, background: 'linear-gradient(180deg,#E8CE72,#C9A227)', color: '#2a2104' }}>Aplicar</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -920,6 +1012,15 @@ function ConversionFunnel({ active, leadsSummary, visitsSummary, dealsSummary, s
 export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: User | null; [key: string]: any }) {
   const [period, setPeriod] = useState('30 dias');
   const [team, setTeam] = useState('Todos');
+  // HOME-FILTERS-R1-EXEC — range custom do Pódio. `customRange` é o range
+  // já APLICADO (só existe depois de "Aplicar" com start/end válidos —
+  // nunca um range em edição vira filtro real, §9); `customDraft` é só o
+  // estado do formulário do popover. V1 fica em state local, sem URL/
+  // persistência (A1-PRECHECK §15 — simplicidade).
+  const [customRange, setCustomRange] = useState<{ start: string; end: string } | null>(null);
+  const [customDraft, setCustomDraft] = useState<{ start: string; end: string }>({ start: '', end: '' });
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
   const [narrow, setNarrow] = useState(typeof window !== 'undefined' && window.innerWidth < 1240);
 
   useEffect(() => {
@@ -975,11 +1076,65 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
     membershipRole: isManager ? 'manager' : isSeller ? 'seller' : null,
     userIsActive: Boolean(currentUser),
   });
+  // HOME-FILTERS-R1-EXEC — chamado SEMPRE (Rules of Hooks), mesma garantia
+  // das demais acima; independente de todas por design. Resolve o timezone
+  // REAL da empresa ativa (nunca o do navegador) para ancorar o filtro de
+  // período do Pódio — reaproveita fetchAccessibleCompanies (RLS já
+  // existente), zero RPC nova.
+  const companyTimezone = useCurrentCompanyTimezone({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: isManager ? 'manager' : isSeller ? 'seller' : null,
+    userIsActive: Boolean(currentUser),
+  });
+  // Resolve o range de período aplicado ao Pódio — 'loading' enquanto o
+  // timezone não chegou (nunca um filtro calculado com timezone errado),
+  // 'unavailable'/'error' espelham companyTimezone. 'Personalizado' só
+  // produz 'ready' depois de um range aplicado e válido (customRange !=
+  // null — resolveCustomRange já validou start<=end no momento do
+  // "Aplicar", nunca recalculado aqui a partir de um draft em edição).
+  const periodResolution: ResolvedPeriod = useMemo(() => {
+    if (companyTimezone.status === 'loading' || companyTimezone.status === 'local') return { kind: 'loading' };
+    if (companyTimezone.status === 'unavailable') return { kind: 'unavailable' };
+    if (companyTimezone.status === 'error') return { kind: 'error', retry: companyTimezone.retry };
+
+    const timezone = companyTimezone.timezone;
+    if (period === 'Personalizado') {
+      if (!customRange) return { kind: 'unavailable' };
+      const range = resolveCustomRange(customRange.start, customRange.end, timezone);
+      return range ? { kind: 'ready', ...range } : { kind: 'unavailable' };
+    }
+    const range = resolvePresetRange(period as PeriodPreset, timezone, new Date());
+    return { kind: 'ready', ...range };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, customRange, companyTimezone.status, (companyTimezone as any).timezone]);
+
+  function selectPodiumPreset(p: string) {
+    setPeriod(p);
+    setCustomOpen(false);
+    setCustomError(null);
+  }
+
+  function applyCustomRange() {
+    if (!customDraft.start || !customDraft.end) {
+      setCustomError('Escolha uma data inicial e uma data final.');
+      return;
+    }
+    if (customDraft.start > customDraft.end) {
+      setCustomError('A data inicial precisa ser antes da data final.');
+      return;
+    }
+    setCustomError(null);
+    setCustomRange({ start: customDraft.start, end: customDraft.end });
+    setPeriod('Personalizado');
+    setCustomOpen(false);
+  }
+
   // HOME-PODIUM-R1-EXEC — chamado SEMPRE (Rules of Hooks), mesma garantia
   // de leadsSummary/tasksSummary/visitsSummary/dealsSummary acima;
   // independente de todas por design. sellerLabels.sellersById é o MESMO
   // índice já usado pela seção Manager (zero query nova).
-  const podiumRanking = useHomePodiumRanking(currentUser ?? null, sellerLabels.sellersById);
+  const podiumRanking = useHomePodiumRanking(currentUser ?? null, sellerLabels.sellersById, periodResolution);
   const variant = t.podium;
   // M1-E E7-B1 — Podium/Ranking/MinhaDisputa dependem exclusivamente do
   // catálogo LOCAL de Sellers (getStore().sellers, sem company_id, sem
@@ -1026,7 +1181,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ink-900)', position: 'relative' }}>
-      <ControlBar period={period} setPeriod={setPeriod} variant={variant} setVariant={(v: string) => setTweak('podium', v)} team={team} setTeam={setTeam} />
+      <ControlBar period={period} setPeriod={setPeriod} variant={variant} setVariant={(v: string) => setTweak('podium', v)} team={team} setTeam={setTeam} isSellersLocal={isSellersLocal} />
       {isSellersLocal && <CompTicker comp={comp} />}
 
       <div style={{ padding: '22px 26px 44px', position: 'relative' }}>
@@ -1044,11 +1199,23 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
           )
         ) : (
           <div style={{ marginBottom: 26 }}>
-            <SectionTitle icon="trophy" tone="#D4AF37">Pódio de campeões</SectionTitle>
+            <SectionTitle icon="trophy" tone="#D4AF37" right={
+              <PodiumPeriodControl
+                period={period}
+                onSelectPreset={selectPodiumPreset}
+                appliedCustomRange={customRange}
+                customDraft={customDraft}
+                setCustomDraft={setCustomDraft}
+                customOpen={customOpen}
+                setCustomOpen={setCustomOpen}
+                customError={customError}
+                onApplyCustom={applyCustomRange}
+              />
+            }>Pódio de campeões</SectionTitle>
             {podiumRanking.status === 'loading' && <CommercialWidgetNotice>Carregando pódio…</CommercialWidgetNotice>}
             {podiumRanking.status === 'error' && <CommercialWidgetNotice onRetry={podiumRanking.retry}>Não foi possível carregar o pódio.</CommercialWidgetNotice>}
             {(podiumRanking.status === 'unavailable' || podiumRanking.status === 'local') && <CommercialWidgetNotice>Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>}
-            {podiumRanking.status === 'empty' && <CommercialWidgetNotice>Nenhuma venda registrada ainda.</CommercialWidgetNotice>}
+            {podiumRanking.status === 'empty' && <CommercialWidgetNotice>Nenhuma venda registrada neste período.</CommercialWidgetNotice>}
             {podiumRanking.status === 'ready' && <RealPodiumTop3 rows={podiumRanking.top3} />}
           </div>
         )}
