@@ -12,6 +12,9 @@ import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState
 import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
 import { useRemoteDealsScreenState } from '@/lib/hooks/useRemoteDealsScreenState';
 import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
+import { useRemoteSalesScreenState } from '@/lib/hooks/useRemoteSalesScreenState';
+import { buildSalesRanking, type SalesRankingRow as SalesRankingRowT } from '@/lib/sales/salesRanking';
+import { formatCentsToBRL } from '@/lib/deals/money';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { groupLateTasksBySeller, groupOpenDealsBySeller, type SellerAttentionRow } from '@/lib/home/managerAttention';
 import type { RemoteTaskModel } from '@/lib/tasks/taskAdapter';
@@ -200,6 +203,50 @@ function useHomeDealsSummary(currentUser: User | null): HomeDealsSummary {
     openCount: openDeals.length,
     openDeals,
   };
+}
+
+// HOME-PODIUM-R1-EXEC — "Pódio de campeões" migrado para Sales reais.
+// Reaproveita EXATAMENTE a mesma composição já REMOTE VERIFIED de
+// ScreenResultados (useRemoteSalesScreenState + buildSalesRanking) — nenhuma
+// RPC nova, nenhum N+1, nenhum score/meta/gap/conversão inventado. Sales já
+// chegam autorizadas pela RLS (Manager: company-wide; Seller: só as
+// próprias) — buildSalesRanking só agrega o que recebeu, nenhum filtro de
+// role aqui. Isso é, por construção, a resposta ao item 6 do R1-EXEC: para
+// Seller, useSales devolve own-only, então o "pódio" naturalmente vira uma
+// única linha (a própria) — nunca um ranking global fingido — exatamente o
+// mesmo comportamento já em produção em Resultados para Seller. Nenhuma
+// ampliação de RLS, nenhum filtro manual por seller.
+type HomePodiumRanking =
+  | { status: 'local' }
+  | { status: 'unavailable' }
+  | { status: 'loading' }
+  | { status: 'error'; retry: () => void }
+  | { status: 'empty' }
+  | { status: 'ready'; top3: SalesRankingRowT[] };
+
+function useHomePodiumRanking(
+  currentUser: User | null,
+  sellersById: Readonly<Record<string, { id: string; name: string }>>,
+): HomePodiumRanking {
+  const remote = useRemoteSalesScreenState(currentUser);
+
+  if (remote.mode === 'sale_local') return { status: 'local' };
+  if (remote.mode === 'sale_blocked') return { status: 'unavailable' };
+  if (remote.mode === 'sale_remote_misconfigured') return { status: 'unavailable' };
+  if (remote.mode === 'sale_remote_unavailable_identity') return { status: 'unavailable' };
+
+  // mode === 'sale_remote_active' daqui em diante.
+  if (remote.isLoading) return { status: 'loading' };
+  if (remote.isError) return { status: 'error', retry: remote.refetch };
+  if (remote.configError !== null) return { status: 'unavailable' };
+  if (remote.isEmpty) return { status: 'empty' };
+
+  // sellersById vem do MESMO catálogo batch (useCurrentCompanySellerLabels)
+  // já usado pela seção Manager — nenhuma segunda query. Sale com
+  // assignedSellerId não resolvido cai no bucket único "Vendedor
+  // indisponível" (buildSalesRanking), nunca quebra o bloco.
+  const ranking = buildSalesRanking(remote.sales, sellersById);
+  return { status: 'ready', top3: ranking.slice(0, 3) };
 }
 
 // Estado compacto de loading/erro/indisponível para os widgets comerciais —
@@ -423,6 +470,45 @@ function MinhaDisputa({ active, comp }: any) {
           <RaceMsg icon="flame" c="#FF8A00" title="Atenção">{comp.chaser?.first ?? '—'} empatou com você e vem subindo rápido</RaceMsg>
         </div>
       </div>
+    </div>
+  );
+}
+
+// HOME-PODIUM-R1-EXEC — cartão do pódio real, 1 linha por posição (1º a
+// 3º, nunca mais que rows.length — sem vendedor fictício para completar).
+// Reaproveita o mesmo vocabulário visual do pódio local (PLACE ring/glow,
+// Avatar, crown no 1º) sem tocar em components/podiums/Podiums.tsx (os
+// variants A-D permanecem exclusivos do modo fixture — R1-EXEC §12). Só os
+// campos reais do contrato: posição, nome, quantidade de vendas, receita —
+// nenhum leads/visitas/conversão/meta (dados que este agregado não tem).
+function RealPodiumRow({ row, pos }: { row: SalesRankingRowT; pos: number }) {
+  const pl = (PLACE as any[])[pos];
+  const first = pos === 0;
+  return (
+    <div data-testid="home-podium-row" style={{
+      display: 'flex', alignItems: 'center', gap: 16,
+      padding: first ? '18px 22px' : '14px 20px',
+      borderRadius: 16,
+      background: first ? 'linear-gradient(90deg, rgba(212,175,55,.14), rgba(212,175,55,.02))' : 'linear-gradient(180deg,#161618,#111113)',
+      border: `1px solid ${first ? 'rgba(212,175,55,.4)' : 'var(--line-dark)'}`,
+      boxShadow: 'var(--shadow-sm)',
+    }}>
+      <div className="display tnum" style={{ width: 34, textAlign: 'center', fontSize: first ? 26 : 21, fontWeight: 900, color: pl.ring }}>{pos + 1}º</div>
+      {first && <Icon name="crown" size={20} stroke={1.8} style={{ color: '#E8CE72', flexShrink: 0 }} />}
+      <Avatar name={row.sellerLabel} size={first ? 54 : 44} ring={pl.ring} gold={first} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: first ? 17 : 14.5, fontWeight: 800, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sellerLabel}</div>
+        <div style={{ fontSize: 12, color: 'var(--txt-lo)', marginTop: 2 }}>{row.saleCount} {row.saleCount === 1 ? 'venda' : 'vendas'}</div>
+      </div>
+      <div className="display tnum" style={{ fontSize: first ? 21 : 17, fontWeight: 900, color: first ? '#E8CE72' : '#fff', whiteSpace: 'nowrap' }}>{formatCentsToBRL(row.revenueCents)}</div>
+    </div>
+  );
+}
+
+function RealPodiumTop3({ rows }: { rows: readonly SalesRankingRowT[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {rows.map((row, i) => <RealPodiumRow key={row.sellerId} row={row} pos={i} />)}
     </div>
   );
 }
@@ -781,12 +867,25 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // Manager nunca vai renderizar (B7-B2-PRECHECK §11/§15 — zero query
   // desnecessária para Seller).
   const isManager = currentUser?.activeMembership?.role === 'manager';
+  // HOME-PODIUM-R1-EXEC — antes desabilitada para Seller (única consumidora
+  // era a seção Manager-only de Tasks/Deals). O pódio real precisa resolver
+  // o próprio nome do Seller (buildSalesRanking), então o gate passa a
+  // cobrir manager E seller — mesmo papel/mesma chamada de ScreenResultados
+  // (linha "membershipRole: currentUser?.activeMembership?.role"). Para
+  // Seller a RPC (list_current_company_seller_labels) já devolve só a
+  // própria linha por RLS — nenhuma ampliação de visão aqui.
+  const isSeller = currentUser?.activeMembership?.role === 'seller';
   const sellerLabels = useCurrentCompanySellerLabels({
     userId: currentUser?.id ?? null,
     companyId: currentUser?.activeMembership?.companyId ?? null,
-    membershipRole: isManager ? 'manager' : null,
+    membershipRole: isManager ? 'manager' : isSeller ? 'seller' : null,
     userIsActive: Boolean(currentUser),
   });
+  // HOME-PODIUM-R1-EXEC — chamado SEMPRE (Rules of Hooks), mesma garantia
+  // de leadsSummary/tasksSummary/visitsSummary/dealsSummary acima;
+  // independente de todas por design. sellerLabels.sellersById é o MESMO
+  // índice já usado pela seção Manager (zero query nova).
+  const podiumRanking = useHomePodiumRanking(currentUser ?? null, sellerLabels.sellersById);
   const variant = t.podium;
   // M1-E E7-B1 — Podium/Ranking/MinhaDisputa dependem exclusivamente do
   // catálogo LOCAL de Sellers (getStore().sellers, sem company_id, sem
@@ -852,7 +951,11 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
         ) : (
           <div style={{ marginBottom: 26 }}>
             <SectionTitle icon="trophy" tone="#D4AF37">Pódio de campeões</SectionTitle>
-            <CommercialWidgetNotice>Ranking e desempenho de vendedores serão disponibilizados após a migração deste módulo.</CommercialWidgetNotice>
+            {podiumRanking.status === 'loading' && <CommercialWidgetNotice>Carregando pódio…</CommercialWidgetNotice>}
+            {podiumRanking.status === 'error' && <CommercialWidgetNotice onRetry={podiumRanking.retry}>Não foi possível carregar o pódio.</CommercialWidgetNotice>}
+            {(podiumRanking.status === 'unavailable' || podiumRanking.status === 'local') && <CommercialWidgetNotice>Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>}
+            {podiumRanking.status === 'empty' && <CommercialWidgetNotice>Nenhuma venda registrada ainda.</CommercialWidgetNotice>}
+            {podiumRanking.status === 'ready' && <RealPodiumTop3 rows={podiumRanking.top3} />}
           </div>
         )}
 

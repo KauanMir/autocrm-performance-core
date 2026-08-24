@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   useRemoteTasksScreenState: vi.fn(),
   useRemoteVisitsScreenState: vi.fn(),
   useRemoteDealsScreenState: vi.fn(),
+  useRemoteSalesScreenState: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   leadServiceGetAll: vi.fn(),
@@ -42,6 +43,10 @@ vi.mock('@/lib/hooks/useRemoteVisitsScreenState', () => ({
 
 vi.mock('@/lib/hooks/useRemoteDealsScreenState', () => ({
   useRemoteDealsScreenState: m.useRemoteDealsScreenState,
+}));
+
+vi.mock('@/lib/hooks/useRemoteSalesScreenState', () => ({
+  useRemoteSalesScreenState: m.useRemoteSalesScreenState,
 }));
 
 vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
@@ -167,6 +172,18 @@ function dealScreenState(mode: string, over: Partial<Record<string, unknown>> = 
   };
 }
 
+// HOME-PODIUM-R1-EXEC — resultado padrão de useRemoteSalesScreenState
+// (assinatura real, lib/hooks/useRemoteSalesScreenState.ts), mesmo formato
+// de taskScreenState/visitScreenState/dealScreenState acima, já provado em
+// tests/screens/ScreenResultadosRemote.test.tsx.
+function saleScreenState(mode: string, over: Partial<Record<string, unknown>> = {}) {
+  return {
+    mode, sales: [] as any[], isLoading: false, isFetching: false, isError: false, error: null,
+    configError: null, isEmpty: false, hasData: false, refetch: vi.fn(),
+    ...over,
+  };
+}
+
 // COMMERCIAL-REMOTE-DEALS-B7-B2 — resultado padrão de
 // useCurrentCompanySellerLabels (assinatura real, lib/hooks/
 // useCurrentCompanySellerLabels.ts), usado pela seção Manager para
@@ -231,6 +248,12 @@ beforeEach(() => {
   // sobrescreve para um mode não-local próprio (nunca 'deal_local' junto de
   // Leads remoto — violaria a garantia estrutural de resolveDealRemoteMode()).
   m.useRemoteDealsScreenState.mockReset().mockReturnValue(dealScreenState('deal_local'));
+  // HOME-PODIUM-R1-EXEC — default 'sale_local', mesmo raciocínio do default
+  // de Tasks/Visits/Deals acima: preserva o baseline local de todos os
+  // testes escritos antes deste lote. Toda describe com Leads remoto (e
+  // isLocalCommercialDataAllowed=false) sobrescreve para um mode não-local
+  // próprio (nunca 'sale_local' junto de Leads remoto/Sellers remoto).
+  m.useRemoteSalesScreenState.mockReset().mockReturnValue(saleScreenState('sale_local'));
   m.useCurrentCompanySellerLabels.mockReset().mockReturnValue(currentCompanySellerLabelsResult());
 });
 
@@ -302,6 +325,10 @@ describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
     // Leads remoto ⟹ Deals nunca 'deal_local'. Esta suíte não testa Deals
     // especificamente, então usa 'unavailable'.
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    // HOME-PODIUM-R1-EXEC — mesma garantia estrutural para Sales: Leads
+    // remoto ⟹ Sales nunca 'sale_local'. Esta suíte não testa o pódio real
+    // especificamente (cobertura própria abaixo), então usa 'unavailable'.
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
   });
 
   it('nunca chama SellerService.getAll/getById', () => {
@@ -317,13 +344,19 @@ describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
     expect(screen.queryByText('Equipe')).toBeNull(); // DEFAULT_SELLER.name
   });
 
-  it('pódio/ranking somem, estado indisponível explícito aparece no lugar', () => {
+  it('ranking/MinhaDisputa fixture somem; título "Pódio de campeões" permanece, agora movido para dados reais (HOME-PODIUM-R1-EXEC)', () => {
     renderHome(manager());
     expect(screen.queryByText('PÓDIO DE CAMPEÕES')).toBeNull();
     expect(screen.queryByText('Ranking completo')).toBeNull();
     expect(screen.queryByText('Minha disputa')).toBeNull();
     expect(screen.getByText('Pódio de campeões')).toBeInTheDocument();
-    expect(screen.getByText('Ranking e desempenho de vendedores serão disponibilizados após a migração deste módulo.')).toBeInTheDocument();
+    // A mensagem antiga de "aguardando migração" não existe mais — o bloco
+    // agora usa a mesma fonte remota (useRemoteSalesScreenState) de
+    // ScreenResultados; aqui o estado é 'sale_remote_unavailable_identity',
+    // que compartilha a copy sanitizada genérica já usada pelos outros
+    // widgets comerciais da Home.
+    expect(screen.queryByText('Ranking e desempenho de vendedores serão disponibilizados após a migração deste módulo.')).toBeNull();
+    expect(screen.getByText('Métricas comerciais indisponíveis nesta sessão.')).toBeInTheDocument();
   });
 
   it('widgets de Leads remotos (fora do escopo de Sellers) continuam funcionando normalmente', () => {
@@ -332,6 +365,138 @@ describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
     );
     renderHome(manager());
     expect(screen.getByText('leads atrasados')).toBeInTheDocument();
+  });
+});
+
+// ── Pódio real (HOME-PODIUM-R1-EXEC) ────────────────────────────────────
+// "Pódio de campeões" migrado de SellerService (fixture) para a mesma fonte
+// remota já REMOTE VERIFIED de ScreenResultados (useRemoteSalesScreenState +
+// buildSalesRanking) — mesmo padrão de suíte que ScreenResultadosRemote.
+describe('Home — Pódio real (HOME-PODIUM-R1-EXEC)', () => {
+  function remoteSale(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 'sale-1', assignedSellerId: 's1', soldValueCents: 10000000, ...over };
+  }
+
+  const SELLERS_BY_ID = {
+    s1: { id: 's1', name: 'Lucas Martins' },
+    s2: { id: 's2', name: 'Fernanda Dias' },
+    s3: { id: 's3', name: 'Rafael Souza' },
+    s4: { id: 's4', name: 'Bianca Alves' },
+  };
+
+  beforeEach(() => {
+    m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
+    );
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    m.useCurrentCompanySellerLabels.mockReturnValue(
+      currentCompanySellerLabelsResult({ sellersById: SELLERS_BY_ID, hasData: true, isEmpty: false }),
+    );
+  });
+
+  it('Manager: ranking real renderiza — nome, quantidade de vendas e receita formatada, zero fixture', () => {
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true,
+      sales: [
+        remoteSale({ id: 's-1', assignedSellerId: 's1', soldValueCents: 19000000 }),
+        remoteSale({ id: 's-2', assignedSellerId: 's1', soldValueCents: 19000000 }),
+      ],
+    }));
+    renderHome(manager());
+    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
+    expect(screen.getByText('2 vendas')).toBeInTheDocument();
+    expect(screen.getByText('R$ 380.000,00')).toBeInTheDocument();
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
+    expect(m.sellerServiceGetById).not.toHaveBeenCalled();
+  });
+
+  it('Top 3 máximo: 4 vendedores com Sales, só os 3 primeiros (saleCount DESC) aparecem', () => {
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true,
+      sales: [
+        remoteSale({ id: 's-1', assignedSellerId: 's1' }),
+        remoteSale({ id: 's-2', assignedSellerId: 's1' }),
+        remoteSale({ id: 's-3', assignedSellerId: 's1' }),
+        remoteSale({ id: 's-4', assignedSellerId: 's2' }),
+        remoteSale({ id: 's-5', assignedSellerId: 's2' }),
+        // s3 e s4 empatam em saleCount (1) — receita maior decide o
+        // desempate (buildSalesRanking: saleCount DESC, revenueCents DESC,
+        // sellerLabel ASC), então s3 (Rafael Souza) fica à frente de s4.
+        remoteSale({ id: 's-6', assignedSellerId: 's3', soldValueCents: 20000000 }),
+        remoteSale({ id: 's-7', assignedSellerId: 's4', soldValueCents: 10000000 }),
+      ],
+    }));
+    renderHome(manager());
+    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
+    expect(screen.getByText('Fernanda Dias')).toBeInTheDocument();
+    expect(screen.getByText('Rafael Souza')).toBeInTheDocument();
+    expect(screen.queryByText('Bianca Alves')).toBeNull();
+    expect(screen.getAllByTestId('home-podium-row')).toHaveLength(3);
+  });
+
+  it('1 vendedor apenas: mostra só o 1º, nenhum vendedor fictício para completar', () => {
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true,
+      sales: [remoteSale({ id: 's-1', assignedSellerId: 's1' })],
+    }));
+    renderHome(manager());
+    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
+    expect(screen.getAllByTestId('home-podium-row')).toHaveLength(1);
+  });
+
+  it('loading: notice dedicado de pódio, nenhuma linha renderizada', () => {
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isLoading: true }));
+    renderHome(manager());
+    expect(screen.getByText('Carregando pódio…')).toBeInTheDocument();
+    expect(screen.queryByText('Lucas Martins')).toBeNull();
+  });
+
+  it('erro: mensagem sanitizada com retry, sem fallback fixture', () => {
+    const refetch = vi.fn();
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isError: true, refetch }));
+    renderHome(manager());
+    expect(screen.getByText('Não foi possível carregar o pódio.')).toBeInTheDocument();
+    const [retryBtn] = screen.getAllByText('Tentar novamente');
+    fireEvent.click(retryBtn);
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it('empty: nenhuma Sale registrada — copy honesta, sem pódio vazio com nomes falsos', () => {
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isEmpty: true }));
+    renderHome(manager());
+    expect(screen.getByText('Nenhuma venda registrada ainda.')).toBeInTheDocument();
+  });
+
+  it('Sale com sellerId não resolvido: bucket "Vendedor indisponível", bloco não quebra', () => {
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true,
+      sales: [remoteSale({ id: 's-1', assignedSellerId: 'unknown-seller' })],
+    }));
+    renderHome(manager());
+    expect(screen.getByText('Vendedor indisponível')).toBeInTheDocument();
+  });
+
+  // R1-EXEC §6/§16 — Seller: Sales já chegam own-only por RLS (mesmo
+  // contrato já auditado/em produção em ScreenResultados), então o pódio de
+  // Seller é honesto por construção: nunca um ranking global fingido, só a
+  // própria linha, sem ampliar RLS/filtro manual para simular um pódio
+  // company-wide.
+  it('Seller: contrato real (Sales own-only via RLS) — só a própria linha, nenhum ranking global fingido', () => {
+    m.useCurrentCompanySellerLabels.mockReturnValue(
+      currentCompanySellerLabelsResult({ sellersById: { s1: { id: 's1', name: 'Lucas Martins' } }, hasData: true, isEmpty: false }),
+    );
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true,
+      sales: [remoteSale({ id: 's-1', assignedSellerId: 's1', soldValueCents: 19000000 })],
+    }));
+    renderHome(seller('s1'));
+    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
+    expect(screen.getByText('R$ 190.000,00')).toBeInTheDocument();
+    expect(screen.getAllByTestId('home-podium-row')).toHaveLength(1);
+    expect(screen.queryByText('Fernanda Dias')).toBeNull();
   });
 });
 
@@ -700,6 +865,9 @@ describe('Home — Visits summary remoto (independente de Leads)', () => {
     // fora do escopo de Sellers/Podium (E7-B1, já coberto na sua própria
     // suíte acima).
     m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    // HOME-PODIUM-R1-EXEC — mesma garantia estrutural para Sales: Leads
+    // remoto ⟹ Sales nunca 'sale_local'. Esta suíte não testa o pódio real.
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
   });
 
   it('snapshot [scheduled, scheduled, confirmed, completed, canceled]: card mostra 2 não confirmadas, funil mostra 3 em aberto — completed/canceled nunca contam', () => {
@@ -852,6 +1020,9 @@ describe('Home — Deals summary remoto (independente de Leads/Tasks/Visits)', (
     // Desligado para isolar as asserções desta suíte do Ranking (mesma
     // razão da suíte de Visits acima — Podium/Ranking fora de escopo).
     m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    // HOME-PODIUM-R1-EXEC — mesma garantia estrutural para Sales: Leads
+    // remoto ⟹ Sales nunca 'sale_local'. Esta suíte não testa o pódio real.
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
   });
 
   it('4 Deals [open, open, lost, sold]: openCount=2, terminal statuses nunca contam', () => {
