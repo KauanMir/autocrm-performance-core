@@ -364,7 +364,11 @@ describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
       screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [{ id: 'r1', urgency: 'red' }] } }),
     );
     renderHome(manager());
-    expect(screen.getByText('leads atrasados')).toBeInTheDocument();
+    // HOME-ATTENTION-R1-EXEC §5 — "leads atrasados" foi removido de
+    // Attention (auditoria: Lead.urgency é estado de evento, não atraso
+    // objetivo); o funil de conversão (Leads total) continua real.
+    expect(screen.queryByText('leads atrasados')).toBeNull();
+    expect(screen.getAllByText('Leads').length).toBeGreaterThan(0);
   });
 });
 
@@ -536,10 +540,12 @@ describe('Home — remote_active (Manager e Seller)', () => {
       }),
     );
     renderHome(manager());
-    expect(screen.getByText('leads atrasados')).toBeInTheDocument();
-    // "1" (delayedLeads) também coincide com a posição #1 do Ranking — a
-    // contagem real já é provada pelo count na UrgentAttentionGrid.
-    expect(screen.getAllByText('1').length).toBeGreaterThan(0);
+    // HOME-ATTENTION-R1-EXEC §5 — "leads atrasados" (Lead.urgency==='red')
+    // foi auditado e REMOVIDO de Attention: é estado de evento
+    // (calculateLeadHealth/default 'red' na criação do Lead), não "sem
+    // contato há N dias" — sem contrato de atraso objetivo. O total real de
+    // Leads continua visível no funil de conversão (ConversionFunnel).
+    expect(screen.queryByText('leads atrasados')).toBeNull();
     // "Leads" também aparece nas colunas do Ranking (SellerService, fora do
     // escopo desta etapa) — verifica só que a etapa do funil está presente.
     expect(screen.getAllByText('Leads').length).toBeGreaterThan(0);
@@ -714,11 +720,14 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
     },
   );
 
-  it('lateCount=0 é sucesso (ready), não indisponibilidade', () => {
+  // HOME-ATTENTION-R1-EXEC §2/§8 — count=0 não é mais "sucesso visível":
+  // com lateCount=0 (e nenhuma outra métrica em Attention na V1), a seção
+  // inteira "Atenção imediata" desaparece — nunca um card vermelho "0".
+  it('lateCount=0: nenhum card falso, seção "Atenção imediata" inteira desaparece', () => {
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: false, isEmpty: true, tasks: [] }));
     renderHome(manager());
-    const card = screen.getByText('pendências atrasadas').closest('button');
-    expect(card?.textContent).toContain('0');
+    expect(screen.queryByText('pendências atrasadas')).toBeNull();
+    expect(screen.queryByText('Atenção imediata')).toBeNull();
   });
 
   it('independência A: Leads ready + Tasks loading — Leads normal, Tasks em loading', () => {
@@ -727,7 +736,9 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
     );
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isLoading: true }));
     renderHome(manager());
-    expect(screen.getByText('leads atrasados')).toBeInTheDocument();
+    // "leads atrasados" foi removido de Attention (§5) — só resta o notice
+    // de Tasks em loading.
+    expect(screen.queryByText('leads atrasados')).toBeNull();
     expect(screen.getByText('Carregando pendências…')).toBeInTheDocument();
     expect(screen.queryByText('pendências atrasadas')).toBeNull();
   });
@@ -741,7 +752,10 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
       hasData: true, tasks: [{ id: 'r1', state: TASK_STATE.LATE }],
     }));
     renderHome(manager());
-    expect(screen.getByText('Não foi possível carregar as métricas.')).toBeInTheDocument();
+    // HOME-ATTENTION-R1-EXEC §5 — o erro de Leads não aparece mais em
+    // Attention (o card "leads atrasados" foi removido); a superfície real
+    // de erro de Leads passou a ser só o funil de conversão.
+    expect(screen.getByText('Não foi possível carregar o funil.')).toBeInTheDocument();
     const card = screen.getByText('pendências atrasadas').closest('button');
     expect(card?.textContent).toContain('1');
   });
@@ -753,7 +767,9 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
     );
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isError: true, refetch }));
     renderHome(manager());
-    expect(screen.getByText('leads atrasados')).toBeInTheDocument();
+    // "leads atrasados" foi removido de Attention (§5) — só resta o erro
+    // sanitizado de Tasks.
+    expect(screen.queryByText('leads atrasados')).toBeNull();
     expect(screen.getByText('Não foi possível carregar as pendências.')).toBeInTheDocument();
     const [retryBtn] = screen.getAllByText('Tentar novamente');
     fireEvent.click(retryBtn);
@@ -782,6 +798,101 @@ describe('Home — Task summary remoto (independente de Leads)', () => {
 
     expect(screen.getByText('Carregando pendências…')).toBeInTheDocument();
     expect(screen.queryByText('pendências atrasadas')).toBeNull();
+  });
+});
+
+// ── G2. "Atenção imediata" V1 — REAL ATTENTION ONLY (HOME-ATTENTION-R1-EXEC) ─
+// Consolida o contrato do lote: count=0 → card não existe; todos count=0 →
+// seção não existe; leads atrasados/visitas não confirmadas/negociações em
+// andamento NUNCA entram em Attention no remote mode (auditados e
+// removidos — §5/§6/§4); só "pendências atrasadas" (Tasks LATE) sobrevive.
+describe('Home — Atenção imediata V1: real attention only, zero noise (HOME-ATTENTION-R1-EXEC)', () => {
+  function remoteTaskAttn(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 't1', state: TASK_STATE.LATE, ...over };
+  }
+  function remoteDealAttn(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 'd1', status: 'open', assignedSellerId: 's1', ...over };
+  }
+  function remoteVisitAttn(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 'v1', status: 'scheduled', ...over };
+  }
+
+  beforeEach(() => {
+    m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [{ id: 'r1', urgency: 'red' }] } }),
+    );
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
+  });
+
+  it('todos os counts em 0 (sem pendências atrasadas, sem outras métricas): "Atenção imediata" não existe', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: false, isEmpty: true, tasks: [] }));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    renderHome(manager());
+    expect(screen.queryByText('Atenção imediata')).toBeNull();
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('1 métrica real (3 pendências atrasadas): mostra somente esse card — nenhum outro card, mesmo com Leads/Visits/Deals com dado real', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true,
+      tasks: [remoteTaskAttn(), remoteTaskAttn({ id: 't2' }), remoteTaskAttn({ id: 't3' })],
+    }));
+    // Visits e Deals com dado real e count>0 — não devem virar card algum
+    // em Attention (§4/§6), apenas Tasks sobrevive na V1.
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { hasData: true, visits: [remoteVisitAttn()] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: true, deals: [remoteDealAttn()] }));
+    renderHome(manager());
+    expect(screen.getByText('Atenção imediata')).toBeInTheDocument();
+    const card = screen.getByText('pendências atrasadas').closest('button');
+    expect(card?.textContent).toContain('3');
+    expect(card?.textContent).toContain('Resolva o quanto antes');
+    expect(card?.textContent).toContain('Resolver agora');
+    expect(screen.queryByText('leads atrasados')).toBeNull();
+    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
+  });
+
+  it('negociações OPEN sozinhas (sem pendências atrasadas): "Atenção imediata" não existe', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: false, isEmpty: true, tasks: [] }));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true,
+      deals: [remoteDealAttn(), remoteDealAttn({ id: 'd2' }), remoteDealAttn({ id: 'd3' })],
+    }));
+    renderHome(manager());
+    expect(screen.queryByText('Atenção imediata')).toBeNull();
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
+  });
+
+  it('Manager: pendências overdue reais entram em Attention', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: true, tasks: [remoteTaskAttn()] }));
+    renderHome(manager());
+    expect(screen.getByText('pendências atrasadas').closest('button')?.textContent).toContain('1');
+  });
+
+  it('Seller: pendências overdue reais (próprio escopo/RLS) entram em Attention', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: true, tasks: [remoteTaskAttn(), remoteTaskAttn({ id: 't2' })] }));
+    renderHome(seller('s1'));
+    expect(screen.getByText('pendências atrasadas').closest('button')?.textContent).toContain('2');
+  });
+
+  it('zero fixture: nenhum SellerService/LeadService/VisitService/DealService local é chamado para montar Attention no remote mode', () => {
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { hasData: true, tasks: [remoteTaskAttn()] }));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    renderHome(manager());
+    expect(screen.getByText('pendências atrasadas')).toBeInTheDocument();
+    expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
+    expect(m.leadServiceGetAll).not.toHaveBeenCalled();
+    expect(m.visitServiceGetAll).not.toHaveBeenCalled();
+    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
   });
 });
 
@@ -870,7 +981,13 @@ describe('Home — Visits summary remoto (independente de Leads)', () => {
     m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
   });
 
-  it('snapshot [scheduled, scheduled, confirmed, completed, canceled]: card mostra 2 não confirmadas, funil mostra 3 em aberto — completed/canceled nunca contam', () => {
+  // HOME-ATTENTION-R1-EXEC §6 — "visitas não confirmadas" (Visit.status===
+  // 'scheduled') foi auditado e REMOVIDO de "Atenção imediata": é qualquer
+  // visita futura ainda sem confirmação, sem nenhuma dimensão de tempo/
+  // prazo — não é um contrato objetivo de "precisa de ação agora". O funil
+  // de conversão (ConversionFunnel, "Visitas" — total em aberto) é uma
+  // superfície DIFERENTE, fora do escopo deste lote, e continua real.
+  it('snapshot [scheduled, scheduled, confirmed, completed, canceled]: card de Attention NUNCA aparece, funil mostra 3 em aberto — completed/canceled nunca contam', () => {
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
       hasData: true,
       visits: [
@@ -882,93 +999,63 @@ describe('Home — Visits summary remoto (independente de Leads)', () => {
       ],
     }));
     renderHome(manager());
-    const card = screen.getByText('visitas não confirmadas').closest('button');
-    expect(card?.textContent).toContain('2');
+    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
     const funnelStage = screen.getByText('Visitas').closest('.lift');
     expect(funnelStage?.textContent).toContain('3');
     expect(m.visitServiceGetAll).not.toHaveBeenCalled();
   });
 
-  it('Seller: conta somente o snapshot já RLS-scoped recebido, nenhum SellerService necessário', () => {
+  it('Seller: mesmo com visita própria scheduled, card de Attention não aparece', () => {
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
       hasData: true,
       visits: [remoteVisit({ id: 'v1', status: 'scheduled' })],
     }));
     renderHome(seller('s1'));
-    const card = screen.getByText('visitas não confirmadas').closest('button');
-    expect(card?.textContent).toContain('1');
+    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
     expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
   });
 
-  it('loading: nenhuma contagem local, notice dedicado de Visits', () => {
+  it('loading/error/configError de Visits: nenhum notice "Carregando visitas…"/erro aparece mais em Attention', () => {
     m.visitServiceGetAll.mockReturnValue([{ id: 'v1', status: 'pendente' }]);
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { isLoading: true }));
     renderHome(manager());
-    expect(screen.getByText('Carregando visitas…')).toBeInTheDocument();
-    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
-    expect(m.visitServiceGetAll).not.toHaveBeenCalled();
-  });
-
-  it('erro: mensagem sanitizada com retry, sem fallback local', () => {
-    const refetch = vi.fn();
-    m.visitServiceGetAll.mockReturnValue([{ id: 'v1', status: 'pendente' }]);
-    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { isError: true, refetch }));
-    renderHome(manager());
-    expect(screen.getByText('Não foi possível carregar as visitas.')).toBeInTheDocument();
-    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
-    expect(m.visitServiceGetAll).not.toHaveBeenCalled();
-    const [retryBtn] = screen.getAllByText('Tentar novamente');
-    fireEvent.click(retryBtn);
-    expect(refetch).toHaveBeenCalled();
-  });
-
-  it('configError: unavailable, sem contagem parcial', () => {
-    m.visitServiceGetAll.mockReturnValue([{ id: 'v1', status: 'pendente' }]);
-    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { configError: { code: 'x' } as any }));
-    renderHome(manager());
-    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
     expect(screen.queryByText('Carregando visitas…')).toBeNull();
-    expect(screen.queryByText('Não foi possível carregar as visitas.')).toBeNull();
+    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
     expect(m.visitServiceGetAll).not.toHaveBeenCalled();
   });
 
-  it.each(['visit_blocked', 'visit_remote_misconfigured', 'visit_remote_unavailable_identity'])(
-    '%s: unavailable, VisitService.getAll nunca chamado, nenhum zero falso',
+  it.each(['visit_blocked', 'visit_remote_misconfigured', 'visit_remote_unavailable_identity', 'visit_remote_active'])(
+    '%s: card de Attention ausente, VisitService.getAll nunca chamado',
     (mode) => {
       m.visitServiceGetAll.mockReturnValue([{ id: 'v1', status: 'pendente' }]);
-      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState(mode));
+      m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState(mode, mode === 'visit_remote_active' ? { hasData: true, visits: [remoteVisit({ status: 'scheduled' })] } : {}));
       renderHome(manager());
       expect(screen.queryByText('visitas não confirmadas')).toBeNull();
       expect(m.visitServiceGetAll).not.toHaveBeenCalled();
     },
   );
 
-  it('unconfirmedCount=0 é sucesso (ready), não indisponibilidade', () => {
-    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { hasData: false, isEmpty: true, visits: [] }));
-    renderHome(manager());
-    const card = screen.getByText('visitas não confirmadas').closest('button');
-    expect(card?.textContent).toContain('0');
-  });
-
-  it('independência A: Leads ready + Visits blocked — Leads normal, Visits some sem zero falso', () => {
+  it('independência A: Leads ready + Visits blocked — card de Attention some por Tasks unavailable, nunca por Visits', () => {
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_blocked'));
     renderHome(manager());
-    expect(screen.getByText('leads atrasados')).toBeInTheDocument();
+    expect(screen.queryByText('leads atrasados')).toBeNull();
     expect(screen.queryByText('visitas não confirmadas')).toBeNull();
+    expect(screen.queryByText('Atenção imediata')).toBeNull();
   });
 
-  it('independência B: Leads error + Visits ready — Visits summary continua disponível', () => {
-    const refetch = vi.fn();
+  it('independência B: Leads error + Visits ready — Visits continua fora de Attention, funil de Leads mostra o erro sanitizado', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(
-      screenState('remote_active', { leads: { isError: true, isEmpty: false, refetch } }),
+      screenState('remote_active', { leads: { isError: true, isEmpty: false, refetch: vi.fn() } }),
     );
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
       hasData: true, visits: [remoteVisit({ status: 'scheduled' })],
     }));
     renderHome(manager());
-    expect(screen.getByText('Não foi possível carregar as métricas.')).toBeInTheDocument();
-    const card = screen.getByText('visitas não confirmadas').closest('button');
-    expect(card?.textContent).toContain('1');
+    // HOME-ATTENTION-R1-EXEC §5 — o erro de Leads não aparece mais em
+    // Attention (o card "leads atrasados" foi removido); a superfície real
+    // de erro de Leads passou a ser só o funil de conversão.
+    expect(screen.getByText('Não foi possível carregar o funil.')).toBeInTheDocument();
+    expect(screen.queryByText('visitas não confirmadas')).toBeNull();
   });
 
   it('funil: Leads + Visitas presentes quando ambos válidos, sem Propostas/Vendas locais', () => {
@@ -1006,7 +1093,14 @@ describe('Home — Visits summary remoto (independente de Leads)', () => {
 // (mesmo padrão de Tasks/Visits nas seções G/I — B7-B-PRECHECK §5). Único
 // dado exposto: openCount (status==='open' exclusivamente) — nenhum
 // agrupamento por Seller (isso é B7-B2, fora de escopo aqui).
-describe('Home — Deals summary remoto (independente de Leads/Tasks/Visits)', () => {
+//
+// HOME-ATTENTION-R1-EXEC §4 — Deal OPEN é comportamento normal, não é
+// problema por si só: o card "negociações em andamento" foi REMOVIDO de
+// "Atenção imediata" (UrgentAttention), qualquer que seja openCount/status
+// de dealsSummary. useHomeDealsSummary continua existindo intacto — ainda
+// alimenta a seção separada "Equipe precisa de atenção" (Manager-only,
+// testada isoladamente na suíte L abaixo) — só o card em Attention some.
+describe('Home — Deals summary remoto: "negociações em andamento" NUNCA aparece em Attention (HOME-ATTENTION-R1-EXEC §4)', () => {
   function remoteDeal(over: Partial<Record<string, unknown>> = {}) {
     return { id: 'd1', status: 'open', assignedSellerId: 's1', ...over };
   }
@@ -1025,33 +1119,7 @@ describe('Home — Deals summary remoto (independente de Leads/Tasks/Visits)', (
     m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
   });
 
-  it('4 Deals [open, open, lost, sold]: openCount=2, terminal statuses nunca contam', () => {
-    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
-      hasData: true,
-      deals: [
-        remoteDeal({ id: 'd1', status: 'open' }),
-        remoteDeal({ id: 'd2', status: 'open' }),
-        remoteDeal({ id: 'd3', status: 'lost' }),
-        remoteDeal({ id: 'd4', status: 'sold' }),
-      ],
-    }));
-    renderHome(manager());
-    const card = screen.getByText('negociações em andamento').closest('button');
-    expect(card?.textContent).toContain('2');
-    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
-  });
-
-  it('Seller: conta somente o snapshot já RLS-scoped recebido, nenhum filtro de empresa no frontend', () => {
-    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
-      hasData: true,
-      deals: [remoteDeal({ id: 'd1', status: 'open', assignedSellerId: 's1' })],
-    }));
-    renderHome(seller('s1'));
-    const card = screen.getByText('negociações em andamento').closest('button');
-    expect(card?.textContent).toContain('1');
-  });
-
-  it('Manager: conta o conjunto company-wide recebido, sem agrupar por Seller', () => {
+  it('Manager: 3 Deals OPEN — card "negociações em andamento" NUNCA aparece em Attention (Deal aberto não é problema)', () => {
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
       hasData: true,
       deals: [
@@ -1061,65 +1129,36 @@ describe('Home — Deals summary remoto (independente de Leads/Tasks/Visits)', (
       ],
     }));
     renderHome(manager());
-    const card = screen.getByText('negociações em andamento').closest('button');
-    expect(card?.textContent).toContain('3');
-    // Prova de "nenhum agrupamento por Seller ainda" (B7-B2, fora de
-    // escopo): só um card de Negociações existe, nenhum nome de Seller
-    // aparece associado a uma contagem individual.
-    expect(screen.getAllByText('negociações em andamento').length).toBe(1);
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
+    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
   });
 
-  it('openCount=0 é sucesso (ready), não indisponibilidade', () => {
+  it('Seller: mesmo com Deal próprio OPEN, card não aparece em Attention', () => {
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true,
+      deals: [remoteDeal({ id: 'd1', status: 'open', assignedSellerId: 's1' })],
+    }));
+    renderHome(seller('s1'));
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
+  });
+
+  it('openCount=0: card continua ausente (mesmo padrão de count=0 em qualquer outro estado)', () => {
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: false, isEmpty: true, deals: [] }));
     renderHome(manager());
-    const card = screen.getByText('negociações em andamento').closest('button');
-    expect(card?.textContent).toContain('0');
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
   });
 
-  it('loading: nenhuma contagem falsa, notice dedicado de Negociações', () => {
+  it('loading/error/configError de Deals: nenhum notice "Carregando negociações…"/erro aparece mais em Attention', () => {
     m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isLoading: true }));
-    // Seller (não Manager): isola esta asserção da seção Manager
-    // "Equipe precisa de atenção" (B7-B2), que reusa a mesma copy de
-    // loading/erro para a própria subseção de Negociações — comportamento
-    // do resumo em si é idêntico para os dois papéis.
     renderHome(seller('s1'));
-    expect(screen.getByText('Carregando negociações…')).toBeInTheDocument();
-    expect(screen.queryByText('negociações em andamento')).toBeNull();
-    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
-  });
-
-  it('erro: mensagem sanitizada com retry, sem fallback local, sem detalhe técnico', () => {
-    const refetch = vi.fn();
-    m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
-    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isError: true, refetch }));
-    // Seller (não Manager): mesma razão do teste de loading acima.
-    renderHome(seller('s1'));
-    expect(screen.getByText('Não foi possível carregar as negociações.')).toBeInTheDocument();
-    expect(screen.queryByText('negociações em andamento')).toBeNull();
-    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
-    expect(screen.queryByText(/supabase/i)).toBeNull();
-    expect(screen.queryByText(/RLS/)).toBeNull();
-    const [retryBtn] = screen.getAllByText('Tentar novamente');
-    fireEvent.click(retryBtn);
-    expect(refetch).toHaveBeenCalled();
-  });
-
-  it('configError: unavailable, sem contagem parcial', () => {
-    m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
-    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { configError: { code: 'x' } as any }));
-    renderHome(manager());
-    expect(screen.queryByText('negociações em andamento')).toBeNull();
     expect(screen.queryByText('Carregando negociações…')).toBeNull();
-    expect(screen.queryByText('Não foi possível carregar as negociações.')).toBeNull();
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
     expect(m.dealServiceGetAll).not.toHaveBeenCalled();
   });
 
-  // 'deal_blocked' reproduz o rollout atual: NEXT_PUBLIC_FF_REMOTE_DEALS
-  // OFF com Leads já remote_ready (lib/deals/remoteDealsMode.ts) — nunca
-  // tratado como erro, célula simplesmente ausente, nenhum DealService novo.
   it.each(['deal_blocked', 'deal_remote_misconfigured', 'deal_remote_unavailable_identity'])(
-    '%s: unavailable, DealService.getAll nunca chamado, nenhum zero falso',
+    '%s: card ausente, DealService.getAll nunca chamado',
     (mode) => {
       m.dealServiceGetAll.mockReturnValue([{ id: 'd1', status: 'open' }]);
       m.useRemoteDealsScreenState.mockReturnValue(dealScreenState(mode));
@@ -1129,30 +1168,19 @@ describe('Home — Deals summary remoto (independente de Leads/Tasks/Visits)', (
     },
   );
 
-  it('click em "Negociações em andamento" navega para go(\'propostas\'), nunca abre flow', () => {
-    const go = vi.fn();
-    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
-      hasData: true,
-      deals: [remoteDeal({ id: 'd1', status: 'open' })],
-    }));
-    const props: any = { t: { podium: 'B' }, setTweak: vi.fn(), go, active: false, currentUser: manager() };
-    render(<Home {...props} />);
-    fireEvent.click(screen.getByText('negociações em andamento'));
-    expect(go).toHaveBeenCalledWith('propostas');
-  });
-
-  it('independência: Leads error + Deals ready — Deals summary continua disponível', () => {
-    const refetch = vi.fn();
+  it('independência: Leads error + Deals ready OPEN — card de Deals continua ausente em Attention', () => {
     m.useRemoteLeadsScreenState.mockReturnValue(
-      screenState('remote_active', { leads: { isError: true, isEmpty: false, refetch } }),
+      screenState('remote_active', { leads: { isError: true, isEmpty: false, refetch: vi.fn() } }),
     );
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
       hasData: true, deals: [remoteDeal({ id: 'd1', status: 'open' })],
     }));
     renderHome(manager());
-    expect(screen.getByText('Não foi possível carregar as métricas.')).toBeInTheDocument();
-    const card = screen.getByText('negociações em andamento').closest('button');
-    expect(card?.textContent).toContain('1');
+    // HOME-ATTENTION-R1-EXEC §5 — o erro de Leads não aparece mais em
+    // Attention (o card "leads atrasados" foi removido); a superfície real
+    // de erro de Leads passou a ser só o funil de conversão.
+    expect(screen.getByText('Não foi possível carregar o funil.')).toBeInTheDocument();
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
   });
 
   it('nenhuma linguagem de aprovação/relação Task-Deal na nova seção remota', () => {
@@ -1228,8 +1256,12 @@ describe('Home — Manager Team Attention (Equipe precisa de atenção)', () => 
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: true, deals: [remoteDeal()] }));
     renderHome(seller('s1'));
     expect(screen.queryByText('Equipe precisa de atenção')).toBeNull();
-    // B7-B1 (agregado) preservado normalmente para Seller.
-    expect(screen.getByText('negociações em andamento')).toBeInTheDocument();
+    // HOME-ATTENTION-R1-EXEC §4 — "negociações em andamento" foi REMOVIDO
+    // de Attention (Deal OPEN não é mais atenção real); a Attention de
+    // Seller continua funcionando normalmente via Tasks (remoteTask()
+    // default é LATE).
+    expect(screen.queryByText('negociações em andamento')).toBeNull();
+    expect(screen.getByText('pendências atrasadas')).toBeInTheDocument();
   });
 
   it('Task group: conta LATE por Seller, TODAY/COMPLETED nunca contam (filtro já aplicado por useHomeTasksSummary)', () => {

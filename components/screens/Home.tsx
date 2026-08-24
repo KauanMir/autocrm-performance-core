@@ -543,7 +543,19 @@ function UrgentMetricCard({ it, i, go }: { it: { n: number; label: string; sub: 
   );
 }
 
-function UrgentAttention({ go, leadsSummary, tasksSummary, visitsSummary, dealsSummary }: { go: (id: string) => void; leadsSummary: HomeLeadsSummary; tasksSummary: HomeTasksSummary; visitsSummary: HomeVisitsSummary; dealsSummary: HomeDealsSummary }) {
+// HOME-ATTENTION-R1-EXEC — "Atenção imediata" é área de EXCEÇÃO ("o que
+// exige ação agora?"), não dashboard geral: count=0 → card não existe;
+// todos count=0 → seção não existe (R1-EXEC §2/§8). Auditoria do lote sobre
+// as 4 métricas legadas (docs no branch remoto abaixo) concluiu que só
+// "pendências atrasadas" (Tasks LATE) tem contrato objetivo de atraso real
+// — as outras três saem de Attention na V1 (permanecem só onde já viviam
+// fora desta seção: funil, Vendas/Visitas/Propostas). Local/fixture
+// (isLocal) preserva o comportamento antigo pixel-a-pixel — inclusive
+// contagem 0 visível — para não quebrar a demo legada nem os testes
+// antigos (R1-EXEC §10: não misturar local + remoto).
+function UrgentAttention({ go, leadsSummary, tasksSummary, visitsSummary }: { go: (id: string) => void; leadsSummary: HomeLeadsSummary; tasksSummary: HomeTasksSummary; visitsSummary: HomeVisitsSummary }) {
+  const isLocal = leadsSummary.status === 'local';
+
   // COMMERCIAL-REMOTE-B1-B3-G-R1 — Tasks é resolvido SEMPRE por
   // tasksSummary, NUNCA por leadsSummary.status==='local' (o G-EXEC tinha
   // reintroduzido esse acoplamento por engano). A suposição "Leads local
@@ -562,78 +574,71 @@ function UrgentAttention({ go, leadsSummary, tasksSummary, visitsSummary, dealsS
     taskCell = <CommercialWidgetNotice key="tasks">Carregando pendências…</CommercialWidgetNotice>;
   } else if (tasksSummary.status === 'error') {
     taskCell = <CommercialWidgetNotice key="tasks" onRetry={tasksSummary.retry}>Não foi possível carregar as pendências.</CommercialWidgetNotice>;
-  } else if (tasksSummary.status === 'ready') {
+  } else if (tasksSummary.status === 'ready' && (isLocal || tasksSummary.lateCount > 0)) {
+    // HOME-ATTENTION-R1-EXEC — count=0 fora do modo local não é mais
+    // atenção real: card omitido (não um "0" vermelho). Local preserva o
+    // comportamento antigo (mostra mesmo a 0).
     taskCell = <UrgentMetricCard key="tasks" i={0} go={go} it={{ n: tasksSummary.lateCount, label: 'pendências atrasadas', sub: 'Resolva o quanto antes', icon: 'check', to: 'pendencias' }} />;
   }
-  // 'unavailable': célula omitida — nunca um card mostrando zero/
-  // indisponível como dado real.
+  // 'unavailable' (e 'ready' com lateCount=0 fora do local): célula
+  // omitida — nunca um card mostrando zero/indisponível como dado real.
 
-  // Leads/Propostas: legado, continuam governados por leadsSummary — Deal
-  // nunca ganhou backend remoto (achado do E5-B2-A0/E7-A0) e permanece fora
-  // de escopo deste lote.
-  let leadCells: React.ReactNode[];
-  if (leadsSummary.status === 'local') {
-    leadCells = [
+  if (isLocal) {
+    // Leads/Propostas/Visitas: legado, 100% intocado (fora de escopo deste
+    // lote — R1-EXEC §10/§17, preservado só para a demo/testes antigos).
+    const leadCells: React.ReactNode[] = [
       <UrgentMetricCard key="leads" i={0} go={go} it={{ n: LeadService.getAll().filter((l: any) => l.urgency === 'red').length, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' }} />,
       <UrgentMetricCard key="propostas" i={1} go={go} it={{ n: DealService.getAll().filter((d: any) => d.status === DEAL_STATUS.APPROVAL).length, label: 'propostas aguardando aprovação', sub: 'Desconto acima do limite', icon: 'handshake', to: 'propostas' }} />,
     ];
-  } else if (leadsSummary.status === 'unavailable') {
-    leadCells = [<CommercialWidgetNotice key="leads">Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>];
-  } else if (leadsSummary.status === 'loading') {
-    leadCells = [<CommercialWidgetNotice key="leads">Carregando…</CommercialWidgetNotice>];
-  } else if (leadsSummary.status === 'error') {
-    leadCells = [<CommercialWidgetNotice key="leads" onRetry={leadsSummary.retry}>Não foi possível carregar as métricas.</CommercialWidgetNotice>];
-  } else {
-    leadCells = [<UrgentMetricCard key="leads" i={0} go={go} it={{ n: leadsSummary.delayedLeads, label: 'leads atrasados', sub: 'Sem contato recente', icon: 'flame', to: 'clientes' }} />];
+
+    // COMMERCIAL-REMOTE-VISITS-B7 — Visitas resolvido SEMPRE por
+    // visitsSummary, NUNCA por leadsSummary.status: "Leads local ⟹ Visits
+    // local" é garantido por resolveVisitRemoteMode(), mas o inverso não
+    // vale — mesmo com Leads local, Tasks (acima) pode não ser
+    // 'task_local'; o mesmo switch multi-status vale para Visits.
+    // VisitService.getAll() só pode ser chamado quando
+    // visitsSummary.status === 'local'.
+    let visitCell: React.ReactNode | null = null;
+    if (visitsSummary.status === 'local') {
+      const unconfirmed = VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length;
+      visitCell = <UrgentMetricCard key="visitas" i={1} go={go} it={{ n: unconfirmed, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' }} />;
+    } else if (visitsSummary.status === 'loading') {
+      visitCell = <CommercialWidgetNotice key="visitas">Carregando visitas…</CommercialWidgetNotice>;
+    } else if (visitsSummary.status === 'error') {
+      visitCell = <CommercialWidgetNotice key="visitas" onRetry={visitsSummary.retry}>Não foi possível carregar as visitas.</CommercialWidgetNotice>;
+    } else if (visitsSummary.status === 'ready') {
+      visitCell = <UrgentMetricCard key="visitas" i={1} go={go} it={{ n: visitsSummary.unconfirmedCount, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' }} />;
+    }
+
+    const cells = [...leadCells, ...(visitCell ? [visitCell] : []), ...(taskCell ? [taskCell] : [])];
+    return (
+      <div>
+        <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cells.length}, 1fr)`, gap: 14 }}>
+          {cells}
+        </div>
+      </div>
+    );
   }
 
-  // COMMERCIAL-REMOTE-VISITS-B7 — Visitas resolvido SEMPRE por
-  // visitsSummary, NUNCA por leadsSummary.status (mesmo princípio de
-  // tasksSummary acima/G-PRECHECK-R1): "Leads local ⟹ Visits local" é
-  // garantido por resolveVisitRemoteMode(), mas o inverso não vale — Leads
-  // remote_active pode conviver com Visits blocked/misconfigured/loading/
-  // error, e cada um mostra seu próprio estado. VisitService.getAll() só
-  // pode ser chamado quando visitsSummary.status === 'local'.
-  let visitCell: React.ReactNode | null = null;
-  if (visitsSummary.status === 'local') {
-    const unconfirmed = VisitService.getAll().filter((v: any) => v.status === VISIT_STATUS.PENDING).length;
-    visitCell = <UrgentMetricCard key="visitas" i={1} go={go} it={{ n: unconfirmed, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' }} />;
-  } else if (visitsSummary.status === 'loading') {
-    visitCell = <CommercialWidgetNotice key="visitas">Carregando visitas…</CommercialWidgetNotice>;
-  } else if (visitsSummary.status === 'error') {
-    visitCell = <CommercialWidgetNotice key="visitas" onRetry={visitsSummary.retry}>Não foi possível carregar as visitas.</CommercialWidgetNotice>;
-  } else if (visitsSummary.status === 'ready') {
-    visitCell = <UrgentMetricCard key="visitas" i={1} go={go} it={{ n: visitsSummary.unconfirmedCount, label: 'visitas não confirmadas', sub: 'Confirme antes do horário', icon: 'calendar', to: 'visitas' }} />;
-  }
-  // 'unavailable': célula omitida — nunca um card mostrando zero/
-  // indisponível como dado real (mesmo padrão de Tasks/Leads acima).
-
-  // COMMERCIAL-REMOTE-DEALS-B7-B1 — Negociações resolvido SEMPRE por
-  // dealsSummary, NUNCA por leadsSummary.status (mesmo princípio de Tasks/
-  // Visits acima). 'local' não produz célula aqui: o card local legado de
-  // "propostas aguardando aprovação" já cobre o modo local dentro de
-  // leadCells acima (vocabulário/contagem diferentes, LEGACY LOCAL ONLY,
-  // intocado por este lote) — mostrar as duas seria duplicar a mesma
-  // informação com rótulos incoerentes. DealService.getAll() nunca é
-  // chamado aqui.
-  let dealCell: React.ReactNode | null = null;
-  if (dealsSummary.status === 'loading') {
-    dealCell = <CommercialWidgetNotice key="negociacoes">Carregando negociações…</CommercialWidgetNotice>;
-  } else if (dealsSummary.status === 'error') {
-    dealCell = <CommercialWidgetNotice key="negociacoes" onRetry={dealsSummary.retry}>Não foi possível carregar as negociações.</CommercialWidgetNotice>;
-  } else if (dealsSummary.status === 'ready') {
-    dealCell = <UrgentMetricCard key="negociacoes" i={2} go={go} it={{ n: dealsSummary.openCount, label: 'negociações em andamento', sub: 'Acompanhe até o fechamento', icon: 'handshake', to: 'propostas' }} />;
-  }
-  // 'local'/'unavailable': célula omitida — nunca um card mostrando zero/
-  // indisponível como dado real (mesmo padrão de Tasks/Visits acima).
-
-  const cells = [...leadCells, ...(visitCell ? [visitCell] : []), ...(taskCell ? [taskCell] : []), ...(dealCell ? [dealCell] : [])];
-
+  // Remote V1 — auditoria do lote (documentada no relatório final):
+  //  - leads atrasados (Lead.urgency==='red'): estado de evento
+  //    (calculateLeadHealth/default 'red' na criação), não "sem contato há
+  //    N dias" — sem contrato de atraso objetivo. REMOVE.
+  //  - visitas não confirmadas (Visit.status==='scheduled'): qualquer
+  //    visita futura ainda sem confirmação, sem dimensão de tempo/prazo —
+  //    sem contrato de atenção objetivo. REMOVE.
+  //  - negociações em andamento (Deal.status==='open'): Deal aberto é
+  //    comportamento normal, não é problema por si só — REMOVE (stalled/
+  //    stale Deal fica FUTURE, sem contrato definido ainda).
+  //  - pendências atrasadas (Task LATE): único caso com contrato real de
+  //    overdue — KEEP, único card possível em Attention remoto.
+  if (!taskCell) return null;
   return (
     <div>
       <SectionTitle icon="alert" tone="#FF3B3B">Atenção imediata</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cells.length}, 1fr)`, gap: 14 }}>
-        {cells}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 14 }}>
+        {taskCell}
       </div>
     </div>
   );
@@ -961,7 +966,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
 
         <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} /></div>
         {isSellersLocal && <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>}
-        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} dealsSummary={dealsSummary} /></div>
+        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} /></div>
         {isManager && (
           <div style={{ marginBottom: 26 }}>
             <ManagerTeamAttentionSection tasksSummary={tasksSummary} dealsSummary={dealsSummary} sellersById={sellerLabels.sellersById} />
