@@ -145,7 +145,7 @@ export function PlatformLeadCreateModal({ company, onClose, onCreated }: Platfor
 
   return (
     <FlowShell
-      eyebrow={`NOVO LEAD — ${company.name.toUpperCase()}`}
+      eyebrow={`NOVO LEAD: ${company.name.toUpperCase()}`}
       title="Novo Lead"
       sub="Cadastro real na empresa selecionada. A etapa inicial do funil é definida automaticamente."
       icon="plus"

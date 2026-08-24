@@ -346,8 +346,8 @@ function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam }: a
 function CompTicker({ comp }: any) {
   const msgs = [
     { icon: 'flag', c: '#E8CE72', t: <span>Faltam <b>{comp.top3Gap} vendas</b> para você entrar no <b>TOP 3</b></span> },
-    { icon: 'flame', c: '#FF6B3B', t: <span><b>{comp.chaser?.first ?? '—'}</b> subiu 3 posições e empatou com você</span> },
-    { icon: 'target', c: '#E23744', t: <span>Seu rival direto: <b>{comp.rivalAhead?.first ?? '—'}</b> — {comp.aheadGap} vendas à frente</span> },
+    { icon: 'flame', c: '#FF6B3B', t: <span><b>{comp.chaser?.first ?? '-'}</b> subiu 3 posições e empatou com você</span> },
+    { icon: 'target', c: '#E23744', t: <span>Seu rival direto: <b>{comp.rivalAhead?.first ?? '-'}</b>, {comp.aheadGap} vendas à frente</span> },
     { icon: 'trophy', c: '#E8CE72', t: <span><b>{comp.leader?.first}</b> lidera com {comp.leader?.sales} vendas</span> },
     { icon: 'zap', c: '#27C75F', t: <span>Meta da semana: <b>+{comp.weeklyGoal} vendas</b></span> },
   ];
@@ -497,8 +497,8 @@ function MinhaDisputa({ active, comp }: any) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <RaceMsg icon="flag" c="#D4AF37" title="Sua meta agora">Faltam <b style={{ color: '#E8CE72' }}>{comp.top3Gap} vendas</b> para entrar no TOP 3</RaceMsg>
-          <RaceMsg icon="target" c="#E23744" title="Rival direto">Ultrapasse <b>{comp.rivalAhead?.first ?? '—'}</b> — está só {comp.aheadGap} vendas à frente</RaceMsg>
-          <RaceMsg icon="flame" c="#FF8A00" title="Atenção">{comp.chaser?.first ?? '—'} empatou com você e vem subindo rápido</RaceMsg>
+          <RaceMsg icon="target" c="#E23744" title="Rival direto">Ultrapasse <b>{comp.rivalAhead?.first ?? '-'}</b>, está só {comp.aheadGap} vendas à frente</RaceMsg>
+          <RaceMsg icon="flame" c="#FF8A00" title="Atenção">{comp.chaser?.first ?? '-'} empatou com você e vem subindo rápido</RaceMsg>
         </div>
       </div>
     </div>

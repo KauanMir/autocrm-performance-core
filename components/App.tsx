@@ -408,7 +408,7 @@ export function App() {
           <TweaksPanel>
             <TweakSection label="Pódio (tela inicial)" />
             <TweakRadio label="Estilo do pódio" value={t.podium} options={['A', 'B', 'C', 'D']} onChange={(v: string) => setTweak('podium', v)} />
-            <div style={{ fontSize: 11.5, color: '#9aa1ac', padding: '0 2px 8px', lineHeight: 1.5 }}>A · Pódio — B · Líder — C · Galeria — D · Campeão (fotos reais)</div>
+            <div style={{ fontSize: 11.5, color: '#9aa1ac', padding: '0 2px 8px', lineHeight: 1.5 }}>A · Pódio, B · Líder, C · Galeria, D · Campeão (fotos reais)</div>
             <TweakToggle label="Animações (coroa, partículas, brilho)" value={t.anim} onChange={(v: boolean) => setTweak('anim', v)} />
             <TweakSection label="Métricas" />
             <TweakToggle label="Mostrar receita (discreto)" value={t.showRevenue} onChange={(v: boolean) => setTweak('showRevenue', v)} />

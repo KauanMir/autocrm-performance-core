@@ -188,7 +188,7 @@ describe('useLeads — resultados (flag ON)', () => {
     expect(result.current.leads.map((l) => l.id)).toEqual(['lead-b', 'lead-a']);
     expect(result.current.leads[0].stage).toBe('Novo');
     expect(result.current.leads[0].stageCode).toBe('new');
-    expect(result.current.leads[1].seller).toBe('—');
+    expect(result.current.leads[1].seller).toBe('-');
     expect(result.current.configError).toBeNull();
   });
 

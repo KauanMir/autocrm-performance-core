@@ -111,7 +111,7 @@ export const AuthService = {
   async login(email: string, password: string): Promise<User | null> {
     if (!isSupabaseConfigured) {
       // eslint-disable-next-line no-console
-      console.error('[AutoCRM] Supabase não configurado — preencha .env.local antes de logar (ver .env.local.example).');
+      console.error('[AutoCRM] Supabase não configurado. Preencha .env.local antes de logar (ver .env.local.example).');
       return null;
     }
     const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
@@ -360,10 +360,10 @@ export function calculateLeadHealth(event: LeadHealthEvent): Partial<Lead> {
       return { urgency: 'green', alert: 'Visita confirmada', last: 'Cliente confirmou presença' };
 
     case 'visit_canceled':
-      return { urgency: 'red', alert: 'Visita cancelada — retomar contato', last: 'Cliente cancelou a visita' };
+      return { urgency: 'red', alert: 'Visita cancelada: retomar contato', last: 'Cliente cancelou a visita' };
 
     case 'visit_rescheduled':
-      return { urgency: 'amber', alert: 'Visita remarcada — confirmar novo horário', last: 'Aguardando nova confirmação' };
+      return { urgency: 'amber', alert: 'Visita remarcada: confirmar novo horário', last: 'Aguardando nova confirmação' };
 
     case 'deal_created':
       return event.needsApproval
@@ -371,7 +371,7 @@ export function calculateLeadHealth(event: LeadHealthEvent): Partial<Lead> {
         : { urgency: 'green', stage: 'Em negociação', alert: 'Proposta enviada', last: 'Aguardando resposta do cliente' };
 
     case 'deal_approved':
-      return { urgency: 'green', alert: 'Proposta aprovada — fechar venda', last: 'Aprovada pelo gestor' };
+      return { urgency: 'green', alert: 'Proposta aprovada: fechar venda', last: 'Aprovada pelo gestor' };
 
     case 'deal_rejected':
       return { urgency: 'amber', alert: 'Renegociar proposta', last: 'Recusada pelo gestor' };
@@ -791,6 +791,6 @@ export function validateRelations(): string[] {
   });
 
   if (warnings.length) console.warn('[AutoCRM] Data integrity warnings:', warnings);
-  else                 console.info('[AutoCRM] Data integrity: OK — all relations valid');
+  else                 console.info('[AutoCRM] Data integrity: OK, all relations valid');
   return warnings;
 }

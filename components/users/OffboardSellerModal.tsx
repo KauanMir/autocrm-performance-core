@@ -120,7 +120,7 @@ export function OffboardSellerModal({ userId, user, onClose }: OffboardSellerMod
         >
           <option value="">Nenhum sucessor</option>
           {candidates.map((c) => (
-            <option key={c.membership_id} value={c.membership_id}>{c.name} — {c.email}</option>
+            <option key={c.membership_id} value={c.membership_id}>{c.name} ({c.email})</option>
           ))}
         </select>
       </label>
@@ -134,7 +134,7 @@ export function OffboardSellerModal({ userId, user, onClose }: OffboardSellerMod
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         <Icon name="shield" size={14} stroke={2} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>Leads arquivados nunca são alterados — permanecem vinculados ao histórico deste vendedor.</span>
+        <span>Leads arquivados nunca são alterados. Permanecem vinculados ao histórico deste vendedor.</span>
       </div>
     </FlowShell>
   );

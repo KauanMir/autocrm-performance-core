@@ -95,7 +95,7 @@ export function SuspendMembershipModal({ userId, user, onClose }: SuspendMembers
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         <Icon name="shield" size={14} stroke={2} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>O histórico deste usuário é preservado — nenhum dado é apagado.</span>
+        <span>O histórico deste usuário é preservado. Nenhum dado é apagado.</span>
       </div>
     </FlowShell>
   );

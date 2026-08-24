@@ -9,7 +9,7 @@ import { metadata as inviteMetadata } from '@/app/convite/aceitar/page';
 
 describe('app/layout metadata — branding', () => {
   it('title mostra KAPA CRM', () => {
-    expect(metadata.title).toBe('KAPA CRM — Ranking & Operação');
+    expect(metadata.title).toBe('KAPA CRM | Ranking & Operação');
   });
 
   it('title nunca menciona o nome antigo do produto', () => {
@@ -19,7 +19,7 @@ describe('app/layout metadata — branding', () => {
 
 describe('app/convite/aceitar metadata — branding', () => {
   it('title e description mostram KAPA CRM, nunca o nome antigo', () => {
-    expect(inviteMetadata.title).toBe('Convite — KAPA CRM');
+    expect(inviteMetadata.title).toBe('Convite | KAPA CRM');
     expect(inviteMetadata.description).toBe('Ative sua conta no KAPA CRM.');
     expect(String(inviteMetadata.title)).not.toMatch(/AutoCRM/i);
     expect(String(inviteMetadata.description)).not.toMatch(/AutoCRM/i);

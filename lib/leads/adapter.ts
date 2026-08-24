@@ -72,8 +72,10 @@ function isAdapterError(result: AdaptLeadRowResult): result is LeadAdapterError 
 // ── Formatação de compatibilidade ────────────────────────────────────────
 
 // Placeholder já aprovado na interface para valor/vendedor ausentes
-// (FlowNovoCliente grava value '—' e seller '—' quando não há vendedor).
-export const LEAD_EMPTY_DISPLAY_VALUE = '—';
+// (FlowNovoCliente grava value '-' e seller '-' quando não há vendedor).
+// KAPA-CRM-COPY-CLEANUP-R1-EXEC: hífen simples, nunca em dash (U+2014) em
+// texto visível ao usuário.
+export const LEAD_EMPTY_DISPLAY_VALUE = '-';
 
 // Mesma regra do único formatter existente no projeto (fmt local de
 // Flows2.tsx: 'R$ ' + n.toLocaleString('pt-BR')) — nenhuma regra nova.

@@ -166,9 +166,9 @@ describe('adaptLeadRow — mapeamento de campos', () => {
       .toBe('hot');
   });
 
-  it('value_amount null ⇒ value "—" e valueAmount null', () => {
+  it('value_amount null ⇒ value placeholder e valueAmount null', () => {
     const lead = expectOk(adaptLeadRow(leadRow({ value_amount: null }), makeContext()));
-    expect(lead.value).toBe('—');
+    expect(lead.value).toBe(LEAD_EMPTY_DISPLAY_VALUE);
     expect(lead.valueAmount).toBeNull();
   });
 

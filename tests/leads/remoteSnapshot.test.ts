@@ -68,7 +68,7 @@ describe('buildRemoteLeadSnapshot', () => {
     expect(snapshot.leads.map((l) => l.id)).toEqual(['lead-b', 'lead-a']);
     expect(snapshot.leads[0].stage).toBe('Novo');
     expect(snapshot.leads[0].seller).toBe('Marcos Silva');
-    expect(snapshot.leads[1].seller).toBe('—');
+    expect(snapshot.leads[1].seller).toBe('-');
   });
 
   it('lista remota vazia vira snapshot VÁLIDO com leads: [] — nunca leads locais', () => {

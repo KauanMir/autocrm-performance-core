@@ -6,7 +6,7 @@ import type { Metadata } from 'next';
 import { AcceptInviteFlow } from '@/components/invites/AcceptInviteFlow';
 
 export const metadata: Metadata = {
-  title: 'Convite — KAPA CRM',
+  title: 'Convite | KAPA CRM',
   description: 'Ative sua conta no KAPA CRM.',
 };
 

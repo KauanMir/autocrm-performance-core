@@ -116,7 +116,7 @@ export function OffboardManagerModal({ userId, user, onClose }: OffboardManagerM
         >
           <option value="">Nenhum sucessor</option>
           {candidates.map((c) => (
-            <option key={c.profile_id} value={c.profile_id}>{c.name} — {c.email}</option>
+            <option key={c.profile_id} value={c.profile_id}>{c.name} ({c.email})</option>
           ))}
         </select>
       </label>
@@ -130,7 +130,7 @@ export function OffboardManagerModal({ userId, user, onClose }: OffboardManagerM
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         <Icon name="shield" size={14} stroke={2} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>O sucessor selecionado precisa já ser Manager ativo — ninguém é promovido automaticamente.</span>
+        <span>O sucessor selecionado precisa já ser Manager ativo. Ninguém é promovido automaticamente.</span>
       </div>
     </FlowShell>
   );

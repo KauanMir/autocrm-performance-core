@@ -295,12 +295,12 @@ export const DEFAULT_COMPANY: Company = {
 
 export const TASKS: Task[] = [
   { id: 't1', title: 'Ligar para Carlos Andrade',              lead: 'Carlos Andrade',  assignedTo: 's1', when: 'Venceu há 3 dias', prio: 'alta',  state: 'atrasada', note: 'Primeiro contato pós-qualificação' },
-  { id: 't2', title: 'Retomar proposta — Roberto Dias',        lead: 'Roberto Dias',    assignedTo: 's4', when: 'Venceu há 2 dias', prio: 'alta',  state: 'atrasada', note: 'Proposta parada, cliente esfriando' },
+  { id: 't2', title: 'Retomar proposta: Roberto Dias',        lead: 'Roberto Dias',    assignedTo: 's4', when: 'Venceu há 2 dias', prio: 'alta',  state: 'atrasada', note: 'Proposta parada, cliente esfriando' },
   { id: 't3', title: 'Ligar para Larissa Gomes',               lead: 'Larissa Gomes',   assignedTo: 's4', when: 'Venceu ontem',     prio: 'alta',  state: 'atrasada', note: 'Sem contato há 4 dias' },
-  { id: 't4', title: 'Confirmar visita — Mariana Luz',         lead: 'Mariana Luz',     assignedTo: 's4', when: 'Hoje, 14:00',      prio: 'media', state: 'hoje',     note: 'Confirmar presença na visita' },
-  { id: 't5', title: 'Enviar simulação — Eduardo Reis',        lead: 'Eduardo Reis',    assignedTo: 's4', when: 'Hoje, 16:30',      prio: 'media', state: 'hoje',     note: 'Cliente pediu simulação de financiamento' },
-  { id: 't6', title: 'Follow-up pós-visita — Tatiane Vidal',  lead: 'Tatiane Vidal',   assignedTo: 's5', when: 'Amanhã, 10:00',    prio: 'baixa', state: 'proxima',  note: 'Verificar interesse após visita' },
-  { id: 't7', title: 'Enviar fotos do Pulse — Camila Freitas', lead: 'Camila Freitas',  assignedTo: 's6', when: 'Amanhã, 11:00',    prio: 'baixa', state: 'proxima',  note: 'Cliente pediu fotos adicionais' },
+  { id: 't4', title: 'Confirmar visita: Mariana Luz',         lead: 'Mariana Luz',     assignedTo: 's4', when: 'Hoje, 14:00',      prio: 'media', state: 'hoje',     note: 'Confirmar presença na visita' },
+  { id: 't5', title: 'Enviar simulação: Eduardo Reis',        lead: 'Eduardo Reis',    assignedTo: 's4', when: 'Hoje, 16:30',      prio: 'media', state: 'hoje',     note: 'Cliente pediu simulação de financiamento' },
+  { id: 't6', title: 'Follow-up pós-visita: Tatiane Vidal',  lead: 'Tatiane Vidal',   assignedTo: 's5', when: 'Amanhã, 10:00',    prio: 'baixa', state: 'proxima',  note: 'Verificar interesse após visita' },
+  { id: 't7', title: 'Enviar fotos do Pulse: Camila Freitas', lead: 'Camila Freitas',  assignedTo: 's6', when: 'Amanhã, 11:00',    prio: 'baixa', state: 'proxima',  note: 'Cliente pediu fotos adicionais' },
 ];
 
 // ── VISITS — sellerId → SELLERS.id FK, leadId → LEADS.id FK ──────────

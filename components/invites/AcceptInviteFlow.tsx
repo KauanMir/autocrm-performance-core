@@ -522,7 +522,7 @@ export function AcceptInviteFlow() {
           <div>
             <h2 style={{ margin: '0 0 8px', fontSize: 22, fontWeight: 800, color: 'var(--t-900)' }}>Conta ativada!</h2>
             <p style={{ margin: 0, color: 'var(--t-500)', fontSize: 14 }}>
-              {state.roleLabel ? <>Bem-vindo(a) — acesso: {state.roleLabel}.</> : 'Redirecionando…'}
+              {state.roleLabel ? <>Bem-vindo(a). Acesso: {state.roleLabel}.</> : 'Redirecionando…'}
             </p>
           </div>
         )}

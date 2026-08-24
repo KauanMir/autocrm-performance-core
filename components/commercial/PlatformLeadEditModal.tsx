@@ -121,7 +121,7 @@ export function PlatformLeadEditModal({ lead, company, onClose, onUpdated }: Pla
 
   return (
     <FlowShell
-      eyebrow={`EDITAR LEAD — ${company.name.toUpperCase()}`}
+      eyebrow={`EDITAR LEAD: ${company.name.toUpperCase()}`}
       title={lead.name}
       sub="Etapa, vendedor, arquivamento e histórico não são editáveis por aqui."
       icon="edit"

@@ -517,11 +517,11 @@ function FlowLigarLocal({ payload, close, openFlow }: any) {
     id: 'visita' | 'proposta' | 'retorno' | 'naoatendeu'; icon: string; title: string; accent: string; next: string | null;
     task: null | { title: string; when: string; prio: string; state: string };
   }> = [
-    { id: 'visita', icon: 'calendar', title: 'Atendeu — agendar visita', accent: '#27C75F', next: 'criar-visita', task: null },
-    { id: 'proposta', icon: 'handshake', title: 'Atendeu — montar proposta', accent: '#E8CE72', next: 'nova-proposta', task: null },
-    { id: 'retorno', icon: 'clock', title: 'Pediu retorno — agendar follow-up', accent: '#FFA31F', next: 'criar-acompanhamento',
+    { id: 'visita', icon: 'calendar', title: 'Atendeu: agendar visita', accent: '#27C75F', next: 'criar-visita', task: null },
+    { id: 'proposta', icon: 'handshake', title: 'Atendeu: montar proposta', accent: '#E8CE72', next: 'nova-proposta', task: null },
+    { id: 'retorno', icon: 'clock', title: 'Pediu retorno: agendar follow-up', accent: '#FFA31F', next: 'criar-acompanhamento',
       task: { title: 'Follow-up', when: 'Amanhã', prio: 'media', state: TASK_STATE.UPCOMING } },
-    { id: 'naoatendeu', icon: 'phone', title: 'Não atendeu — tentar mais tarde', accent: '#8B8B93', next: null,
+    { id: 'naoatendeu', icon: 'phone', title: 'Não atendeu: tentar mais tarde', accent: '#8B8B93', next: null,
       task: { title: 'Tentar contato novamente', when: 'Hoje', prio: 'alta', state: TASK_STATE.TODAY } },
   ];
 
@@ -533,7 +533,7 @@ function FlowLigarLocal({ payload, close, openFlow }: any) {
     LeadService.addToTimeline(lead.id, { icon: 'phone', c: o.accent === '#8B8B93' ? '#8B8B93' : o.accent, t: `Ligação: ${o.title}` });
     if (o.task) {
       TaskService.create({
-        title: `${o.task.title} — ${lead.name}`,
+        title: `${o.task.title}: ${lead.name}`,
         lead: lead.name,
         leadId: lead.id,
         assignedTo: lead.sellerId ?? null,
@@ -1144,7 +1144,7 @@ export function FlowAtribuirVendedor({ payload, close }: any) {
   // (lib/leads/adapter.ts) — nunca recalculado aqui, e nunca escondido
   // mesmo quando o Seller está fora do catálogo operacional (decisão
   // humana: nome histórico sempre visível, nunca "Sem vendedor" forçado).
-  const currentSellerName: string = lead.seller || '—';
+  const currentSellerName: string = lead.seller || '-';
 
   const assignableSellers = useCurrentCompanyAssignableSellers({
     userId: ctx.userId, companyId: ctx.companyId, membershipRole: ctx.membershipRole, userIsActive: ctx.userIsActive,
@@ -1387,22 +1387,22 @@ export function FlowVerClienteArquivado({ payload, close, openFlow }: any) {
   return (
     <FlowShell eyebrow="LEAD ARQUIVADO" title={lead.name || 'Lead arquivado'} icon="inbox" accent="#8B8B93" onClose={close}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 20, padding: 22, borderRadius: 16, background: 'linear-gradient(120deg,#1b1b1f,#121214)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)', marginBottom: 20, flexWrap: 'wrap' }}>
-        <Avatar name={lead.name || '—'} size={72} />
+        <Avatar name={lead.name || '-'} size={72} />
         <div style={{ minWidth: 0 }}>
           <div className="display" style={{ fontSize: 24, fontWeight: 800, color: '#fff' }}>{lead.name}</div>
           <div style={{ display: 'flex', gap: 16, marginTop: 6, flexWrap: 'wrap' }}>
             {lead.phone && <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="phone" size={14} stroke={2} /> {lead.phone}</span>}
             {lead.car && <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="car" size={14} stroke={2} /> {lead.car}</span>}
             <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="flow" size={14} stroke={2} /> {lead.stage}</span>
-            <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="users" size={14} stroke={2} /> {lead.seller || '—'}</span>
+            <span style={{ fontSize: 13.5, color: 'var(--t-500)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="users" size={14} stroke={2} /> {lead.seller || '-'}</span>
           </div>
         </div>
       </div>
 
       <FPanel title="Cadastro" icon="clipboard" accent="#8B8B93">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-          <Info icon="users" label="Vendedor responsável" value={lead.seller || '—'} />
-          <Info icon="flow" label="Etapa" value={lead.stage || '—'} />
+          <Info icon="users" label="Vendedor responsável" value={lead.seller || '-'} />
+          <Info icon="flow" label="Etapa" value={lead.stage || '-'} />
           {archivedAtLabel && <Info icon="calendar" label="Arquivado em" value={archivedAtLabel} />}
         </div>
       </FPanel>

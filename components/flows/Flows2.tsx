@@ -49,9 +49,9 @@ import { isRemoteSalesError, REMOTE_SALES_MUTATION_ERROR_MESSAGES_PT } from '@/l
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
 const TEMP_INFO: Record<string, string> = {
-  Quente: 'Forte intenção de compra — quer comprar agora ou nos próximos dias, já sabe o modelo e tem orçamento ou financiamento encaminhado.',
-  Morno: 'Interessado, mas ainda comparando opções — precisa de acompanhamento, simulação ou mais convencimento.',
-  Frio: 'Curioso, sem prazo definido ou decisão clara — precisa ser nutrido com menor urgência.',
+  Quente: 'Forte intenção de compra. Quer comprar agora ou nos próximos dias, já sabe o modelo e tem orçamento ou financiamento encaminhado.',
+  Morno: 'Interessado, mas ainda comparando opções. Precisa de acompanhamento, simulação ou mais convencimento.',
+  Frio: 'Curioso, sem prazo definido ou decisão clara. Precisa ser nutrido com menor urgência.',
 };
 
 // ── M1-E E4-B2 — utilitários compartilhados do caminho remoto ────────────
@@ -190,10 +190,10 @@ function FlowNovoClienteLocal({ close, openFlow }: any) {
       urgency: 'red',
       temperature: TEMP_MAP[f.urg] || 'warm',
       pay: f.pay,
-      value: '—',
+      value: '-',
       last: 'Sem contato ainda',
       alert: 'Fazer primeiro contato',
-      seller: finalSeller?.name || '—',
+      seller: finalSeller?.name || '-',
       sellerId: finalSellerId,
       createdByUserId: user?.id ?? null,
       origem: f.origem,
@@ -213,7 +213,7 @@ function FlowNovoClienteLocal({ close, openFlow }: any) {
   };
 
   if (step === 3) {
-    const lead = { id: newLeadId, name: f.nome || 'Novo cliente', phone: f.tel, car: f.car || CARS[0], stage: 'Novo', urgency: 'red', pay: f.pay, value: '—', last: 'Sem contato ainda', alert: 'Fazer primeiro contato', seller: finalSeller?.name || '—', sellerId: finalSellerId };
+    const lead = { id: newLeadId, name: f.nome || 'Novo cliente', phone: f.tel, car: f.car || CARS[0], stage: 'Novo', urgency: 'red', pay: f.pay, value: '-', last: 'Sem contato ainda', alert: 'Fazer primeiro contato', seller: finalSeller?.name || '-', sellerId: finalSellerId };
     return (
       <FlowShell eyebrow="NOVO ATENDIMENTO" title="Cliente criado" icon="users" accent="#27C75F" onClose={close}>
         <FlowSuccess title="Atendimento criado!" sub={`${f.nome} entrou na sua carteira. Que tal já fazer o primeiro contato e sair na frente?`}
@@ -259,16 +259,16 @@ function FlowNovoClienteLocal({ close, openFlow }: any) {
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', margin: '8px 0 9px' }}>Forma de pagamento</div>
           <div style={{ marginBottom: 18 }}><Segmented options={PAYS.map(p => p[0])} value={f.pay} onChange={v => set('pay', v)} /></div>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-500)', marginBottom: 2 }}>Temperatura do lead</div>
-          <div style={{ fontSize: 11, color: 'var(--t-400)', marginBottom: 9 }}>O quanto o cliente quer comprar — não é a mesma coisa que a cor do card (essa reflete se ele precisa de ação agora).</div>
+          <div style={{ fontSize: 11, color: 'var(--t-400)', marginBottom: 9 }}>O quanto o cliente quer comprar. Não é a mesma coisa que a cor do card (essa reflete se ele precisa de ação agora).</div>
           <Segmented options={['Quente', 'Morno', 'Frio']} value={f.urg} onChange={v => set('urg', v)} accent="#FF6B3B" />
           <div style={{ fontSize: 12, color: 'var(--t-500)', marginTop: 9, lineHeight: 1.5 }}>{TEMP_INFO[f.urg]}</div>
         </FPanel>}
         {step === 2 && <FPanel title="Confira antes de criar" icon="checkCircle" accent="#27C75F">
-          <SummaryRow label="Cliente" value={f.nome || '—'} />
-          <SummaryRow label="Telefone" value={f.tel || '—'} />
-          {!isSeller && <SummaryRow label="Vendedor responsável" value={finalSeller?.name || '—'} />}
+          <SummaryRow label="Cliente" value={f.nome || '-'} />
+          <SummaryRow label="Telefone" value={f.tel || '-'} />
+          {!isSeller && <SummaryRow label="Vendedor responsável" value={finalSeller?.name || '-'} />}
           <SummaryRow label="Origem" value={f.origem} />
-          <SummaryRow label="Veículo" value={f.car || '—'} />
+          <SummaryRow label="Veículo" value={f.car || '-'} />
           <SummaryRow label="Pagamento" value={f.pay} />
           <SummaryRow label="Temperatura" value={f.urg} accent={f.urg === 'Quente' ? '#FF6B3B' : undefined} />
           <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: 'var(--gold-bg)', border: '1px solid var(--gold-line)' }}>
@@ -726,7 +726,7 @@ export function FlowCriarVisita({ payload, close, openFlow }: any) {
       day: normalizeDay(finalDay),
       time: finalTime,
       status: VISIT_STATUS.SCHEDULED,
-      seller: lead?.seller || user?.name || '—',
+      seller: lead?.seller || user?.name || '-',
       sellerId: lead?.sellerId ?? user?.activeMembership?.sellerId ?? null,
       leadId: lead?.id ?? null,
       note: note.trim() || undefined,
@@ -1437,7 +1437,7 @@ export function FlowConfirmarVisita({ payload, close, openFlow }: any) {
 
   if (done) {
     const map: Record<string, any> = {
-      confirmada: { icon: 'checkCircle', accent: '#27C75F', title: 'Visita confirmada!', sub: `${v.client} confirmou presença ${remind ? '— lembrete enviado por WhatsApp.' : '.'}` },
+      confirmada: { icon: 'checkCircle', accent: '#27C75F', title: 'Visita confirmada!', sub: `${v.client} confirmou presença${remind ? '. Lembrete enviado por WhatsApp.' : '.'}` },
       remarcar: { icon: 'calendar', accent: '#FFA31F', title: 'Vamos remarcar', sub: 'Escolha um novo dia e horário para a visita.' },
       cancelou: { icon: 'xCircle', accent: '#FF3B3B', title: 'Visita cancelada', sub: 'Registramos o cancelamento e criamos um follow-up para retomar o cliente.' },
     };
@@ -1671,7 +1671,7 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
       note: note.trim() || undefined,
       status: needsApproval ? DEAL_STATUS.APPROVAL : DEAL_STATUS.OPEN,
       last: 'Agora',
-      seller: lead.seller || user?.name || '—',
+      seller: lead.seller || user?.name || '-',
       sellerId: lead.sellerId ?? user?.activeMembership?.sellerId ?? null,
       leadId: lead.id,
     });
@@ -1901,7 +1901,7 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
             </FPanel>
           </div>}
           {step === 2 && <FPanel title="Resumo da proposta" icon="checkCircle" accent="#27C75F">
-            <SummaryRow label="Cliente" value={lead?.name || '—'} />
+            <SummaryRow label="Cliente" value={lead?.name || '-'} />
             <SummaryRow label="Veículo" value={finalCar} />
             <SummaryRow label="Pagamento" value={pay} />
             {downPayment.trim() && <SummaryRow label="Entrada" value={downPayment} />}
@@ -1914,7 +1914,7 @@ export function FlowNovaProposta({ payload, close, openFlow }: any) {
             </div>
             <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 11, background: needsApproval ? 'var(--amber-bg)' : 'var(--green-bg)', border: `1px solid ${needsApproval ? 'var(--amber-line)' : 'var(--green-line)'}` }}>
               <Icon name={needsApproval ? 'shield' : 'checkCircle'} size={18} stroke={2.2} style={{ color: needsApproval ? 'var(--amber)' : 'var(--green)' }} />
-              <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{needsApproval ? 'Será enviada para aprovação do gestor.' : 'Dentro do seu limite — pode enviar direto ao cliente.'}</span>
+              <span style={{ fontSize: 13, color: 'var(--t-700)' }}>{needsApproval ? 'Será enviada para aprovação do gestor.' : 'Dentro do seu limite. Pode enviar direto ao cliente.'}</span>
             </div>
           </FPanel>}
         </div>
@@ -2624,7 +2624,7 @@ export function FlowRegistrarVenda({ payload, close }: any) {
       sellerId: finalSeller.id,
       leadId: lead?.id ?? null,
       dealId: deal?.id ?? null,
-      value: deal?.value ?? '—',
+      value: deal?.value ?? '-',
       pay: lead?.pay || 'Financiamento',
       date: 'Hoje',
       status: SALE_STATUS.PENDING,
@@ -2735,8 +2735,8 @@ export function FlowRegistrarVenda({ payload, close }: any) {
         </LBtn></>}>
         <div style={{ maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <FPanel title="Negociação" icon="handshake" accent="#E8CE72">
-            <SummaryRow label="Cliente" value={remoteDeal?.clientName ?? '—'} />
-            <SummaryRow label="Veículo" value={remoteDeal?.vehicle ?? '—'} />
+            <SummaryRow label="Cliente" value={remoteDeal?.clientName ?? '-'} />
+            <SummaryRow label="Veículo" value={remoteDeal?.vehicle ?? '-'} />
           </FPanel>
           <FPanel title="Valor final da venda" icon="dollar" accent="#E8CE72">
             <FField label="Valor vendido (R$)" icon="dollar" placeholder="Ex.: 120000" value={remoteSoldValueInput} onChange={(e: any) => setRemoteSoldValueInput(e.target.value)} />
@@ -2771,11 +2771,11 @@ export function FlowRegistrarVenda({ payload, close }: any) {
             <p style={{ margin: '0 auto 24px', color: 'var(--txt-mid)', fontSize: 16, maxWidth: 500 }}>Você fechou a venda do <b style={{ color: '#fff' }}>{car}</b>{(lead?.name || client) ? <> para <b style={{ color: '#fff' }}>{lead?.name || client}</b></> : ''}. Mais um passo rumo ao topo do ranking.</p>
             <div style={{ display: 'inline-flex', gap: 14, marginBottom: 28, flexWrap: 'wrap', justifyContent: 'center' }}>
               <div style={{ padding: '16px 26px', borderRadius: 16, background: 'linear-gradient(180deg,#1f1a08,#141103)', border: '1px solid rgba(212,175,55,.4)' }}>
-                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#E8CE72', lineHeight: 1 }}>{doneSeller?.sales ?? '—'}</div>
+                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#E8CE72', lineHeight: 1 }}>{doneSeller?.sales ?? '-'}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginTop: 4 }}>vendas no mês</div>
               </div>
               <div style={{ padding: '16px 26px', borderRadius: 16, background: 'rgba(255,255,255,.04)', border: '1px solid var(--line-dark)' }}>
-                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{donePos >= 0 ? `${donePos + 1}º` : '—'}</div>
+                <div className="display tnum" style={{ fontSize: 38, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{donePos >= 0 ? `${donePos + 1}º` : '-'}</div>
                 <div style={{ fontSize: 11.5, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700, marginTop: 4 }}>posição</div>
               </div>
               <div style={{ padding: '16px 26px', borderRadius: 16, background: 'rgba(39,199,95,.1)', border: '1px solid var(--green-line)' }}>
@@ -2797,7 +2797,7 @@ export function FlowRegistrarVenda({ payload, close }: any) {
 
   return (
     <FlowShell eyebrow="REGISTRAR VENDA" title="Confirmar venda" icon="trophy" accent="#E8CE72" onClose={close}
-      sub="Confirme os dados da venda. Esse é o número que mais importa — e que te leva ao topo do ranking."
+      sub="Confirme os dados da venda. Esse é o número que mais importa e que te leva ao topo do ranking."
       footer={<><div style={{ flex: 1 }} /><LBtn kind="gold" size="lg" icon="trophy" onClick={handleConfirmSale} style={{ opacity: canConfirm ? 1 : .5, background: 'linear-gradient(180deg,#E8CE72,#C9A227)' }}>Confirmar venda 🏁</LBtn></>}>
       <div style={{ maxWidth: 720 }}>
         {!isSeller && (
@@ -3040,7 +3040,7 @@ export function FlowNovaPendencia({ payload, close }: any) {
     if (!finalSellerId || !finalWhen) return;
     const prioMap: Record<string, string> = { Alta: 'alta', Média: 'media', Baixa: 'baixa' };
     TaskService.create({
-      title: `${type}${client ? ' — ' + client : ''}`,
+      title: `${type}${client ? ': ' + client : ''}`,
       lead: client,
       leadId: payload.lead?.id ?? null,
       state: NOVA_PENDENCIA_WHEN_STATE[when] || TASK_STATE.UPCOMING,
@@ -3056,7 +3056,7 @@ export function FlowNovaPendencia({ payload, close }: any) {
     if (!canCreate || submitting || createHook.isPending || !remoteDueAtResult.ok) return;
     const prioMap: Record<string, 'alta' | 'media' | 'baixa'> = { Alta: 'alta', Média: 'media', Baixa: 'baixa' };
     const priority = prioMap[prio] || 'media';
-    const title = `${type}${client ? ' — ' + client : ''}`;
+    const title = `${type}${client ? ': ' + client : ''}`;
     const leadId = payload.lead?.id ?? null;
     setSubmitting(true);
     setSubmitError(null);
@@ -3086,7 +3086,7 @@ export function FlowNovaPendencia({ payload, close }: any) {
 
   if (done) return (
     <FlowShell eyebrow="NOVA PENDÊNCIA" title="Pendência criada" icon="check" accent="#27C75F" onClose={close}>
-      <FlowSuccess title="Pendência criada!" sub={`"${type}${client ? ' — ' + client : ''}" foi adicionada para ${successWhenLabel.toLowerCase()}.`} actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      <FlowSuccess title="Pendência criada!" sub={`"${type}${client ? ': ' + client : ''}" foi adicionada para ${successWhenLabel.toLowerCase()}.`} actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
     </FlowShell>
   );
   return (
@@ -3356,7 +3356,7 @@ export function FlowCriarAcompanhamento({ payload, close }: any) {
           LeadService.addToTimeline(lead.id, { icon: 'refresh', c: '#3B82F6', t: `Follow-up via ${canal}`, d: note || when });
         }
         TaskService.create({
-          title: `${canal}${lead ? ' — ' + lead.name : ''}`,
+          title: `${canal}${lead ? ': ' + lead.name : ''}`,
           lead: lead ? lead.name : '',
           leadId: lead?.id ?? null,
           state: TASK_STATE.UPCOMING,

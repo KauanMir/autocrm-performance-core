@@ -116,8 +116,8 @@ export function PlatformCommercialClientsView({ userId, platformRole }: Platform
       <PageHead
         title="Clientes"
         sub={canMutate
-          ? 'Acompanhamento comercial da KAPA — dados reais da empresa selecionada.'
-          : 'Acompanhamento comercial da KAPA — leitura somente, dados reais da empresa selecionada.'}
+          ? 'Acompanhamento comercial da KAPA. Dados reais da empresa selecionada.'
+          : 'Acompanhamento comercial da KAPA, leitura somente. Dados reais da empresa selecionada.'}
         actions={canMutate && (
           <LBtn kind="gold" icon="plus" onClick={() => setCreateModalOpen(true)}>Novo Lead</LBtn>
         )}

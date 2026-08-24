@@ -158,7 +158,7 @@ export function TransferMembershipModal({ userId, user, onClose }: TransferMembe
         >
           <option value="">Nenhum sucessor</option>
           {candidates.map((c) => (
-            <option key={c.profile_id} value={c.profile_id}>{c.name} — {c.email}</option>
+            <option key={c.profile_id} value={c.profile_id}>{c.name} ({c.email})</option>
           ))}
         </select>
       </label>
@@ -168,7 +168,7 @@ export function TransferMembershipModal({ userId, user, onClose }: TransferMembe
 
       <div style={{ marginTop: 4, marginBottom: 10, fontSize: 12.5, color: 'var(--t-500)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         <Icon name="alert" size={14} stroke={2} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span>O vínculo na empresa atual é encerrado (histórico preservado) e um novo vínculo é criado — ou reaproveitado, se já existir um vínculo antigo com esta empresa de destino.</span>
+        <span>O vínculo na empresa atual é encerrado (histórico preservado) e um novo vínculo é criado, ou reaproveitado, se já existir um vínculo antigo com esta empresa de destino.</span>
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         <Icon name="shield" size={14} stroke={2} style={{ flexShrink: 0, marginTop: 1 }} />

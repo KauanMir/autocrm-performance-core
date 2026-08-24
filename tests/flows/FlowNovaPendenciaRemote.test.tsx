@@ -105,7 +105,7 @@ describe('FlowNovaPendencia — task_local (preservado)', () => {
     fireEvent.click(screen.getByText('Criar pendência'));
 
     expect(m.taskServiceCreate).toHaveBeenCalledWith({
-      title: 'Ligar — Juliana',
+      title: 'Ligar: Juliana',
       lead: 'Juliana',
       leadId: null,
       state: 'hoje',

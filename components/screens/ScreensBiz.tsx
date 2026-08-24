@@ -441,8 +441,8 @@ export function ScreenVisitas({ go }: any) {
   const visits = VisitService.getAll();
   const KNOWN_DAYS = ['hoje', 'amanha', 'passado'];
   const groups = [
-    { name: 'Hoje — 14 de junho', items: visits.filter((v: any) => v.day === 'hoje') },
-    { name: 'Amanhã — 15 de junho', items: visits.filter((v: any) => v.day === 'amanha') },
+    { name: 'Hoje, 14 de junho', items: visits.filter((v: any) => v.day === 'hoje') },
+    { name: 'Amanhã, 15 de junho', items: visits.filter((v: any) => v.day === 'amanha') },
     // Catches visits scheduled for any other day (custom dates, "Qui 18", etc.) so they
     // never silently disappear from this screen just for not matching hoje/amanha/passado.
     { name: 'Próximos dias', items: visits.filter((v: any) => !KNOWN_DAYS.includes(v.day)) },
@@ -452,7 +452,7 @@ export function ScreenVisitas({ go }: any) {
   return (
     <LightScreen>
       <PageHead title="Visitas" sub={pageHeadSub} actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
-      <Guide tone="red" icon="calendar" text={<span>Você tem <b>{unconfirmed} visitas não confirmadas</b> para hoje. Ligue para confirmar antes do horário — visita confirmada vende mais.</span>} action="Confirmar agora" onAction={() => { const v = visits.find((x: any) => x.status === VISIT_STATUS.PENDING); (window as any).__openFlow('confirmar-visita', { visit: v }); }} />
+      <Guide tone="red" icon="calendar" text={<span>Você tem <b>{unconfirmed} visitas não confirmadas</b> para hoje. Ligue para confirmar antes do horário. Visita confirmada vende mais.</span>} action="Confirmar agora" onAction={() => { const v = visits.find((x: any) => x.status === VISIT_STATUS.PENDING); (window as any).__openFlow('confirmar-visita', { visit: v }); }} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         {groups.map((g: any) => (
           <div key={g.name}>
@@ -724,8 +724,8 @@ export function ScreenPropostas({ go }: any) {
         </div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 18px', borderRadius: 11, background: 'var(--green-bg)', border: '1px solid var(--green-line)' }}>
           <Icon name="trophy" size={20} stroke={2} style={{ color: 'var(--green)' }} />
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>8 propostas fechadas este mês</span>
-          <span style={{ fontSize: 12.5, color: 'var(--t-500)' }}>— continue assim para subir no ranking.</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)' }}>8 propostas fechadas este mês.</span>
+          <span style={{ fontSize: 12.5, color: 'var(--t-500)' }}>Continue assim para subir no ranking.</span>
         </div>
       </div>
     </LightScreen>
@@ -1069,7 +1069,7 @@ export function ScreenResultados({ go }: any) {
   });
 
   const pageHeadTitle = 'Resultados';
-  const pageHeadSub = 'Como a equipe está performando — em números simples.';
+  const pageHeadSub = 'Como a equipe está performando, em números simples.';
 
   // Mesmo padrão de barreira de ScreenVendas: blocked/misconfigured
   // continuam com o aviso genérico de módulo em migração (conversão por
@@ -1171,7 +1171,7 @@ export function ScreenResultados({ go }: any) {
     <LightScreen>
       <PageHead title={pageHeadTitle} sub={pageHeadSub} actions={canExport ? <LBtn kind="ghost" icon="file" onClick={exportResultadosCSV}>Exportar</LBtn> : undefined} />
       <LCard pad={0} style={{ overflow: 'hidden', marginBottom: 18 }}>
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14, color: 'var(--t-900)' }}>Desempenho por vendedor — Junho</div>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14, color: 'var(--t-900)' }}>Desempenho por vendedor (Junho)</div>
         <div style={{ display: 'grid', gridTemplateColumns: '32px 1.6fr repeat(4, .8fr)', padding: '10px 18px', borderBottom: '1px solid var(--border)', fontSize: 11.5, color: 'var(--t-400)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>
           <span>#</span><span>Vendedor</span><span style={{ textAlign: 'right' }}>Leads</span><span style={{ textAlign: 'right' }}>Visitas</span><span style={{ textAlign: 'right' }}>Conv.</span><span style={{ textAlign: 'right' }}>Vendas</span>
         </div>

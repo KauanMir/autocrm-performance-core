@@ -220,7 +220,7 @@ function ArchivedLeadRow({ lead }: { lead: any }) {
             <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="car" size={12} stroke={2} /> {lead.car}</span>
           )}
           <span style={{ padding: '2px 8px', borderRadius: 999, background: 'rgba(255,255,255,.06)' }}>{lead.stage}</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="users" size={12} stroke={2} /> {lead.seller || '—'}</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="users" size={12} stroke={2} /> {lead.seller || '-'}</span>
           {archivedAtLabel && <span>Arquivado em {archivedAtLabel}</span>}
         </div>
       </div>
@@ -392,7 +392,7 @@ function ScreenClientesLegacy({ go }: any) {
               </div>
             )}
             {showChrome && (
-              <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles — são os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
+              <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles. São os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
             )}
             {showChrome && !isSeller && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -423,7 +423,7 @@ function ScreenClientesLegacy({ go }: any) {
   return (
     <LightScreen>
       <PageHead title="Clientes" sub="Cada cliente mostra na cor o que precisa de você. Vermelho = aja agora." actions={<LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('novo-cliente')}>Novo cliente</LBtn>} />
-      <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles — são os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
+      <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles. São os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
       {!isSeller && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           <Chip active={sellerFilter === 'Todos'} onClick={() => setSellerFilter('Todos')}>Todos</Chip>
@@ -990,7 +990,7 @@ export function ScreenPendencias({ go }: any) {
   if (mode === 'task_blocked' || mode === 'task_remote_misconfigured') {
     return (
       <LightScreen>
-        <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
+        <PageHead title="Pendências" sub="O que você precisa fazer e o que já passou da hora." />
         <KanbanStateCard testId="pendencias-state-unavailable">Pendências indisponíveis nesta sessão.</KanbanStateCard>
       </LightScreen>
     );
@@ -998,7 +998,7 @@ export function ScreenPendencias({ go }: any) {
   if (mode === 'task_remote_unavailable_identity') {
     return (
       <LightScreen>
-        <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
+        <PageHead title="Pendências" sub="O que você precisa fazer e o que já passou da hora." />
         <KanbanStateCard testId="pendencias-state-unavailable-identity">Pendências indisponíveis nesta sessão.</KanbanStateCard>
       </LightScreen>
     );
@@ -1008,7 +1008,7 @@ export function ScreenPendencias({ go }: any) {
   if (remoteActive && remoteTasksScreen.isLoading) {
     return (
       <LightScreen>
-        <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
+        <PageHead title="Pendências" sub="O que você precisa fazer e o que já passou da hora." />
         <KanbanStateCard testId="pendencias-state-loading">Carregando pendências…</KanbanStateCard>
       </LightScreen>
     );
@@ -1016,7 +1016,7 @@ export function ScreenPendencias({ go }: any) {
   if (remoteActive && remoteTasksScreen.isError) {
     return (
       <LightScreen>
-        <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
+        <PageHead title="Pendências" sub="O que você precisa fazer e o que já passou da hora." />
         <KanbanStateCard testId="pendencias-state-error" onRetry={remoteTasksScreen.refetch}>Não foi possível carregar as pendências.</KanbanStateCard>
       </LightScreen>
     );
@@ -1024,7 +1024,7 @@ export function ScreenPendencias({ go }: any) {
   if (remoteActive && remoteTasksScreen.configError !== null) {
     return (
       <LightScreen>
-        <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." />
+        <PageHead title="Pendências" sub="O que você precisa fazer e o que já passou da hora." />
         <KanbanStateCard testId="pendencias-state-config-error">Uma ou mais pendências remotas estão com configuração inválida.</KanbanStateCard>
       </LightScreen>
     );
@@ -1050,8 +1050,8 @@ export function ScreenPendencias({ go }: any) {
           identity/loading/erro/configError já retornaram antes, acima).
           FlowNovaPendencia decide sozinho local/remoto (FlowLayer não
           bloqueia mais 'nova-pendencia' fora do modo local). */}
-      <PageHead title="Pendências" sub="O que você precisa fazer — e o que já passou da hora." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-pendencia')}>Nova pendência</LBtn>} />
-      <Guide tone="red" icon="alert" text={<span>Você tem <b>{late} pendências atrasadas</b>. Resolva primeiro as vermelhas — cada dia parado é uma venda mais distante.</span>} action="Ver atrasadas" onAction={() => setTab('Atrasadas')} />
+      <PageHead title="Pendências" sub="O que você precisa fazer e o que já passou da hora." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-pendencia')}>Nova pendência</LBtn>} />
+      <Guide tone="red" icon="alert" text={<span>Você tem <b>{late} pendências atrasadas</b>. Resolva primeiro as vermelhas. Cada dia parado é uma venda mais distante.</span>} action="Ver atrasadas" onAction={() => setTab('Atrasadas')} />
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
         {['Atrasadas', 'Hoje', 'Próximas', 'Todas'].map(t => (
           <Chip key={t} active={tab === t} onClick={() => setTab(t)}>{t === 'Atrasadas' ? `Atrasadas (${late})` : t}</Chip>

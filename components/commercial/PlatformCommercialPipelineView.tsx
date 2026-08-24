@@ -80,8 +80,8 @@ export function PlatformCommercialPipelineView({ userId, platformRole }: Platfor
       <PageHead
         title="Em progresso"
         sub={canMutate
-          ? 'Pipeline comercial da KAPA — dados reais da empresa selecionada.'
-          : 'Pipeline comercial da KAPA — leitura somente, dados reais da empresa selecionada.'}
+          ? 'Pipeline comercial da KAPA. Dados reais da empresa selecionada.'
+          : 'Pipeline comercial da KAPA, leitura somente. Dados reais da empresa selecionada.'}
         actions={canMutate && (
           <LBtn kind="gold" icon="plus" onClick={() => setCreateModalOpen(true)}>Novo Lead</LBtn>
         )}

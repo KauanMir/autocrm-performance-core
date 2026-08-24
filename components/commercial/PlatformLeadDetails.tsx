@@ -142,7 +142,7 @@ export function PlatformLeadDetails({
 
   return (
     <FlowShell
-      eyebrow={canMutate ? 'MODO COMERCIAL' : 'MODO COMERCIAL — SOMENTE LEITURA'}
+      eyebrow={canMutate ? 'MODO COMERCIAL' : 'MODO COMERCIAL (SOMENTE LEITURA)'}
       title={lead.name}
       icon="user"
       accent="#3B82F6"

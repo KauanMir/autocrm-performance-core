@@ -265,7 +265,7 @@ export function ScreenEmpresas() {
     <LightScreen>
       <PageHead
         title="Empresas"
-        sub="Lista global das empresas da plataforma. Nenhuma seleção — apenas cadastro."
+        sub="Lista global das empresas da plataforma. Nenhuma seleção, apenas cadastro."
         actions={<LBtn kind="gold" icon="plus" onClick={() => setModalOpen(true)}>Criar empresa</LBtn>}
       />
 

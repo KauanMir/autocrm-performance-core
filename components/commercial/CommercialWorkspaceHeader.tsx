@@ -33,7 +33,7 @@ export function CommercialWorkspaceHeader({
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
         {readOnly && (
           <LBadge tone="amber">
-            <Icon name="eye" size={12} stroke={2.2} /> Modo comercial — somente leitura
+            <Icon name="eye" size={12} stroke={2.2} /> Modo comercial (somente leitura)
           </LBadge>
         )}
         {selected && (

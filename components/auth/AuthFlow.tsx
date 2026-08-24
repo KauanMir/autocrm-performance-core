@@ -43,7 +43,7 @@ function AuthHero({ note }: { note?: React.ReactNode }) {
           Cada venda é<br />uma <span style={{ color: '#E8CE72' }}>posição no pódio.</span>
         </h1>
         <p style={{ margin: '20px 0 0', fontSize: 16.5, color: 'var(--txt-mid)', maxWidth: 460, lineHeight: 1.6 }}>
-          Ranking ao vivo, metas claras e cada cliente na cor certa. Seu time sabe exatamente o que fazer — e quer vencer.
+          Ranking ao vivo, metas claras e cada cliente na cor certa. Seu time sabe exatamente o que fazer e quer vencer.
         </p>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 36 }}>
           {[['2º', 54, '#C9CDD4'], ['1º', 78, '#E8CE72'], ['3º', 40, '#C1121F']].map(([t, h, c], i) => (
