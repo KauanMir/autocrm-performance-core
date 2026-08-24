@@ -205,6 +205,37 @@ function useHomeDealsSummary(currentUser: User | null): HomeDealsSummary {
   };
 }
 
+// HOME-CONVERSION-FUNNEL-R1-EXEC — resumo de Sales da Home ("Funil
+// comercial", etapa Vendas), independente de leadsSummary/tasksSummary/
+// visitsSummary/dealsSummary (mesmo raciocínio de useHomeDealsSummary
+// acima). Wrapper fino sobre useRemoteSalesScreenState — a MESMA
+// composição já REMOTE VERIFIED usada pelo Pódio (useHomePodiumRanking) e
+// por ScreenResultados — nenhuma query nova, nenhuma segunda fonte,
+// nenhuma agregação por vendedor (isso é o Pódio, fora de escopo aqui: só
+// a contagem total já autorizada pela RLS).
+type HomeSalesSummary =
+  | { status: 'local' }
+  | { status: 'unavailable' }
+  | { status: 'loading' }
+  | { status: 'error'; retry: () => void }
+  | { status: 'ready'; totalSales: number };
+
+function useHomeSalesSummary(currentUser: User | null): HomeSalesSummary {
+  const remote = useRemoteSalesScreenState(currentUser);
+
+  if (remote.mode === 'sale_local') return { status: 'local' };
+  if (remote.mode === 'sale_blocked') return { status: 'unavailable' };
+  if (remote.mode === 'sale_remote_misconfigured') return { status: 'unavailable' };
+  if (remote.mode === 'sale_remote_unavailable_identity') return { status: 'unavailable' };
+
+  // mode === 'sale_remote_active' daqui em diante.
+  if (remote.isLoading) return { status: 'loading' };
+  if (remote.isError) return { status: 'error', retry: remote.refetch };
+  if (remote.configError !== null) return { status: 'unavailable' };
+
+  return { status: 'ready', totalSales: remote.sales.length };
+}
+
 // HOME-PODIUM-R1-EXEC — "Pódio de campeões" migrado para Sales reais.
 // Reaproveita EXATAMENTE a mesma composição já REMOTE VERIFIED de
 // ScreenResultados (useRemoteSalesScreenState + buildSalesRanking) — nenhuma
@@ -724,7 +755,7 @@ function QuickActions({ go }: { go: (id: string) => void }) {
     { label: 'Agendar visita', icon: 'calendar', to: 'visitas' },
     { label: 'Registrar venda', icon: 'trophy', to: 'vendas' },
     { label: 'Atualizar cliente', icon: 'user', to: 'clientes' },
-    { label: 'Ver atrasados', icon: 'flame', tone: 'red', to: 'clientes' },
+    { label: 'Ver atrasados', icon: 'clock', tone: 'red', to: 'clientes' },
     { label: 'Criar proposta', icon: 'handshake', to: 'propostas' },
   ];
   return (
@@ -749,11 +780,77 @@ function QuickActions({ go }: { go: (id: string) => void }) {
   );
 }
 
-function ConversionFunnel({ active, leadsSummary, visitsSummary }: { active: boolean; leadsSummary: HomeLeadsSummary; visitsSummary: HomeVisitsSummary }) {
+// HOME-CONVERSION-FUNNEL-R1-EXEC — cada etapa do funil é OU um valor real
+// pronto (kind:'value') OU um placeholder compacto de loading/erro
+// (kind:'loading'/'error') — nunca um zero fingido enquanto o source
+// correspondente não está pronto. 'unavailable' não produz stage nenhum
+// (a etapa inteira é omitida do array, nunca renderizada como notice).
+type FunnelStage =
+  | { kind: 'value'; key: string; label: string; sub: string; v: number; icon: string; c: string; gold?: boolean }
+  | { kind: 'loading' | 'error'; key: string; label: string; icon: string; c: string; retry?: () => void };
+
+function FunnelStageCell({ stage, isLast, top, active }: { stage: FunnelStage; isLast: boolean; top: number; active: boolean }) {
+  const gold = stage.kind === 'value' && stage.gold;
+  return (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+      <div className="lift" style={{ flex: 1, height: '100%', borderRadius: 14, padding: '20px 18px', background: gold ? 'linear-gradient(180deg, rgba(212,175,55,.12), rgba(0,0,0,.12)), #161618' : 'rgba(255,255,255,.02)', border: `1px solid ${gold ? 'rgba(212,175,55,.4)' : 'var(--line-dark)'}`, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ width: 38, height: 38, borderRadius: 11, background: `${stage.c}22`, color: stage.c, display: 'grid', placeItems: 'center', flexShrink: 0, boxShadow: 'inset 0 1px 0 rgba(255,255,255,.06)' }}><Icon name={stage.icon} size={19} stroke={2.2} /></span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{stage.label}</div>
+            {stage.kind === 'value' && <div style={{ fontSize: 11, color: 'var(--txt-lo)' }}>{stage.sub}</div>}
+          </div>
+        </div>
+        {stage.kind === 'value' ? (
+          <>
+            <div className="display tnum" style={{ fontSize: 44, fontWeight: 900, color: stage.gold ? '#E8CE72' : '#fff', lineHeight: 1, letterSpacing: '-.02em' }}>
+              {active ? <CountUp value={stage.v} active={active} /> : stage.v}
+            </div>
+            <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,.07)', overflow: 'hidden' }}>
+              <div style={{ width: Math.round((stage.v / top) * 100) + '%', height: '100%', borderRadius: 999, background: `linear-gradient(90deg, ${stage.c}, color-mix(in srgb, ${stage.c} 65%, #000))`, boxShadow: `0 0 10px ${stage.c}66`, animation: 'barFill 1.1s ease-out' }} />
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--txt-lo)' }}>total no sistema</div>
+          </>
+        ) : (
+          <div style={{ flex: 1, minHeight: 66, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6 }}>
+            <div style={{ fontSize: 12.5, color: stage.kind === 'error' ? '#FF8A8A' : 'var(--txt-lo)' }}>
+              {stage.kind === 'loading' ? 'Carregando…' : 'Não foi possível carregar.'}
+            </div>
+            {stage.kind === 'error' && stage.retry && (
+              <button onClick={stage.retry} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--txt-mid)', fontFamily: 'inherit', fontSize: 11.5, fontWeight: 700, textDecoration: 'underline', padding: 0 }}>
+                Tentar novamente
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {!isLast && <div style={{ position: 'absolute', right: -2, top: '50%', transform: 'translate(50%,-50%)', zIndex: 2, width: 26, height: 26, borderRadius: '50%', background: '#1b1b1e', border: '1px solid var(--line-dark-2)', display: 'grid', placeItems: 'center', color: 'var(--txt-lo)' }}><Icon name="arrowRight" size={14} stroke={2.4} /></div>}
+    </div>
+  );
+}
+
+// Barra de cada etapa é só proporção visual em relação ao MAIOR valor real
+// exibido (nunca rotulada como % de conversão — A1-PRECHECK §4/§8: os
+// datasets são snapshots de populações diferentes, não um cohort
+// sequencial). Etapas em loading/error não entram no cálculo do topo.
+function FunnelBlock({ title, stages, active }: { title: string; stages: FunnelStage[]; active: boolean }) {
+  const values = stages.filter((s): s is Extract<FunnelStage, { kind: 'value' }> => s.kind === 'value').map((s) => s.v);
+  const top = Math.max(...values, 1);
+  return (
+    <div>
+      <SectionTitle icon="flow">{title}</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${stages.length}, 1fr)`, gap: 0, alignItems: 'stretch', background: 'linear-gradient(180deg,#161618,#111113)', border: '1px solid var(--line-dark)', borderRadius: 18, padding: '8px', boxShadow: 'var(--shadow-md)', position: 'relative' }}>
+        {stages.map((stage, i) => <FunnelStageCell key={stage.key} stage={stage} isLast={i === stages.length - 1} top={top} active={active} />)}
+      </div>
+    </div>
+  );
+}
+
+function ConversionFunnel({ active, leadsSummary, visitsSummary, dealsSummary, salesSummary }: { active: boolean; leadsSummary: HomeLeadsSummary; visitsSummary: HomeVisitsSummary; dealsSummary: HomeDealsSummary; salesSummary: HomeSalesSummary }) {
   if (leadsSummary.status === 'unavailable') {
     return (
       <div>
-        <SectionTitle icon="flow">Funil de conversão</SectionTitle>
+        <SectionTitle icon="flow">Funil comercial</SectionTitle>
         <CommercialWidgetNotice>Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>
       </div>
     );
@@ -761,7 +858,7 @@ function ConversionFunnel({ active, leadsSummary, visitsSummary }: { active: boo
   if (leadsSummary.status === 'loading') {
     return (
       <div>
-        <SectionTitle icon="flow">Funil de conversão</SectionTitle>
+        <SectionTitle icon="flow">Funil comercial</SectionTitle>
         <CommercialWidgetNotice>Carregando…</CommercialWidgetNotice>
       </div>
     );
@@ -769,69 +866,55 @@ function ConversionFunnel({ active, leadsSummary, visitsSummary }: { active: boo
   if (leadsSummary.status === 'error') {
     return (
       <div>
-        <SectionTitle icon="flow">Funil de conversão</SectionTitle>
+        <SectionTitle icon="flow">Funil comercial</SectionTitle>
         <CommercialWidgetNotice onRetry={leadsSummary.retry}>Não foi possível carregar o funil.</CommercialWidgetNotice>
       </div>
     );
   }
-  // Real totals via services — these are independent counts (how many of each
-  // exist right now), not a true step-by-step conversion rate: there's no
-  // event history to say how many leads actually became each visit/proposta/
-  // venda. So no "X% da etapa anterior" here — that would be exactly the
-  // fake percentage the audit flagged (M0-K3).
-  //
-  // 'ready' (remoto): Leads é sempre real. Visitas é adicionada SOMENTE
-  // quando visitsSummary tem dado remoto válido (COMMERCIAL-REMOTE-VISITS-
-  // B7 §16/§17 — Visits resolve seu próprio estado, independente de
-  // leadsSummary; "Leads local ⟹ Visits local" garante que visitsSummary
-  // nunca é 'local' neste branch). Propostas/Vendas ainda não têm backend
-  // remoto (Deal/Sale, achado do E5-B2-A0/E7-A0) e permanecem OCULTADAS,
-  // nunca mostradas como zero — B7 não tenta migrá-las.
-  const stages = leadsSummary.status === 'local'
-    ? [
-        { label: 'Leads', sub: 'clientes cadastrados', v: LeadService.getAll().length, icon: 'users', c: '#5B9BFF' },
-        { label: 'Visitas', sub: 'agendadas no total', v: VisitService.getAll().length, icon: 'calendar', c: '#A855F7' },
-        { label: 'Propostas', sub: 'criadas no total', v: DealService.getAll().length, icon: 'handshake', c: '#27C75F' },
-        { label: 'Vendas', sub: 'registradas no total', v: SaleService.getAll().length, icon: 'trophy', c: '#E8CE72', gold: true },
-      ]
-    : [
-        { label: 'Leads', sub: 'clientes cadastrados', v: leadsSummary.totalLeads, icon: 'users', c: '#5B9BFF' },
-        ...(visitsSummary.status === 'ready'
-          ? [{ label: 'Visitas', sub: 'agendadas em aberto', v: visitsSummary.openCount, icon: 'calendar', c: '#A855F7' }]
-          : []),
-      ];
-  const top = Math.max(...stages.map((s) => s.v), 1);
-  return (
-    <div>
-      <SectionTitle icon="flow">Funil de conversão</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${stages.length}, 1fr)`, gap: 0, alignItems: 'stretch', background: 'linear-gradient(180deg,#161618,#111113)', border: '1px solid var(--line-dark)', borderRadius: 18, padding: '8px', boxShadow: 'var(--shadow-md)', position: 'relative' }}>
-        {stages.map((s: any, i: number) => {
-          const pct = Math.round((s.v / top) * 100);
-          return (
-            <div key={s.label} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-              <div className="lift" style={{ flex: 1, height: '100%', borderRadius: 14, padding: '20px 18px', background: s.gold ? 'linear-gradient(180deg, rgba(212,175,55,.12), rgba(0,0,0,.12)), #161618' : 'rgba(255,255,255,.02)', border: `1px solid ${s.gold ? 'rgba(212,175,55,.4)' : 'var(--line-dark)'}`, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ width: 38, height: 38, borderRadius: 11, background: `${s.c}22`, color: s.c, display: 'grid', placeItems: 'center', flexShrink: 0, boxShadow: 'inset 0 1px 0 rgba(255,255,255,.06)' }}><Icon name={s.icon} size={19} stroke={2.2} /></span>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>{s.label}</div>
-                    <div style={{ fontSize: 11, color: 'var(--txt-lo)' }}>{s.sub}</div>
-                  </div>
-                </div>
-                <div className="display tnum" style={{ fontSize: 44, fontWeight: 900, color: s.gold ? '#E8CE72' : '#fff', lineHeight: 1, letterSpacing: '-.02em' }}>
-                  {active ? <CountUp value={s.v} active={active} /> : s.v}
-                </div>
-                <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,.07)', overflow: 'hidden' }}>
-                  <div style={{ width: pct + '%', height: '100%', borderRadius: 999, background: `linear-gradient(90deg, ${s.c}, color-mix(in srgb, ${s.c} 65%, #000))`, boxShadow: `0 0 10px ${s.c}66`, animation: 'barFill 1.1s ease-out' }} />
-                </div>
-                <div style={{ fontSize: 11.5, color: 'var(--txt-lo)' }}>total no sistema</div>
-              </div>
-              {i < stages.length - 1 && <div style={{ position: 'absolute', right: -2, top: '50%', transform: 'translate(50%,-50%)', zIndex: 2, width: 26, height: 26, borderRadius: '50%', background: '#1b1b1e', border: '1px solid var(--line-dark-2)', display: 'grid', placeItems: 'center', color: 'var(--txt-lo)' }}><Icon name="arrowRight" size={14} stroke={2.4} /></div>}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+
+  if (leadsSummary.status === 'local') {
+    // Local/fixture legado — 100% intocado, inclusive o título original
+    // ("Funil de conversão", nunca "Funil comercial" — R1-EXEC §1/§20,
+    // preserva os testes antigos).
+    const stages: FunnelStage[] = [
+      { kind: 'value', key: 'leads', label: 'Leads', sub: 'clientes cadastrados', v: LeadService.getAll().length, icon: 'users', c: '#5B9BFF' },
+      { kind: 'value', key: 'visitas', label: 'Visitas', sub: 'agendadas no total', v: VisitService.getAll().length, icon: 'calendar', c: '#A855F7' },
+      { kind: 'value', key: 'propostas', label: 'Propostas', sub: 'criadas no total', v: DealService.getAll().length, icon: 'handshake', c: '#27C75F' },
+      { kind: 'value', key: 'vendas', label: 'Vendas', sub: 'registradas no total', v: SaleService.getAll().length, icon: 'trophy', c: '#E8CE72', gold: true },
+    ];
+    return <FunnelBlock title="Funil de conversão" stages={stages} active={active} />;
+  }
+
+  // "Funil comercial" — R1-EXEC A1-PRECHECK §1: renomeado porque os 4
+  // datasets são snapshots de populações diferentes, nunca um cohort
+  // sequencial (nenhum "% da etapa anterior" — §7/§8/§12 do EXEC). Leads é
+  // sempre real (leadsSummary já é 'ready' aqui, pelos early-returns
+  // acima). Visitas/Negociações/Vendas resolvem CADA UMA seu próprio
+  // estado remoto, independente entre si e de Leads (mesmo princípio já
+  // usado por UrgentAttention/ManagerTeamAttentionSection): 'unavailable'
+  // omite a etapa inteira, 'loading'/'error' mostram um placeholder só
+  // NAQUELA etapa (nunca derruba o bloco todo se as outras já resolveram),
+  // 'ready' mostra o valor real — 0 incluso, 0 é dado válido depois de
+  // ready (§13). ZERO fixture: LeadService/VisitService/DealService/
+  // SaleService nunca são chamados aqui.
+  const stages: FunnelStage[] = [
+    { kind: 'value', key: 'leads', label: 'Leads', sub: 'clientes cadastrados', v: leadsSummary.totalLeads, icon: 'users', c: '#5B9BFF' },
+  ];
+  if (visitsSummary.status === 'loading') stages.push({ kind: 'loading', key: 'visitas', label: 'Visitas', icon: 'calendar', c: '#A855F7' });
+  else if (visitsSummary.status === 'error') stages.push({ kind: 'error', key: 'visitas', label: 'Visitas', icon: 'calendar', c: '#A855F7', retry: visitsSummary.retry });
+  else if (visitsSummary.status === 'ready') stages.push({ kind: 'value', key: 'visitas', label: 'Visitas', sub: 'em aberto', v: visitsSummary.openCount, icon: 'calendar', c: '#A855F7' });
+  // 'local'/'unavailable': etapa omitida (estruturalmente 'local' nunca
+  // ocorre aqui — Leads não-local ⟹ Visits não-local).
+
+  if (dealsSummary.status === 'loading') stages.push({ kind: 'loading', key: 'negociacoes', label: 'Negociações', icon: 'handshake', c: '#27C75F' });
+  else if (dealsSummary.status === 'error') stages.push({ kind: 'error', key: 'negociacoes', label: 'Negociações', icon: 'handshake', c: '#27C75F', retry: dealsSummary.retry });
+  else if (dealsSummary.status === 'ready') stages.push({ kind: 'value', key: 'negociacoes', label: 'Negociações', sub: 'em aberto', v: dealsSummary.openCount, icon: 'handshake', c: '#27C75F' });
+
+  if (salesSummary.status === 'loading') stages.push({ kind: 'loading', key: 'vendas', label: 'Vendas', icon: 'trophy', c: '#E8CE72' });
+  else if (salesSummary.status === 'error') stages.push({ kind: 'error', key: 'vendas', label: 'Vendas', icon: 'trophy', c: '#E8CE72', retry: salesSummary.retry });
+  else if (salesSummary.status === 'ready') stages.push({ kind: 'value', key: 'vendas', label: 'Vendas', sub: 'registradas', v: salesSummary.totalSales, icon: 'trophy', c: '#E8CE72', gold: true });
+
+  return <FunnelBlock title="Funil comercial" stages={stages} active={active} />;
 }
 
 export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: User | null; [key: string]: any }) {
@@ -865,6 +948,12 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // de todas por design (B7-B-PRECHECK §5 — cada domínio comercial resolve
   // seu próprio estado, nunca um proxy de outro).
   const dealsSummary = useHomeDealsSummary(currentUser ?? null);
+  // HOME-CONVERSION-FUNNEL-R1-EXEC — chamado SEMPRE (Rules of Hooks), mesma
+  // garantia das demais summaries acima; independente de todas por design
+  // (etapa "Vendas" do Funil comercial — mesmo useRemoteSalesScreenState já
+  // usado pelo Pódio, TanStack Query dedupe por queryKey evita 2ª chamada
+  // de rede).
+  const salesSummary = useHomeSalesSummary(currentUser ?? null);
   // COMMERCIAL-REMOTE-DEALS-B7-B2 — apresentação apenas; RLS/backend
   // continua a única autoridade sobre quais rows cada usuário recebe.
   // membershipRole força 'manager' → null para Seller (nunca 'seller'),
@@ -964,7 +1053,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
           </div>
         )}
 
-        <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} /></div>
+        <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} dealsSummary={dealsSummary} salesSummary={salesSummary} /></div>
         {isSellersLocal && <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>}
         <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} /></div>
         {isManager && (

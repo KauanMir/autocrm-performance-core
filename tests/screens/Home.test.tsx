@@ -1197,6 +1197,152 @@ describe('Home — Deals summary remoto: "negociações em andamento" NUNCA apar
   });
 });
 
+// ── J2. "Funil comercial" V1 real (HOME-CONVERSION-FUNNEL-R1-EXEC) ─────
+// 4 etapas (Leads/Visitas/Negociações/Vendas), cada uma com estado remoto
+// independente. Sem percentual entre etapas (A1-PRECHECK §4/§7/§8) — só
+// volumes reais. Título remoto renomeado para "Funil comercial" (nunca
+// "Funil de conversão", que fica exclusivo do legado local — §1/§20).
+describe('Home — Funil comercial V1 real (HOME-CONVERSION-FUNNEL-R1-EXEC)', () => {
+  function remoteDealFunnel(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 'd1', status: 'open', assignedSellerId: 's1', ...over };
+  }
+  function remoteSaleFunnel(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 's1', assignedSellerId: 's1', soldValueCents: 1000000, ...over };
+  }
+
+  beforeEach(() => {
+    m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [{ id: 'r1', urgency: 'red' }, { id: 'r2', urgency: 'green' }] } }),
+    );
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+  });
+
+  it('Manager: 4 etapas reais com os valores exatos dos mocks remotos — título "Funil comercial", nenhum "%"', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true,
+      visits: [{ id: 'v1', status: 'scheduled' }, { id: 'v2', status: 'confirmed' }, { id: 'v3', status: 'completed' }],
+    }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true,
+      deals: [remoteDealFunnel({ id: 'd1' }), remoteDealFunnel({ id: 'd2' }), remoteDealFunnel({ id: 'd3', status: 'lost' })],
+    }));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true,
+      sales: [remoteSaleFunnel({ id: 's1' }), remoteSaleFunnel({ id: 's2' })],
+    }));
+    renderHome(manager());
+
+    expect(screen.getByText('Funil comercial')).toBeInTheDocument();
+    expect(screen.queryByText('Funil de conversão')).toBeNull();
+
+    const leadsStage = screen.getByText('Leads').closest('.lift');
+    expect(leadsStage?.textContent).toContain('2');
+    expect(leadsStage?.textContent).toContain('clientes cadastrados');
+
+    const visitasStage = screen.getByText('Visitas').closest('.lift');
+    expect(visitasStage?.textContent).toContain('2'); // scheduled + confirmed
+    expect(visitasStage?.textContent).toContain('em aberto');
+
+    const negociacoesStage = screen.getByText('Negociações').closest('.lift');
+    expect(negociacoesStage?.textContent).toContain('2'); // só os 2 'open'
+    expect(negociacoesStage?.textContent).toContain('em aberto');
+
+    const vendasStage = screen.getByText('Vendas').closest('.lift');
+    expect(vendasStage?.textContent).toContain('2');
+    expect(vendasStage?.textContent).toContain('registradas');
+
+    expect(screen.queryByText(/%/)).toBeNull();
+  });
+
+  it('Seller: 4 etapas dentro do próprio escopo RLS (mocks já pré-filtrados)', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { hasData: true, visits: [{ id: 'v1', status: 'scheduled' }] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: true, deals: [remoteDealFunnel({ id: 'd1', assignedSellerId: 's1' })] }));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { hasData: true, sales: [remoteSaleFunnel({ id: 's1', assignedSellerId: 's1' })] }));
+    renderHome(seller('s1'));
+    expect(screen.getByText('Negociações').closest('.lift')?.textContent).toContain('1');
+    expect(screen.getByText('Vendas').closest('.lift')?.textContent).toContain('1');
+  });
+
+  it('0 real (Vendas): mostra "0", nunca omite a etapa nem indisponibiliza', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { hasData: false, isEmpty: true, sales: [] }));
+    renderHome(manager());
+    const vendasStage = screen.getByText('Vendas').closest('.lift');
+    expect(vendasStage?.textContent).toContain('0');
+    expect(vendasStage?.textContent).toContain('registradas');
+  });
+
+  it('loading: etapa em loading mostra placeholder, nunca "0" antes da resposta; outras etapas ready continuam', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isLoading: true }));
+    renderHome(manager());
+    const vendasStage = screen.getByText('Vendas').closest('.lift');
+    expect(vendasStage?.textContent).toContain('Carregando');
+    expect(vendasStage?.textContent).not.toContain('0');
+    // Leads (sempre ready neste branch) continua mostrando o valor real.
+    expect(screen.getByText('Leads').closest('.lift')?.textContent).toContain('2');
+  });
+
+  it('erro parcial: Negociações em erro não derruba Visitas/Vendas prontas', () => {
+    const retry = vi.fn();
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { hasData: true, visits: [{ id: 'v1', status: 'scheduled' }] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isError: true, refetch: retry }));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { hasData: true, sales: [remoteSaleFunnel()] }));
+    renderHome(manager());
+    const negociacoesStage = screen.getByText('Negociações').closest('.lift');
+    expect(negociacoesStage?.textContent).toContain('Não foi possível carregar');
+    expect(screen.getByText('Visitas').closest('.lift')?.textContent).toContain('1');
+    expect(screen.getByText('Vendas').closest('.lift')?.textContent).toContain('1');
+    const [retryBtn] = screen.getAllByText('Tentar novamente');
+    fireEvent.click(retryBtn);
+    expect(retry).toHaveBeenCalled();
+  });
+
+  it('Visitas/Negociações/Vendas unavailable: etapa some por completo (nunca notice, nunca zero) — só Leads aparece', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
+    renderHome(manager());
+    expect(screen.getByText('Leads')).toBeInTheDocument();
+    expect(screen.queryByText('Visitas')).toBeNull();
+    expect(screen.queryByText('Negociações')).toBeNull();
+    expect(screen.queryByText('Vendas')).toBeNull();
+  });
+
+  it('zero fixture: LeadService/VisitService/DealService/SaleService nunca chamados para montar o funil remoto', () => {
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { hasData: true, visits: [{ id: 'v1', status: 'scheduled' }] }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { hasData: true, deals: [remoteDealFunnel()] }));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { hasData: true, sales: [remoteSaleFunnel()] }));
+    renderHome(manager());
+    expect(screen.getByText('Vendas')).toBeInTheDocument();
+    expect(m.leadServiceGetAll).not.toHaveBeenCalled();
+    expect(m.visitServiceGetAll).not.toHaveBeenCalled();
+    expect(m.dealServiceGetAll).not.toHaveBeenCalled();
+    expect(m.saleServiceGetAll).not.toHaveBeenCalled();
+  });
+});
+
+// ── J3. Quick Action "Ver atrasados" — ícone clock (HOME-CONVERSION-FUNNEL-R1-EXEC §17) ─
+describe('Home — Quick Action "Ver atrasados" usa clock, não flame (HOME-CONVERSION-FUNNEL-R1-EXEC)', () => {
+  it('continua existindo, navega para o destino existente ("clientes"), sem flame', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+    const go = vi.fn();
+    const props: any = { t: { podium: 'B' }, setTweak: vi.fn(), go, active: false, currentUser: manager() };
+    render(<Home {...props} />);
+    const btn = screen.getByText('Ver atrasados').closest('button') as HTMLElement;
+    expect(btn).toBeInTheDocument();
+    // Ícone clock é um <circle> + ponteiros (path); flame era um <path> só
+    // (blob fechado) — a presença de <circle> dentro do botão confirma a
+    // troca sem depender de detalhe de implementação do Icon.
+    expect(btn.querySelector('circle')).not.toBeNull();
+    fireEvent.click(btn);
+    expect(go).toHaveBeenCalledWith('clientes');
+  });
+});
+
 // ── K. Home Deals — modo local / flag OFF (regressão) ───────────────────
 describe('Home — Deals summary local/OFF preserva o legado (COMMERCIAL-REMOTE-DEALS-B7-B1)', () => {
   it('Leads local: card legado "propostas aguardando aprovação" continua, "Negociações em andamento" NUNCA aparece', () => {
