@@ -80,3 +80,31 @@ export async function createCompanyRpc(input: CreateCompanyInput): Promise<Platf
 
   return data as unknown as PlatformCompanyRow;
 }
+
+// PLATFORM-COMPANY-ACTIVATION-A1 — transição implantacao -> ativa, único
+// caminho de escrita em companies.status (nenhum UPDATE direto, mesmo
+// motivo estrutural de createCompanyRpc). Idempotente no backend: chamar
+// para uma empresa já ativa não é erro, apenas devolve a linha atual —
+// este wrapper não precisa (nem deve) tratar isso como um caso especial.
+export async function activateCompanyRpc(companyId: string): Promise<PlatformCompanyRow> {
+  const { data, error } = await supabase.rpc('activate_company', {
+    p_company_id: companyId,
+  });
+
+  if (error) {
+    throw new PlatformCompanyError('platform_companies_activate_failed', {
+      code: typeof error.code === 'string' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined,
+    });
+  }
+  // activate_company sempre retorna a linha (criada ou já existente) quando
+  // não há erro — null é anômalo, mesmo padrão de createCompanyRpc.
+  if (!data) {
+    throw new PlatformCompanyError('platform_companies_activate_failed', {
+      operation: 'activate_company',
+      message: 'empty_response',
+    });
+  }
+
+  return data as unknown as PlatformCompanyRow;
+}

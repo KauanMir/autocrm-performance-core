@@ -1,11 +1,11 @@
 'use client';
 // components/screens/ScreenEmpresas.tsx — M1-F S3-B: interface mínima de
 // empresas da KAPA. Global, sem empresa alvo (design §7.8) — lista as
-// empresas visíveis via RLS (companies_select_accessible) e cria novas
-// exclusivamente via public.create_company() (S3-A). Sem seleção de
-// empresa, sem convite, sem Manager/Seller, sem transição de status —
-// tudo isso é escopo de etapas futuras (S3-B só conecta o que o S3-A já
-// aprovou).
+// empresas visíveis via RLS (companies_select_accessible), cria novas
+// exclusivamente via public.create_company() (S3-A) e ativa empresas em
+// implantação via public.activate_company() (PLATFORM-COMPANY-ACTIVATION-A1).
+// Sem seleção de empresa, sem convite, sem Manager/Seller, sem suspender/
+// reativar/cancelar — fora de escopo deste lote (exigiriam RPCs próprias).
 //
 // Guarda de interface (conveniência/UX): App.tsx já impede este componente
 // de renderizar para quem não é Super Admin com a flag ON (allowedNavIds +
@@ -21,6 +21,7 @@ import { isPlatformAdminEnabled } from '@/lib/flags';
 import { canAccessPlatformAdmin } from '@/lib/capabilities';
 import { useCompanies } from '@/lib/hooks/useCompanies';
 import { useCreateCompany, getCreateCompanyErrorMessage } from '@/lib/hooks/useCreateCompany';
+import { useActivateCompany, getActivateCompanyErrorMessage } from '@/lib/hooks/useActivateCompany';
 import type { PlatformCompanyRow } from '@/lib/companies/repository';
 import type { CreateCompanyInput } from '@/lib/companies/repository';
 
@@ -69,7 +70,17 @@ function listTimezones(): string[] {
   return FALLBACK_TIMEZONES;
 }
 
-function CompanyRow({ company }: { company: PlatformCompanyRow }) {
+function CompanyRow({ company, onActivate, isActivating, justActivated }: {
+  company: PlatformCompanyRow;
+  onActivate: (company: PlatformCompanyRow) => void;
+  isActivating: boolean;
+  justActivated: boolean;
+}) {
+  // Ação só para 'implantacao' (§11 do EXEC): ativa não mostra (já ativa),
+  // suspensa/cancelada não oferecem ativação neste lote (fora de escopo —
+  // exigiriam uma RPC de reversão própria, nunca esta).
+  const canActivate = company.status === 'implantacao';
+
   return (
     <LCard pad={16} style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
       <div style={{ width: 40, height: 40, borderRadius: 11, background: 'rgba(255,255,255,.05)', display: 'grid', placeItems: 'center', flexShrink: 0, color: 'var(--t-500)' }}>
@@ -82,6 +93,9 @@ function CompanyRow({ company }: { company: PlatformCompanyRow }) {
             <span style={{ fontSize: 12.5, color: 'var(--t-500)' }}>({company.trade_name})</span>
           )}
           <LBadge tone={STATUS_TONE[company.status] || 'ink'}>{STATUS_LABEL[company.status] || company.status}</LBadge>
+          {justActivated && (
+            <span style={{ fontSize: 12.5, color: '#27C75F', fontWeight: 600 }}>Empresa ativada.</span>
+          )}
         </div>
         <div style={{ marginTop: 4, fontSize: 12.5, color: 'var(--t-500)', display: 'flex', gap: 14, flexWrap: 'wrap' }}>
           {company.cnpj && <span>CNPJ: {company.cnpj}</span>}
@@ -90,6 +104,16 @@ function CompanyRow({ company }: { company: PlatformCompanyRow }) {
           <span>Criada em {formatCreatedAt(company.created_at)}</span>
         </div>
       </div>
+      {canActivate && (
+        <LBtn
+          kind="gold"
+          icon={isActivating ? 'refresh' : 'checkCircle'}
+          onClick={() => onActivate(company)}
+          style={{ flexShrink: 0, opacity: isActivating ? 0.6 : 1, cursor: isActivating ? 'not-allowed' : 'pointer' }}
+        >
+          {isActivating ? 'Ativando…' : 'Ativar empresa'}
+        </LBtn>
+      )}
     </LCard>
   );
 }
@@ -192,8 +216,16 @@ export function ScreenEmpresas() {
   const currentUser = AuthService.getCurrentUser();
   const authorized = isPlatformAdminEnabled() && canAccessPlatformAdmin(currentUser);
   const [modalOpen, setModalOpen] = useState(false);
+  const [activatingId, setActivatingId] = useState<string | null>(null);
+  const [justActivatedId, setJustActivatedId] = useState<string | null>(null);
+  const [activateError, setActivateError] = useState<unknown>(null);
 
   const { companies, isLoading, isError, error, isEmpty, hasData, refetch } = useCompanies({
+    userId: currentUser?.id ?? null,
+    authorized,
+  });
+
+  const { activateCompany } = useActivateCompany({
     userId: currentUser?.id ?? null,
     authorized,
   });
@@ -202,6 +234,33 @@ export function ScreenEmpresas() {
   // quem não é autorizado (guarda síncrona em allowedNavIds/effectiveCurrent).
   if (!authorized) return null;
 
+  const performActivate = async (company: PlatformCompanyRow) => {
+    setActivatingId(company.id);
+    setJustActivatedId(null);
+    setActivateError(null);
+    try {
+      await activateCompany(company.id);
+      setJustActivatedId(company.id);
+      refetch();
+    } catch (err) {
+      setActivateError(err);
+    } finally {
+      setActivatingId(null);
+    }
+  };
+
+  const handleActivateClick = (company: PlatformCompanyRow) => {
+    (window as { __openFlow?: (name: string, payload: unknown) => void }).__openFlow?.('confirmar', {
+      title: 'Ativar esta empresa?',
+      message: 'Após a ativação, os usuários da empresa poderão utilizar os módulos comerciais.',
+      confirmLabel: 'Ativar empresa',
+      cancelLabel: 'Cancelar',
+      tone: 'gold',
+      icon: 'checkCircle',
+      onConfirm: () => { void performActivate(company); },
+    });
+  };
+
   return (
     <LightScreen>
       <PageHead
@@ -209,6 +268,13 @@ export function ScreenEmpresas() {
         sub="Lista global das empresas da plataforma. Nenhuma seleção — apenas cadastro."
         actions={<LBtn kind="gold" icon="plus" onClick={() => setModalOpen(true)}>Criar empresa</LBtn>}
       />
+
+      {activateError != null && (
+        <div style={{ marginBottom: 10, padding: '12px 14px', borderRadius: 10, background: 'var(--red-bg)', border: '1px solid var(--red-line)', color: 'var(--red)', fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Icon name="alert" size={16} stroke={2.2} />
+          {getActivateCompanyErrorMessage(activateError)}
+        </div>
+      )}
 
       {isLoading && (
         <LCard style={{ display: 'grid', placeItems: 'center', height: 200, color: 'var(--t-400)' }}>
@@ -233,7 +299,15 @@ export function ScreenEmpresas() {
 
       {!isLoading && !isError && hasData && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {companies.map((c) => <CompanyRow key={c.id} company={c} />)}
+          {companies.map((c) => (
+            <CompanyRow
+              key={c.id}
+              company={c}
+              onActivate={handleActivateClick}
+              isActivating={activatingId === c.id}
+              justActivated={justActivatedId === c.id}
+            />
+          ))}
         </div>
       )}
 

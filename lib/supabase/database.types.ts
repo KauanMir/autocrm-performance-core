@@ -1070,6 +1070,27 @@ export type Database = {
           success: boolean
         }[]
       }
+      activate_company: {
+        Args: { p_company_id: string }
+        Returns: {
+          cnpj: string | null
+          created_at: string
+          created_by_profile_id: string | null
+          id: string
+          name: string
+          phone: string | null
+          status: Database["public"]["Enums"]["company_status"]
+          timezone: string
+          trade_name: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "companies"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       add_lead_timeline_entry: {
         Args: {
           p_color: string
