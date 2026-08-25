@@ -21,6 +21,10 @@ import {
   buildMinhaDisputaLines,
   buildCompetitionTickerMessages,
 } from '@/lib/podium/competition';
+import { useSellerCompetitionEvents } from '@/lib/hooks/useSellerCompetitionEvents';
+import { useMarkCompetitionEventsSeen } from '@/lib/hooks/useMarkCompetitionEventsSeen';
+import { selectPrimaryCompetitionEvent, buildCompetitionCelebration } from '@/lib/podium/competitionCelebration';
+import { CompetitionCelebration } from '@/components/podiums/CompetitionCelebration';
 import { resolvePresetRange, resolveCustomRange, type PeriodPreset, type ResolvedPeriod } from '@/lib/date/companyPeriod';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { groupLateTasksBySeller, groupOpenDealsBySeller, type SellerAttentionRow } from '@/lib/home/managerAttention';
@@ -1121,6 +1125,42 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
     period: periodResolution,
   });
 
+  // PODIUM-COMPETITION-R2B-B1-EXEC §25/§32 — cobre o caso "Manager
+  // registrou a venda enquanto o Seller estava offline": ao carregar a
+  // Home, se existir evento unseen do próprio Seller, mostra a comemoração
+  // real UMA vez (nunca no load de Manager/Super Admin — hook já nega por
+  // role/RLS). O leaderboard já reflete a posição nova quando isso
+  // acontece (mesma invalidation de useRegisterSale, mesmo hook de leitura
+  // — nunca dessincroniza).
+  const pendingCompetitionEvents = useSellerCompetitionEvents({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: isManager ? 'manager' : isSeller ? 'seller' : null,
+    userIsActive: Boolean(currentUser),
+  });
+  const markPendingCompetitionEventsSeen = useMarkCompetitionEventsSeen({
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    userId: currentUser?.id ?? null,
+  });
+  const [homeCelebrationDismissed, setHomeCelebrationDismissed] = useState(false);
+  const primaryPendingCompetitionEvent = pendingCompetitionEvents.status === 'ready'
+    ? selectPrimaryCompetitionEvent(pendingCompetitionEvents.events)
+    : null;
+  const showHomeCelebration = Boolean(primaryPendingCompetitionEvent) && !homeCelebrationDismissed;
+
+  const dismissHomeCelebration = async () => {
+    setHomeCelebrationDismissed(true);
+    try {
+      const idsToMark = pendingCompetitionEvents.status === 'ready'
+        ? pendingCompetitionEvents.events.map((e) => e.id)
+        : primaryPendingCompetitionEvent ? [primaryPendingCompetitionEvent.id] : [];
+      await markPendingCompetitionEventsSeen.markSeen(idsToMark);
+    } catch {
+      // Mesma tolerância de FlowRegistrarVenda: falha ao marcar "visto"
+      // não é crítica — na pior hipótese reaparece 1x no próximo load.
+    }
+  };
+
   // Preferência visual A/B/C/D: local/fixture continua 100% no TweaksPanel
   // (t.podium/setTweak, §44 do EXEC — zero mudança de comportamento local);
   // remoto usa a persistência própria por usuário no navegador (§36-§39),
@@ -1278,6 +1318,15 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
         )}
         <QuickActions go={go} />
       </div>
+      {showHomeCelebration && primaryPendingCompetitionEvent && (
+        <CompetitionCelebration
+          copy={buildCompetitionCelebration(primaryPendingCompetitionEvent)}
+          newRank={primaryPendingCompetitionEvent.newRank}
+          saleCount={primaryPendingCompetitionEvent.saleCount}
+          onDismiss={dismissHomeCelebration}
+          dismissLabel="Continuar"
+        />
+      )}
     </div>
   );
 }

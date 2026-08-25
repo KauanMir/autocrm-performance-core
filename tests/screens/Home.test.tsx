@@ -20,6 +20,8 @@ const m = vi.hoisted(() => ({
   useCurrentCompanySellerLabels: vi.fn(),
   useCurrentCompanyTimezone: vi.fn(),
   useCompanySellerLeaderboard: vi.fn(),
+  useSellerCompetitionEvents: vi.fn(),
+  useMarkCompetitionEventsSeen: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   leadServiceGetAll: vi.fn(),
   visitServiceGetAll: vi.fn(),
@@ -69,6 +71,18 @@ vi.mock('@/lib/hooks/useCurrentCompanyTimezone', () => ({
 // — aqui só se valida o que Home FAZ com o resultado.
 vi.mock('@/lib/hooks/useCompanySellerLeaderboard', () => ({
   useCompanySellerLeaderboard: m.useCompanySellerLeaderboard,
+}));
+
+// PODIUM-COMPETITION-R2B-B1-EXEC — mesmo motivo de useCompanySellerLeaderboard
+// acima: useQuery real exige QueryClientProvider, ausente neste harness.
+// Cobertura própria dos hooks fica em tests/hooks/useSellerCompetitionEvents.test.tsx
+// e tests/hooks/useMarkCompetitionEventsSeen.test.tsx — aqui só se valida o
+// que Home FAZ com o resultado (mostra/esconde a comemoração, marca visto).
+vi.mock('@/lib/hooks/useSellerCompetitionEvents', () => ({
+  useSellerCompetitionEvents: m.useSellerCompetitionEvents,
+}));
+vi.mock('@/lib/hooks/useMarkCompetitionEventsSeen', () => ({
+  useMarkCompetitionEventsSeen: m.useMarkCompetitionEventsSeen,
 }));
 
 // PODIUM-COMPETITION-R1-EXEC — fixa a preferência remota em 'B' (mesmo
@@ -310,6 +324,10 @@ beforeEach(() => {
   // todos os testes escritos antes deste lote. Toda describe com Leads
   // remoto sobrescreve para um status não-local próprio.
   m.useCompanySellerLeaderboard.mockReset().mockReturnValue({ status: 'local' });
+  // PODIUM-COMPETITION-R2B-B1-EXEC — default 'local', mesmo raciocínio do
+  // default de useCompanySellerLeaderboard acima.
+  m.useSellerCompetitionEvents.mockReset().mockReturnValue({ status: 'local' });
+  m.useMarkCompetitionEventsSeen.mockReset().mockReturnValue({ markSeen: vi.fn().mockResolvedValue(1), isPending: false });
 });
 
 // ── A. Home local ────────────────────────────────────────────────────────
@@ -781,6 +799,94 @@ describe('Home — Minha Disputa + CompTicker reais (PODIUM-COMPETITION-R2A-EXEC
     renderHome(seller('s1'));
     // Aparece 2x no ticker (loop de scroll) + 1x no card Minha Disputa.
     expect(screen.getAllByText('Você está na liderança.').length).toBe(3);
+  });
+});
+
+// ── Comemoração persistente pendente no load da Home (PODIUM-COMPETITION-R2B-B1-EXEC) ──
+// Cobre o caso "Manager registrou a venda enquanto o Seller estava
+// offline" (§25/§32 do EXEC). useSellerCompetitionEvents/
+// useMarkCompetitionEventsSeen são mockados diretamente (cobertura própria
+// dos hooks em tests/hooks/) — aqui só se prova o que Home FAZ com o
+// resultado: mostra a comemoração real, marca visto ao fechar, nunca
+// repete.
+describe('Home — comemoração pendente no load (PODIUM-COMPETITION-R2B-B1-EXEC)', () => {
+  beforeEach(() => {
+    m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
+    );
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'unavailable' });
+  });
+
+  function unseenEvent(over: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: 'evt-1', eventType: 'rank_up', oldRank: 4, newRank: 1, saleCount: 5,
+      relatedSellerId: null, relatedSellerLabel: null, competitionStarted: true,
+      periodStart: '2026-08-01T00:00:00Z', periodEnd: '2026-09-01T00:00:00Z',
+      createdAt: '2026-08-10T12:00:00Z', ...over,
+    };
+  }
+
+  it('Seller com evento unseen: comemoração real aparece no load', () => {
+    m.useSellerCompetitionEvents.mockReturnValue({ status: 'ready', events: [unseenEvent()] });
+    renderHome(seller('s1'));
+    expect(screen.getByText('Primeira venda do mês!')).toBeInTheDocument();
+    expect(screen.getByText('Você abriu a disputa e assumiu a liderança.')).toBeInTheDocument();
+  });
+
+  it('Seller sem evento unseen (ready, array vazio): nenhuma comemoração', () => {
+    m.useSellerCompetitionEvents.mockReturnValue({ status: 'ready', events: [] });
+    renderHome(seller('s1'));
+    expect(screen.queryByText('Primeira venda do mês!')).toBeNull();
+  });
+
+  it('loading/error/unavailable: nunca mostra comemoração fake', () => {
+    const states: any[] = [{ status: 'loading' }, { status: 'error', retry: vi.fn() }, { status: 'unavailable' }];
+    for (const state of states) {
+      m.useSellerCompetitionEvents.mockReturnValue(state);
+      const { unmount } = renderHome(seller('s1'));
+      expect(screen.queryByText('Primeira venda do mês!')).toBeNull();
+      unmount();
+    }
+  });
+
+  it('Manager: nunca mostra comemoração pessoal (hook já nega — Home só reflete o estado)', () => {
+    m.useSellerCompetitionEvents.mockReturnValue({ status: 'unavailable' });
+    renderHome(manager());
+    expect(screen.queryByText('Primeira venda do mês!')).toBeNull();
+  });
+
+  it('fechar a comemoração: marca vistos TODOS os unseen carregados, some da tela, nunca repete', () => {
+    const markSeen = vi.fn().mockResolvedValue(2);
+    m.useMarkCompetitionEventsSeen.mockReturnValue({ markSeen, isPending: false });
+    m.useSellerCompetitionEvents.mockReturnValue({
+      status: 'ready',
+      events: [unseenEvent({ id: 'evt-1' }), unseenEvent({ id: 'evt-2', competitionStarted: false, oldRank: 3, newRank: 2 })],
+    });
+    renderHome(seller('s1'));
+    expect(screen.getByText('Primeira venda do mês!')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Continuar'));
+
+    expect(markSeen).toHaveBeenCalledWith(['evt-1', 'evt-2']);
+    expect(screen.queryByText('Primeira venda do mês!')).toBeNull();
+  });
+
+  it('múltiplos unseen: escolhe 1 evento principal (nunca dois modais)', () => {
+    m.useSellerCompetitionEvents.mockReturnValue({
+      status: 'ready',
+      events: [
+        unseenEvent({ id: 'evt-1', competitionStarted: false, oldRank: 6, newRank: 4 }),
+        unseenEvent({ id: 'evt-2', competitionStarted: true, oldRank: 2, newRank: 1 }),
+      ],
+    });
+    renderHome(seller('s1'));
+    // competition_started tem prioridade — só essa mensagem aparece.
+    expect(screen.getByText('Primeira venda do mês!')).toBeInTheDocument();
+    expect(screen.queryByText(/Você ganhou \d+ posiç/)).toBeNull();
   });
 });
 

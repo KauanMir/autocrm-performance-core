@@ -3,6 +3,23 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Icon } from './Icon';
 import { initials, ringFor } from '@/lib/data';
 
+// PODIUM-COMPETITION-R2B-B1-EXEC — movida de components/flows/Flows2.tsx
+// (onde nasceu, usada pelo passo "done" local de FlowRegistrarVenda) pra
+// cá: components/podiums/CompetitionCelebration.tsx também precisa dela e
+// não pode importar de Flows2.tsx sem criar um ciclo (Flows2 -> Celebration
+// -> Flows2). kit.tsx já é o ponto de UI primitives compartilhado por
+// ambos.
+export function Confetti() {
+  const cols = ['#E8CE72', '#C1121F', '#27C75F', '#fff', '#FFA31F'];
+  return (
+    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }} aria-hidden="true">
+      {Array.from({ length: 40 }).map((_, i) => (
+        <span key={i} style={{ position: 'absolute', top: -20, left: (i * 2.6 + (i % 3)) + '%', width: i % 2 ? 7 : 9, height: i % 2 ? 7 : 12, background: cols[i % cols.length], borderRadius: i % 3 ? 2 : '50%', opacity: 0, animation: `confettiFall ${2.6 + (i % 5) * 0.5}s ease-in ${(i % 10) * 0.15}s infinite` }} />
+      ))}
+    </div>
+  );
+}
+
 export const NAV = [
   { id: 'home',      label: 'Início',       icon: 'home' },
   { id: 'clientes',  label: 'Clientes',     icon: 'users' },

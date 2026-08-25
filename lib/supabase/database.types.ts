@@ -790,6 +790,96 @@ export type Database = {
           },
         ]
       }
+      seller_competition_events: {
+        Row: {
+          actor_profile_id: string
+          company_id: string
+          competition_started: boolean
+          created_at: string
+          event_type: string
+          id: string
+          new_rank: number
+          old_rank: number
+          period_end: string
+          period_start: string
+          related_seller_id: string | null
+          sale_count: number
+          seen_at: string | null
+          seller_id: string
+          source_sale_id: string
+        }
+        Insert: {
+          actor_profile_id: string
+          company_id: string
+          competition_started?: boolean
+          created_at?: string
+          event_type?: string
+          id?: string
+          new_rank: number
+          old_rank: number
+          period_end: string
+          period_start: string
+          related_seller_id?: string | null
+          sale_count: number
+          seen_at?: string | null
+          seller_id: string
+          source_sale_id: string
+        }
+        Update: {
+          actor_profile_id?: string
+          company_id?: string
+          competition_started?: boolean
+          created_at?: string
+          event_type?: string
+          id?: string
+          new_rank?: number
+          old_rank?: number
+          period_end?: string
+          period_start?: string
+          related_seller_id?: string | null
+          sale_count?: number
+          seen_at?: string | null
+          seller_id?: string
+          source_sale_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "seller_competition_events_actor_fk"
+            columns: ["company_id", "actor_profile_id"]
+            isOneToOne: false
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
+          },
+          {
+            foreignKeyName: "seller_competition_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "seller_competition_events_company_related_seller_fk"
+            columns: ["company_id", "related_seller_id"]
+            isOneToOne: false
+            referencedRelation: "sellers"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "seller_competition_events_company_seller_fk"
+            columns: ["company_id", "seller_id"]
+            isOneToOne: false
+            referencedRelation: "sellers"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "seller_competition_events_source_sale_fk"
+            columns: ["source_sale_id"]
+            isOneToOne: true
+            referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sellers: {
         Row: {
           company_id: string | null
@@ -1062,6 +1152,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      _rank_company_sellers: {
+        Args: {
+          p_company_id: string
+          p_period_end: string
+          p_period_start: string
+        }
+        Returns: Database["public"]["CompositeTypes"]["seller_rank_row"][]
+        SetofOptions: {
+          from: "*"
+          to: "seller_rank_row"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       accept_invite: {
         Args: { p_token_hash: string }
         Returns: {
@@ -1691,6 +1795,22 @@ export type Database = {
           updated_at: string
         }[]
       }
+      list_my_unseen_competition_events: {
+        Args: never
+        Returns: {
+          competition_started: boolean
+          created_at: string
+          event_type: string
+          id: string
+          new_rank: number
+          old_rank: number
+          period_end: string
+          period_start: string
+          related_seller_id: string
+          related_seller_label: string
+          sale_count: number
+        }[]
+      }
       list_pipeline_stages_for_company: {
         Args: { p_company_id: string }
         Returns: {
@@ -1769,6 +1889,10 @@ export type Database = {
           name: string
           seller_id: string
         }[]
+      }
+      mark_competition_events_seen: {
+        Args: { p_event_ids: string[] }
+        Returns: number
       }
       mark_deal_lost: {
         Args: { p_expected_version: number; p_id: string }
@@ -2419,7 +2543,13 @@ export type Database = {
       visit_status: "scheduled" | "confirmed" | "canceled" | "completed"
     }
     CompositeTypes: {
-      [_ in never]: never
+      seller_rank_row: {
+        seller_id: string | null
+        seller_label: string | null
+        sale_count: number | null
+        completed_visit_count: number | null
+        rank: number | null
+      }
     }
   }
 }

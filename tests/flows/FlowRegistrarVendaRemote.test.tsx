@@ -14,6 +14,8 @@ const m = vi.hoisted(() => ({
   user: { current: null as any },
   resolveSalesRemoteMode: vi.fn(),
   useRegisterSale: vi.fn(),
+  useSellerCompetitionEvents: vi.fn(),
+  useMarkCompetitionEventsSeen: vi.fn(),
   saleServiceCreate: vi.fn(() => true),
   saleServiceGetAll: vi.fn(() => [] as any[]),
   dealServiceGetAll: vi.fn(() => [] as any[]),
@@ -26,6 +28,16 @@ vi.mock('@/lib/sales/remoteSalesMode', () => ({
 }));
 vi.mock('@/lib/hooks/useRegisterSale', () => ({
   useRegisterSale: m.useRegisterSale,
+}));
+// PODIUM-COMPETITION-R2B-B1-EXEC — mesmo motivo de useRegisterSale acima
+// (useQuery/useMutation reais exigem QueryClientProvider, ausente aqui).
+// Cobertura própria dos hooks em tests/hooks/; aqui só a wiring da
+// comemoração dentro do flow.
+vi.mock('@/lib/hooks/useSellerCompetitionEvents', () => ({
+  useSellerCompetitionEvents: m.useSellerCompetitionEvents,
+}));
+vi.mock('@/lib/hooks/useMarkCompetitionEventsSeen', () => ({
+  useMarkCompetitionEventsSeen: m.useMarkCompetitionEventsSeen,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -85,6 +97,8 @@ beforeEach(() => {
   m.leadServiceGetAll.mockReset().mockReturnValue([]);
   registerSaleSpy = vi.fn().mockResolvedValue(remoteDeal({ status: 'sold', version: 4 }));
   m.useRegisterSale.mockReset().mockImplementation(() => registerHookResult(registerSaleSpy));
+  m.useSellerCompetitionEvents.mockReset().mockReturnValue({ status: 'local' });
+  m.useMarkCompetitionEventsSeen.mockReset().mockReturnValue({ markSeen: vi.fn().mockResolvedValue(0), isPending: false });
   m.user.current = manager();
 });
 
@@ -168,6 +182,58 @@ describe('FlowRegistrarVenda — remoto: submit com sucesso', () => {
     expect(screen.queryByText('Vendedor responsável')).toBeNull();
     fireEvent.click(screen.getByText('Registrar venda'));
     await waitFor(() => expect(registerSaleSpy).toHaveBeenCalled());
+  });
+});
+
+describe('FlowRegistrarVenda — remoto: comemoração real (PODIUM-COMPETITION-R2B-B1-EXEC)', () => {
+  beforeEach(() => {
+    m.resolveSalesRemoteMode.mockReturnValue('sale_remote_ready');
+  });
+
+  function unseenEvent(over: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: 'evt-1', eventType: 'rank_up', oldRank: 4, newRank: 1, saleCount: 5,
+      relatedSellerId: null, relatedSellerLabel: null, competitionStarted: true,
+      periodStart: '2026-08-01T00:00:00Z', periodEnd: '2026-09-01T00:00:00Z',
+      createdAt: '2026-08-10T12:00:00Z', ...over,
+    };
+  }
+
+  it('venda melhora o rank: mostra a comemoração real (headline/mensagem), nunca a tela de sucesso genérica', async () => {
+    m.user.current = seller();
+    m.useSellerCompetitionEvents.mockReturnValue({ status: 'ready', events: [unseenEvent()] });
+    renderFlow({ deal: remoteDeal({ assignedSellerId: 'seller-self' }) });
+    fireEvent.click(screen.getByText('Registrar venda'));
+    await waitFor(() => expect(screen.getByText('Primeira venda do mês!')).toBeInTheDocument());
+    expect(screen.queryByText('Venda registrada.')).toBeNull();
+  });
+
+  it('venda NÃO melhora o rank (nenhum evento unseen): segue o sucesso normal, nenhuma comemoração inventada', async () => {
+    m.useSellerCompetitionEvents.mockReturnValue({ status: 'ready', events: [] });
+    renderFlow({ deal: remoteDeal() });
+    fireEvent.click(screen.getByText('Registrar venda'));
+    await waitFor(() => expect(screen.getByText('Venda registrada.')).toBeInTheDocument());
+  });
+
+  it('Manager registrando para outro Seller: hook nega (unavailable) — sucesso normal, sem comemoração pessoal', async () => {
+    m.useSellerCompetitionEvents.mockReturnValue({ status: 'unavailable' });
+    renderFlow({ deal: remoteDeal() });
+    fireEvent.click(screen.getByText('Registrar venda'));
+    await waitFor(() => expect(screen.getByText('Venda registrada.')).toBeInTheDocument());
+  });
+
+  it('fechar a comemoração ("Concluir"): marca visto e fecha o flow', async () => {
+    const markSeen = vi.fn().mockResolvedValue(1);
+    m.useMarkCompetitionEventsSeen.mockReturnValue({ markSeen, isPending: false });
+    m.useSellerCompetitionEvents.mockReturnValue({ status: 'ready', events: [unseenEvent()] });
+    const { close } = renderFlow({ deal: remoteDeal() });
+    fireEvent.click(screen.getByText('Registrar venda'));
+    await waitFor(() => expect(screen.getByText('Primeira venda do mês!')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText('Concluir'));
+
+    await waitFor(() => expect(markSeen).toHaveBeenCalledWith(['evt-1']));
+    await waitFor(() => expect(close).toHaveBeenCalled());
   });
 });
 

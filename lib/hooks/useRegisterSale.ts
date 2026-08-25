@@ -27,6 +27,19 @@ import { registerRemoteSale } from '@/lib/sales/remoteRepository';
 import type { Database } from '@/lib/supabase/database.types';
 import { isRemoteSalesError, mapRemoteSalesMutationError } from '@/lib/sales/errors';
 import { runSaleMutationWithGenerationGuard } from '@/lib/sales/mutationGeneration';
+// PODIUM-COMPETITION-R2B-B1-EXEC §33/§34 — sem isto, o Pódio/Ranking
+// completo/Minha Disputa/CompTicker (R1/R2A) e os eventos de comemoração
+// pessoal (R2B) nunca refletiam uma venda recém-registrada sem reload
+// manual (achado do PRECHECK §27: só Deals/Sales/timeline eram
+// invalidados). companySellerLeaderboardQueryKey cobre o leaderboard
+// inteiro (Pódio+Ranking+Minha Disputa+CompTicker consomem o mesmo hook);
+// sellerCompetitionEventsQueryKey só é relevante quando o BENEFICIÁRIO da
+// venda é a própria sessão (Seller registrando a própria venda) — quando
+// é o Manager registrando para outro Seller, o evento fica persistido no
+// servidor e esse Seller o vê no próprio próximo load (§34 do EXEC: "não
+// precisa buscar eventos pessoais do Seller na sessão Manager").
+import { companySellerLeaderboardQueryPrefix } from '@/lib/hooks/useCompanySellerLeaderboard';
+import { sellerCompetitionEventsQueryKey } from '@/lib/hooks/useSellerCompetitionEvents';
 
 type RemoteDealRow = Database['public']['Tables']['deals']['Row'];
 type DealPaymentMethod = Database['public']['Enums']['deal_payment_method'];
@@ -113,6 +126,17 @@ export function useRegisterSale(options: UseRegisterSaleOptions): UseRegisterSal
       queryClient.invalidateQueries({ queryKey: dealQueryKeys.active(capturedCompanyId) });
       queryClient.invalidateQueries({ queryKey: salesQueryKeys.active(capturedCompanyId) });
       queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, row.lead_id) });
+      // §33/§34 do EXEC — Pódio/Ranking completo/Minha Disputa/CompTicker
+      // (mesmo hook de leaderboard) e eventos de comemoração pessoal nunca
+      // refletiam uma venda recém-registrada sem reload manual antes desta
+      // etapa. sellerCompetitionEventsQueryKey só é populada de fato
+      // quando a própria sessão é Seller (gate do hook) — invalidar
+      // incondicionalmente aqui é inofensivo quando não havia nada
+      // cacheado (Manager registrando para outro Seller).
+      queryClient.invalidateQueries({ queryKey: companySellerLeaderboardQueryPrefix(capturedCompanyId) });
+      if (userId) {
+        queryClient.invalidateQueries({ queryKey: sellerCompetitionEventsQueryKey(capturedCompanyId, userId) });
+      }
     },
   });
 

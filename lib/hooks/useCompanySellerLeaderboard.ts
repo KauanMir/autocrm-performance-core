@@ -44,6 +44,14 @@ export function companySellerLeaderboardQueryKey(
   return ['company', companyId, 'seller-leaderboard', 'remote', userId, periodStartMillis, periodEndMillis] as const;
 }
 
+// PODIUM-COMPETITION-R2B-B1-EXEC §33 — prefixo estável (sem userId/período)
+// para invalidar TODO o leaderboard de uma empresa de uma vez (ex.: depois
+// de registerSale, sem saber qual período/usuário está com cache quente
+// no momento) — invalidateQueries faz match por prefixo por padrão.
+export function companySellerLeaderboardQueryPrefix(companyId: string) {
+  return ['company', companyId, 'seller-leaderboard', 'remote'] as const;
+}
+
 export function useCompanySellerLeaderboard(
   options: UseCompanySellerLeaderboardOptions,
 ): CompanySellerLeaderboardState {

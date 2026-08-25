@@ -61,12 +61,15 @@ function compareBySales(ahead: CompetitionRow, behind: CompetitionRow): SalesCom
   return { kind: 'tie_full' };
 }
 
-function firstName(label: string): string {
+// Exportadas: reaproveitadas por lib/podium/competitionCelebration.ts
+// (PODIUM-COMPETITION-R2B-B1-EXEC) — mesma convenção de copy (primeiro
+// nome, singular/plural de "venda"), nunca duas implementações.
+export function firstName(label: string): string {
   const trimmed = label.trim();
   return trimmed.split(/\s+/)[0] || trimmed;
 }
 
-function vendaWord(n: number): string {
+export function vendaWord(n: number): string {
   return n === 1 ? '1 venda' : `${n} vendas`;
 }
 

@@ -26,3 +26,30 @@ export class PodiumLeaderboardError extends Error {
 export function isPodiumLeaderboardError(error: unknown): error is PodiumLeaderboardError {
   return error instanceof PodiumLeaderboardError;
 }
+
+// PODIUM-COMPETITION-R2B-B1-EXEC — eventos reais de melhora de ranking
+// (seller_competition_events). Mesmo padrão de PodiumLeaderboardError.
+export type PodiumCompetitionEventsErrorCode =
+  | 'competition_events_fetch_failed'
+  | 'competition_events_mark_seen_failed';
+
+export interface PodiumCompetitionEventsErrorDetail {
+  code?: string;
+  message?: string;
+}
+
+export class PodiumCompetitionEventsError extends Error {
+  readonly code: PodiumCompetitionEventsErrorCode;
+  readonly detail: PodiumCompetitionEventsErrorDetail;
+
+  constructor(code: PodiumCompetitionEventsErrorCode, detail: PodiumCompetitionEventsErrorDetail = {}) {
+    super(code);
+    this.name = 'PodiumCompetitionEventsError';
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+export function isPodiumCompetitionEventsError(error: unknown): error is PodiumCompetitionEventsError {
+  return error instanceof PodiumCompetitionEventsError;
+}

@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { Avatar, LBtn, LBadge } from '@/components/ui/kit';
+import { Avatar, LBtn, LBadge, Confetti } from '@/components/ui/kit';
 import { STAGES, VISIT_STATUS, DEAL_STATUS, SALE_STATUS, TASK_STATE } from '@/lib/data';
 import { AuthService, LeadService, VisitService, DealService, SaleService, TaskService, SellerService } from '@/lib/services';
 import {
@@ -46,6 +46,12 @@ import { formatCentsToBRL } from '@/lib/deals/money';
 import { useRegisterSale } from '@/lib/hooks/useRegisterSale';
 import { resolveSalesRemoteMode } from '@/lib/sales/remoteSalesMode';
 import { isRemoteSalesError, REMOTE_SALES_MUTATION_ERROR_MESSAGES_PT } from '@/lib/sales/errors';
+// PODIUM-COMPETITION-R2B-B1-EXEC §22/§28/§30 — comemoração real pós-venda
+// (só quando a própria venda melhorou o rank do Seller; nunca inventada).
+import { useSellerCompetitionEvents } from '@/lib/hooks/useSellerCompetitionEvents';
+import { useMarkCompetitionEventsSeen } from '@/lib/hooks/useMarkCompetitionEventsSeen';
+import { selectPrimaryCompetitionEvent, buildCompetitionCelebration } from '@/lib/podium/competitionCelebration';
+import { CompetitionCelebration } from '@/components/podiums/CompetitionCelebration';
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
 const TEMP_INFO: Record<string, string> = {
@@ -2503,16 +2509,6 @@ export function FlowAprovarProposta({ payload, close }: any) {
   );
 }
 
-export function Confetti() {
-  const cols = ['#E8CE72', '#C1121F', '#27C75F', '#fff', '#FFA31F'];
-  return (
-    <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }} aria-hidden="true">
-      {Array.from({ length: 40 }).map((_, i) => (
-        <span key={i} style={{ position: 'absolute', top: -20, left: (i * 2.6 + (i % 3)) + '%', width: i % 2 ? 7 : 9, height: i % 2 ? 7 : 12, background: cols[i % cols.length], borderRadius: i % 3 ? 2 : '50%', opacity: 0, animation: `confettiFall ${2.6 + (i % 5) * 0.5}s ease-in ${(i % 10) * 0.15}s infinite` }} />
-      ))}
-    </div>
-  );
-}
 
 // Only deals that could still legitimately be sold — a pending-approval or
 // already-rejected proposal must never show up as sellable, and a SOLD one
@@ -2672,6 +2668,21 @@ export function FlowRegistrarVenda({ payload, close }: any) {
     membershipRole: remoteIdentityMembershipRole, userIsActive: remoteIdentityUserIsActive,
   });
 
+  // PODIUM-COMPETITION-R2B-B1-EXEC §22/§30 — a query fica "ativa" assim
+  // que o componente monta (mesmo antes da venda), então quando
+  // useRegisterSale invalida sellerCompetitionEventsQueryKey no sucesso, o
+  // refetch acontece automaticamente — nenhum fetch manual extra aqui.
+  // Ausente/vazio quando não é Seller (Manager registrando pra outro) ou
+  // quando a venda não melhorou o rank — nunca inventa celebração.
+  const competitionEvents = useSellerCompetitionEvents({
+    userId: remoteIdentityUserId, companyId: remoteIdentityCompanyId,
+    membershipRole: remoteIdentityMembershipRole, userIsActive: remoteIdentityUserIsActive,
+  });
+  const markCompetitionEventsSeenHook = useMarkCompetitionEventsSeen({
+    companyId: remoteIdentityCompanyId, userId: remoteIdentityUserId,
+  });
+  const [celebrationDismissed, setCelebrationDismissed] = useState(false);
+
   // Prefill de conveniência visual (SALES-A1-PRECHECK §13) — o payload
   // final SEMPRE reflete o que está de fato no formulário no momento do
   // submit, nunca um valor da Deal silenciosamente reenviado por baixo.
@@ -2720,6 +2731,44 @@ export function FlowRegistrarVenda({ payload, close }: any) {
 
   if (salesDataSource === 'remote') {
     if (remoteSaleDone) {
+      // §22/§24/§30 do EXEC — celebração real SOMENTE quando a própria
+      // venda de fato melhorou o rank do Seller (evento existe) — nunca
+      // enquanto o refetch ainda está carregando (nunca com zeros/fake).
+      // Vários unseen na mesma rodada: 1 evento principal, os demais são
+      // marcados vistos junto no dismiss (nunca fila de popups).
+      const primaryEvent = competitionEvents.status === 'ready'
+        ? selectPrimaryCompetitionEvent(competitionEvents.events)
+        : null;
+
+      if (primaryEvent && !celebrationDismissed) {
+        const copy = buildCompetitionCelebration(primaryEvent);
+        const handleDismissCelebration = async () => {
+          setCelebrationDismissed(true);
+          try {
+            const idsToMark = competitionEvents.status === 'ready'
+              ? competitionEvents.events.map((e) => e.id)
+              : [primaryEvent.id];
+            await markCompetitionEventsSeenHook.markSeen(idsToMark);
+          } catch {
+            // Falha ao marcar "visto" não é crítica o suficiente pra travar
+            // o fechamento do flow (§21 do PRECHECK original) — o Seller
+            // já viu a comemoração; na pior hipótese ela reaparece 1x no
+            // próximo load, nunca perde a venda em si.
+          } finally {
+            close();
+          }
+        };
+        return (
+          <CompetitionCelebration
+            copy={copy}
+            newRank={primaryEvent.newRank}
+            saleCount={primaryEvent.saleCount}
+            onDismiss={handleDismissCelebration}
+            dismissLabel="Concluir"
+          />
+        );
+      }
+
       return (
         <FlowShell eyebrow="REGISTRAR VENDA" title="Venda registrada" icon="trophy" accent="#27C75F" onClose={close}>
           <FlowSuccess title="Venda registrada." sub={remoteDeal ? `${remoteDeal.clientName} · ${remoteDeal.vehicle}.` : undefined}
