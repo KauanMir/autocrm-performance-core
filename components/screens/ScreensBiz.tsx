@@ -21,6 +21,7 @@ import { CompanyLogo } from '@/components/company/CompanyLogo';
 import type { PlatformCompanyRow } from '@/lib/companies/repository';
 import { listTimezones } from '@/lib/date/timezoneOptions';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
+import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
 import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
 import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
 import { useConfirmVisit } from '@/lib/hooks/useConfirmVisit';
@@ -1354,6 +1355,12 @@ function CompanyLogoSection({ userId, companyId, authorized, company }: {
 // um save bem-sucedido — nunca durante digitação normal, porque as
 // dependências são os valores string, não a identidade do objeto).
 function RemoteCompanySettingsForm({ userId, companyId, authorized, company }: {
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §8/§33 — `authorized` aqui é
+  // especificamente de ESCRITA (writeAuthorized do chamador): Manager
+  // sempre igual ao read (can_access_company já nega suspensa por
+  // membership), Super Admin operacional pode ler uma empresa suspensa mas
+  // nunca escrever nela (false neste caso, mesmo com companySettingsAccess
+  // geral true).
   userId: string; companyId: string; authorized: boolean; company: PlatformCompanyRow;
 }) {
   const [phone, setPhone] = useState(company.phone ?? '');
@@ -1426,10 +1433,10 @@ function RemoteCompanySettingsForm({ userId, companyId, authorized, company }: {
 // nunca renderiza o formulário antes de `company` estar de verdade
 // carregada (RemoteCompanySettingsForm só monta com dado real, nunca com
 // um placeholder disfarçado de dado).
-function ScreenAjustesEmpresaRemote({ userId, companyId, authorized }: {
-  userId: string; companyId: string | null; authorized: boolean;
+function ScreenAjustesEmpresaRemote({ userId, companyId, readAuthorized, writeAuthorized }: {
+  userId: string; companyId: string | null; readAuthorized: boolean; writeAuthorized: boolean;
 }) {
-  const settings = useCompanySettings({ userId, companyId, authorized });
+  const settings = useCompanySettings({ userId, companyId, authorized: readAuthorized });
 
   if (settings.status === 'loading') {
     return (
@@ -1461,7 +1468,7 @@ function ScreenAjustesEmpresaRemote({ userId, companyId, authorized }: {
     <RemoteCompanySettingsForm
       userId={userId}
       companyId={companyId as string}
-      authorized={authorized}
+      authorized={writeAuthorized}
       company={settings.company}
     />
   );
@@ -1492,14 +1499,25 @@ export function ScreenAjustes({ go }: any) {
   const [saved, setSaved] = useState(false);
   const setField = (k: keyof typeof companyForm, v: string) => { setCompanyForm((f: any) => ({ ...f, [k]: v })); setSaved(false); };
   // COMPANY-SETTINGS-R1-EXEC §14/§16 — Manager com membership ATIVA edita a
-  // PRÓPRIA empresa; Super Admin nunca ganha esta aba na superfície
-  // genérica de Ajustes (sem company context ainda, ver ScreenEmpresas).
-  // isLocalCommercialDataAllowed() é o MESMO gate mestre que já decide
-  // local/remoto para leads/tasks/visits/deals/sales — Ajustes > Empresa
-  // segue exatamente a mesma regra (§16 do PRECHECK).
+  // PRÓPRIA empresa. isLocalCommercialDataAllowed() é o MESMO gate mestre
+  // que já decide local/remoto para leads/tasks/visits/deals/sales —
+  // Ajustes > Empresa segue exatamente a mesma regra (§16 do PRECHECK).
+  //
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §27/§28 — dentro do contexto
+  // operacional explícito (/company/[id]), Super Admin GANHA esta aba
+  // reaproveitando o MESMO contrato (update_company_settings/
+  // update_company_logo já suportam Super Admin explícito, ver PRECHECK
+  // §18) — nunca companyId implícito, sempre operational.companyId. Leitura
+  // é permitida mesmo em empresa suspensa (§8); escrita nunca (§33,
+  // companyWriteAccess abaixo).
   const isLocalCompany = isLocalCommercialDataAllowed();
-  const companySettingsAccess = canManageCompanySettings(currentUser);
-  const companyId = currentUser?.activeMembership?.companyId ?? null;
+  const operational = useOperationalCompanyContext();
+  const isOperationalSuperAdmin = operational.mode === 'super_admin';
+  const companySettingsAccess = canManageCompanySettings(currentUser) || isOperationalSuperAdmin;
+  const companyId = isOperationalSuperAdmin
+    ? operational.companyId
+    : (currentUser?.activeMembership?.companyId ?? null);
+  const companyWriteAccess = companySettingsAccess && !(isOperationalSuperAdmin && operational.isReadOnly);
 
   // Same drag-and-drop pattern as the Pipeline Kanban (M0-K1): lifted React
   // state as the source of truth for what's being dragged, dataTransfer only
@@ -1680,7 +1698,8 @@ export function ScreenAjustes({ go }: any) {
             <ScreenAjustesEmpresaRemote
               userId={currentUser.id}
               companyId={companyId}
-              authorized={companySettingsAccess}
+              readAuthorized={companySettingsAccess}
+              writeAuthorized={companyWriteAccess}
             />
           )
         )

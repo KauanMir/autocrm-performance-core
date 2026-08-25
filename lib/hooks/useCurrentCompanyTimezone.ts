@@ -35,6 +35,10 @@ export type UseCurrentCompanyTimezoneOptions = {
   companyId: string | null;
   membershipRole: 'manager' | 'seller' | null;
   userIsActive: boolean;
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — true SOMENTE quando companyId vem
+  // de um OperationalCompanyContext em modo super_admin. Bypassa a exigência
+  // de membershipRole; false/omitido preserva 100% o comportamento anterior.
+  isSuperAdminContext?: boolean;
 };
 
 // Key sentinela usada SOMENTE quando a query está desabilitada — nunca
@@ -50,12 +54,12 @@ export function currentCompanyTimezoneQueryKey(companyId: string, userId: string
 }
 
 export function useCurrentCompanyTimezone(options: UseCurrentCompanyTimezoneOptions): HomeCompanyTimezone {
-  const { userId, companyId, membershipRole, userIsActive } = options;
+  const { userId, companyId, membershipRole, userIsActive, isSuperAdminContext = false } = options;
 
   const remoteLeadsEnabled = isRemoteLeadsEnabled();
   const hasUser = typeof userId === 'string' && userId.trim() !== '';
   const hasCompany = typeof companyId === 'string' && companyId.trim() !== '';
-  const isManagerOrSeller = membershipRole === 'manager' || membershipRole === 'seller';
+  const isManagerOrSeller = membershipRole === 'manager' || membershipRole === 'seller' || isSuperAdminContext;
 
   const queryEnabled = remoteLeadsEnabled && hasUser && hasCompany && userIsActive && isManagerOrSeller;
   const queryKey = hasCompany && hasUser

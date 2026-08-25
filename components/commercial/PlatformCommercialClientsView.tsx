@@ -13,6 +13,7 @@ import { PlatformLeadDetails } from '@/components/commercial/PlatformLeadDetails
 import { PlatformLeadCreateModal } from '@/components/commercial/PlatformLeadCreateModal';
 import { PlatformLeadEditModal } from '@/components/commercial/PlatformLeadEditModal';
 import { useCommercialCompanyContext } from '@/lib/commercial/CommercialCompanyContext';
+import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
 import { useCommercialCompanies } from '@/lib/hooks/useCommercialCompanies';
 import { usePlatformLeads } from '@/lib/hooks/usePlatformLeads';
 import { usePlatformPipelineStages } from '@/lib/hooks/usePlatformPipelineStages';
@@ -66,7 +67,19 @@ function LeadListCard({ lead, stageName, onOpen }: { lead: PlatformLeadRow; stag
 }
 
 export function PlatformCommercialClientsView({ userId, platformRole }: PlatformCommercialClientsViewProps) {
-  const { selectedCompanyId, setSelectedCompanyId } = useCommercialCompanyContext();
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §15/§24 — quando o Super Admin
+  // chegou via /company/[id] (OperationalCompanyContext em modo
+  // super_admin), essa é a ÚNICA autoridade de empresa: o seletor manual do
+  // CommercialCompanyContext (fluxo antigo, Super Admin genérico escolhendo
+  // livremente) nunca decide neste caso — nunca duas autoridades
+  // simultâneas (Company A no contexto operacional + Company B no
+  // comercial). Fora do contexto operacional, comportamento 100%
+  // preservado (seletor manual, como sempre).
+  const operational = useOperationalCompanyContext();
+  const isOperationalMode = operational.mode === 'super_admin';
+  const commercial = useCommercialCompanyContext();
+  const selectedCompanyId = isOperationalMode ? operational.companyId : commercial.selectedCompanyId;
+  const setSelectedCompanyId = commercial.setSelectedCompanyId;
   const companiesQuery = useCommercialCompanies({ userId, authorized: true });
   const stagesQuery = usePlatformPipelineStages({ companyId: selectedCompanyId, authorized: true });
   const [archived, setArchived] = useState(false);
@@ -129,6 +142,7 @@ export function PlatformCommercialClientsView({ userId, platformRole }: Platform
         companiesLoading={companiesQuery.isLoading}
         companiesError={companiesQuery.isError}
         readOnly={!canMutate}
+        hideSelector={isOperationalMode}
       />
 
       {!selectedCompanyId ? (

@@ -40,6 +40,25 @@ vi.mock('@/lib/store', () => ({
   useStore: () => ({}),
 }));
 
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — este teste monta o App REAL, que
+// monta OperationalCompanyProvider incondicionalmente (mesmo padrão de
+// CommercialCompanyProvider) — precisa de um passthrough, não só do hook.
+// mode:'none' preserva 100% o comportamento anterior (Manager continua via
+// activeMembership.companyId).
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  OperationalCompanyProvider: ({ children }: { children: React.ReactNode }) => children,
+  useOperationalCompanyContext: () => ({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  }),
+}));
+
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — Rail (dentro de App real) agora usa
+// next/navigation's useRouter ("Voltar para Empresas"). App Router real
+// exige contexto ausente neste harness de render isolado.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+}));
+
 vi.mock('@/components/podiums/Podiums', () => ({ PLACE: [] }));
 
 vi.mock('@/lib/services', () => ({

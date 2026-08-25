@@ -104,6 +104,35 @@ describe('useActiveCompanyIdentity — Super Admin / sem membership (§25)', () 
   });
 });
 
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — isSuperAdminContext bypassa a
+// exigência de membershipRole (OperationalCompanyContext já autorizou o
+// companyId via can_access_company antes de chegar aqui, nunca inferido
+// deste hook).
+describe('useActiveCompanyIdentity — isSuperAdminContext (SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC)', () => {
+  it('membershipRole null + isSuperAdminContext=true + companyId: status ready, mesmo shape (com status real)', async () => {
+    mockCompaniesResponse({ data: [companyRow({ status: 'suspensa' })], error: null });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(
+      () => useActiveCompanyIdentity({ userId: 'user-sa', companyId: 'company-1', membershipRole: null, userIsActive: true, isSuperAdminContext: true }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(result.current.status === 'ready' && result.current.company).toEqual({
+      id: 'company-1', name: 'Rcar Seminovos Gama', logoPath: 'company-1/logos/abc.png', timezone: 'America/Sao_Paulo', status: 'suspensa',
+    });
+  });
+
+  it('isSuperAdminContext=false (default) + membershipRole null: continua unavailable, nenhuma query — comportamento anterior 100% preservado', () => {
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(
+      () => useActiveCompanyIdentity({ userId: 'user-sa', companyId: 'company-1', membershipRole: null, userIsActive: true }),
+      { wrapper },
+    );
+    expect(result.current.status).toBe('unavailable');
+    expect(m.from).not.toHaveBeenCalled();
+  });
+});
+
 describe('useActiveCompanyIdentity — Manager/Seller com empresa (§24)', () => {
   it('Manager: status ready com id/name/logoPath/timezone', async () => {
     mockCompaniesResponse({ data: [companyRow()], error: null });
@@ -114,7 +143,7 @@ describe('useActiveCompanyIdentity — Manager/Seller com empresa (§24)', () =>
     );
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(result.current.status === 'ready' && result.current.company).toEqual({
-      id: 'company-1', name: 'Rcar Seminovos Gama', logoPath: 'company-1/logos/abc.png', timezone: 'America/Sao_Paulo',
+      id: 'company-1', name: 'Rcar Seminovos Gama', logoPath: 'company-1/logos/abc.png', timezone: 'America/Sao_Paulo', status: 'ativa',
     });
   });
 

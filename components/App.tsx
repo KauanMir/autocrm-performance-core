@@ -1,7 +1,8 @@
 'use client';
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/ui/Icon';
-import { NAV, Avatar, PageHead, LCard, LightScreen } from '@/components/ui/kit';
+import { NAV, Avatar, PageHead, LCard, LBtn, LightScreen } from '@/components/ui/kit';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle, TweakButton } from '@/components/ui/TweaksPanel';
 import { NAV_ROLES, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
@@ -12,9 +13,13 @@ import { useQueryCacheIdentity } from '@/lib/hooks/useQueryCacheIdentity';
 import { useLeadsRemoteBridgeLifecycle } from '@/lib/hooks/useLeadsRemoteBridgeLifecycle';
 import { useTasksRemoteBridgeLifecycle } from '@/lib/hooks/useTasksRemoteBridgeLifecycle';
 import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState';
-import { useActiveCompanyIdentity } from '@/lib/hooks/useActiveCompanyIdentity';
 import { CompanyLogo } from '@/components/company/CompanyLogo';
 import { CommercialCompanyProvider } from '@/lib/commercial/CommercialCompanyContext';
+import {
+  OperationalCompanyProvider,
+  useOperationalCompanyContext,
+  type OperationalCompanyMode,
+} from '@/lib/operational/OperationalCompanyContext';
 import { subscribeStore } from '@/lib/store';
 import { AuthService, SellerService, TaskService } from '@/lib/services';
 import { AuthFlow } from '@/components/auth/AuthFlow';
@@ -83,10 +88,35 @@ const COMMERCIAL_NAV_IDS = ['clientes', 'andamento'];
 // mais abaixo os devolve.
 const SUPER_ADMIN_OPERATIONAL_NAV_IDS = [...COMMERCIAL_NAV_IDS, 'pendencias', 'visitas', 'propostas', 'vendas', 'resultados'];
 
-function allowedNavIds(user: User | null): string[] {
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — dentro do contexto operacional
+// explícito (/company/[id]), a lista de nav ids do Super Admin é
+// COMPLETAMENTE diferente da lista genérica acima: só as superfícies com
+// contrato real pronto (PRECHECK §12-§17/§20/§31/§32) — nunca os 5 ids
+// membership-only (Tasks/Visits/Deals/Sales/Resultados continuam sem
+// contrato de Super Admin, mesmo dentro do contexto operacional) nem
+// 'empresas' (a ação "Voltar para Empresas" do Rail cobre essa navegação,
+// nunca duplicada como item de nav). Cada superfície continua atrás da
+// PRÓPRIA capability+flag — nunca um hardcode que ignore
+// isSuperAdminCommercialReadEnabled/canManageInvites/etc.
+function operationalSuperAdminNavIds(user: User): string[] {
+  const ids = ['home'];
+  if (isSuperAdminCommercialReadEnabled() && canAccessCommercialWorkspace(user)) {
+    ids.push('clientes', 'andamento');
+  }
+  if (canManageInvites(user) || (isRemoteStagesEnabled() && canAccessStageSettings(user))) {
+    ids.push('ajustes');
+  }
+  return ids;
+}
+
+function allowedNavIds(user: User | null, operationalMode: OperationalCompanyMode = 'none'): string[] {
   if (!user) return [];
   const isSuperAdmin = user.platformRole === 'super_admin';
   const membershipRole = user.activeMembership?.role ?? null;
+
+  if (isSuperAdmin && operationalMode === 'super_admin') {
+    return operationalSuperAdminNavIds(user);
+  }
 
   const base = isSuperAdmin
     ? NAV_ROLES.admin.filter((id) => !SUPER_ADMIN_OPERATIONAL_NAV_IDS.includes(id))
@@ -131,21 +161,17 @@ function PlaceholderScreen({ title }: { title: string }) {
 }
 
 function Rail({ current, go, currentUser }: { current: string; go: (id: string) => void; currentUser: User }) {
-  const allowedIds = allowedNavIds(currentUser);
-  // COMPANY-IDENTITY-LOGO-R1-EXEC §22/§24/§25/§30 — identidade visual da
-  // empresa ativa, abaixo do bloco KAPA CRM/PERFORMANCE (co-branding, nunca
-  // rebranding — §31). Manager/Seller: companyId = activeMembership.
-  // companyId (nunca escolha arbitrária, §24). Super Admin sem membership
-  // nunca recebe uma empresa "ativa" implícita — o hook devolve
-  // 'unavailable' e o bloco simplesmente não renderiza (§25/§50).
-  // Hook chamado INCONDICIONALMENTE (Rules of Hooks, mesmo padrão de
-  // useRemoteTasksScreenState logo abaixo).
-  const activeCompanyIdentity = useActiveCompanyIdentity({
-    userId: currentUser.id,
-    companyId: currentUser.activeMembership?.companyId ?? null,
-    membershipRole: currentUser.activeMembership?.role ?? null,
-    userIsActive: true,
-  });
+  const router = useRouter();
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — fonte ÚNICA de empresa
+  // operacional/identidade (§2/§17 do EXEC: nenhum fetch novo, o mesmo
+  // useActiveCompanyIdentity de sempre já roda dentro do Provider montado
+  // em App()). Manager/Seller: mode==='membership', comportamento 100%
+  // inalterado (§25/§50 do design original preservados). Super Admin sem
+  // /company/[id]: mode==='none', bloco de empresa some, exatamente como
+  // antes.
+  const operational = useOperationalCompanyContext();
+  const allowedIds = allowedNavIds(currentUser, operational.mode);
+  const isOperationalSuperAdmin = operational.mode === 'super_admin';
   // M1-E E7-A1: SellerService (lib/services.ts) lê um catálogo LOCAL, sem
   // company_id, sem namespace por empresa (achado do E7-A0) — fora do modo
   // local ele nunca é consultado aqui, para não misturar Seller de
@@ -213,12 +239,35 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
         </div>
       </div>
 
-      {activeCompanyIdentity.status === 'ready' && (
-        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: '0 22px 18px' }}>
-          <CompanyLogo name={activeCompanyIdentity.company.name} logoPath={activeCompanyIdentity.company.logoPath} size={30} />
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--txt-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {activeCompanyIdentity.company.name}
+      {operational.identity.status === 'ready' && (
+        <div style={{ position: 'relative', padding: '0 22px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <CompanyLogo name={operational.identity.company.name} logoPath={operational.identity.company.logoPath} size={30} />
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--txt-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {operational.identity.company.name}
+            </div>
           </div>
+          {/* SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §16 — badge próprio, nunca
+              reaproveita "Gerente"/"Administrador" (identidade falsa). */}
+          {isOperationalSuperAdmin && (
+            <div style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, letterSpacing: '.04em', color: '#5B9BFF', background: 'rgba(59,130,246,.14)', border: '1px solid rgba(59,130,246,.4)', padding: '3px 9px', borderRadius: 999 }}>
+              <Icon name="eye" size={11} stroke={2.4} /> VISUALIZANDO COMO SUPER ADMIN
+            </div>
+          )}
+          {isOperationalSuperAdmin && operational.isReadOnly && (
+            <div style={{ marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 800, letterSpacing: '.04em', color: '#E8CE72', background: 'rgba(212,175,55,.12)', border: '1px solid rgba(212,175,55,.35)', padding: '3px 9px', borderRadius: 999, marginLeft: 8 }}>
+              <Icon name="lock" size={11} stroke={2.4} /> EMPRESA SUSPENSA · SOMENTE LEITURA
+            </div>
+          )}
+          {isOperationalSuperAdmin && (
+            <button
+              onClick={() => router.push('/')}
+              className="focus-ring"
+              style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 7, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--line-dark, rgba(255,255,255,.08))', background: 'transparent', color: 'var(--txt-mid)', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+            >
+              <Icon name="arrowLeft" size={13} stroke={2.2} /> Voltar para Empresas
+            </button>
+          )}
         </div>
       )}
 
@@ -266,7 +315,184 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
   );
 }
 
-export function App() {
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §39/§40 — telas do "gate" operacional:
+// nunca um frame da empresa anterior, nunca um fallback silencioso para
+// outra empresa. Mostradas SOMENTE quando hasOperationalCompanyId (Super
+// Admin chegou via /company/[id]) — Manager/Seller/Super Admin genérico
+// nunca passam por aqui.
+function OperationalLoadingScreen() {
+  return (
+    <div style={{ height: '100vh', display: 'grid', placeItems: 'center', background: '#0a0a0b', color: 'var(--t-500, #8b8b93)', fontSize: 14 }}>
+      Carregando empresa…
+    </div>
+  );
+}
+
+function OperationalAccessDeniedScreen({ isError, onRetry }: { isError: boolean; onRetry?: () => void }) {
+  const router = useRouter();
+  return (
+    <div style={{ height: '100vh', display: 'grid', placeItems: 'center', background: '#0a0a0b' }}>
+      <div style={{ textAlign: 'center', maxWidth: 420, padding: 24 }}>
+        <div style={{ width: 48, height: 48, borderRadius: 14, background: 'rgba(255,255,255,.05)', display: 'grid', placeItems: 'center', margin: '0 auto 16px', color: 'var(--t-500, #8b8b93)' }}>
+          <Icon name="building" size={22} stroke={2} />
+        </div>
+        <div style={{ color: '#fff', fontSize: 16, fontWeight: 700, marginBottom: 8 }}>
+          Empresa não encontrada ou sem acesso
+        </div>
+        <div style={{ color: 'var(--t-500, #8b8b93)', fontSize: 13.5, marginBottom: 22, lineHeight: 1.5 }}>
+          {isError
+            ? 'Não foi possível carregar esta empresa agora.'
+            : 'Verifique o link ou volte para a lista de empresas.'}
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+          {isError && onRetry && <LBtn kind="ghost" icon="refresh" onClick={onRetry}>Tentar novamente</LBtn>}
+          <LBtn kind="gold" icon="arrowLeft" onClick={() => router.push('/')}>Voltar para Empresas</LBtn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — corpo autenticado real, montado
+// DENTRO de OperationalCompanyProvider (precisa consumir
+// useOperationalCompanyContext, impossível no mesmo componente que monta o
+// Provider). Recebe todo o estado de App() por prop/setter — nenhum estado
+// próprio novo além do que já existia, só passou a viver um nível abaixo.
+function AuthenticatedApp({
+  currentUser, current, setCurrent, navParams, setNavParams, t, setTweak,
+  animKey, setAnimKey, flow, openFlow, closeFlow, isDevPreview, hasOperationalCompanyId,
+}: {
+  currentUser: User;
+  current: string;
+  setCurrent: (v: string) => void;
+  navParams: any;
+  setNavParams: (v: any) => void;
+  t: any;
+  setTweak: (k: string, v: any) => void;
+  animKey: number;
+  setAnimKey: React.Dispatch<React.SetStateAction<number>>;
+  flow: { id: string; payload: any } | null;
+  openFlow: (id: string, payload?: any) => void;
+  closeFlow: () => void;
+  isDevPreview: boolean;
+  hasOperationalCompanyId: boolean;
+}) {
+  const operational = useOperationalCompanyContext();
+
+  const go = (id: string, params: any = null) => {
+    const allowed = allowedNavIds(currentUser, operational.mode);
+    if (!allowed.includes(id)) return;
+    setCurrent(id);
+    setNavParams(params);
+    document.querySelector('#scroll-host')?.scrollTo(0, 0);
+  };
+
+  useEffect(() => {
+    const allowed = allowedNavIds(currentUser, operational.mode);
+    if (!allowed.includes(current)) setCurrent('home');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, current, operational.mode]);
+
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §11 — Super Admin SEM contexto de
+  // empresa (mode==='none') nunca deve pousar numa Home comercial vazia:
+  // Empresas é a superfície inicial preferida. Guard `current === 'home'`
+  // evita disparar de novo depois que o próprio redirecionamento já rodou
+  // (ou se o usuário navegou manualmente de volta para Home).
+  useEffect(() => {
+    if (currentUser.platformRole !== 'super_admin' || operational.mode !== 'none') return;
+    if (current !== 'home') return;
+    const allowed = allowedNavIds(currentUser, operational.mode);
+    if (allowed.includes('empresas')) setCurrent('empresas');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, operational.mode]);
+
+  useEffect(() => { if (current === 'home') setAnimKey((k) => k + 1); }, [current, t.podium, setAnimKey]);
+
+  // §39/§40 do EXEC — enquanto a empresa da URL ainda está carregando/
+  // indisponível, NENHUM shell/Rail/nav é montado (nunca um frame da
+  // empresa anterior, nunca um item de nav clicável antes da autorização
+  // real ser confirmada).
+  if (hasOperationalCompanyId) {
+    if (operational.identity.status === 'loading' || operational.identity.status === 'local') {
+      return <OperationalLoadingScreen />;
+    }
+    if (operational.identity.status === 'error') {
+      return <OperationalAccessDeniedScreen isError onRetry={operational.identity.retry} />;
+    }
+    if (operational.identity.status !== 'ready') {
+      return <OperationalAccessDeniedScreen isError={false} />;
+    }
+  }
+
+  const Screens: Record<string, React.ComponentType<any>> = {
+    home: () => <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />,
+    clientes: ScreenClientes,
+    andamento: ScreenAndamento,
+    pendencias: ScreenPendencias,
+    visitas: ScreenVisitas,
+    propostas: ScreenPropostas,
+    vendas: ScreenVendas,
+    resultados: ScreenResultados,
+    ajustes: ScreenAjustes,
+    empresas: ScreenEmpresas,
+  };
+
+  const effectiveCurrent = allowedNavIds(currentUser, operational.mode).includes(current) ? current : 'home';
+  const Cur = Screens[effectiveCurrent];
+  const navItem = (NAV as any[]).find((n: any) => n.id === effectiveCurrent);
+
+  const shellErrorResetKey = [
+    currentUser.id,
+    currentUser.platformRole ?? '',
+    currentUser.activeMembership?.companyId ?? '',
+    currentUser.activeMembership?.role ?? '',
+    operational.companyId ?? '',
+  ].join(':');
+
+  return (
+    // M1-F S8-C2-B2: CommercialCompanyProvider montado UMA vez aqui, acima da
+    // troca de tela — assim a seleção do Super Admin sobrevive à navegação
+    // entre Clientes/Andamento (Provider compartilhado), e é limpa sozinha
+    // quando currentUser.id muda (login/logout/troca de usuário).
+    <CommercialCompanyProvider identityKey={currentUser.id}>
+      <AuthenticatedShellErrorBoundary key={shellErrorResetKey}>
+        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+          <Rail current={effectiveCurrent} go={go} currentUser={currentUser} />
+          <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
+            {effectiveCurrent === 'home'
+              ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />
+              : (Cur ? <Cur go={go} t={t} initialFilter={navParams?.filter ?? null} /> : <PlaceholderScreen title={navItem?.label} />)}
+          </main>
+
+          {isDevPreview && (
+            <TweaksPanel>
+              <TweakSection label="Pódio (tela inicial)" />
+              <TweakRadio label="Estilo do pódio" value={t.podium} options={['A', 'B', 'C', 'D']} onChange={(v: string) => setTweak('podium', v)} />
+              <div style={{ fontSize: 11.5, color: '#9aa1ac', padding: '0 2px 8px', lineHeight: 1.5 }}>A · Pódio, B · Líder, C · Galeria, D · Campeão (fotos reais)</div>
+              <TweakToggle label="Animações (coroa, partículas, brilho)" value={t.anim} onChange={(v: boolean) => setTweak('anim', v)} />
+              <TweakButton label="Reproduzir animação de entrada" onClick={() => setAnimKey((k) => k + 1)} />
+              <TweakSection label="Telas novas (revisão)" />
+              <TweakButton label="Ver Login" onClick={() => (window as any).__reviewAuth('login')} />
+              <TweakButton label="Ver Cadastro" onClick={() => (window as any).__reviewAuth('signup')} />
+              <TweakButton label="Ver Recuperação de senha" onClick={() => (window as any).__reviewAuth('recover')} />
+              <TweakButton label="Ver Onboarding" onClick={() => (window as any).__reviewAuth('onboarding')} />
+              {isLocalCommercialDataAllowed() && (
+                <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
+              )}
+              <TweakButton label="Ver Central de notificações" onClick={() => openFlow('notificacoes')} />
+              <TweakButton label="Ver Busca global" onClick={() => openFlow('busca')} />
+              <TweakButton label="Ver Galeria de estados" onClick={() => openFlow('estados')} />
+            </TweaksPanel>
+          )}
+
+          <FlowLayer flow={flow} close={closeFlow} openFlow={openFlow} go={go} />
+        </div>
+      </AuthenticatedShellErrorBoundary>
+    </CommercialCompanyProvider>
+  );
+}
+
+export function App({ operationalCompanyId = null }: { operationalCompanyId?: string | null } = {}) {
   // PILOT-UI-TRUTH-FIXES-R1-EXEC — TweaksPanel é uma ferramenta de dev/QA
   // (edit-mode via postMessage, revisão de telas de Auth, fixtures locais),
   // nunca deve alcançar um usuário real (Manager/Seller/Super Admin) em
@@ -337,14 +563,6 @@ export function App() {
   // snapshot mudar, mesmo depois de Rail deixar de depender dele.
   useTasksRemoteBridgeLifecycle(currentUser, () => _setTick(n => n + 1));
 
-  const go = (id: string, params: any = null) => {
-    if (!currentUser) return;
-    const allowed = allowedNavIds(currentUser);
-    if (!allowed.includes(id)) return;
-    setCurrent(id);
-    setNavParams(params);
-    document.querySelector('#scroll-host')?.scrollTo(0, 0);
-  };
   const openFlow = (id: string, payload: any = {}) => setFlow({ id, payload });
   const closeFlow = () => setFlow(null);
   const enter = (user: User) => { setCurrentUser(user); setFlow(null); };
@@ -376,34 +594,6 @@ export function App() {
 
   useEffect(() => { (window as any).__currentUser = currentUser; }, [currentUser]);
 
-  useEffect(() => {
-    if (!currentUser) return;
-    const allowed = allowedNavIds(currentUser);
-    if (!allowed.includes(current)) setCurrent('home');
-  }, [currentUser, current]);
-
-  useEffect(() => { if (current === 'home') setAnimKey(k => k + 1); }, [current, t.podium]);
-
-  const Screens: Record<string, React.ComponentType<any>> = {
-    home: () => <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />,
-    clientes: ScreenClientes,
-    andamento: ScreenAndamento,
-    pendencias: ScreenPendencias,
-    visitas: ScreenVisitas,
-    propostas: ScreenPropostas,
-    vendas: ScreenVendas,
-    resultados: ScreenResultados,
-    ajustes: ScreenAjustes,
-    empresas: ScreenEmpresas,
-  };
-
-  // Guarda SÍNCRONA de render: uma tela proibida nunca é renderizada, nem por
-  // um frame — o useEffect acima só sincroniza o estado depois. Cobre troca de
-  // usuário com estado antigo de navegação apontando para tela agora proibida.
-  const effectiveCurrent = currentUser && allowedNavIds(currentUser).includes(current) ? current : 'home';
-  const Cur = Screens[effectiveCurrent];
-  const navItem = (NAV as any[]).find((n: any) => n.id === effectiveCurrent);
-
   if (authLoading) {
     // Minimal, unstyled-on-purpose gate — just long enough to avoid flashing
     // the login screen while restoreSession() is still resolving. No new
@@ -419,58 +609,40 @@ export function App() {
     return <AuthFlow view={authView} setView={setAuthView} onAuthed={enter} onSignedUp={() => setAuthView('onboarding')} />;
   }
 
-  // M1-E E7-A2 — chave de reset do AuthenticatedShellErrorBoundary abaixo:
-  // muda em logout, login de outro usuário, troca de companyId/platformRole/
-  // membershipRole (mesmos campos já usados por useQueryCacheIdentity, nunca
-  // um novo estado global). Trocar a prop `key` de um componente força o
-  // React a desmontar a instância antiga (descartando `hasError`) e montar
-  // uma instância nova — nunca preso num erro da identidade anterior.
-  const shellErrorResetKey = [
-    currentUser.id,
-    currentUser.platformRole ?? '',
-    currentUser.activeMembership?.companyId ?? '',
-    currentUser.activeMembership?.role ?? '',
-  ].join(':');
+  const isSuperAdminUser = currentUser.platformRole === 'super_admin';
+  const hasOperationalCompanyId = isSuperAdminUser
+    && typeof operationalCompanyId === 'string' && operationalCompanyId.trim() !== '';
 
   return (
-    // M1-F S8-C2-B2: CommercialCompanyProvider montado UMA vez aqui, acima da
-    // troca de tela — assim a seleção do Super Admin sobrevive à navegação
-    // entre Clientes/Andamento (Provider compartilhado), e é limpa sozinha
-    // quando currentUser.id muda (login/logout/troca de usuário).
-    <CommercialCompanyProvider identityKey={currentUser.id}>
-      <AuthenticatedShellErrorBoundary key={shellErrorResetKey}>
-        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-          <Rail current={effectiveCurrent} go={go} currentUser={currentUser} />
-          <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
-            {effectiveCurrent === 'home'
-              ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />
-              : (Cur ? <Cur go={go} t={t} initialFilter={navParams?.filter ?? null} /> : <PlaceholderScreen title={navItem?.label} />)}
-          </main>
-
-          {isDevPreview && (
-            <TweaksPanel>
-              <TweakSection label="Pódio (tela inicial)" />
-              <TweakRadio label="Estilo do pódio" value={t.podium} options={['A', 'B', 'C', 'D']} onChange={(v: string) => setTweak('podium', v)} />
-              <div style={{ fontSize: 11.5, color: '#9aa1ac', padding: '0 2px 8px', lineHeight: 1.5 }}>A · Pódio, B · Líder, C · Galeria, D · Campeão (fotos reais)</div>
-              <TweakToggle label="Animações (coroa, partículas, brilho)" value={t.anim} onChange={(v: boolean) => setTweak('anim', v)} />
-              <TweakButton label="Reproduzir animação de entrada" onClick={() => setAnimKey(k => k + 1)} />
-              <TweakSection label="Telas novas (revisão)" />
-              <TweakButton label="Ver Login" onClick={() => (window as any).__reviewAuth('login')} />
-              <TweakButton label="Ver Cadastro" onClick={() => (window as any).__reviewAuth('signup')} />
-              <TweakButton label="Ver Recuperação de senha" onClick={() => (window as any).__reviewAuth('recover')} />
-              <TweakButton label="Ver Onboarding" onClick={() => (window as any).__reviewAuth('onboarding')} />
-              {isLocalCommercialDataAllowed() && (
-                <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
-              )}
-              <TweakButton label="Ver Central de notificações" onClick={() => openFlow('notificacoes')} />
-              <TweakButton label="Ver Busca global" onClick={() => openFlow('busca')} />
-              <TweakButton label="Ver Galeria de estados" onClick={() => openFlow('estados')} />
-            </TweaksPanel>
-          )}
-
-          <FlowLayer flow={flow} close={closeFlow} openFlow={openFlow} go={go} />
-        </div>
-      </AuthenticatedShellErrorBoundary>
-    </CommercialCompanyProvider>
+    // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — montado SEMPRE (Manager/Seller
+    // incluídos), generalizando a fonte de "empresa operacional" sem exigir
+    // que cada tela decida sozinha entre activeMembership e a URL (§2 do
+    // EXEC). Para Manager/Seller mode fica 'membership' e o comportamento é
+    // idêntico ao anterior — só passou a vir de um Provider único.
+    <OperationalCompanyProvider
+      userId={currentUser.id}
+      userIsActive={true}
+      membershipCompanyId={currentUser.activeMembership?.companyId ?? null}
+      membershipRole={currentUser.activeMembership?.role ?? null}
+      isSuperAdmin={isSuperAdminUser}
+      superAdminCompanyIdFromUrl={hasOperationalCompanyId ? operationalCompanyId : null}
+    >
+      <AuthenticatedApp
+        currentUser={currentUser}
+        current={current}
+        setCurrent={setCurrent}
+        navParams={navParams}
+        setNavParams={setNavParams}
+        t={t}
+        setTweak={setTweak}
+        animKey={animKey}
+        setAnimKey={setAnimKey}
+        flow={flow}
+        openFlow={openFlow}
+        closeFlow={closeFlow}
+        isDevPreview={isDevPreview}
+        hasOperationalCompanyId={hasOperationalCompanyId}
+      />
+    </OperationalCompanyProvider>
   );
 }

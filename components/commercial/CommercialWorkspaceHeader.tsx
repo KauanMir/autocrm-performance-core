@@ -22,10 +22,17 @@ export type CommercialWorkspaceHeaderProps = {
   // capability lida diretamente aqui (este componente permanece puramente
   // visual, sem autorização própria).
   readOnly?: boolean;
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §15 — true quando a empresa já vem
+  // fixa do OperationalCompanyContext (rota /company/[id]): o seletor
+  // manual não faz sentido (empresa fixada pela URL, nunca escolhida aqui,
+  // §6 do EXEC) — mostra só o rótulo "Acompanhando: X". false (default)
+  // preserva 100% o comportamento anterior (Super Admin genérico escolhe
+  // via dropdown).
+  hideSelector?: boolean;
 };
 
 export function CommercialWorkspaceHeader({
-  selectedCompanyId, onSelectCompany, companies, companiesLoading, companiesError, readOnly = true,
+  selectedCompanyId, onSelectCompany, companies, companiesLoading, companiesError, readOnly = true, hideSelector = false,
 }: CommercialWorkspaceHeaderProps) {
   const selected = companies.find((c) => c.id === selectedCompanyId) ?? null;
   return (
@@ -42,13 +49,15 @@ export function CommercialWorkspaceHeader({
           </span>
         )}
       </div>
-      <CommercialCompanySelector
-        selectedCompanyId={selectedCompanyId}
-        onChange={onSelectCompany}
-        companies={companies}
-        companiesLoading={companiesLoading}
-        companiesError={companiesError}
-      />
+      {!hideSelector && (
+        <CommercialCompanySelector
+          selectedCompanyId={selectedCompanyId}
+          onChange={onSelectCompany}
+          companies={companies}
+          companiesLoading={companiesLoading}
+          companiesError={companiesError}
+        />
+      )}
     </div>
   );
 }

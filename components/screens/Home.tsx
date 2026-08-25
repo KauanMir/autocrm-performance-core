@@ -27,6 +27,7 @@ import { selectPrimaryCompetitionEvent, buildCompetitionCelebration } from '@/li
 import { CompetitionCelebration } from '@/components/podiums/CompetitionCelebration';
 import { resolvePresetRange, resolveCustomRange, type PeriodPreset, type ResolvedPeriod } from '@/lib/date/companyPeriod';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
+import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
 import { groupLateTasksBySeller, groupOpenDealsBySeller, type SellerAttentionRow } from '@/lib/home/managerAttention';
 import type { RemoteTaskModel } from '@/lib/tasks/taskAdapter';
 import type { RemoteDealModel } from '@/lib/deals/adapter';
@@ -1054,6 +1055,18 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // Seller a RPC (list_current_company_seller_labels) já devolve só a
   // própria linha por RLS — nenhuma ampliação de visão aqui.
   const isSeller = currentUser?.activeMembership?.role === 'seller';
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — companyId/flag de leitura do
+  // Pódio/Ranking/movement (§18 do EXEC): SOMENTE leaderboard/timezone
+  // recebem o companyId operacional do Super Admin. leadsSummary/
+  // tasksSummary/visitsSummary/dealsSummary/salesSummary/sellerLabels
+  // continuam exclusivamente com activeMembership.companyId (sempre null
+  // para Super Admin) — Tasks/Visits/Deals/Sales/Resultados não têm
+  // contrato de Super Admin (PRECHECK §13-§17), nunca ampliado aqui.
+  const operational = useOperationalCompanyContext();
+  const isOperationalSuperAdmin = operational.mode === 'super_admin';
+  const podiumCompanyId = isOperationalSuperAdmin
+    ? operational.companyId
+    : (currentUser?.activeMembership?.companyId ?? null);
   const sellerLabels = useCurrentCompanySellerLabels({
     userId: currentUser?.id ?? null,
     companyId: currentUser?.activeMembership?.companyId ?? null,
@@ -1067,9 +1080,10 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // existente), zero RPC nova.
   const companyTimezone = useCurrentCompanyTimezone({
     userId: currentUser?.id ?? null,
-    companyId: currentUser?.activeMembership?.companyId ?? null,
+    companyId: podiumCompanyId,
     membershipRole: isManager ? 'manager' : isSeller ? 'seller' : null,
     userIsActive: Boolean(currentUser),
+    isSuperAdminContext: isOperationalSuperAdmin,
   });
   // Resolve o range de período aplicado ao Pódio — 'loading' enquanto o
   // timezone não chegou (nunca um filtro calculado com timezone errado),
@@ -1124,9 +1138,10 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // adicional aqui.
   const leaderboard = useCompanySellerLeaderboard({
     userId: currentUser?.id ?? null,
-    companyId: currentUser?.activeMembership?.companyId ?? null,
+    companyId: podiumCompanyId,
     membershipRole: isManager ? 'manager' : isSeller ? 'seller' : null,
     userIsActive: Boolean(currentUser),
+    isSuperAdminContext: isOperationalSuperAdmin,
     period: periodResolution,
   });
 
@@ -1314,20 +1329,29 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
           </div>
         )}
 
-        <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} dealsSummary={dealsSummary} salesSummary={salesSummary} /></div>
+        {/* SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §21/§22/§23 — Funil comercial/
+            Atenção imediata/Ações rápidas dependem de Tasks/Visits/Deals/
+            Sales, que não têm contrato de Super Admin (PRECHECK §13-§17):
+            ocultas por inteiro (nunca o aviso "indisponível nesta sessão",
+            nunca um zero falso) para Super Admin, operacional ou não. */}
+        {currentUser?.platformRole !== 'super_admin' && (
+          <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} dealsSummary={dealsSummary} salesSummary={salesSummary} /></div>
+        )}
         {isSellersLocal && <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>}
         {showRemoteMinhaDisputa && (
           <div style={{ marginBottom: 26 }}>
             <MinhaDisputa active={active} remote={{ me: (remoteCompetitionState as any).me, lines: remoteMinhaDisputaLines }} />
           </div>
         )}
-        <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} /></div>
+        {currentUser?.platformRole !== 'super_admin' && (
+          <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} /></div>
+        )}
         {isManager && (
           <div style={{ marginBottom: 26 }}>
             <ManagerTeamAttentionSection tasksSummary={tasksSummary} dealsSummary={dealsSummary} sellersById={sellerLabels.sellersById} />
           </div>
         )}
-        <QuickActions go={go} />
+        {currentUser?.platformRole !== 'super_admin' && <QuickActions go={go} />}
       </div>
       {showHomeCelebration && primaryPendingCompetitionEvent && (
         <CompetitionCelebration

@@ -30,6 +30,15 @@ vi.mock('@/lib/flags', async (importOriginal) => {
 
 vi.mock('@/lib/store', () => ({ useStore: () => ({}) }));
 
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — ScreenAjustes agora consome
+// OperationalCompanyContext (aba Empresa). mode:'none' preserva 100% o
+// comportamento anterior (Manager continua via activeMembership.companyId).
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: () => ({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  }),
+}));
+
 vi.mock('@/components/podiums/Podiums', () => ({ PLACE: [] }));
 
 vi.mock('@/lib/services', () => ({

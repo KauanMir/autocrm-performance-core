@@ -26,6 +26,13 @@ export type ActiveCompanyIdentity = {
   name: string;
   logoPath: string | null;
   timezone: string;
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — status real da empresa (mesma
+  // linha já buscada por fetchAccessibleCompanies, nenhum fetch novo).
+  // Necessário para o modo somente-leitura de empresa suspensa no contexto
+  // operacional do Super Admin (§8/§33 do EXEC); Manager/Seller nunca
+  // acessam uma empresa suspensa por membership (can_access_company já
+  // nega), então este campo é sempre 'ativa'/'implantacao' para eles.
+  status: PlatformCompanyRow['status'];
 };
 
 export type ActiveCompanyIdentityState =
@@ -40,6 +47,12 @@ export type UseActiveCompanyIdentityOptions = {
   companyId: string | null;
   membershipRole: 'manager' | 'seller' | null;
   userIsActive: boolean;
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — true SOMENTE quando companyId vem
+  // de um OperationalCompanyContext em modo super_admin (já autorizado via
+  // can_access_company na resolução do contexto, nunca inferido daqui).
+  // Bypassa a exigência de membershipRole; false/omitido preserva 100% o
+  // comportamento anterior (Manager/Seller inalterados).
+  isSuperAdminContext?: boolean;
 };
 
 // Key sentinela usada SOMENTE quando a query está desabilitada — nunca
@@ -51,12 +64,12 @@ export function currentCompanyIdentityQueryKey(companyId: string, userId: string
 }
 
 export function useActiveCompanyIdentity(options: UseActiveCompanyIdentityOptions): ActiveCompanyIdentityState {
-  const { userId, companyId, membershipRole, userIsActive } = options;
+  const { userId, companyId, membershipRole, userIsActive, isSuperAdminContext = false } = options;
 
   const remoteLeadsEnabled = isRemoteLeadsEnabled();
   const hasUser = typeof userId === 'string' && userId.trim() !== '';
   const hasCompany = typeof companyId === 'string' && companyId.trim() !== '';
-  const isManagerOrSeller = membershipRole === 'manager' || membershipRole === 'seller';
+  const isManagerOrSeller = membershipRole === 'manager' || membershipRole === 'seller' || isSuperAdminContext;
 
   const queryEnabled = remoteLeadsEnabled && hasUser && hasCompany && userIsActive && isManagerOrSeller;
   const queryKey = hasCompany && hasUser
@@ -81,6 +94,6 @@ export function useActiveCompanyIdentity(options: UseActiveCompanyIdentityOption
 
   return {
     status: 'ready',
-    company: { id: row.id, name: row.name, logoPath: row.logo_path, timezone: row.timezone },
+    company: { id: row.id, name: row.name, logoPath: row.logo_path, timezone: row.timezone, status: row.status },
   };
 }

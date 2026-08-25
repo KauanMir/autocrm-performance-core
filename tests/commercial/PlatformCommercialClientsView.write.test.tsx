@@ -25,6 +25,16 @@ vi.mock('@/lib/commercial/CommercialCompanyContext', () => ({
   }),
 }));
 
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — mode:'none' preserva 100% o
+// comportamento anterior (seletor manual via CommercialCompanyContext
+// continua sendo a autoridade quando não há contexto operacional /
+// company/[id]).
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: () => ({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  }),
+}));
+
 vi.mock('@/lib/hooks/useCommercialCompanies', () => ({
   useCommercialCompanies: () => ({
     queryEnabled: true, companies: m.companies.current, isLoading: false, isFetching: false,

@@ -38,6 +38,7 @@ const m = vi.hoisted(() => ({
   useSellerCompetitionEvents: vi.fn(),
   useMarkCompetitionEventsSeen: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
+  useOperationalCompanyContext: vi.fn(),
   leadServiceGetAll: vi.fn(),
   visitServiceGetAll: vi.fn(),
   dealServiceGetAll: vi.fn(),
@@ -115,6 +116,16 @@ vi.mock('@/lib/hooks/usePodiumViewPreference', () => ({
 
 vi.mock('@/lib/leads/localCommercialAccess', () => ({
   isLocalCommercialDataAllowed: m.isLocalCommercialDataAllowed,
+}));
+
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — Home agora consome
+// OperationalCompanyContext (mesma razão dos demais mocks acima: useQuery
+// real exige QueryClientProvider, ausente neste harness). Default
+// mode:'none' preserva 100% o comportamento anterior para Manager/Seller
+// (Home cai de volta em activeMembership.companyId) — testes de Super
+// Admin contextual sobrescrevem via m.useOperationalCompanyContext.mockReturnValue(...).
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: m.useOperationalCompanyContext,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -301,6 +312,13 @@ beforeEach(() => {
   m.sellerServiceGetAll.mockReset().mockReturnValue(DEFAULT_SELLERS);
   m.sellerServiceGetById.mockReset().mockReturnValue(null);
   m.authGetCurrentUser.mockReset().mockReturnValue(manager());
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — default mode:'none' preserva o
+  // comportamento de todos os testes existentes (Manager/Seller/Super
+  // Admin genérico); só os testes de Super Admin contextual (novo describe
+  // block) sobrescrevem para mode:'super_admin'.
+  m.useOperationalCompanyContext.mockReset().mockReturnValue({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  });
   m.useRemoteLeadsScreenState.mockReset();
   // Default true (equivalente a REMOTE_LEADS=false real) preserva o
   // comportamento de todos os testes existentes, escritos antes do E7-B1 —
@@ -1225,7 +1243,14 @@ describe('Home — Super Admin sem companyId operacional', () => {
     expect(m.dealServiceGetAll).not.toHaveBeenCalled();
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
     expect(m.saleServiceGetAll).not.toHaveBeenCalled();
-    expect(screen.getAllByText('Métricas comerciais indisponíveis nesta sessão.').length).toBeGreaterThan(0);
+    // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §21/§22/§23 — Funil comercial/
+    // Atenção imediata/Ações rápidas dependem de Tasks/Visits/Deals/Sales
+    // (sem contrato de Super Admin): ocultos por inteiro para Super Admin,
+    // nunca o aviso "indisponível nesta sessão" (comportamento anterior a
+    // este EXEC, superado — a seção nem monta mais).
+    expect(screen.queryByText('Funil comercial')).toBeNull();
+    expect(screen.queryByText('Atenção imediata')).toBeNull();
+    expect(screen.queryByText('Ações rápidas')).toBeNull();
   });
 });
 

@@ -20,6 +20,15 @@ const m = vi.hoisted(() => ({
   user: { current: null as any },
   flag: { current: true },
   openFlow: vi.fn(),
+  routerPush: vi.fn(),
+}));
+
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — ScreenEmpresas agora usa
+// next/navigation's useRouter para "Abrir operação" (§10 do EXEC). App
+// Router real exige um contexto de navegação ausente neste harness de
+// render isolado (mesmo motivo de todo hook remoto irmão mockado abaixo).
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: m.routerPush, replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
 }));
 
 vi.mock('@/lib/hooks/useCompanies', () => ({ useCompanies: m.useCompanies }));
@@ -97,6 +106,7 @@ beforeEach(() => {
   m.activateCompanyMock.mockResolvedValue(company({ id: 'c1', status: 'ativa' }));
   m.openFlow.mockReset();
   (window as any).__openFlow = m.openFlow;
+  m.routerPush.mockReset();
 });
 
 describe('ScreenEmpresas — autorização visual', () => {
@@ -329,5 +339,47 @@ describe('ScreenEmpresas — ativação (PLATFORM-COMPANY-ACTIVATION-A1)', () =>
     await waitFor(() => expect(screen.getByText('Você não tem permissão para ativar empresas.')).toBeInTheDocument());
     expect(screen.queryByText(/42501/)).toBeNull();
     expect(screen.queryByText(/permission denied/i)).toBeNull();
+  });
+});
+
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §10 — ação "Abrir operação" navega
+// para /company/[id]. Disponível em toda linha desta listagem (implantacao/
+// ativa/suspensa — cancelada nunca aparece aqui, RLS já a omite); a decisão
+// de somente-leitura para suspensa acontece DENTRO do contexto operacional
+// (OperationalCompanyProvider/Rail), nunca aqui.
+describe('ScreenEmpresas — Abrir operação (SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC)', () => {
+  it.each(['implantacao', 'ativa', 'suspensa'] as const)('status=%s: botão "Abrir operação" navega para /company/<id>', (status) => {
+    m.useCompanies.mockReturnValue(companiesResult({
+      isEmpty: false, hasData: true,
+      companies: [company({ id: 'c-target', name: 'Empresa Alvo', status })],
+    }));
+    render(<ScreenEmpresas />);
+    fireEvent.click(screen.getByText('Abrir operação'));
+    expect(m.routerPush).toHaveBeenCalledWith('/company/c-target');
+  });
+
+  it('múltiplas empresas: cada botão navega para o id correto da própria linha', () => {
+    m.useCompanies.mockReturnValue(companiesResult({
+      isEmpty: false, hasData: true,
+      companies: [
+        company({ id: 'c-a', name: 'Empresa A', status: 'ativa' }),
+        company({ id: 'c-b', name: 'Empresa B', status: 'implantacao' }),
+      ],
+    }));
+    render(<ScreenEmpresas />);
+    const buttons = screen.getAllByText('Abrir operação');
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[1]);
+    expect(m.routerPush).toHaveBeenCalledWith('/company/c-b');
+  });
+
+  it('nunca chama a RPC de ativação (ação independente de "Ativar empresa")', () => {
+    m.useCompanies.mockReturnValue(companiesResult({
+      isEmpty: false, hasData: true,
+      companies: [company({ id: 'c-target', status: 'implantacao' })],
+    }));
+    render(<ScreenEmpresas />);
+    fireEvent.click(screen.getByText('Abrir operação'));
+    expect(m.activateCompanyMock).not.toHaveBeenCalled();
   });
 });

@@ -31,6 +31,14 @@ export type UseCompanySellerLeaderboardOptions = {
   membershipRole: 'manager' | 'seller' | null;
   userIsActive: boolean;
   period: ResolvedPeriod;
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — true SOMENTE quando companyId vem
+  // de um OperationalCompanyContext em modo super_admin. Bypassa a exigência
+  // de membershipRole E faz a RPC receber p_company_id explícito (o backend
+  // já suporta isso via can_access_company, ver
+  // 20260825120000_podium_competition_leaderboard_r1.sql) — Manager/Seller
+  // continuam SEM enviar p_company_id (a RPC deriva da própria membership,
+  // comportamento 100% preservado).
+  isSuperAdminContext?: boolean;
 };
 
 const DISABLED_QUERY_KEY = ['company', null, 'seller-leaderboard', 'remote', null, null, null] as const;
@@ -55,12 +63,12 @@ export function companySellerLeaderboardQueryPrefix(companyId: string) {
 export function useCompanySellerLeaderboard(
   options: UseCompanySellerLeaderboardOptions,
 ): CompanySellerLeaderboardState {
-  const { userId, companyId, membershipRole, userIsActive, period } = options;
+  const { userId, companyId, membershipRole, userIsActive, period, isSuperAdminContext = false } = options;
 
   const remoteLeadsEnabled = isRemoteLeadsEnabled();
   const hasUser = typeof userId === 'string' && userId.trim() !== '';
   const hasCompany = typeof companyId === 'string' && companyId.trim() !== '';
-  const isManagerOrSeller = membershipRole === 'manager' || membershipRole === 'seller';
+  const isManagerOrSeller = membershipRole === 'manager' || membershipRole === 'seller' || isSuperAdminContext;
   const periodReady = period.kind === 'ready';
 
   const queryEnabled =
@@ -79,6 +87,7 @@ export function useCompanySellerLeaderboard(
     queryFn: () => fetchCompanySellerLeaderboard({
       periodStartMillis: (period as { startMillis: number }).startMillis,
       periodEndMillis: (period as { endMillis: number }).endMillis,
+      companyId: isSuperAdminContext ? (companyId ?? undefined) : undefined,
     }),
   });
 

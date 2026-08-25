@@ -30,6 +30,13 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/lib/store', () => ({ subscribeStore: () => () => {} }));
 
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — Rail (dentro de App real) agora usa
+// next/navigation's useRouter ("Voltar para Empresas"). App Router real
+// exige contexto ausente neste harness de render isolado.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+}));
+
 vi.mock('@/lib/services', () => ({
   AuthService: {
     restoreSession: () => Promise.resolve(m.restoredUser.current),

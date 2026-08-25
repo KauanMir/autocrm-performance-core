@@ -39,6 +39,7 @@ const ICONS: Record<string, React.ReactNode> = {
   flame: <path d="M12 2s4 4 4 8a4 4 0 0 1-8 0c0-1 .5-2 1-2.5C9 9 9 10 10 10c0-2 2-4 2-8Z" />,
   alert: <><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></>,
   clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  lock: <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M7 10V7a5 5 0 0 1 10 0v3" /></>,
   target: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" /></>,
   flag: <><path d="M4 22V4a1 1 0 0 1 .4-.8C6 2 8 2 10 3s4 1 6 0l1 .5V14l-1 .5c-2 1-4 1-6 0s-4-1-5.6.2" /></>,
   file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></>,

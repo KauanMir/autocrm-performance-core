@@ -13,6 +13,7 @@
 // profundidade — a autoridade real é sempre a RLS + is_platform_super_admin()
 // no banco.
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/ui/Icon';
 import { PageHead, LCard, LightScreen, LBtn, LBadge } from '@/components/ui/kit';
 import { FField, FlowShell, FlowSuccess } from '@/components/flows/FlowsShared';
@@ -55,11 +56,18 @@ function formatCreatedAt(iso: string): string {
   }
 }
 
-function CompanyRow({ company, onActivate, isActivating, justActivated }: {
+function CompanyRow({ company, onActivate, isActivating, justActivated, onOpenOperation }: {
   company: PlatformCompanyRow;
   onActivate: (company: PlatformCompanyRow) => void;
   isActivating: boolean;
   justActivated: boolean;
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — "Abrir operação" navega para
+  // /company/[id] (§10 do EXEC). Disponível para qualquer linha desta
+  // listagem: 'cancelada' nunca aparece aqui (companies_select_accessible
+  // já a omite, ver comentário de STATUS_LABEL acima), e 'suspensa' abre
+  // normalmente em modo somente-leitura (§8/§9 — decidido dentro do
+  // contexto operacional, nunca aqui).
+  onOpenOperation: (company: PlatformCompanyRow) => void;
 }) {
   // Ação só para 'implantacao' (§11 do EXEC): ativa não mostra (já ativa),
   // suspensa/cancelada não oferecem ativação neste lote (fora de escopo —
@@ -89,16 +97,21 @@ function CompanyRow({ company, onActivate, isActivating, justActivated }: {
           <span>Criada em {formatCreatedAt(company.created_at)}</span>
         </div>
       </div>
-      {canActivate && (
-        <LBtn
-          kind="gold"
-          icon={isActivating ? 'refresh' : 'checkCircle'}
-          onClick={() => onActivate(company)}
-          style={{ flexShrink: 0, opacity: isActivating ? 0.6 : 1, cursor: isActivating ? 'not-allowed' : 'pointer' }}
-        >
-          {isActivating ? 'Ativando…' : 'Ativar empresa'}
+      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        {canActivate && (
+          <LBtn
+            kind="gold"
+            icon={isActivating ? 'refresh' : 'checkCircle'}
+            onClick={() => onActivate(company)}
+            style={{ opacity: isActivating ? 0.6 : 1, cursor: isActivating ? 'not-allowed' : 'pointer' }}
+          >
+            {isActivating ? 'Ativando…' : 'Ativar empresa'}
+          </LBtn>
+        )}
+        <LBtn kind="ghost" icon="arrowRight" onClick={() => onOpenOperation(company)}>
+          Abrir operação
         </LBtn>
-      )}
+      </div>
     </LCard>
   );
 }
@@ -198,6 +211,7 @@ function CreateCompanyModal({ userId, onClose, onCreated }: {
 }
 
 export function ScreenEmpresas() {
+  const router = useRouter();
   const currentUser = AuthService.getCurrentUser();
   const authorized = isPlatformAdminEnabled() && canAccessPlatformAdmin(currentUser);
   const [modalOpen, setModalOpen] = useState(false);
@@ -291,6 +305,7 @@ export function ScreenEmpresas() {
               onActivate={handleActivateClick}
               isActivating={activatingId === c.id}
               justActivated={justActivatedId === c.id}
+              onOpenOperation={(company) => router.push(`/company/${company.id}`)}
             />
           ))}
         </div>

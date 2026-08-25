@@ -12,6 +12,7 @@ import { PlatformLeadDetails } from '@/components/commercial/PlatformLeadDetails
 import { PlatformLeadCreateModal } from '@/components/commercial/PlatformLeadCreateModal';
 import { PlatformLeadEditModal } from '@/components/commercial/PlatformLeadEditModal';
 import { useCommercialCompanyContext } from '@/lib/commercial/CommercialCompanyContext';
+import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
 import { useCommercialCompanies } from '@/lib/hooks/useCommercialCompanies';
 import { usePlatformLeads } from '@/lib/hooks/usePlatformLeads';
 import { usePlatformPipelineStages } from '@/lib/hooks/usePlatformPipelineStages';
@@ -50,7 +51,15 @@ function PipelineLeadCard({ lead, onOpen }: { lead: PlatformLeadRow; onOpen: () 
 }
 
 export function PlatformCommercialPipelineView({ userId, platformRole }: PlatformCommercialPipelineViewProps) {
-  const { selectedCompanyId, setSelectedCompanyId } = useCommercialCompanyContext();
+  // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §15/§25 — mesma regra de
+  // PlatformCommercialClientsView: OperationalCompanyContext é a autoridade
+  // quando presente (rota /company/[id]), nunca o seletor manual do
+  // CommercialCompanyContext ao mesmo tempo.
+  const operational = useOperationalCompanyContext();
+  const isOperationalMode = operational.mode === 'super_admin';
+  const commercial = useCommercialCompanyContext();
+  const selectedCompanyId = isOperationalMode ? operational.companyId : commercial.selectedCompanyId;
+  const setSelectedCompanyId = commercial.setSelectedCompanyId;
   const companiesQuery = useCommercialCompanies({ userId, authorized: true });
   const stagesQuery = usePlatformPipelineStages({ companyId: selectedCompanyId, authorized: true });
   const leadsQuery = usePlatformLeads({ companyId: selectedCompanyId, archived: false, authorized: true });
@@ -93,6 +102,7 @@ export function PlatformCommercialPipelineView({ userId, platformRole }: Platfor
         companiesLoading={companiesQuery.isLoading}
         companiesError={companiesQuery.isError}
         readOnly={!canMutate}
+        hideSelector={isOperationalMode}
       />
 
       {!selectedCompanyId ? (

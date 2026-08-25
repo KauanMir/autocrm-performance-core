@@ -21,6 +21,16 @@ vi.mock('@/lib/flags', async (importOriginal) => {
   return { ...actual, isSuperAdminCommercialWriteEnabled: () => m.writeFlag.current };
 });
 
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — mode:'none' preserva 100% este
+// fluxo E2E existente (seletor manual via CommercialCompanyProvider REAL
+// continua sendo a autoridade; nenhum contexto operacional /company/[id]
+// nesta suíte).
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: () => ({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  }),
+}));
+
 import { CommercialCompanyProvider } from '@/lib/commercial/CommercialCompanyContext';
 import { PlatformCommercialClientsView } from '@/components/commercial/PlatformCommercialClientsView';
 

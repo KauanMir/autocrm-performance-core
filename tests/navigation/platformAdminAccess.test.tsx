@@ -27,6 +27,13 @@ vi.mock('@/lib/flags', async (importOriginal) => {
 
 vi.mock('@/lib/store', () => ({ subscribeStore: () => () => {} }));
 
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — Rail/ScreenEmpresas (dentro de App
+// real) agora usam next/navigation's useRouter. App Router real exige
+// contexto ausente neste harness de render isolado.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
+}));
+
 vi.mock('@/lib/services', () => ({
   AuthService: {
     restoreSession: () => Promise.resolve(m.restoredUser.current),
@@ -126,38 +133,38 @@ describe('menu Empresas por role/platformRole e flag', () => {
   it('Super Admin vê Empresas com a flag ON', async () => {
     m.flag.current = true;
     await renderApp(user('admin', 'super_admin'));
-    expect(screen.getByText('Empresas')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Empresas' })).toBeInTheDocument();
   });
 
   it('Super Admin NÃO vê Empresas com a flag OFF', async () => {
     m.flag.current = false;
     await renderApp(user('admin', 'super_admin'));
-    expect(screen.queryByText('Empresas')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Empresas' })).toBeNull();
   });
 
   it('ADMIN legado (platformRole null) não vê Empresas mesmo com a flag ON', async () => {
     m.flag.current = true;
     await renderApp(user('admin', null));
-    expect(screen.queryByText('Empresas')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Empresas' })).toBeNull();
   });
 
   it('Manager não vê Empresas com a flag ON', async () => {
     m.flag.current = true;
     await renderApp(user('manager', null));
-    expect(screen.queryByText('Empresas')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Empresas' })).toBeNull();
   });
 
   it('Seller não vê Empresas com a flag ON', async () => {
     m.flag.current = true;
     await renderApp(user('seller', null));
-    expect(screen.queryByText('Empresas')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Empresas' })).toBeNull();
   });
 
   it('usuário null não vê menu nenhum', async () => {
     m.flag.current = true;
     await renderApp(null);
     expect(screen.getByTestId('mock-login')).toBeInTheDocument();
-    expect(screen.queryByText('Empresas')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Empresas' })).toBeNull();
   });
 
   it('acesso direto (via go) a "empresas" sem autorização não renderiza a tela — cai em home', async () => {
@@ -166,7 +173,7 @@ describe('menu Empresas por role/platformRole e flag', () => {
     // Não há entrada de menu para clicar (já coberto acima); a guarda
     // síncrona de App (effectiveCurrent) garante que mesmo que `current`
     // apontasse para 'empresas' por qualquer motivo, a tela não renderiza.
-    expect(screen.queryByText('Empresas')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Empresas' })).toBeNull();
     expect(screen.getByTestId('screen-home')).toBeInTheDocument();
   });
 
@@ -181,7 +188,7 @@ describe('acesso real à tela Empresas', () => {
   it('Super Admin com flag ON acessa a tela e dispara a listagem', async () => {
     m.flag.current = true;
     await renderApp(user('admin', 'super_admin'));
-    fireEvent.click(screen.getByText('Empresas'));
+    fireEvent.click(screen.getByRole('button', { name: 'Empresas' }));
     await waitFor(() => expect(fetchAccessibleCompaniesMock).toHaveBeenCalled());
   });
 });
@@ -190,20 +197,20 @@ describe('troca de usuário com tela Empresas aberta', () => {
   it('Super Admin → Manager com flag ON: acesso removido imediatamente (volta para home)', async () => {
     m.flag.current = true;
     await renderApp(user('admin', 'super_admin'));
-    fireEvent.click(screen.getByText('Empresas'));
+    fireEvent.click(screen.getByRole('button', { name: 'Empresas' }));
     await waitFor(() => expect(fetchAccessibleCompaniesMock).toHaveBeenCalled());
 
     switchUser(user('manager', null));
-    expect(screen.queryByText('Empresas')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Empresas' })).toBeNull();
     expect(screen.getByTestId('screen-home')).toBeInTheDocument();
   });
 
   it('Manager → Super Admin com flag ON: ganha acesso a Empresas', async () => {
     m.flag.current = true;
     await renderApp(user('manager', null));
-    expect(screen.queryByText('Empresas')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Empresas' })).toBeNull();
 
     switchUser(user('admin', 'super_admin'));
-    expect(screen.getByText('Empresas')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Empresas' })).toBeInTheDocument();
   });
 });
