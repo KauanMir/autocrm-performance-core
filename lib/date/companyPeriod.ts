@@ -17,6 +17,21 @@ export interface MillisRange {
   endMillis: number;
 }
 
+// HOME-FILTERS-R1-EXEC / PODIUM-COMPETITION-R1-EXEC — resolução do período
+// em uso pelo Pódio/leaderboard real, discriminada para o consumidor saber
+// exatamente por que ainda não tem uma janela pronta: 'loading' enquanto o
+// timezone da empresa carrega (nunca um filtro aplicado com timezone do
+// navegador), 'unavailable'/'error' espelham o próprio status de
+// useCurrentCompanyTimezone, 'ready' carrega o range calculado (preset ou
+// custom, sempre ancorado no timezone real). Movido para cá (fora de
+// Home.tsx) para que lib/hooks/useCompanySellerLeaderboard.ts também possa
+// usá-lo, sem um hook importando de um arquivo de componente.
+export type ResolvedPeriod =
+  | { kind: 'loading' }
+  | { kind: 'unavailable' }
+  | { kind: 'error'; retry: () => void }
+  | ({ kind: 'ready' } & MillisRange);
+
 function zonedYMD(date: Date, timeZone: string): { year: number; month: number; day: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone, year: 'numeric', month: '2-digit', day: '2-digit',

@@ -102,18 +102,20 @@ function Standee({ s, pl, first, active, anim }: { s: any; pl: any; first: boole
             {first && anim && <div style={{ position: 'absolute', inset: -7, borderRadius: '50%', boxShadow: '0 0 30px 2px rgba(212,175,55,.5)', animation: 'spotBreathe 3.4s ease-in-out infinite', pointerEvents: 'none' }} />}
           </div>
           <div className="display" style={{ marginTop: 15, width: '100%', textAlign: 'center', fontSize: first ? 24 : 19, fontWeight: 800, color: '#fff', letterSpacing: '-.01em' }}>{s.name}</div>
-          <div style={{ fontSize: 12, color: 'var(--txt-lo)', marginTop: 4 }}>{s.team}</div>
+          {s.team && <div style={{ fontSize: 12, color: 'var(--txt-lo)', marginTop: 4 }}>{s.team}</div>}
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: first ? 14 : 11 }}>
             <span className="display tnum" style={{ fontSize: first ? 80 : 56, fontWeight: 900, color: first ? '#E8CE72' : '#fff', lineHeight: .82, letterSpacing: '-.04em', textShadow: first ? '0 6px 32px rgba(212,175,55,.55)' : 'none' }}>
               {active ? <CountUp value={s.sales} active={active} /> : s.sales}
             </span>
             <span style={{ fontSize: 13, color: 'var(--txt-mid)', fontWeight: 600 }}>vendas</span>
           </div>
-          <div style={{ marginTop: first ? 16 : 12, width: '100%', display: 'flex', gap: 6, paddingTop: first ? 14 : 11, borderTop: '1px solid var(--line-dark)' }}>
-            <MiniStat label="Leads" value={s.leads} active={active} fs={first ? 24 : 20} lfs={10} />
-            <MiniStat label="Visitas" value={s.visits} active={active} fs={first ? 24 : 20} lfs={10} />
-            <MiniStat label="Conv." value={s.conv} suf="%" active={active} accent={first ? '#E8CE72' : undefined} fs={first ? 24 : 20} lfs={10} />
-          </div>
+          {(typeof s.leads === 'number' || typeof s.visits === 'number' || typeof s.conv === 'number') && (
+            <div style={{ marginTop: first ? 16 : 12, width: '100%', display: 'flex', gap: 6, paddingTop: first ? 14 : 11, borderTop: '1px solid var(--line-dark)' }}>
+              {typeof s.leads === 'number' && <MiniStat label="Leads" value={s.leads} active={active} fs={first ? 24 : 20} lfs={10} />}
+              {typeof s.visits === 'number' && <MiniStat label="Visitas" value={s.visits} active={active} fs={first ? 24 : 20} lfs={10} />}
+              {typeof s.conv === 'number' && <MiniStat label="Conv." value={s.conv} suf="%" active={active} accent={first ? '#E8CE72' : undefined} fs={first ? 24 : 20} lfs={10} />}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -121,8 +123,13 @@ function Standee({ s, pl, first, active, anim }: { s: any; pl: any; first: boole
 }
 
 function PodiumA({ top3, anim, active }: { top3: any[]; anim?: boolean; active?: boolean }) {
-  const order = [top3[1], top3[0], top3[2]];
-  const idx = [1, 0, 2];
+  // PODIUM-COMPETITION-R1-EXEC — top3 real pode ter 1 ou 2 sellers (empresa
+  // pequena, poucos ativos), nunca só 3 como o fixture original sempre
+  // garantia — filtra os slots [2º,1º,3º] que existirem de verdade, nunca
+  // acessa .id/.name de um slot vazio (Boolean(s) descarta undefined).
+  const order = ([top3[1], top3[0], top3[2]] as any[])
+    .map((s, i) => ({ s, place: [1, 0, 2][i] }))
+    .filter((o) => Boolean(o.s));
   const plinthH: Record<number, number> = { 0: 232, 1: 150, 2: 100 };
   const colW: Record<number, number> = { 0: 312, 1: 250, 2: 250 };
   return (
@@ -130,8 +137,8 @@ function PodiumA({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
       <div style={{ position: 'absolute', left: '50%', bottom: 18, transform: 'translateX(-50%)', width: '116%', height: 230, background: 'radial-gradient(ellipse at 50% 12%, rgba(212,175,55,.13), transparent 60%)', pointerEvents: 'none', animation: anim ? 'floorShine 6s ease-in-out infinite' : 'none' }} />
       <div style={{ position: 'absolute', left: '4%', right: '4%', bottom: 28, height: 1, background: 'linear-gradient(90deg, transparent, rgba(255,255,255,.16), transparent)' }} />
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 18, position: 'relative', zIndex: 2 }}>
-        {order.map((s, i) => {
-          const place = idx[i]; const pl = PLACE[place]; const first = place === 0;
+        {order.map(({ s, place }, i) => {
+          const pl = PLACE[place]; const first = place === 0;
           return (
             <div key={s.id} style={{ width: colW[place], display: 'flex', flexDirection: 'column', alignItems: 'center', animation: anim ? `riseUp .7s ${0.12 * i}s both` : 'none', position: 'relative' }}>
               {first && <Spotlight anim={anim} />}
@@ -149,6 +156,9 @@ function PodiumA({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
 
 function PodiumB({ top3, anim, active }: { top3: any[]; anim?: boolean; active?: boolean }) {
   const leader = top3[0];
+  // PODIUM-COMPETITION-R1-EXEC — top3 real pode ter 0 sellers (roster
+  // ativo vazio) — nunca acessa leader.name/leader.sales sem checar.
+  if (!leader) return null;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 18, padding: '6px' }}>
       <div style={{
@@ -175,10 +185,12 @@ function PodiumB({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
           </div>
           <div style={{ minWidth: 0 }}>
             <div className="display" style={{ fontSize: 30, fontWeight: 800, color: '#fff', letterSpacing: '-.02em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{leader.name}</div>
-            <div style={{ fontSize: 14, color: 'var(--txt-mid)', marginTop: 3 }}>Equipe {leader.team}</div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10, color: '#27C75F', fontSize: 13.5, fontWeight: 700, whiteSpace: 'nowrap' }}>
-              <Icon name="trend" size={15} stroke={2.4} /> +{leader.growth}% na semana
-            </div>
+            {leader.team && <div style={{ fontSize: 14, color: 'var(--txt-mid)', marginTop: 3 }}>Equipe {leader.team}</div>}
+            {typeof leader.growth === 'number' && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10, color: '#27C75F', fontSize: 13.5, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                <Icon name="trend" size={15} stroke={2.4} /> +{leader.growth}% na semana
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 24 }}>
@@ -188,32 +200,34 @@ function PodiumB({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
           <span style={{ fontSize: 17, color: 'var(--txt-mid)', fontWeight: 600 }}>vendas no período</span>
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 'auto', paddingTop: 24, borderTop: '1px solid var(--line-dark)' }}>
-          <MiniStat label="Leads" value={leader.leads} active={active} fs={28} lfs={11} />
-          <MiniStat label="Agendadas" value={leader.scheduled} active={active} fs={28} lfs={11} />
-          <MiniStat label="Visitas" value={leader.visits} active={active} fs={28} lfs={11} />
-          <MiniStat label="Conversão" value={leader.conv} suf="%" active={active} accent="#E8CE72" fs={28} lfs={11} />
+          {typeof leader.leads === 'number' && <MiniStat label="Leads" value={leader.leads} active={active} fs={28} lfs={11} />}
+          {typeof leader.scheduled === 'number' && <MiniStat label="Agendadas" value={leader.scheduled} active={active} fs={28} lfs={11} />}
+          {typeof leader.visits === 'number' && <MiniStat label="Visitas realizadas" value={leader.visits} active={active} fs={28} lfs={11} />}
+          {typeof leader.conv === 'number' && <MiniStat label="Conversão" value={leader.conv} suf="%" active={active} accent="#E8CE72" fs={28} lfs={11} />}
         </div>
         {anim && <GoldParticles count={9} />}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        {[top3[1], top3[2]].map((s, i) => {
-          const place = i + 1; const pl = PLACE[place];
+        {([top3[1], top3[2]] as any[]).map((s, i) => ({ s, place: i + 1 })).filter((o) => Boolean(o.s)).map(({ s, place }) => {
+          const pl = PLACE[place];
           return (
             <div key={s.id} style={{
               flex: 1, borderRadius: 18, padding: 24, background: 'linear-gradient(180deg,#1a1a1d,#131315)',
               border: '1px solid var(--line-dark)', display: 'flex', alignItems: 'center', gap: 18,
-              borderLeft: `4px solid ${pl.ring}`, boxShadow: 'var(--shadow-md)', animation: anim ? `riseUp .6s ${0.15 + i * 0.1}s both` : 'none',
+              borderLeft: `4px solid ${pl.ring}`, boxShadow: 'var(--shadow-md)', animation: anim ? `riseUp .6s ${0.15 + (place - 1) * 0.1}s both` : 'none',
             }}>
               <div className="display" style={{ fontSize: 42, fontWeight: 900, color: pl.ring, width: 48, textAlign: 'center' }}>{pl.tag}</div>
               <Avatar name={s.name} size={68} ring={pl.ring} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="display" style={{ fontSize: 21, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
-                <div style={{ display: 'flex', gap: 14, marginTop: 8 }}>
-                  <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.leads}</b> leads</span>
-                  <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.visits}</b> visitas</span>
-                  <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.conv}%</b> conv.</span>
-                </div>
+                {(typeof s.leads === 'number' || typeof s.visits === 'number' || typeof s.conv === 'number') && (
+                  <div style={{ display: 'flex', gap: 14, marginTop: 8 }}>
+                    {typeof s.leads === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.leads}</b> leads</span>}
+                    {typeof s.visits === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.visits}</b> visitas</span>}
+                    {typeof s.conv === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.conv}%</b> conv.</span>}
+                  </div>
+                )}
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div className="display tnum" style={{ fontSize: 48, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{active ? <CountUp value={s.sales} active={active} /> : s.sales}</div>
@@ -228,14 +242,17 @@ function PodiumB({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
 }
 
 function PodiumC({ top3, anim, active }: { top3: any[]; anim?: boolean; active?: boolean }) {
-  const order = [top3[1], top3[0], top3[2]];
-  const idx = [1, 0, 2];
+  // PODIUM-COMPETITION-R1-EXEC — mesmo raciocínio de PodiumA: top3 real
+  // pode ter 1 ou 2 sellers, nunca só 3.
+  const order = ([top3[1], top3[0], top3[2]] as any[])
+    .map((s, i) => ({ s, place: [1, 0, 2][i] }))
+    .filter((o) => Boolean(o.s));
   return (
     <div style={{ position: 'relative', padding: '52px 8px 28px' }}>
       <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 620, height: 620, background: 'radial-gradient(circle, rgba(212,175,55,.16), transparent 62%)', pointerEvents: 'none' }} />
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 34, position: 'relative' }}>
-        {order.map((s, i) => {
-          const place = idx[i]; const pl = PLACE[place]; const first = place === 0;
+        {order.map(({ s, place }, i) => {
+          const pl = PLACE[place]; const first = place === 0;
           const sz = first ? 184 : 134;
           return (
             <div key={s.id} style={{ width: first ? 300 : 232, textAlign: 'center', marginBottom: first ? 0 : 26, animation: anim ? `riseUp .7s ${0.12 * i}s both` : 'none' }}>
@@ -252,15 +269,17 @@ function PodiumC({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
                 {first && anim && <GoldParticles count={10} />}
               </div>
               <div className="display" style={{ marginTop: 24, width: '100%', textAlign: 'center', fontSize: first ? 27 : 21, fontWeight: 800, color: '#fff' }}>{s.name}</div>
-              <div style={{ fontSize: 13, color: 'var(--txt-lo)', marginTop: 4 }}>{s.team}</div>
+              {s.team && <div style={{ fontSize: 13, color: 'var(--txt-lo)', marginTop: 4 }}>{s.team}</div>}
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 7, marginTop: 14 }}>
                 <span className="display tnum" style={{ fontSize: first ? 64 : 46, fontWeight: 900, color: first ? '#E8CE72' : '#fff', lineHeight: 1, letterSpacing: '-.03em' }}>{active ? <CountUp value={s.sales} active={active} /> : s.sales}</span>
                 <span style={{ fontSize: 14, color: 'var(--txt-mid)' }}>vendas</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line-dark)' }}>
-                <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.visits}</b> visitas</span>
-                <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: first ? '#E8CE72' : 'var(--txt-mid)' }}>{s.conv}%</b> conv.</span>
-              </div>
+              {(typeof s.visits === 'number' || typeof s.conv === 'number') && (
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line-dark)' }}>
+                  {typeof s.visits === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.visits}</b> visitas</span>}
+                  {typeof s.conv === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: first ? '#E8CE72' : 'var(--txt-mid)' }}>{s.conv}%</b> conv.</span>}
+                </div>
+              )}
             </div>
           );
         })}
@@ -277,22 +296,27 @@ function PhotoSlot({ s, w, h, radius, gold, ring }: { s: any; w: number; h: numb
       boxShadow: gold ? '0 0 0 1px rgba(212,175,55,.35), 0 22px 60px -20px rgba(212,175,55,.6)' : '0 16px 40px -22px rgba(0,0,0,.85)',
       animation: gold ? 'goldPulse 3.6s ease-in-out infinite' : undefined,
     }}>
-      <image-slot id={`podium-foto-${s.id}`} shape="rounded" radius={String(radius)} fit="cover"
-        placeholder="Arraste a foto" style={{ display: 'block', width: '100%', height: '100%', borderRadius: radius + 'px', overflow: 'hidden' }}></image-slot>
-      <div style={{ position: 'absolute', inset: 5, borderRadius: radius, display: 'grid', placeItems: 'center', pointerEvents: 'none', zIndex: 0 }}>
-        <span className="display" style={{ fontSize: gold ? 92 : 64, fontWeight: 900, color: 'rgba(255,255,255,.05)' }}>{initials(s.name)}</span>
+      {/* COMPANY-IDENTITY-LOGO-R1-EXEC/PODIUM-COMPETITION-R1-EXEC §25 — o
+          <image-slot> original (Claude Design editor-only, sem upload real)
+          foi removido: não existe foto de Seller no produto, nunca uma
+          logo/foto fake. O fallback de iniciais abaixo é o conteúdo real. */}
+      <div style={{ position: 'absolute', inset: 5, borderRadius: radius, display: 'grid', placeItems: 'center', pointerEvents: 'none', zIndex: 0, background: 'radial-gradient(circle at 32% 26%, #232327, #141416)' }}>
+        <span className="display" style={{ fontSize: gold ? 92 : 64, fontWeight: 900, color: 'rgba(255,255,255,.14)' }}>{initials(s.name)}</span>
       </div>
       <div style={{ position: 'absolute', left: 5, right: 5, bottom: 5, borderRadius: `0 0 ${radius}px ${radius}px`, padding: gold ? '34px 16px 14px' : '26px 13px 12px', background: 'linear-gradient(180deg, transparent, rgba(6,6,7,.62) 42%, rgba(6,6,7,.92))', pointerEvents: 'none', zIndex: 1 }}>
         <div className="display" style={{ fontSize: gold ? 23 : 18, fontWeight: 800, color: '#fff', letterSpacing: '-.01em', lineHeight: 1.05, textShadow: '0 2px 12px rgba(0,0,0,.7)' }}>{s.name}</div>
-        <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,.7)', marginTop: 3 }}>Equipe {s.team}</div>
+        {s.team && <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,.7)', marginTop: 3 }}>Equipe {s.team}</div>}
       </div>
     </div>
   );
 }
 
 function PodiumD({ top3, anim, active }: { top3: any[]; anim?: boolean; active?: boolean }) {
-  const order = [top3[1], top3[0], top3[2]];
-  const idx = [1, 0, 2];
+  // PODIUM-COMPETITION-R1-EXEC — mesmo raciocínio de PodiumA/C: top3 real
+  // pode ter 1 ou 2 sellers, nunca só 3.
+  const order = ([top3[1], top3[0], top3[2]] as any[])
+    .map((s, i) => ({ s, place: [1, 0, 2][i] }))
+    .filter((o) => Boolean(o.s));
   const photoW: Record<number, number> = { 0: 300, 1: 234, 2: 234 };
   const photoH: Record<number, number> = { 0: 360, 1: 282, 2: 282 };
   const pedH: Record<number, number> = { 0: 150, 1: 94, 2: 62 };
@@ -302,8 +326,8 @@ function PodiumD({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
       <div style={{ position: 'absolute', left: '3%', right: '3%', bottom: 26, height: 1, background: 'linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent)' }} />
 
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 26, position: 'relative', zIndex: 2 }}>
-        {order.map((s, i) => {
-          const place = idx[i]; const pl = PLACE[place]; const first = place === 0;
+        {order.map(({ s, place }, i) => {
+          const pl = PLACE[place]; const first = place === 0;
           return (
             <div key={s.id} style={{ width: photoW[place] + 4, display: 'flex', flexDirection: 'column', alignItems: 'center', animation: anim ? `riseUp .8s ${0.12 * i}s both` : 'none', position: 'relative' }}>
               {first && <Spotlight anim={anim} />}
@@ -324,11 +348,13 @@ function PodiumD({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
                     </span>
                     <span style={{ fontSize: 13, color: 'var(--txt-mid)', fontWeight: 600 }}>vendas</span>
                   </div>
-                  <div style={{ display: 'flex', gap: 6, marginTop: first ? 14 : 11, paddingTop: first ? 12 : 10, borderTop: '1px solid var(--line-dark)' }}>
-                    <MiniStat label="Leads" value={s.leads} active={active} fs={first ? 22 : 18} lfs={9.5} />
-                    <MiniStat label="Visitas" value={s.visits} active={active} fs={first ? 22 : 18} lfs={9.5} />
-                    <MiniStat label="Conv." value={s.conv} suf="%" active={active} accent={first ? '#E8CE72' : undefined} fs={first ? 22 : 18} lfs={9.5} />
-                  </div>
+                  {(typeof s.leads === 'number' || typeof s.visits === 'number' || typeof s.conv === 'number') && (
+                    <div style={{ display: 'flex', gap: 6, marginTop: first ? 14 : 11, paddingTop: first ? 12 : 10, borderTop: '1px solid var(--line-dark)' }}>
+                      {typeof s.leads === 'number' && <MiniStat label="Leads" value={s.leads} active={active} fs={first ? 22 : 18} lfs={9.5} />}
+                      {typeof s.visits === 'number' && <MiniStat label="Visitas" value={s.visits} active={active} fs={first ? 22 : 18} lfs={9.5} />}
+                      {typeof s.conv === 'number' && <MiniStat label="Conv." value={s.conv} suf="%" active={active} accent={first ? '#E8CE72' : undefined} fs={first ? 22 : 18} lfs={9.5} />}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -351,6 +377,9 @@ function PodiumD({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
 }
 
 export function Podium({ variant, top3, anim, active }: { variant: string; top3: any[]; anim?: boolean; active?: boolean }) {
+  // PODIUM-COMPETITION-R1-EXEC — roster ativo vazio (nenhum seller): nunca
+  // monta um pódio sem ninguém para mostrar, em nenhuma variante.
+  if (!top3 || top3.length === 0) return null;
   if (variant === 'B') return <PodiumB top3={top3} anim={anim} active={active} />;
   if (variant === 'C') return <PodiumC top3={top3} anim={anim} active={active} />;
   if (variant === 'D') return <PodiumD top3={top3} anim={anim} active={active} />;

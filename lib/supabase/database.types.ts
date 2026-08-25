@@ -1619,6 +1619,20 @@ export type Database = {
           status: Database["public"]["Enums"]["company_status"]
         }[]
       }
+      list_company_seller_leaderboard: {
+        Args: {
+          p_company_id?: string
+          p_period_end: string
+          p_period_start: string
+        }
+        Returns: {
+          completed_visit_count: number
+          rank: number
+          sale_count: number
+          seller_id: string
+          seller_label: string
+        }[]
+      }
       list_company_users: {
         Args: {
           p_company_id?: string

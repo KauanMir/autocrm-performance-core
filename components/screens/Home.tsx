@@ -14,9 +14,9 @@ import { useRemoteDealsScreenState } from '@/lib/hooks/useRemoteDealsScreenState
 import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
 import { useRemoteSalesScreenState } from '@/lib/hooks/useRemoteSalesScreenState';
 import { useCurrentCompanyTimezone } from '@/lib/hooks/useCurrentCompanyTimezone';
-import { buildSalesRanking, type SalesRankingRow as SalesRankingRowT } from '@/lib/sales/salesRanking';
-import { resolvePresetRange, resolveCustomRange, isWithinRange, type PeriodPreset, type MillisRange } from '@/lib/date/companyPeriod';
-import { formatCentsToBRL } from '@/lib/deals/money';
+import { useCompanySellerLeaderboard } from '@/lib/hooks/useCompanySellerLeaderboard';
+import { usePodiumViewPreference } from '@/lib/hooks/usePodiumViewPreference';
+import { resolvePresetRange, resolveCustomRange, type PeriodPreset, type ResolvedPeriod } from '@/lib/date/companyPeriod';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { groupLateTasksBySeller, groupOpenDealsBySeller, type SellerAttentionRow } from '@/lib/home/managerAttention';
 import type { RemoteTaskModel } from '@/lib/tasks/taskAdapter';
@@ -214,10 +214,11 @@ function useHomeDealsSummary(currentUser: User | null): HomeDealsSummary {
 // comercial", etapa Vendas), independente de leadsSummary/tasksSummary/
 // visitsSummary/dealsSummary (mesmo raciocínio de useHomeDealsSummary
 // acima). Wrapper fino sobre useRemoteSalesScreenState — a MESMA
-// composição já REMOTE VERIFIED usada pelo Pódio (useHomePodiumRanking) e
-// por ScreenResultados — nenhuma query nova, nenhuma segunda fonte,
-// nenhuma agregação por vendedor (isso é o Pódio, fora de escopo aqui: só
-// a contagem total já autorizada pela RLS).
+// composição já REMOTE VERIFIED usada por ScreenResultados — nenhuma
+// query nova, nenhuma segunda fonte, nenhuma agregação por vendedor (isso
+// é o Pódio — PODIUM-COMPETITION-R1-EXEC, useCompanySellerLeaderboard,
+// agregado 100% server-side — fora de escopo aqui: só a contagem total já
+// autorizada pela RLS).
 type HomeSalesSummary =
   | { status: 'local' }
   | { status: 'unavailable' }
@@ -239,78 +240,6 @@ function useHomeSalesSummary(currentUser: User | null): HomeSalesSummary {
   if (remote.configError !== null) return { status: 'unavailable' };
 
   return { status: 'ready', totalSales: remote.sales.length };
-}
-
-// HOME-PODIUM-R1-EXEC — "Pódio de campeões" migrado para Sales reais.
-// Reaproveita EXATAMENTE a mesma composição já REMOTE VERIFIED de
-// ScreenResultados (useRemoteSalesScreenState + buildSalesRanking) — nenhuma
-// RPC nova, nenhum N+1, nenhum score/meta/gap/conversão inventado. Sales já
-// chegam autorizadas pela RLS (Manager: company-wide; Seller: só as
-// próprias) — buildSalesRanking só agrega o que recebeu, nenhum filtro de
-// role aqui. Isso é, por construção, a resposta ao item 6 do R1-EXEC: para
-// Seller, useSales devolve own-only, então o "pódio" naturalmente vira uma
-// única linha (a própria) — nunca um ranking global fingido — exatamente o
-// mesmo comportamento já em produção em Resultados para Seller. Nenhuma
-// ampliação de RLS, nenhum filtro manual por seller.
-type HomePodiumRanking =
-  | { status: 'local' }
-  | { status: 'unavailable' }
-  | { status: 'loading' }
-  | { status: 'error'; retry: () => void }
-  | { status: 'empty' }
-  | { status: 'ready'; top3: SalesRankingRowT[] };
-
-// HOME-FILTERS-R1-EXEC — resolução do período em uso pelo Pódio real,
-// discriminada para o Pódio saber exatamente por que ainda não tem uma
-// janela pronta: 'loading' enquanto o timezone da empresa carrega (nunca
-// um filtro aplicado com timezone do navegador), 'unavailable'/'error'
-// espelham o próprio status de useCurrentCompanyTimezone, 'ready' carrega
-// o range calculado (preset ou custom, sempre ancorado no timezone real —
-// A1-PRECHECK §6/§13).
-export type ResolvedPeriod =
-  | { kind: 'loading' }
-  | { kind: 'unavailable' }
-  | { kind: 'error'; retry: () => void }
-  | ({ kind: 'ready' } & MillisRange);
-
-function useHomePodiumRanking(
-  currentUser: User | null,
-  sellersById: Readonly<Record<string, { id: string; name: string }>>,
-  periodResolution: ResolvedPeriod,
-): HomePodiumRanking {
-  const remote = useRemoteSalesScreenState(currentUser);
-
-  if (remote.mode === 'sale_local') return { status: 'local' };
-  if (remote.mode === 'sale_blocked') return { status: 'unavailable' };
-  if (remote.mode === 'sale_remote_misconfigured') return { status: 'unavailable' };
-  if (remote.mode === 'sale_remote_unavailable_identity') return { status: 'unavailable' };
-
-  // mode === 'sale_remote_active' daqui em diante.
-  if (remote.isLoading) return { status: 'loading' };
-  if (remote.isError) return { status: 'error', retry: remote.refetch };
-  if (remote.configError !== null) return { status: 'unavailable' };
-
-  // Timezone da empresa ainda não resolvido: nunca mostrar ranking sem
-  // filtro (isso vazaria Sales fora da janela escolhida) nem um "0"/vazio
-  // fingido enquanto isso — mesmo tratamento de loading/erro/indisponível
-  // já usado no resto da Home.
-  if (periodResolution.kind === 'loading') return { status: 'loading' };
-  if (periodResolution.kind === 'unavailable') return { status: 'unavailable' };
-  if (periodResolution.kind === 'error') return { status: 'error', retry: periodResolution.retry };
-
-  // Filtro de período client-side ANTES da agregação (R1-EXEC §2/§11):
-  // Sales já chegam autorizadas pela RLS (Manager: company-wide; Seller:
-  // só as próprias) — o filtro só reduz o que já foi autorizado, nunca
-  // amplia. sellersById vem do MESMO catálogo batch
-  // (useCurrentCompanySellerLabels) já usado pela seção Manager — nenhuma
-  // segunda query. Sale com assignedSellerId não resolvido cai no bucket
-  // único "Vendedor indisponível" (buildSalesRanking), nunca quebra o
-  // bloco.
-  const salesInWindow = remote.sales.filter((sale) => isWithinRange(sale.soldAt, periodResolution));
-  if (salesInWindow.length === 0) return { status: 'empty' };
-
-  const ranking = buildSalesRanking(salesInWindow, sellersById);
-  return { status: 'ready', top3: ranking.slice(0, 3) };
 }
 
 // Estado compacto de loading/erro/indisponível para os widgets comerciais —
@@ -444,12 +373,12 @@ function RankingRow({ s, pos, active, leader, me, target }: any) {
           {me && <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '.06em', color: '#fff', background: '#3B82F6', padding: '2px 7px', borderRadius: 999 }}>VOCÊ</span>}
           {target && <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '.06em', color: '#E8CE72', background: 'rgba(212,175,55,.14)', border: '1px solid rgba(212,175,55,.4)', padding: '1px 7px', borderRadius: 999 }}>SEU ALVO</span>}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--txt-lo)' }}>{s.team}</div>
+        {s.team && <div style={{ fontSize: 11, color: 'var(--txt-lo)' }}>{s.team}</div>}
       </div>
       <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-        <Col label="Leads" v={s.leads} />
-        <Col label="Visitas" v={s.visits} />
-        <Col label="Conv." v={s.conv + '%'} />
+        {typeof s.leads === 'number' && <Col label="Leads" v={s.leads} />}
+        {typeof s.visits === 'number' && <Col label="Visitas" v={s.visits} />}
+        {typeof s.conv === 'number' && <Col label="Conv." v={s.conv + '%'} />}
         <div style={{ textAlign: 'center', minWidth: 44 }}>
           <div className="display tnum" style={{ fontSize: 23, fontWeight: 900, color: pos === 1 ? '#E8CE72' : me ? '#5B9BFF' : '#fff', lineHeight: 1 }}>{s.sales}</div>
           <div style={{ fontSize: 9, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.06em', fontWeight: 700 }}>vendas</div>
@@ -546,45 +475,6 @@ function MinhaDisputa({ active, comp }: any) {
   );
 }
 
-// HOME-PODIUM-R1-EXEC — cartão do pódio real, 1 linha por posição (1º a
-// 3º, nunca mais que rows.length — sem vendedor fictício para completar).
-// Reaproveita o mesmo vocabulário visual do pódio local (PLACE ring/glow,
-// Avatar, crown no 1º) sem tocar em components/podiums/Podiums.tsx (os
-// variants A-D permanecem exclusivos do modo fixture — R1-EXEC §12). Só os
-// campos reais do contrato: posição, nome, quantidade de vendas, receita —
-// nenhum leads/visitas/conversão/meta (dados que este agregado não tem).
-function RealPodiumRow({ row, pos }: { row: SalesRankingRowT; pos: number }) {
-  const pl = (PLACE as any[])[pos];
-  const first = pos === 0;
-  return (
-    <div data-testid="home-podium-row" style={{
-      display: 'flex', alignItems: 'center', gap: 16,
-      padding: first ? '18px 22px' : '14px 20px',
-      borderRadius: 16,
-      background: first ? 'linear-gradient(90deg, rgba(212,175,55,.14), rgba(212,175,55,.02))' : 'linear-gradient(180deg,#161618,#111113)',
-      border: `1px solid ${first ? 'rgba(212,175,55,.4)' : 'var(--line-dark)'}`,
-      boxShadow: 'var(--shadow-sm)',
-    }}>
-      <div className="display tnum" style={{ width: 34, textAlign: 'center', fontSize: first ? 26 : 21, fontWeight: 900, color: pl.ring }}>{pos + 1}º</div>
-      {first && <Icon name="crown" size={20} stroke={1.8} style={{ color: '#E8CE72', flexShrink: 0 }} />}
-      <Avatar name={row.sellerLabel} size={first ? 54 : 44} ring={pl.ring} gold={first} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: first ? 17 : 14.5, fontWeight: 800, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sellerLabel}</div>
-        <div style={{ fontSize: 12, color: 'var(--txt-lo)', marginTop: 2 }}>{row.saleCount} {row.saleCount === 1 ? 'venda' : 'vendas'}</div>
-      </div>
-      <div className="display tnum" style={{ fontSize: first ? 21 : 17, fontWeight: 900, color: first ? '#E8CE72' : '#fff', whiteSpace: 'nowrap' }}>{formatCentsToBRL(row.revenueCents)}</div>
-    </div>
-  );
-}
-
-function RealPodiumTop3({ rows }: { rows: readonly SalesRankingRowT[] }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {rows.map((row, i) => <RealPodiumRow key={row.sellerId} row={row} pos={i} />)}
-    </div>
-  );
-}
-
 // HOME-FILTERS-R1-EXEC §1 — "PERÍODO DO RANKING" vive no cabeçalho do
 // próprio Pódio (via SectionTitle right=), nunca mais na ControlBar
 // global: deixa claro que só esse bloco muda quando o período muda. Só os
@@ -625,6 +515,26 @@ function PodiumPeriodControl({
           </label>
           {customError && <div style={{ fontSize: 11.5, color: '#FF8A8A' }}>{customError}</div>}
           <button onClick={onApplyCustom} style={{ marginTop: 4, padding: '9px 14px', borderRadius: 9, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 700, background: 'linear-gradient(180deg,#E8CE72,#C9A227)', color: '#2a2104' }}>Aplicar</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// PODIUM-COMPETITION-R1-EXEC §16/§21 — empresa com ZERO Sales no período
+// oficial: nunca monta um Top 3/Ranking artificial (0 vendas para todos).
+// sellerCount vem do roster REAL já devolvido pela RPC (leaderboard.rows
+// nunca fica vazio quando existe ao menos 1 seller ativo) — nunca um
+// número inventado.
+function PodiumEmptyState({ sellerCount }: { sellerCount: number }) {
+  return (
+    <div style={{ padding: '44px 22px', borderRadius: 18, textAlign: 'center', background: 'linear-gradient(180deg,#161618,#111113)', border: '1px solid var(--line-dark)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+      <Icon name="trophy" size={30} stroke={1.8} style={{ color: '#D4AF37', opacity: .55 }} />
+      <div className="display" style={{ fontSize: 17, fontWeight: 800, color: '#fff' }}>Aguardando as primeiras vendas</div>
+      <div style={{ fontSize: 13.5, color: 'var(--txt-lo)', maxWidth: 420 }}>Assim que a equipe registrar a primeira venda, a disputa começa.</div>
+      {sellerCount > 0 && (
+        <div style={{ marginTop: 4, fontSize: 12.5, color: 'var(--txt-mid)', fontWeight: 600 }}>
+          {sellerCount} {sellerCount === 1 ? 'vendedor' : 'vendedores'} na disputa
         </div>
       )}
     </div>
@@ -1131,25 +1041,65 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
     setCustomOpen(false);
   }
 
-  // HOME-PODIUM-R1-EXEC — chamado SEMPRE (Rules of Hooks), mesma garantia
-  // de leadsSummary/tasksSummary/visitsSummary/dealsSummary acima;
-  // independente de todas por design. sellerLabels.sellersById é o MESMO
-  // índice já usado pela seção Manager (zero query nova).
-  const podiumRanking = useHomePodiumRanking(currentUser ?? null, sellerLabels.sellersById, periodResolution);
-  const variant = t.podium;
-  // M1-E E7-B1 — Podium/Ranking/MinhaDisputa dependem exclusivamente do
+  // PODIUM-COMPETITION-R1-EXEC — leaderboard company-wide real, agregado
+  // server-side (list_company_seller_leaderboard) — substitui o
+  // useHomePodiumRanking/RealPodiumTop3 anterior (que só resolvia um Top 3
+  // "sozinho", filtrando Sale bruta client-side). Chamado SEMPRE (Rules of
+  // Hooks), mesma garantia das demais summaries acima. Manager e Seller
+  // recebem o MESMO hook/mesmo shape — a RPC já devolve o roster inteiro
+  // da empresa para os dois papéis (§4/§11 do EXEC), nenhum filtro
+  // adicional aqui.
+  const leaderboard = useCompanySellerLeaderboard({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: isManager ? 'manager' : isSeller ? 'seller' : null,
+    userIsActive: Boolean(currentUser),
+    period: periodResolution,
+  });
+
+  // Preferência visual A/B/C/D: local/fixture continua 100% no TweaksPanel
+  // (t.podium/setTweak, §44 do EXEC — zero mudança de comportamento local);
+  // remoto usa a persistência própria por usuário no navegador (§36-§39),
+  // nunca a mesma chave (um Manager trocando de variante no Ajustes de QA
+  // local nunca deve mexer na preferência real de ninguém).
+  const [remoteVariant, setRemoteVariant] = usePodiumViewPreference(currentUser?.id ?? null);
+
+  // M1-E E7-B1 — Podium/Ranking (fixture) dependem exclusivamente do
   // catálogo LOCAL de Sellers (getStore().sellers, sem company_id, sem
   // backend remoto — achado do E7-A0/E7-B1). Fora do modo local nenhuma
-  // leitura acontece aqui: sem catálogo real de desempenho de vendedores, a
-  // seção inteira vira um estado indisponível explícito (nunca zero
-  // fictício, nunca o primeiro Seller local).
+  // leitura acontece aqui.
   const isSellersLocal = isLocalCommercialDataAllowed();
   const allSellers = isSellersLocal ? SellerService.getAll() : [];
-  const sellers = isSellersLocal
+  const localSellers = isSellersLocal
     ? (team === 'Todos' ? allSellers : allSellers.filter((s: any) => s.team === team))
     : [];
+  const localComp = isSellersLocal ? getCompetition(allSellers) : null;
+
+  // Adapta leaderboard.rows (já ordenadas por rank — a própria RPC entrega
+  // nesta ordem, ver ORDER BY na migration) para o shape legado que
+  // Podiums.tsx/RankingRow já esperam — DELIBERADAMENTE sem
+  // team/leads/conv/scheduled/growth/move: esses componentes agora
+  // renderizam cada um desses campos condicionalmente (só quando
+  // presentes), então omiti-los aqui É o mecanismo real de "esconder sem
+  // quebrar o design" (§20 do EXEC) — nunca um valor inventado, nunca 0
+  // fingido de conversão/leads, nunca uma seta de movimento sem histórico
+  // real (§21/§22/§28).
+  const remoteRankedSellers = leaderboard.status === 'ready'
+    ? leaderboard.rows.map((row) => ({ id: row.sellerId, name: row.sellerLabel, sales: row.saleCount, visits: row.completedVisitCount }))
+    : [];
+  // SEU ALVO / Rival direto (§30-§32) — 100% mecânico a partir do próprio
+  // array já ranqueado, nenhum backend novo: a linha imediatamente ACIMA
+  // da minha. 1º colocado (ou Seller sem posição resolvida) nunca tem
+  // alvo.
+  const mySellerId = currentUser?.activeMembership?.sellerId ?? null;
+  const myRemoteIndex = mySellerId ? remoteRankedSellers.findIndex((s) => s.id === mySellerId) : -1;
+  const remoteRivalRow = myRemoteIndex > 0 ? remoteRankedSellers[myRemoteIndex - 1] : null;
+  const remoteComp = remoteRivalRow ? { rivalAhead: remoteRivalRow } : null;
+
+  const variant = isSellersLocal ? t.podium : remoteVariant;
+  const sellers = isSellersLocal ? localSellers : remoteRankedSellers;
   const top3 = sellers.slice(0, 3);
-  const comp = isSellersLocal ? getCompetition(allSellers) : null;
+  const comp = isSellersLocal ? localComp : remoteComp;
 
   const podiumStage = (
     <div style={{ position: 'relative', background: 'radial-gradient(120% 80% at 50% 6%, #1d1d21 0%, #131315 48%, #0b0b0c 100%)', border: '1px solid var(--line-dark)', borderRadius: 22, padding: '0 16px 14px', height: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
@@ -1163,7 +1113,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
         </div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 7 }}>
           <span style={{ height: 1, width: 60, background: 'linear-gradient(90deg, transparent, rgba(212,175,55,.6))' }} />
-          <span style={{ fontSize: 12, color: 'var(--txt-mid)', fontWeight: 600 }}>{period} · {team}</span>
+          <span style={{ fontSize: 12, color: 'var(--txt-mid)', fontWeight: 600 }}>{isSellersLocal ? `${period} · ${team}` : period}</span>
           <span style={{ height: 1, width: 60, background: 'linear-gradient(90deg, rgba(212,175,55,.6), transparent)' }} />
         </div>
       </div>
@@ -1179,7 +1129,12 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ink-900)', position: 'relative' }}>
-      <ControlBar period={period} setPeriod={setPeriod} variant={variant} setVariant={(v: string) => setTweak('podium', v)} team={team} setTeam={setTeam} isSellersLocal={isSellersLocal} />
+      <ControlBar
+        period={period} setPeriod={setPeriod}
+        variant={variant}
+        setVariant={(v: string) => { if (isSellersLocal) setTweak('podium', v); else setRemoteVariant(v as any); }}
+        team={team} setTeam={setTeam} isSellersLocal={isSellersLocal}
+      />
       {isSellersLocal && <CompTicker comp={comp} />}
 
       <div style={{ padding: '22px 26px 44px', position: 'relative' }}>
@@ -1210,11 +1165,23 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
                 onApplyCustom={applyCustomRange}
               />
             }>Pódio de campeões</SectionTitle>
-            {podiumRanking.status === 'loading' && <CommercialWidgetNotice>Carregando pódio…</CommercialWidgetNotice>}
-            {podiumRanking.status === 'error' && <CommercialWidgetNotice onRetry={podiumRanking.retry}>Não foi possível carregar o pódio.</CommercialWidgetNotice>}
-            {(podiumRanking.status === 'unavailable' || podiumRanking.status === 'local') && <CommercialWidgetNotice>Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>}
-            {podiumRanking.status === 'empty' && <CommercialWidgetNotice>Nenhuma venda registrada neste período.</CommercialWidgetNotice>}
-            {podiumRanking.status === 'ready' && <RealPodiumTop3 rows={podiumRanking.top3} />}
+            {leaderboard.status === 'loading' && <CommercialWidgetNotice>Carregando pódio…</CommercialWidgetNotice>}
+            {leaderboard.status === 'error' && <CommercialWidgetNotice onRetry={leaderboard.retry}>Não foi possível carregar o pódio.</CommercialWidgetNotice>}
+            {(leaderboard.status === 'unavailable' || leaderboard.status === 'local') && <CommercialWidgetNotice>Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>}
+            {leaderboard.status === 'empty' && <PodiumEmptyState sellerCount={leaderboard.sellerCount} />}
+            {leaderboard.status === 'ready' && (
+              narrow ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  <div style={{ height: variant === 'A' ? 620 : variant === 'B' ? 540 : variant === 'D' ? 700 : 560 }}>{podiumStage}</div>
+                  <div style={{ height: 520 }}><RankingList sellers={sellers} active={active} comp={comp} /></div>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: 'stretch', height: 'calc(100vh - 260px)', minHeight: 600 }}>
+                  {podiumStage}
+                  <RankingList sellers={sellers} active={active} comp={comp} />
+                </div>
+              )
+            )}
           </div>
         )}
 

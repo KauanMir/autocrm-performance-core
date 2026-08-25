@@ -8,7 +8,7 @@
 // por estado, mesmo padrão de tests/screens/ScreenClientes.test.tsx.
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { TASK_STATE } from '@/lib/data';
 
 const m = vi.hoisted(() => ({
@@ -19,6 +19,7 @@ const m = vi.hoisted(() => ({
   useRemoteSalesScreenState: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
   useCurrentCompanyTimezone: vi.fn(),
+  useCompanySellerLeaderboard: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   leadServiceGetAll: vi.fn(),
   visitServiceGetAll: vi.fn(),
@@ -59,6 +60,26 @@ vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
 // de useCurrentCompanySellerLabels/useRemoteSalesScreenState acima).
 vi.mock('@/lib/hooks/useCurrentCompanyTimezone', () => ({
   useCurrentCompanyTimezone: m.useCurrentCompanyTimezone,
+}));
+
+// PODIUM-COMPETITION-R1-EXEC — mesmo motivo de useCurrentCompanyTimezone
+// acima: useQuery real exige QueryClientProvider, ausente neste harness.
+// Cobertura própria do hook em si (loading/error/empty/ready, cascade de
+// período, query key) fica em tests/hooks/useCompanySellerLeaderboard.test.tsx
+// — aqui só se valida o que Home FAZ com o resultado.
+vi.mock('@/lib/hooks/useCompanySellerLeaderboard', () => ({
+  useCompanySellerLeaderboard: m.useCompanySellerLeaderboard,
+}));
+
+// PODIUM-COMPETITION-R1-EXEC — fixa a preferência remota em 'B' (mesmo
+// motivo do comentário sobre variant 'B' em renderHome mais abaixo: A/C/D
+// passam pelo caminho FitBox/ResizeObserver, ausente no jsdom, fora do
+// escopo desta suíte). Cobertura própria de leitura/escrita/validação da
+// preferência (default D, fallback em valor inválido, isolamento por
+// userId) fica em lib/podium/podiumViewPreference — puro, sem React, já
+// testável sem esta mock.
+vi.mock('@/lib/hooks/usePodiumViewPreference', () => ({
+  usePodiumViewPreference: () => ['B', vi.fn()],
 }));
 
 vi.mock('@/lib/leads/localCommercialAccess', () => ({
@@ -206,6 +227,22 @@ function currentCompanySellerLabelsResult(over: Partial<Record<string, unknown>>
   };
 }
 
+// PODIUM-COMPETITION-R1-EXEC — quando o roster tem <=3 sellers, TODOS eles
+// caem dentro do Top 3 e aparecem 2x no DOM (Pódio + RankingList) — getByText
+// simples fica ambíguo. Escopa a busca só na RankingList (o texto "Ranking
+// completo" é único, seu container-pai é a lista inteira).
+function getRankingListContainer() {
+  return screen.getByText('Ranking completo').closest('div')!.parentElement!;
+}
+
+// PODIUM-COMPETITION-R1-EXEC — resultado padrão de uma linha do leaderboard
+// (assinatura real, lib/podium/leaderboardRepository.ts): sellerId/
+// sellerLabel/saleCount/completedVisitCount/rank. Nunca revenueCents (não
+// existe no contrato — §11/§24 do EXEC).
+function leaderboardRow(over: Partial<Record<string, unknown>> = {}) {
+  return { sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, completedVisitCount: 0, rank: 1, ...over };
+}
+
 // variant 'B' evita o caminho FitBox/ResizeObserver do Podium (fora do
 // escopo do E7-A1 — ResizeObserver não existe no jsdom por padrão e nenhum
 // teste no projeto ainda exercitava o render real de Home/Podium).
@@ -268,6 +305,11 @@ beforeEach(() => {
   // antes deste lote (nenhum deles testa loading/erro/indisponível de
   // timezone especificamente — cobertura própria na suíte dedicada abaixo).
   m.useCurrentCompanyTimezone.mockReset().mockReturnValue({ status: 'ready', timezone: 'America/Sao_Paulo' });
+  // PODIUM-COMPETITION-R1-EXEC — default 'local', mesmo raciocínio do
+  // default de Sales/Tasks/Visits/Deals acima: preserva o baseline local de
+  // todos os testes escritos antes deste lote. Toda describe com Leads
+  // remoto sobrescreve para um status não-local próprio.
+  m.useCompanySellerLeaderboard.mockReset().mockReturnValue({ status: 'local' });
 });
 
 // ── A. Home local ────────────────────────────────────────────────────────
@@ -319,7 +361,7 @@ describe('Home — caminho local (REMOTE_LEADS=false)', () => {
 // remota real. Corrigido nesta etapa: fora do modo local, a seção inteira
 // vira um estado indisponível explícito, sem nenhuma leitura de
 // SellerService.
-describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
+describe('Home — Ranking completo em modo remoto: leaderboard indisponível (E7-B1 / PODIUM-COMPETITION-R1-EXEC)', () => {
   beforeEach(() => {
     m.isLocalCommercialDataAllowed.mockReturnValue(false);
     m.useRemoteLeadsScreenState.mockReturnValue(
@@ -338,10 +380,10 @@ describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
     // Leads remoto ⟹ Deals nunca 'deal_local'. Esta suíte não testa Deals
     // especificamente, então usa 'unavailable'.
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
-    // HOME-PODIUM-R1-EXEC — mesma garantia estrutural para Sales: Leads
-    // remoto ⟹ Sales nunca 'sale_local'. Esta suíte não testa o pódio real
-    // especificamente (cobertura própria abaixo), então usa 'unavailable'.
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
+    // PODIUM-COMPETITION-R1-EXEC — mesma garantia estrutural para o
+    // leaderboard: esta suíte não testa o Ranking real especificamente
+    // (cobertura própria abaixo), então usa 'unavailable'.
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'unavailable' });
   });
 
   it('nunca chama SellerService.getAll/getById', () => {
@@ -357,18 +399,12 @@ describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
     expect(screen.queryByText('Equipe')).toBeNull(); // DEFAULT_SELLER.name
   });
 
-  it('ranking/MinhaDisputa fixture somem; título "Pódio de campeões" permanece, agora movido para dados reais (HOME-PODIUM-R1-EXEC)', () => {
+  it('ranking/CompTicker/Minha Disputa fixture somem; título "Pódio de campeões" permanece, agora movido para dados reais (PODIUM-COMPETITION-R1-EXEC)', () => {
     renderHome(manager());
     expect(screen.queryByText('PÓDIO DE CAMPEÕES')).toBeNull();
     expect(screen.queryByText('Ranking completo')).toBeNull();
     expect(screen.queryByText('Minha disputa')).toBeNull();
     expect(screen.getByText('Pódio de campeões')).toBeInTheDocument();
-    // A mensagem antiga de "aguardando migração" não existe mais — o bloco
-    // agora usa a mesma fonte remota (useRemoteSalesScreenState) de
-    // ScreenResultados; aqui o estado é 'sale_remote_unavailable_identity',
-    // que compartilha a copy sanitizada genérica já usada pelos outros
-    // widgets comerciais da Home.
-    expect(screen.queryByText('Ranking e desempenho de vendedores serão disponibilizados após a migração deste módulo.')).toBeNull();
     expect(screen.getByText('Métricas comerciais indisponíveis nesta sessão.')).toBeInTheDocument();
   });
 
@@ -385,25 +421,15 @@ describe('Home — Podium/Ranking/MinhaDisputa em modo remoto (E7-B1)', () => {
   });
 });
 
-// ── Pódio real (HOME-PODIUM-R1-EXEC) ────────────────────────────────────
-// "Pódio de campeões" migrado de SellerService (fixture) para a mesma fonte
-// remota já REMOTE VERIFIED de ScreenResultados (useRemoteSalesScreenState +
-// buildSalesRanking) — mesmo padrão de suíte que ScreenResultadosRemote.
-describe('Home — Pódio real (HOME-PODIUM-R1-EXEC)', () => {
-  function remoteSale(over: Partial<Record<string, unknown>> = {}) {
-    // HOME-FILTERS-R1-EXEC — soldAt default "agora": o Pódio passa a
-    // filtrar Sales por período (default 30 dias), então uma fixture sem
-    // soldAt (undefined → Date inválida) sumiria do ranking por engano.
-    return { id: 'sale-1', assignedSellerId: 's1', soldValueCents: 10000000, soldAt: new Date().toISOString(), ...over };
-  }
-
-  const SELLERS_BY_ID = {
-    s1: { id: 's1', name: 'Lucas Martins' },
-    s2: { id: 's2', name: 'Fernanda Dias' },
-    s3: { id: 's3', name: 'Rafael Souza' },
-    s4: { id: 's4', name: 'Bianca Alves' },
-  };
-
+// ── Ranking completo real (PODIUM-COMPETITION-R1-EXEC) ──────────────────
+// "Pódio de campeões"/"Ranking completo"/seletor A-D reativados com o
+// leaderboard company-wide real (list_company_seller_leaderboard, agregado
+// 100% server-side) — nunca mais Sales/Visits brutas, nunca mais fixture.
+// useCompanySellerLeaderboard é mockado diretamente (cobertura própria do
+// hook — loading/error/empty/ready/cascade de período — fica em
+// tests/hooks/useCompanySellerLeaderboard.test.tsx); aqui só se prova o
+// que Home FAZ com cada estado do hook.
+describe('Home — Ranking completo real (PODIUM-COMPETITION-R1-EXEC)', () => {
   beforeEach(() => {
     m.isLocalCommercialDataAllowed.mockReturnValue(false);
     m.useRemoteLeadsScreenState.mockReturnValue(
@@ -412,133 +438,195 @@ describe('Home — Pódio real (HOME-PODIUM-R1-EXEC)', () => {
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
-    m.useCurrentCompanySellerLabels.mockReturnValue(
-      currentCompanySellerLabelsResult({ sellersById: SELLERS_BY_ID, hasData: true, isEmpty: false }),
-    );
   });
 
-  it('Manager: ranking real renderiza — nome, quantidade de vendas e receita formatada, zero fixture', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true,
-      sales: [
-        remoteSale({ id: 's-1', assignedSellerId: 's1', soldValueCents: 19000000 }),
-        remoteSale({ id: 's-2', assignedSellerId: 's1', soldValueCents: 19000000 }),
-      ],
-    }));
+  it('Manager: título real, nome/vendas reais no Ranking completo, zero fixture', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, completedVisitCount: 2, rank: 1 })],
+    });
     renderHome(manager());
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
-    expect(screen.getByText('2 vendas')).toBeInTheDocument();
-    expect(screen.getByText('R$ 380.000,00')).toBeInTheDocument();
+    expect(screen.getByText('Ranking completo')).toBeInTheDocument();
+    // 1 seller só: cai no Top 3 do Pódio E na RankingList — aparece 2x.
+    expect(screen.getAllByText('Lucas Martins').length).toBe(2);
     expect(m.sellerServiceGetAll).not.toHaveBeenCalled();
     expect(m.sellerServiceGetById).not.toHaveBeenCalled();
   });
 
-  it('Top 3 máximo: 4 vendedores com Sales, só os 3 primeiros (saleCount DESC) aparecem', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true,
-      sales: [
-        remoteSale({ id: 's-1', assignedSellerId: 's1' }),
-        remoteSale({ id: 's-2', assignedSellerId: 's1' }),
-        remoteSale({ id: 's-3', assignedSellerId: 's1' }),
-        remoteSale({ id: 's-4', assignedSellerId: 's2' }),
-        remoteSale({ id: 's-5', assignedSellerId: 's2' }),
-        // s3 e s4 empatam em saleCount (1) — receita maior decide o
-        // desempate (buildSalesRanking: saleCount DESC, revenueCents DESC,
-        // sellerLabel ASC), então s3 (Rafael Souza) fica à frente de s4.
-        remoteSale({ id: 's-6', assignedSellerId: 's3', soldValueCents: 20000000 }),
-        remoteSale({ id: 's-7', assignedSellerId: 's4', soldValueCents: 10000000 }),
+  it('todos os Sellers ativos aparecem no Ranking completo, inclusive além do Top 3 do pódio', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 5, rank: 1 }),
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 4, rank: 2 }),
+        leaderboardRow({ sellerId: 's3', sellerLabel: 'João Ferreira', saleCount: 3, rank: 3 }),
+        leaderboardRow({ sellerId: 's4', sellerLabel: 'Bianca Alves', saleCount: 0, completedVisitCount: 0, rank: 4 }),
       ],
-    }));
+    });
     renderHome(manager());
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
-    expect(screen.getByText('Fernanda Dias')).toBeInTheDocument();
-    expect(screen.getByText('Rafael Souza')).toBeInTheDocument();
-    expect(screen.queryByText('Bianca Alves')).toBeNull();
-    expect(screen.getAllByTestId('home-podium-row')).toHaveLength(3);
+    // Um seller do Top 3 aparece 2x no DOM (dentro do Pódio + na
+    // RankingList); um seller FORA do Top 3 aparece só 1x (só na
+    // RankingList) — prova mecânica de que o roster completo (não só
+    // Top3) está sendo listado.
+    expect(screen.getAllByText('Lucas Martins').length).toBe(2);
+    expect(screen.getAllByText('Bianca Alves').length).toBe(1);
+    expect(screen.getByText('4 vendedores')).toBeInTheDocument();
   });
 
-  it('1 vendedor apenas: mostra só o 1º, nenhum vendedor fictício para completar', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true,
-      sales: [remoteSale({ id: 's-1', assignedSellerId: 's1' })],
-    }));
+  it('Seller com ZERO vendas aparece no Ranking (quando já existe alguma venda na empresa)', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, rank: 1 }),
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Bianca Alves', saleCount: 0, completedVisitCount: 0, rank: 2 }),
+      ],
+    });
     renderHome(manager());
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
-    expect(screen.getAllByTestId('home-podium-row')).toHaveLength(1);
+    // 2 sellers só: ambos caem no Top 3 do Pódio E na RankingList.
+    expect(screen.getAllByText('Bianca Alves').length).toBe(2);
   });
 
-  it('loading: notice dedicado de pódio, nenhuma linha renderizada', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isLoading: true }));
+  it('seletor A/B/C/D altera SOMENTE a variante — remoto nunca chama setTweak (preferência remota é própria, localStorage)', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, rank: 1 })],
+    });
+    const setTweak = vi.fn();
+    render(<Home t={{ podium: 'B' }} setTweak={setTweak} go={vi.fn()} active={false} currentUser={manager() as any} />);
+    // Clica no próprio chip 'B' (já ativo) — evita o caminho FitBox/
+    // ResizeObserver das variantes A/C/D (ausente no jsdom, fora de escopo
+    // desta suíte), mas já prova que o clique nunca chama setTweak no
+    // modo remoto.
+    fireEvent.click(screen.getByTitle('Líder'));
+    expect(setTweak).not.toHaveBeenCalled();
+  });
+
+  it('VOCÊ marca a própria linha do Seller logado', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 5, rank: 1 }),
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, rank: 2 }),
+      ],
+    });
+    // RankingRow resolve "VOCÊ" via AuthService.getCurrentUser() (não via
+    // a prop currentUser da Home) — mesmo acoplamento já existente no
+    // componente legado original.
+    m.authGetCurrentUser.mockReturnValue(seller('s1'));
+    renderHome(seller('s1'));
+    expect(screen.getByText('VOCÊ')).toBeInTheDocument();
+    const rankingList = within(getRankingListContainer());
+    expect(rankingList.getByText('Lucas Martins').parentElement?.textContent).toContain('VOCÊ');
+  });
+
+  it('SEU ALVO marca a linha imediatamente acima do Seller logado', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 5, rank: 1 }),
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, rank: 2 }),
+        leaderboardRow({ sellerId: 's3', sellerLabel: 'João Ferreira', saleCount: 1, rank: 3 }),
+      ],
+    });
+    renderHome(seller('s1'));
+    expect(screen.getByText('SEU ALVO')).toBeInTheDocument();
+    const rankingList = within(getRankingListContainer());
+    expect(rankingList.getByText('Ana Souza').parentElement?.textContent).toContain('SEU ALVO');
+  });
+
+  it('1º colocado nunca tem SEU ALVO', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 5, rank: 1 }),
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 3, rank: 2 }),
+      ],
+    });
+    renderHome(seller('s1'));
+    expect(screen.queryByText('SEU ALVO')).toBeNull();
+  });
+
+  it('Manager: nenhuma linha marcada como VOCÊ/SEU ALVO (sem posição pessoal — §11/§20 do EXEC)', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 5, rank: 1 }),
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 3, rank: 2 }),
+      ],
+    });
+    renderHome(manager());
+    expect(screen.queryByText('VOCÊ')).toBeNull();
+    expect(screen.queryByText('SEU ALVO')).toBeNull();
+  });
+
+  it('nenhuma conversão (%) aparece no Ranking/Pódio real (§21 do EXEC)', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, completedVisitCount: 2, rank: 1 })],
+    });
+    renderHome(manager());
+    expect(screen.queryByText('Conv.')).toBeNull();
+    expect(screen.queryByText('Conversão')).toBeNull();
+  });
+
+  it('CompTicker e Minha Disputa continuam ausentes no remoto (R2, não neste lote — §29/§33/§34 do EXEC)', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [leaderboardRow()],
+    });
+    renderHome(manager());
+    expect(screen.queryByText('Minha disputa')).toBeNull();
+    expect(screen.queryByText(/Faltam .* vendas para você entrar no/)).toBeNull();
+  });
+
+  it('loading: notice dedicado, nenhuma linha renderizada', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'loading' });
     renderHome(manager());
     expect(screen.getByText('Carregando pódio…')).toBeInTheDocument();
     expect(screen.queryByText('Lucas Martins')).toBeNull();
   });
 
   it('erro: mensagem sanitizada com retry, sem fallback fixture', () => {
-    const refetch = vi.fn();
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isError: true, refetch }));
+    const retry = vi.fn();
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'error', retry });
     renderHome(manager());
     expect(screen.getByText('Não foi possível carregar o pódio.')).toBeInTheDocument();
     const [retryBtn] = screen.getAllByText('Tentar novamente');
     fireEvent.click(retryBtn);
-    expect(refetch).toHaveBeenCalled();
+    expect(retry).toHaveBeenCalled();
   });
 
-  it('empty: nenhuma Sale registrada, copy honesta, sem pódio vazio com nomes falsos', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isEmpty: true }));
+  it('empty (empresa sem nenhuma venda no período): copy honesta, X vendedores na disputa, zero nomes falsos', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'empty', sellerCount: 5 });
     renderHome(manager());
-    // HOME-FILTERS-R1-EXEC §12 — copy atualizada: pode existir Sale fora da
-    // janela de período escolhida, "ainda" deixaria de ser honesto.
-    expect(screen.getByText('Nenhuma venda registrada neste período.')).toBeInTheDocument();
+    expect(screen.getByText('Aguardando as primeiras vendas')).toBeInTheDocument();
+    expect(screen.getByText('Assim que a equipe registrar a primeira venda, a disputa começa.')).toBeInTheDocument();
+    expect(screen.getByText('5 vendedores na disputa')).toBeInTheDocument();
+    expect(screen.queryByText('Lucas Martins')).toBeNull();
   });
 
-  it('Sale com sellerId não resolvido: bucket "Vendedor indisponível", bloco não quebra', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true,
-      sales: [remoteSale({ id: 's-1', assignedSellerId: 'unknown-seller' })],
-    }));
-    renderHome(manager());
-    expect(screen.getByText('Vendedor indisponível')).toBeInTheDocument();
-  });
-
-  // R1-EXEC §6/§16 — Seller: Sales já chegam own-only por RLS (mesmo
-  // contrato já auditado/em produção em ScreenResultados), então o pódio de
-  // Seller é honesto por construção: nunca um ranking global fingido, só a
-  // própria linha, sem ampliar RLS/filtro manual para simular um pódio
-  // company-wide.
-  it('Seller: contrato real (Sales own-only via RLS) — só a própria linha, nenhum ranking global fingido', () => {
-    m.useCurrentCompanySellerLabels.mockReturnValue(
-      currentCompanySellerLabelsResult({ sellersById: { s1: { id: 's1', name: 'Lucas Martins' } }, hasData: true, isEmpty: false }),
-    );
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true,
-      sales: [remoteSale({ id: 's-1', assignedSellerId: 's1', soldValueCents: 19000000 })],
-    }));
+  it('Seller: mesmo leaderboard company-wide do Manager (nunca só a própria linha)', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, rank: 1 }),
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 1, rank: 2 }),
+      ],
+    });
     renderHome(seller('s1'));
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
-    expect(screen.getByText('R$ 190.000,00')).toBeInTheDocument();
-    expect(screen.getAllByTestId('home-podium-row')).toHaveLength(1);
-    expect(screen.queryByText('Fernanda Dias')).toBeNull();
+    // Ambos caem no Top 3 do Pódio E na RankingList (só 2 sellers no total).
+    expect(screen.getAllByText('Lucas Martins').length).toBe(2);
+    expect(screen.getAllByText('Ana Souza').length).toBe(2);
   });
 });
 
-// ── HOME-FILTERS-R1-EXEC — Pódio: filtro de período real ────────────────
-// Período agora vive no cabeçalho do próprio Pódio (não mais na ControlBar
-// global), filtra Sales por soldAt ANTES de buildSalesRanking, ancorado no
-// timezone REAL da empresa (useCurrentCompanyTimezone mockado). Funil/
-// Atenção/Ações rápidas permanecem intocados ao trocar período — suíte
-// dedicada mais abaixo prova isso explicitamente.
+// ── HOME-FILTERS-R1-EXEC / PODIUM-COMPETITION-R1-EXEC — período real ────
+// O filtro de período resolve boundaries reais (companyPeriod.ts, cobertura
+// própria em tests/date/companyPeriod.test.ts) e os PASSA para
+// useCompanySellerLeaderboard (mockado aqui) — a aritmética de datas em si
+// não é reexercitada nesta suíte, só a fiação: trocar o botão de período
+// muda o range enviado ao hook.
 describe('Home — Pódio: filtro de período real (HOME-FILTERS-R1-EXEC)', () => {
-  const SELLERS_BY_ID = { s1: { id: 's1', name: 'Lucas Martins' } };
-
-  function daysAgoIso(days: number): string {
-    return new Date(Date.now() - days * 86400000).toISOString();
-  }
-
-  function saleAt(iso: string, over: Partial<Record<string, unknown>> = {}) {
-    return { id: `sale-${Math.random()}`, assignedSellerId: 's1', soldValueCents: 10000000, soldAt: iso, ...over };
-  }
-
   beforeEach(() => {
     m.isLocalCommercialDataAllowed.mockReturnValue(false);
     m.useRemoteLeadsScreenState.mockReturnValue(
@@ -547,136 +635,47 @@ describe('Home — Pódio: filtro de período real (HOME-FILTERS-R1-EXEC)', () =
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
-    m.useCurrentCompanySellerLabels.mockReturnValue(
-      currentCompanySellerLabelsResult({ sellersById: SELLERS_BY_ID, hasData: true, isEmpty: false }),
-    );
     m.useCurrentCompanyTimezone.mockReturnValue({ status: 'ready', timezone: 'America/Sao_Paulo' });
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, rank: 1 })],
+    });
   });
 
-  it('default é "30 dias" — mesmo default visual de sempre, agora com comportamento real', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true, sales: [saleAt(daysAgoIso(2))],
-    }));
+  function lastPeriodArg(): any {
+    const calls = m.useCompanySellerLeaderboard.mock.calls;
+    return calls[calls.length - 1][0].period;
+  }
+
+  it('default é "30 dias" — botão ativo visualmente, period.kind ready', () => {
     renderHome(manager());
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
-    expect(screen.getByText('30 dias').closest('button')).toHaveStyle({ color: '#2a2104' });
+    // "30 dias" aparece 2x quando o período está ativo: o botão do filtro e
+    // o subtítulo do Pódio (que ecoa o período em uso) — só o botão importa aqui.
+    expect(screen.getByRole('button', { name: '30 dias' })).toHaveStyle({ color: '#2a2104' });
+    expect(lastPeriodArg().kind).toBe('ready');
   });
 
-  it('Hoje / 7 dias / 15 dias / 30 dias mudam de verdade a contagem exibida', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true,
-      sales: [saleAt(daysAgoIso(2), { id: 'recente' }), saleAt(daysAgoIso(10), { id: 'dez-dias' })],
-    }));
+  it('Hoje / 7 dias / 15 dias mudam de verdade o range enviado ao hook', () => {
     renderHome(manager());
-    // Default 30 dias: as duas Sales entram.
-    expect(screen.getByText('2 vendas')).toBeInTheDocument();
-    // 7 dias: só a Sale de 2 dias atrás sobrevive (a de 10 dias sai da janela).
+    const initialRange = lastPeriodArg();
     fireEvent.click(screen.getByText('7 dias'));
-    expect(screen.getByText('1 venda')).toBeInTheDocument();
-    // 15 dias: as duas voltam a entrar.
-    fireEvent.click(screen.getByText('15 dias'));
-    expect(screen.getByText('2 vendas')).toBeInTheDocument();
-  });
-
-  it('Manager: vê o ranking company-wide já autorizado pela RLS (mock simula Sales de 2 sellers)', () => {
-    m.useCurrentCompanySellerLabels.mockReturnValue(
-      currentCompanySellerLabelsResult({
-        sellersById: { s1: { id: 's1', name: 'Lucas Martins' }, s2: { id: 's2', name: 'Ana Souza' } },
-        hasData: true, isEmpty: false,
-      }),
-    );
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true,
-      sales: [saleAt(daysAgoIso(1), { assignedSellerId: 's1' }), saleAt(daysAgoIso(1), { assignedSellerId: 's2' })],
-    }));
-    renderHome(manager());
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
-    expect(screen.getByText('Ana Souza')).toBeInTheDocument();
-  });
-
-  it('Seller: filtro de período opera só sobre as próprias Sales (mock já pré-filtrado por RLS)', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true, sales: [saleAt(new Date().toISOString())],
-    }));
-    renderHome(seller('s1'));
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
+    const after7 = lastPeriodArg();
+    expect(after7.kind).toBe('ready');
+    expect(after7.startMillis).not.toBe(initialRange.startMillis);
     fireEvent.click(screen.getByText('Hoje'));
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
-  });
-
-  it('zero Sales no período: copy honesta "neste período", sem pódio vazio com nomes falsos', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true, sales: [saleAt(daysAgoIso(20))],
-    }));
-    renderHome(manager());
-    fireEvent.click(screen.getByText('Hoje'));
-    expect(screen.getByText('Nenhuma venda registrada neste período.')).toBeInTheDocument();
-    expect(screen.queryByText('Lucas Martins')).toBeNull();
+    const afterHoje = lastPeriodArg();
+    expect(afterHoje.startMillis).not.toBe(after7.startMillis);
   });
 
   it('loading: timezone da empresa ainda não resolvido — nunca mostra ranking sem filtro', () => {
     m.useCurrentCompanyTimezone.mockReturnValue({ status: 'loading' });
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true, sales: [saleAt(daysAgoIso(1))],
-    }));
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'loading' });
     renderHome(manager());
     expect(screen.getByText('Carregando pódio…')).toBeInTheDocument();
     expect(screen.queryByText('Lucas Martins')).toBeNull();
   });
 
-  it('error: timezone da empresa falha — estado sanitizado com retry, nunca vira 0/empty', () => {
-    const retry = vi.fn();
-    m.useCurrentCompanyTimezone.mockReturnValue({ status: 'error', retry });
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true, sales: [saleAt(daysAgoIso(1))],
-    }));
-    renderHome(manager());
-    expect(screen.getByText('Não foi possível carregar o pódio.')).toBeInTheDocument();
-    expect(screen.queryByText('Nenhuma venda registrada neste período.')).toBeNull();
-    fireEvent.click(screen.getByText('Tentar novamente'));
-    expect(retry).toHaveBeenCalled();
-  });
-
-  it('Top 3 depois do filtro: Sale fora da janela nunca entra no ranking, mesmo que o Seller lideraria sem o filtro', () => {
-    m.useCurrentCompanySellerLabels.mockReturnValue(
-      currentCompanySellerLabelsResult({
-        sellersById: { s1: { id: 's1', name: 'Lucas Martins' }, s2: { id: 's2', name: 'Ana Souza' } },
-        hasData: true, isEmpty: false,
-      }),
-    );
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true,
-      sales: [
-        // s2 teria 3 vendas e lideraria SEM o filtro — mas todas de 50 dias atrás.
-        saleAt(daysAgoIso(50), { assignedSellerId: 's2' }),
-        saleAt(daysAgoIso(50), { assignedSellerId: 's2' }),
-        saleAt(daysAgoIso(50), { assignedSellerId: 's2' }),
-        saleAt(daysAgoIso(1), { assignedSellerId: 's1' }),
-      ],
-    }));
-    renderHome(manager());
-    // Default 30 dias: só a Sale de s1 (1 dia atrás) está na janela.
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
-    expect(screen.queryByText('Ana Souza')).toBeNull();
-  });
-
-  it('receita exibida é a soma somente das Sales dentro da janela', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true,
-      sales: [
-        saleAt(daysAgoIso(1), { soldValueCents: 10000000 }),
-        saleAt(daysAgoIso(50), { soldValueCents: 90000000 }), // fora da janela de 30 dias
-      ],
-    }));
-    renderHome(manager());
-    expect(screen.getByText('R$ 100.000,00')).toBeInTheDocument();
-    expect(screen.queryByText('R$ 1.000.000,00')).toBeNull();
-  });
-
-  it('Personalizado: range válido aplicado inclui a Sale certa; range sem Sales conhecidas mostra vazio honesto', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true, sales: [saleAt(daysAgoIso(3))],
-    }));
+  it('Personalizado: range válido aplicado chama o hook com period.kind ready e os boundaries certos', () => {
     renderHome(manager());
     fireEvent.click(screen.getByText('Personalizado'));
     const today = new Date();
@@ -685,36 +684,21 @@ describe('Home — Pódio: filtro de período real (HOME-FILTERS-R1-EXEC)', () =
     fireEvent.change(screen.getByText('Data inicial').querySelector('input')!, { target: { value: toYMD(start) } });
     fireEvent.change(screen.getByText('Data final').querySelector('input')!, { target: { value: toYMD(today) } });
     fireEvent.click(screen.getByText('Aplicar'));
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
-
-    // Range sem a Sale conhecida (bem antes dela).
-    fireEvent.click(screen.getByText('Personalizado'));
-    const farStart = new Date(today.getTime() - 60 * 86400000);
-    const farEnd = new Date(today.getTime() - 40 * 86400000);
-    fireEvent.change(screen.getByText('Data inicial').querySelector('input')!, { target: { value: toYMD(farStart) } });
-    fireEvent.change(screen.getByText('Data final').querySelector('input')!, { target: { value: toYMD(farEnd) } });
-    fireEvent.click(screen.getByText('Aplicar'));
-    expect(screen.getByText('Nenhuma venda registrada neste período.')).toBeInTheDocument();
+    expect(lastPeriodArg().kind).toBe('ready');
   });
 
-  it('Personalizado: range inválido (start depois de end) mostra erro e não aplica', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true, sales: [saleAt(daysAgoIso(1))],
-    }));
+  it('Personalizado: range inválido (start depois de end) mostra erro e não muda o range enviado ao hook', () => {
     renderHome(manager());
+    const beforeRange = lastPeriodArg();
     fireEvent.click(screen.getByText('Personalizado'));
     fireEvent.change(screen.getByText('Data inicial').querySelector('input')!, { target: { value: '2026-08-20' } });
     fireEvent.change(screen.getByText('Data final').querySelector('input')!, { target: { value: '2026-08-10' } });
     fireEvent.click(screen.getByText('Aplicar'));
     expect(screen.getByText('A data inicial precisa ser antes da data final.')).toBeInTheDocument();
-    // Continua no default 30 dias — Sale conhecida ainda visível, nada aplicado.
-    expect(screen.getByText('Lucas Martins')).toBeInTheDocument();
+    expect(lastPeriodArg()).toEqual(beforeRange);
   });
 
   it('Personalizado: campos vazios mostram erro simples, sem em dash', () => {
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true, sales: [saleAt(daysAgoIso(1))],
-    }));
     renderHome(manager());
     fireEvent.click(screen.getByText('Personalizado'));
     fireEvent.click(screen.getByText('Aplicar'));
@@ -737,9 +721,10 @@ describe('Home — trocar período do Pódio NÃO afeta outros blocos (HOME-FILT
       currentCompanySellerLabelsResult({ sellersById: { s1: { id: 's1', name: 'Lucas Martins' } }, hasData: true, isEmpty: false }),
     );
     m.useCurrentCompanyTimezone.mockReturnValue({ status: 'ready', timezone: 'America/Sao_Paulo' });
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
-      hasData: true, sales: [{ id: 's1', assignedSellerId: 's1', soldValueCents: 10000000, soldAt: new Date().toISOString() }],
-    }));
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, rank: 1 })],
+    });
   });
 
   it('Funil comercial não muda ao trocar período do Pódio', () => {
@@ -785,7 +770,7 @@ describe('Home — segmento Todos/Novos/Seminovos: ausente no remoto, preservado
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
     m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
     m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
-    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'unavailable' });
     renderHome(manager());
     expect(screen.queryByText('Novos')).toBeNull();
     expect(screen.queryByText('Seminovos')).toBeNull();
