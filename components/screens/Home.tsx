@@ -380,7 +380,12 @@ function RankingRow({ s, pos, active, leader, me, target }: any) {
       onMouseLeave={(e: any) => { if (!leader && !me) e.currentTarget.style.background = bg; }}>
       {leader && active && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}><div style={{ position: 'absolute', top: 0, left: 0, width: '30%', height: '100%', background: 'linear-gradient(90deg,transparent,rgba(212,175,55,.14),transparent)', animation: 'sweep 6s ease-in-out 1s infinite' }} /></div>}
       <div className="display tnum" style={{ width: 26, textAlign: 'center', fontSize: 19, fontWeight: 900, color: pl ? pl.ring : me ? '#5B9BFF' : 'var(--txt-lo)' }}>{pos}</div>
-      <div style={{ width: 13, color: moveColor }}>{moveIcon && <Icon name={moveIcon} size={13} stroke={3} />}</div>
+      {/* PODIUM-MOVEMENT-R1-B1-EXEC §23/§24 — title torna a seta acessível
+          (nunca só visual) e deixa explícito que o movimento é do mês
+          oficial, mesmo quando o Pódio está filtrado em Hoje/7/15/30 dias
+          (§8 do PRECHECK: rank do filtro visual e movement mensal são
+          conceitos diferentes, não devem ser confundidos). */}
+      <div style={{ width: 13, color: moveColor }} title={s.move > 0 ? `Subiu ${s.move} ${s.move > 1 ? 'posições' : 'posição'} no mês` : undefined}>{moveIcon && <Icon name={moveIcon} size={13} stroke={3} />}</div>
       <Avatar name={s.name} size={34} ring={pl ? pl.ring : me ? '#3B82F6' : '#3a3a40'} gold={pos === 1} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -1182,14 +1187,15 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // Adapta leaderboard.rows (já ordenadas por rank — a própria RPC entrega
   // nesta ordem, ver ORDER BY na migration) para o shape legado que
   // Podiums.tsx/RankingRow já esperam — DELIBERADAMENTE sem
-  // team/leads/conv/scheduled/growth/move: esses componentes agora
-  // renderizam cada um desses campos condicionalmente (só quando
-  // presentes), então omiti-los aqui É o mecanismo real de "esconder sem
-  // quebrar o design" (§20 do EXEC) — nunca um valor inventado, nunca 0
-  // fingido de conversão/leads, nunca uma seta de movimento sem histórico
-  // real (§21/§22/§28).
+  // team/leads/conv/scheduled/growth: esses componentes agora renderizam
+  // cada um desses campos condicionalmente (só quando presentes), então
+  // omiti-los aqui É o mecanismo real de "esconder sem quebrar o design"
+  // (§20 do EXEC). `move` (PODIUM-MOVEMENT-R1-B1-EXEC) é a ÚNICA exceção:
+  // agora vem de row.movement.positionsGained (último evento real do mês
+  // oficial, nunca soma, nunca inferido) — `undefined` quando null, nunca
+  // 0 fabricado (RankingRow já trata ausência como "sem seta").
   const remoteRankedSellers = leaderboard.status === 'ready'
-    ? leaderboard.rows.map((row) => ({ id: row.sellerId, name: row.sellerLabel, sales: row.saleCount, visits: row.completedVisitCount }))
+    ? leaderboard.rows.map((row) => ({ id: row.sellerId, name: row.sellerLabel, sales: row.saleCount, visits: row.completedVisitCount, move: row.movement?.positionsGained ?? undefined }))
     : [];
   // SEU ALVO / Rival direto (§30-§32) — 100% mecânico a partir do próprio
   // array já ranqueado, nenhum backend novo: a linha imediatamente ACIMA

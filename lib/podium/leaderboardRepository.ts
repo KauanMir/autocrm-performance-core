@@ -8,12 +8,24 @@
 import { supabase } from '@/lib/supabase/client';
 import { PodiumLeaderboardError } from '@/lib/podium/errors';
 
+// PODIUM-MOVEMENT-R1-B1-EXEC — última melhoria real de posição do Seller
+// no mês oficial (companies.timezone), nunca soma de eventos, nunca o
+// período visual do Pódio (Hoje/7/15/30/Personalizado) — ver PRECHECK
+// PODIUM-MOVEMENT-R1-A1 §6/§8. null quando não existe evento elegível
+// (competition_started=true nunca conta, evento de mês anterior nunca
+// conta) — nunca 0, nunca inferido.
+export interface SellerMovement {
+  positionsGained: number;
+  happenedAt: string;
+}
+
 export interface CompanySellerLeaderboardRow {
   sellerId: string;
   sellerLabel: string;
   saleCount: number;
   completedVisitCount: number;
   rank: number;
+  movement: SellerMovement | null;
 }
 
 export type FetchCompanySellerLeaderboardInput = {
@@ -47,5 +59,8 @@ export async function fetchCompanySellerLeaderboard(
     saleCount: row.sale_count,
     completedVisitCount: row.completed_visit_count,
     rank: row.rank,
+    movement: row.movement_positions_gained != null && row.movement_happened_at != null
+      ? { positionsGained: row.movement_positions_gained, happenedAt: row.movement_happened_at }
+      : null,
   }));
 }

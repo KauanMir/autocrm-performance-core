@@ -24,7 +24,11 @@ vi.mock('@/lib/flags', async (importOriginal) => {
 const READY_PERIOD: ResolvedPeriod = { kind: 'ready', startMillis: 1735689600000, endMillis: 1738368000000 };
 
 function rpcRow(over: Partial<Record<string, unknown>> = {}) {
-  return { seller_id: 's1', seller_label: 'Lucas Martins', sale_count: 3, completed_visit_count: 1, rank: 1, ...over };
+  return {
+    seller_id: 's1', seller_label: 'Lucas Martins', sale_count: 3, completed_visit_count: 1, rank: 1,
+    movement_positions_gained: null, movement_happened_at: null,
+    ...over,
+  };
 }
 
 function createWrapper() {
@@ -146,8 +150,41 @@ describe('useCompanySellerLeaderboard — sucesso', () => {
     );
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(result.current.status === 'ready' && result.current.rows).toEqual([
-      { sellerId: 's9', sellerLabel: 'Bianca Alves', saleCount: 5, completedVisitCount: 2, rank: 2 },
+      { sellerId: 's9', sellerLabel: 'Bianca Alves', saleCount: 5, completedVisitCount: 2, rank: 2, movement: null },
     ]);
+  });
+
+  // PODIUM-MOVEMENT-R1-B1-EXEC — movement_positions_gained/
+  // movement_happened_at (null quando não há evento elegível no mês
+  // oficial) viram um único campo de domínio `movement`.
+  it('ready: movement presente vira { positionsGained, happenedAt }', async () => {
+    m.rpc.mockResolvedValue({
+      data: [rpcRow({ movement_positions_gained: 2, movement_happened_at: '2026-08-10T12:00:00Z' })],
+      error: null,
+    });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(
+      () => useCompanySellerLeaderboard({ userId: 'user-1', companyId: 'company-1', membershipRole: 'manager', userIsActive: true, period: READY_PERIOD }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const rows = result.current.status === 'ready' ? result.current.rows : [];
+    expect(rows[0].movement).toEqual({ positionsGained: 2, happenedAt: '2026-08-10T12:00:00Z' });
+  });
+
+  it('ready: movement ausente (null/null) vira movement=null, nunca 0 nem objeto parcial', async () => {
+    m.rpc.mockResolvedValue({
+      data: [rpcRow({ movement_positions_gained: null, movement_happened_at: null })],
+      error: null,
+    });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(
+      () => useCompanySellerLeaderboard({ userId: 'user-1', companyId: 'company-1', membershipRole: 'manager', userIsActive: true, period: READY_PERIOD }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const rows = result.current.status === 'ready' ? result.current.rows : [];
+    expect(rows[0].movement).toBeNull();
   });
 
   it('empty: TODAS as linhas com saleCount=0 (roster ativo sem nenhuma venda) vira status empty com sellerCount real', async () => {

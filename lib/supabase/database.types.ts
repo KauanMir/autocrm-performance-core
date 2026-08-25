@@ -1751,6 +1751,8 @@ export type Database = {
         }
         Returns: {
           completed_visit_count: number
+          movement_happened_at: string
+          movement_positions_gained: number
           rank: number
           sale_count: number
           seller_id: string

@@ -268,10 +268,12 @@ function getRankingListContainer() {
 
 // PODIUM-COMPETITION-R1-EXEC — resultado padrão de uma linha do leaderboard
 // (assinatura real, lib/podium/leaderboardRepository.ts): sellerId/
-// sellerLabel/saleCount/completedVisitCount/rank. Nunca revenueCents (não
-// existe no contrato — §11/§24 do EXEC).
+// sellerLabel/saleCount/completedVisitCount/rank/movement. Nunca
+// revenueCents (não existe no contrato — §11/§24 do EXEC). movement=null
+// por padrão (PODIUM-MOVEMENT-R1-B1-EXEC) — mesmo shape que a RPC real
+// devolve quando não há evento elegível no mês oficial.
 function leaderboardRow(over: Partial<Record<string, unknown>> = {}) {
-  return { sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, completedVisitCount: 0, rank: 1, ...over };
+  return { sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, completedVisitCount: 0, rank: 1, movement: null, ...over };
 }
 
 // variant 'B' por simplicidade de asserção (não mais por ResizeObserver —
@@ -518,6 +520,64 @@ describe('Home — Ranking completo real (PODIUM-COMPETITION-R1-EXEC)', () => {
     renderHome(manager());
     // 2 sellers só: ambos caem no Top 3 do Pódio E na RankingList.
     expect(screen.getAllByText('Bianca Alves').length).toBe(2);
+  });
+
+  // PODIUM-MOVEMENT-R1-B1-EXEC — seta real de movimento mensal no Ranking
+  // completo, a partir de row.movement (nunca fixture, nunca Seller.move
+  // hardcoded no caminho remoto).
+  describe('movimento mensal (PODIUM-MOVEMENT-R1-B1-EXEC)', () => {
+    it('movement presente (positionsGained=2): seta aparece com tooltip plural, sem em dash', () => {
+      m.useCompanySellerLeaderboard.mockReturnValue({
+        status: 'ready',
+        rows: [
+          leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 5, rank: 1, movement: { positionsGained: 2, happenedAt: '2026-08-10T12:00:00Z' } }),
+          leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 3, rank: 2 }),
+          leaderboardRow({ sellerId: 's3', sellerLabel: 'João Ferreira', saleCount: 1, rank: 3 }),
+        ],
+      });
+      renderHome(manager());
+      const tooltip = screen.getByTitle('Subiu 2 posições no mês');
+      expect(tooltip).toBeInTheDocument();
+      expect(tooltip.textContent).not.toMatch(/—/);
+    });
+
+    it('movement presente (positionsGained=1): tooltip singular ("posição", nunca "posições")', () => {
+      m.useCompanySellerLeaderboard.mockReturnValue({
+        status: 'ready',
+        rows: [
+          leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 5, rank: 1, movement: { positionsGained: 1, happenedAt: '2026-08-10T12:00:00Z' } }),
+          leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 3, rank: 2 }),
+          leaderboardRow({ sellerId: 's3', sellerLabel: 'João Ferreira', saleCount: 1, rank: 3 }),
+        ],
+      });
+      renderHome(manager());
+      expect(screen.getByTitle('Subiu 1 posição no mês')).toBeInTheDocument();
+      expect(screen.queryByTitle('Subiu 1 posições no mês')).toBeNull();
+    });
+
+    it('movement=null (sem evento elegível no mês): nenhuma seta, nenhum tooltip', () => {
+      m.useCompanySellerLeaderboard.mockReturnValue({
+        status: 'ready',
+        rows: [
+          leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 5, rank: 1, movement: null }),
+          leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 3, rank: 2, movement: null }),
+        ],
+      });
+      renderHome(manager());
+      expect(screen.queryByTitle(/Subiu/)).toBeNull();
+    });
+
+    it('Seller vê o mesmo movement agregado que o Manager para um colega', () => {
+      m.useCompanySellerLeaderboard.mockReturnValue({
+        status: 'ready',
+        rows: [
+          leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 5, rank: 1, movement: { positionsGained: 2, happenedAt: '2026-08-10T12:00:00Z' } }),
+          leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, rank: 2 }),
+        ],
+      });
+      renderHome(seller());
+      expect(screen.getByTitle('Subiu 2 posições no mês')).toBeInTheDocument();
+    });
   });
 
   it('seletor A/B/C/D altera SOMENTE a variante — remoto nunca chama setTweak (preferência remota é própria, localStorage)', () => {
