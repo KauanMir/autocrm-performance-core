@@ -569,14 +569,18 @@ describe('Home — Ranking completo real (PODIUM-COMPETITION-R1-EXEC)', () => {
     expect(screen.queryByText('Conversão')).toBeNull();
   });
 
-  it('CompTicker e Minha Disputa continuam ausentes no remoto (R2, não neste lote — §29/§33/§34 do EXEC)', () => {
+  it('Manager: CompTicker e Minha Disputa nunca aparecem (personagem pessoal é só do Seller — PODIUM-COMPETITION-R2A-EXEC §21)', () => {
     m.useCompanySellerLeaderboard.mockReturnValue({
       status: 'ready',
-      rows: [leaderboardRow()],
+      rows: [
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, rank: 1 }),
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 1, rank: 2 }),
+      ],
     });
     renderHome(manager());
     expect(screen.queryByText('Minha disputa')).toBeNull();
     expect(screen.queryByText(/Faltam .* vendas para você entrar no/)).toBeNull();
+    expect(screen.queryByText('Você está na liderança.')).toBeNull();
   });
 
   it('loading: notice dedicado, nenhuma linha renderizada', () => {
@@ -615,8 +619,168 @@ describe('Home — Ranking completo real (PODIUM-COMPETITION-R1-EXEC)', () => {
     });
     renderHome(seller('s1'));
     // Ambos caem no Top 3 do Pódio E na RankingList (só 2 sellers no total).
-    expect(screen.getAllByText('Lucas Martins').length).toBe(2);
+    // Lucas (s1, líder) também aparece no header do card Minha Disputa
+    // (PODIUM-COMPETITION-R2A-EXEC) — 3ª ocorrência do próprio nome; Ana
+    // (chaser) só aparece pelo primeiro nome em "Minha Disputa", então
+    // continua em 2 ocorrências do nome completo.
+    expect(screen.getAllByText('Lucas Martins').length).toBe(3);
     expect(screen.getAllByText('Ana Souza').length).toBe(2);
+  });
+});
+
+// ── Minha Disputa + CompTicker reais (PODIUM-COMPETITION-R2A-EXEC) ──────
+// Camada pessoal derivada do MESMO leaderboard (nenhuma segunda fonte).
+// A lógica de negócio (rival/gap/empate/liderança/Top3/mensagens
+// permitidas) tem cobertura própria e exaustiva em
+// tests/podium/competition.test.ts — aqui só se prova o que Home FAZ com
+// o resultado: gating por papel, wiring de period/variant, ausência de
+// fixture.
+// "Minha disputa" está sempre dentro de um <div> (não <span>, ao contrário
+// do título "Ranking completo") — .closest('div') já retorna o próprio nó,
+// então 3 níveis de parentElement chegam ao card inteiro (header com nome/
+// posição + grid de stats/RaceMsg). Necessário porque o Pódio variante B
+// também mostra badges "2º"/"3º" e o CompTicker duplica cada mensagem 2x
+// (loop de scroll) — sem escopo, getByText colide com esses outros nós.
+function getMinhaDisputaContainer() {
+  return screen.getByText('Minha disputa').closest('div')!.parentElement!.parentElement!.parentElement!;
+}
+
+describe('Home — Minha Disputa + CompTicker reais (PODIUM-COMPETITION-R2A-EXEC)', () => {
+  beforeEach(() => {
+    m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
+    );
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+  });
+
+  const THREE_ROWS = [
+    leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 5, completedVisitCount: 3, rank: 1 }),
+    leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, completedVisitCount: 2, rank: 2 }),
+    leaderboardRow({ sellerId: 's3', sellerLabel: 'João Ferreira', saleCount: 1, completedVisitCount: 1, rank: 3 }),
+  ];
+
+  it('Seller (perseguindo): Minha Disputa real aparece com posição, vendas, visitas e rival direto', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'ready', rows: THREE_ROWS });
+    renderHome(seller('s1'));
+    const card = within(getMinhaDisputaContainer());
+    expect(card.getByText('Minha disputa')).toBeInTheDocument();
+    expect(card.getByText('Minha posição').nextElementSibling?.textContent).toBe('2º');
+    expect(card.getByText('Faltam 2 vendas para alcançar Ana.')).toBeInTheDocument();
+    // Fonte real: saleCount/completedVisitCount, nada de leads/agendadas/conversão fixture.
+    expect(card.getByText('Minhas vendas')).toBeInTheDocument();
+    expect(card.getByText('Visitas realizadas')).toBeInTheDocument();
+    expect(card.queryByText('Meus leads')).toBeNull();
+    expect(card.queryByText('Agendadas')).toBeNull();
+    expect(card.queryByText('Conversão')).toBeNull();
+    expect(card.queryByText(/Meta da semana/)).toBeNull();
+  });
+
+  it('Seller em 1º lugar: estado de liderança, sem SEU ALVO, com perseguidor', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 5, rank: 1 }),
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 3, rank: 2 }),
+      ],
+    });
+    renderHome(seller('s1'));
+    const card = within(getMinhaDisputaContainer());
+    expect(card.getByText('Você está na liderança.')).toBeInTheDocument();
+    expect(card.getByText('Você lidera por 2 vendas.')).toBeInTheDocument();
+    expect(card.getByText('Ana está logo atrás com 3 vendas.')).toBeInTheDocument();
+    expect(screen.queryByText('SEU ALVO')).toBeNull();
+  });
+
+  it('Seller fora do Top 3: linha de gap para o Top 3 aparece na Minha Disputa', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 8, rank: 1 }),
+        leaderboardRow({ sellerId: 's3', sellerLabel: 'Bianca Alves', saleCount: 6, rank: 2 }),
+        leaderboardRow({ sellerId: 's4', sellerLabel: 'João Ferreira', saleCount: 4, rank: 3 }),
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 2, rank: 4 }),
+      ],
+    });
+    renderHome(seller('s1'));
+    const card = within(getMinhaDisputaContainer());
+    expect(card.getByText('Faltam 2 vendas para entrar no Top 3.')).toBeInTheDocument();
+  });
+
+  it('Manager: nunca vê Minha Disputa nem CompTicker, mesmo com leaderboard pronto', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'ready', rows: THREE_ROWS });
+    renderHome(manager());
+    expect(screen.queryByText('Minha disputa')).toBeNull();
+    expect(screen.queryByText('Você está na liderança.')).toBeNull();
+  });
+
+  it('Super Admin sem company context: leaderboard unavailable, nenhuma superfície pessoal', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'unavailable' });
+    render(<Home t={{ podium: 'B' }} setTweak={vi.fn()} go={vi.fn()} active={false} currentUser={superAdmin() as any} />);
+    expect(screen.queryByText('Minha disputa')).toBeNull();
+    expect(screen.queryByText('Você está na liderança.')).toBeNull();
+  });
+
+  it('loading: sem Minha Disputa com zeros, sem ticker fake', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'loading' });
+    renderHome(seller('s1'));
+    expect(screen.queryByText('Minha disputa')).toBeNull();
+  });
+
+  it('erro: sem Minha Disputa/ticker stale', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'error', retry: vi.fn() });
+    renderHome(seller('s1'));
+    expect(screen.queryByText('Minha disputa')).toBeNull();
+  });
+
+  it('empty (zero Sales): Minha Disputa não renderiza, nenhuma disputa inventada', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'empty', sellerCount: 3 });
+    renderHome(seller('s1'));
+    expect(screen.queryByText('Minha disputa')).toBeNull();
+  });
+
+  it('leaderboard sem o Seller logado (fail-safe): Minha Disputa não renderiza, não lança', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [leaderboardRow({ sellerId: 's9', sellerLabel: 'Outra Pessoa', saleCount: 2, rank: 1 })],
+    });
+    expect(() => renderHome(seller('s1'))).not.toThrow();
+    expect(screen.queryByText('Minha disputa')).toBeNull();
+  });
+
+  it('trocar A/B/C/D não altera rival/posição/mensagens da Minha Disputa (independência §18)', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'ready', rows: THREE_ROWS });
+    renderHome(seller('s1'));
+    const posBefore = within(getMinhaDisputaContainer()).getByText('Minha posição').nextElementSibling?.textContent;
+    fireEvent.click(screen.getByTitle('Líder'));
+    const posAfter = within(getMinhaDisputaContainer()).getByText('Minha posição').nextElementSibling?.textContent;
+    expect(posAfter).toBe(posBefore);
+  });
+
+  it('CompTicker real: só mensagens permitidas (§13), nenhuma proibida (§14)', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'ready', rows: THREE_ROWS });
+    renderHome(seller('s1'));
+    // s1 (Lucas, 2º) tem rival direto com gap (Ana) e não está fora do
+    // Top 3 (rank 2) — mensagens esperadas: fato do líder (nome curto,
+    // igual ao resto da UI) + alvo direto. Ticker duplica cada mensagem 2x
+    // (loop de scroll) — getAllByText, nunca getByText, para essas.
+    expect(screen.getAllByText('Ana lidera com 5 vendas.').length).toBe(2);
+    expect(screen.getAllByText('Seu alvo é Ana, com 5 vendas.').length).toBe(2);
+    expect(screen.queryByText(/subiu|ultrapass|caiu|Meta da semana|AO VIVO/i)).toBeNull();
+  });
+
+  it('CompTicker real: mostra a mensagem de liderança quando estou em 1º, mesmo sozinho na empresa', () => {
+    // Único seller: leading, sem chaser -> ainda assim gera a mensagem
+    // "Você está na liderança." (nunca ticker vazio quando há disputa real).
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 2, rank: 1 })],
+    });
+    renderHome(seller('s1'));
+    // Aparece 2x no ticker (loop de scroll) + 1x no card Minha Disputa.
+    expect(screen.getAllByText('Você está na liderança.').length).toBe(3);
   });
 });
 

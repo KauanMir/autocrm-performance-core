@@ -16,6 +16,11 @@ import { useRemoteSalesScreenState } from '@/lib/hooks/useRemoteSalesScreenState
 import { useCurrentCompanyTimezone } from '@/lib/hooks/useCurrentCompanyTimezone';
 import { useCompanySellerLeaderboard } from '@/lib/hooks/useCompanySellerLeaderboard';
 import { usePodiumViewPreference } from '@/lib/hooks/usePodiumViewPreference';
+import {
+  resolveMyCompetitionState,
+  buildMinhaDisputaLines,
+  buildCompetitionTickerMessages,
+} from '@/lib/podium/competition';
 import { resolvePresetRange, resolveCustomRange, type PeriodPreset, type ResolvedPeriod } from '@/lib/date/companyPeriod';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { groupLateTasksBySeller, groupOpenDealsBySeller, type SellerAttentionRow } from '@/lib/home/managerAttention';
@@ -313,20 +318,26 @@ function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam, isS
   );
 }
 
-function CompTicker({ comp }: any) {
-  const msgs = [
+// PODIUM-COMPETITION-R2A-EXEC — no modo remoto, `messages` chega já
+// resolvido por buildCompetitionTickerMessages (lib/podium/competition.ts),
+// 100% derivado do leaderboard real, sem fixture. Mantém a mesma casca
+// visual (scroll infinito, mesmo layout de item) — só a fonte do conteúdo
+// muda; local/fixture continua no array `comp`-based abaixo, intocado.
+function CompTicker({ comp, messages }: any) {
+  const msgs = messages ?? [
     { icon: 'flag', c: '#E8CE72', t: <span>Faltam <b>{comp.top3Gap} vendas</b> para você entrar no <b>TOP 3</b></span> },
     { icon: 'flame', c: '#FF6B3B', t: <span><b>{comp.chaser?.first ?? '-'}</b> subiu 3 posições e empatou com você</span> },
     { icon: 'target', c: '#E23744', t: <span>Seu rival direto: <b>{comp.rivalAhead?.first ?? '-'}</b>, {comp.aheadGap} vendas à frente</span> },
     { icon: 'trophy', c: '#E8CE72', t: <span><b>{comp.leader?.first}</b> lidera com {comp.leader?.sales} vendas</span> },
     { icon: 'zap', c: '#27C75F', t: <span>Meta da semana: <b>+{comp.weeklyGoal} vendas</b></span> },
   ];
+  if (messages && messages.length === 0) return null;
   const row = (key: string) => (
     <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 38, padding: '0 19px', flexShrink: 0 }}>
-      {msgs.map((m, i) => (
+      {msgs.map((m: any, i: number) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
           <Icon name={m.icon} size={15} stroke={2.2} style={{ color: m.c }} />
-          <span style={{ fontSize: 13, color: 'var(--txt-mid)', whiteSpace: 'nowrap' }}>{m.t}</span>
+          <span style={{ fontSize: 13, color: 'var(--txt-mid)', whiteSpace: 'nowrap' }}>{m.t ?? m.text}</span>
           <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--line-dark-2)', marginLeft: 18 }} />
         </div>
       ))}
@@ -417,7 +428,60 @@ function RaceMsg({ icon, c, title, children }: any) {
   );
 }
 
-function MinhaDisputa({ active, comp }: any) {
+// PODIUM-COMPETITION-R2A-EXEC — `remote` (quando presente) traz {me, lines}
+// já resolvidos por buildMinhaDisputaLines (lib/podium/competition.ts):
+// me = row real (sellerId/sellerLabel/saleCount/completedVisitCount/rank),
+// lines = RaceMsg reais (rival/liderança/perseguidor/Top 3), nunca meta
+// semanal/leads/agendadas/conversão fixture (§4/§6 do EXEC — campos sem
+// contrato real desaparecem, não viram 0). Preserva a casca visual do
+// card legado (avatar, header, badge de posição, grid de stats, RaceMsg);
+// local/fixture (comp-based) permanece intocado abaixo.
+function MinhaDisputa({ active, comp, remote }: any) {
+  if (remote) {
+    const { me, lines } = remote;
+    const stats = [
+      { label: 'Minhas vendas', v: me.saleCount, icon: 'trophy', gold: true },
+      { label: 'Visitas realizadas', v: me.completedVisitCount, icon: 'check' },
+    ];
+    return (
+      <div style={{ background: 'linear-gradient(135deg,#19191c,#111113)', border: '1px solid var(--line-dark)', borderRadius: 18, padding: 24, boxShadow: 'var(--shadow-md)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20, flexWrap: 'wrap' }}>
+          <Avatar name={me.sellerLabel} size={52} ring="#3B82F6" />
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 700 }}>Minha disputa</div>
+            <div className="display" style={{ fontSize: 22, fontWeight: 800, color: '#fff' }}>{me.sellerLabel}</div>
+          </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(0,0,0,.35)', border: '1px solid var(--line-dark)', borderRadius: 14, padding: '12px 20px' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--txt-lo)' }}>Minha posição</span>
+            <span className="display" style={{ fontSize: 36, fontWeight: 900, color: '#fff', lineHeight: 1 }}>{me.rank}º</span>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 18 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10, alignContent: 'start' }}>
+            {stats.map((s: any) => (
+              <div key={s.label} style={{ background: 'rgba(0,0,0,.3)', border: '1px solid var(--line-dark)', borderRadius: 13, padding: '14px 10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9 }}>
+                  <Icon name={s.icon} size={14} stroke={2} style={{ color: s.gold ? '#D4AF37' : 'var(--txt-lo)' }} />
+                </div>
+                <div className="display tnum" style={{ fontSize: 28, fontWeight: 800, color: s.gold ? '#E8CE72' : '#fff', lineHeight: 1 }}>
+                  {active ? <CountUp value={s.v} active={active} /> : s.v}
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--txt-lo)', fontWeight: 600, marginTop: 6 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {(lines as any[]).map((line) => (
+              <RaceMsg key={line.id} icon={line.icon} c={line.c} title={line.title}>{line.text}</RaceMsg>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const me = comp.me;
   const stats = [
     { label: 'Meus leads', v: me.leads, icon: 'users' },
@@ -1092,9 +1156,20 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // da minha. 1º colocado (ou Seller sem posição resolvida) nunca tem
   // alvo.
   const mySellerId = currentUser?.activeMembership?.sellerId ?? null;
-  const myRemoteIndex = mySellerId ? remoteRankedSellers.findIndex((s) => s.id === mySellerId) : -1;
-  const remoteRivalRow = myRemoteIndex > 0 ? remoteRankedSellers[myRemoteIndex - 1] : null;
-  const remoteComp = remoteRivalRow ? { rivalAhead: remoteRivalRow } : null;
+  // PODIUM-COMPETITION-R2A-EXEC — fonte única para SEU ALVO (RankingList),
+  // Minha Disputa e CompTicker: rows CRUAS do leaderboard (com rank real),
+  // nunca o remoteRankedSellers já adaptado (perde `rank`). §1 do EXEC —
+  // proibido criar uma segunda fonte de ranking.
+  const remoteLeaderboardRows = leaderboard.status === 'ready' ? leaderboard.rows : [];
+  const remoteCompetitionState = resolveMyCompetitionState(remoteLeaderboardRows, mySellerId);
+  const remoteComp = remoteCompetitionState.status === 'chasing'
+    ? { rivalAhead: { id: remoteCompetitionState.rival.sellerId } }
+    : null;
+  const remoteMinhaDisputaLines = buildMinhaDisputaLines(remoteCompetitionState, remoteLeaderboardRows);
+  const remoteTickerMessages = buildCompetitionTickerMessages(remoteCompetitionState, remoteLeaderboardRows);
+  const showRemoteMinhaDisputa = isSeller
+    && leaderboard.status === 'ready'
+    && (remoteCompetitionState.status === 'leading' || remoteCompetitionState.status === 'chasing');
 
   const variant = isSellersLocal ? t.podium : remoteVariant;
   const sellers = isSellersLocal ? localSellers : remoteRankedSellers;
@@ -1136,6 +1211,9 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
         team={team} setTeam={setTeam} isSellersLocal={isSellersLocal}
       />
       {isSellersLocal && <CompTicker comp={comp} />}
+      {!isSellersLocal && isSeller && leaderboard.status === 'ready' && remoteTickerMessages.length > 0 && (
+        <CompTicker messages={remoteTickerMessages} />
+      )}
 
       <div style={{ padding: '22px 26px 44px', position: 'relative' }}>
         {isSellersLocal ? (
@@ -1187,6 +1265,11 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
 
         <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} dealsSummary={dealsSummary} salesSummary={salesSummary} /></div>
         {isSellersLocal && <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>}
+        {showRemoteMinhaDisputa && (
+          <div style={{ marginBottom: 26 }}>
+            <MinhaDisputa active={active} remote={{ me: (remoteCompetitionState as any).me, lines: remoteMinhaDisputaLines }} />
+          </div>
+        )}
         <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} /></div>
         {isManager && (
           <div style={{ marginBottom: 26 }}>
