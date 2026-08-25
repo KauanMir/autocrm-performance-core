@@ -215,21 +215,45 @@ export function Stat({ label, value, sub, icon, tone = 'ink', active }: {
   );
 }
 
+// PODIUM-VIEWPORT-FIT-R1-EXEC — antes escalava SOMENTE pela largura do
+// container (scale = w / naturalWidth), nunca checando se a altura
+// resultante cabia — em zoom 100% (viewport mais curto em px CSS que em
+// 75%), o conteúdo escalado por largura podia ficar mais alto que o
+// container e era cortado pelo overflow:hidden abaixo (achado real,
+// reproduzido visualmente — Pódio variante D cortado verticalmente).
+// Agora mede também a altura NATURAL do próprio conteúdo (via ref no nó
+// interno — offsetHeight/clientHeight refletem o box de layout, nunca
+// afetado por `transform`, então a medição nunca entra em loop com a
+// própria escala aplicada) e usa scale = min(1, largura/naturalWidth,
+// altura/naturalHeight) — nunca deixa o conteúdo ultrapassar o container
+// em NENHUMA dimensão, nunca amplia além do tamanho natural do design.
 export function FitBox({ naturalWidth, align = 'center', children }: {
   naturalWidth: number; align?: 'center' | 'bottom'; children: React.ReactNode;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const outerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   useEffect(() => {
-    const el = ref.current; if (!el) return;
-    const measure = () => { const w = el.clientWidth; setScale(Math.min(1, w / naturalWidth)); };
+    const outer = outerRef.current;
+    const inner = innerRef.current;
+    if (!outer || !inner) return;
+    const measure = () => {
+      const w = outer.clientWidth;
+      const h = outer.clientHeight;
+      const naturalHeight = inner.offsetHeight || 1;
+      const scaleW = w / naturalWidth;
+      const scaleH = h > 0 ? h / naturalHeight : 1;
+      setScale(Math.min(1, scaleW, scaleH));
+    };
     measure();
-    const ro = new ResizeObserver(measure); ro.observe(el);
+    const ro = new ResizeObserver(measure);
+    ro.observe(outer);
+    ro.observe(inner);
     return () => ro.disconnect();
   }, [naturalWidth]);
   return (
-    <div ref={ref} style={{ width: '100%', height: '100%', display: 'grid', placeItems: align === 'bottom' ? 'end center' : 'center', overflow: 'hidden' }}>
-      <div style={{ width: naturalWidth, transform: scale >= 0.96 ? 'none' : `scale(${scale})`, transformOrigin: align === 'bottom' ? 'center bottom' : 'center center' }}>{children}</div>
+    <div ref={outerRef} style={{ width: '100%', height: '100%', display: 'grid', placeItems: align === 'bottom' ? 'end center' : 'center', overflow: 'hidden' }}>
+      <div ref={innerRef} style={{ width: naturalWidth, transform: scale >= 0.96 ? 'none' : `scale(${scale})`, transformOrigin: align === 'bottom' ? 'center bottom' : 'center center' }}>{children}</div>
     </div>
   );
 }

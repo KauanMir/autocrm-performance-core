@@ -14,6 +14,19 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
 
+// PODIUM-VIEWPORT-FIT-R1-EXEC — Home real (não mockada neste arquivo)
+// monta o Pódio via FitBox (components/ui/kit.tsx) em qualquer variante,
+// inclusive B (desde este EXEC) — sem este polyfill, `new ResizeObserver`
+// lança ReferenceError (ausente no jsdom por padrão), derrubando qualquer
+// render que alcance a Home real.
+if (typeof (globalThis as any).ResizeObserver === 'undefined') {
+  (globalThis as any).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 // Badge de Pendências escopado ao próprio botão de nav — evita colidir com
 // qualquer outro "2"/número solto renderizado por Home (não mockada neste
 // arquivo) em telas que não são o foco deste teste.

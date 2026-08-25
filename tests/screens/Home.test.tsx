@@ -11,6 +11,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { TASK_STATE } from '@/lib/data';
 
+// PODIUM-VIEWPORT-FIT-R1-EXEC — FitBox (components/ui/kit.tsx) agora é o
+// caminho de TODAS as variantes A/B/C/D (antes B tinha um wrapper próprio
+// sem ResizeObserver, daí o "variant 'B' evita o caminho FitBox" nos
+// comentários abaixo — não é mais verdade, mas os testes continuam usando
+// B por simplicidade de asserção, não por essa razão). Sem este polyfill,
+// `new ResizeObserver(...)` lança ReferenceError (ausente no jsdom por
+// padrão) e QUALQUER render de Home quebraria, não só A/C/D.
+if (typeof (globalThis as any).ResizeObserver === 'undefined') {
+  (globalThis as any).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 const m = vi.hoisted(() => ({
   useRemoteLeadsScreenState: vi.fn(),
   useRemoteTasksScreenState: vi.fn(),
@@ -85,13 +100,15 @@ vi.mock('@/lib/hooks/useMarkCompetitionEventsSeen', () => ({
   useMarkCompetitionEventsSeen: m.useMarkCompetitionEventsSeen,
 }));
 
-// PODIUM-COMPETITION-R1-EXEC — fixa a preferência remota em 'B' (mesmo
-// motivo do comentário sobre variant 'B' em renderHome mais abaixo: A/C/D
-// passam pelo caminho FitBox/ResizeObserver, ausente no jsdom, fora do
-// escopo desta suíte). Cobertura própria de leitura/escrita/validação da
-// preferência (default D, fallback em valor inválido, isolamento por
-// userId) fica em lib/podium/podiumViewPreference — puro, sem React, já
-// testável sem esta mock.
+// PODIUM-COMPETITION-R1-EXEC — fixa a preferência remota em 'B' por
+// simplicidade de asserção nos testes (não mais por causa de
+// FitBox/ResizeObserver — desde PODIUM-VIEWPORT-FIT-R1-EXEC, todas as
+// variantes A/B/C/D passam por FitBox igualmente, e o polyfill de
+// ResizeObserver no topo deste arquivo cobre todas elas). Cobertura
+// própria de leitura/escrita/validação da preferência (default D,
+// fallback em valor inválido, isolamento por userId) fica em
+// lib/podium/podiumViewPreference — puro, sem React, já testável sem
+// esta mock.
 vi.mock('@/lib/hooks/usePodiumViewPreference', () => ({
   usePodiumViewPreference: () => ['B', vi.fn()],
 }));
@@ -257,9 +274,8 @@ function leaderboardRow(over: Partial<Record<string, unknown>> = {}) {
   return { sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, completedVisitCount: 0, rank: 1, ...over };
 }
 
-// variant 'B' evita o caminho FitBox/ResizeObserver do Podium (fora do
-// escopo do E7-A1 — ResizeObserver não existe no jsdom por padrão e nenhum
-// teste no projeto ainda exercitava o render real de Home/Podium).
+// variant 'B' por simplicidade de asserção (não mais por ResizeObserver —
+// ver polyfill no topo do arquivo, PODIUM-VIEWPORT-FIT-R1-EXEC).
 function renderHome(currentUser: any) {
   return render(<Home t={{ podium: 'B' }} setTweak={vi.fn()} go={vi.fn()} active={false} currentUser={currentUser} />);
 }
@@ -511,10 +527,8 @@ describe('Home — Ranking completo real (PODIUM-COMPETITION-R1-EXEC)', () => {
     });
     const setTweak = vi.fn();
     render(<Home t={{ podium: 'B' }} setTweak={setTweak} go={vi.fn()} active={false} currentUser={manager() as any} />);
-    // Clica no próprio chip 'B' (já ativo) — evita o caminho FitBox/
-    // ResizeObserver das variantes A/C/D (ausente no jsdom, fora de escopo
-    // desta suíte), mas já prova que o clique nunca chama setTweak no
-    // modo remoto.
+    // Clica no próprio chip 'B' (já ativo) — já prova que o clique nunca
+    // chama setTweak no modo remoto.
     fireEvent.click(screen.getByTitle('Líder'));
     expect(setTweak).not.toHaveBeenCalled();
   });

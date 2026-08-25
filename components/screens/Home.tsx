@@ -1233,11 +1233,16 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
         </div>
       </div>
       <div style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative' }}>
-        {variant === 'B'
-          ? <div style={{ height: '100%', display: 'grid', placeItems: 'center', padding: '8px 2px' }}><div style={{ width: '100%' }}><Podium variant="B" top3={top3} anim={t.anim} active={active} /></div></div>
-          : <FitBox naturalWidth={variant === 'A' ? 840 : variant === 'D' ? 900 : 866} align={(variant === 'A' || variant === 'D') ? 'bottom' : 'center'}>
-              <Podium variant={variant} top3={top3} anim={t.anim} active={active} />
-            </FitBox>}
+        {/* PODIUM-VIEWPORT-FIT-R1-EXEC — variante B passou a usar o mesmo
+            FitBox das demais (antes tinha um wrapper próprio sem nenhum
+            mecanismo de escala, então também podia ultrapassar o
+            container em viewports mais curtos, só nunca tinha sido
+            notado). FitBox agora escala por largura E altura (ver
+            components/ui/kit.tsx) — nunca corta, nunca amplia além do
+            tamanho natural do design. */}
+        <FitBox naturalWidth={variant === 'A' ? 840 : variant === 'D' ? 900 : 866} align={(variant === 'A' || variant === 'D') ? 'bottom' : 'center'}>
+          <Podium variant={variant} top3={top3} anim={t.anim} active={active} />
+        </FitBox>
       </div>
     </div>
   );
