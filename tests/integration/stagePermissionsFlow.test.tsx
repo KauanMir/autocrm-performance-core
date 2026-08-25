@@ -174,14 +174,22 @@ beforeEach(() => {
 });
 
 describe('fluxo de permissões — acesso por role e flag', () => {
-  it('Super Admin + flag OFF: Ajustes completo (Empresa/Usuários/Etapas) e reorder local por names, sem RPC nem Supabase', async () => {
-    // M1-F S8-B1: fixture desatualizado — canAccessFullSettings migrou de
-    // role='admin' (legado) para platformRole='super_admin'.
+  it('Super Admin + flag OFF: Usuários/Etapas (nunca Empresa) e reorder local por names, sem RPC nem Supabase', async () => {
+    // COMPANY-SETTINGS-R1-EXEC: canAccessFullSettings foi removida — Empresa
+    // é superfície exclusiva de Manager agora (canManageCompanySettings).
+    // Super Admin continua vendo Usuários/Etapas (capabilities intocadas).
     await renderApp({ ...user('admin'), platformRole: 'super_admin' });
     fireEvent.click(navAjustes()!);
 
-    expect(screen.getByRole('button', { name: 'Empresa' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Empresa' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Usuários' })).toBeInTheDocument();
+    // COMPANY-SETTINGS-R1-EXEC: Super Admin agora cai na aba 'Usuários' por
+    // padrão (Empresa não existe mais para este ator) — Usuários é conteúdo
+    // REAL (InviteList/company selector) e legitimamente chama
+    // supabase.from() antes mesmo de navegar para Etapas. Reseta a
+    // contagem aqui para isolar só o que a navegação para Etapas/reorder
+    // LOCAL dispara (que deve continuar sendo zero Supabase).
+    m.from.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Etapas' }));
 
     expect(screen.getByTestId('stage-row-new')).toHaveAttribute('draggable', 'false');
@@ -193,9 +201,9 @@ describe('fluxo de permissões — acesso por role e flag', () => {
     expect(m.from).not.toHaveBeenCalled();
   });
 
-  it('Super Admin + flag ON: Ajustes completo (Empresa/Usuários/Etapas), mas pipeline sem empresa real (sem membership) — Etapas mostra "Sessão indisponível"', async () => {
-    // M1-F S8-B1: fixture desatualizado — canAccessFullSettings migrou para
-    // platformRole. Super Admin nunca tem activeMembership (design) — o
+  it('Super Admin + flag ON: Usuários/Etapas (nunca Empresa), mas pipeline sem empresa real (sem membership) — Etapas mostra "Sessão indisponível"', async () => {
+    // COMPANY-SETTINGS-R1-EXEC: Empresa nunca aparece para Super Admin (sem
+    // company context). Super Admin nunca tem activeMembership (design) — o
     // pipeline real (usePipelineStages) desabilita a query sem companyId,
     // mesma regra de sempre, nunca alterada por esta etapa (§28.3/proibição
     // de tocar a lógica de empresa do pipeline). O reorder remoto REAL por
@@ -206,7 +214,15 @@ describe('fluxo de permissões — acesso por role e flag', () => {
     const superAdmin: User = { ...user('seller'), platformRole: 'super_admin' };
     await renderApp(superAdmin);
     fireEvent.click(navAjustes()!);
-    expect(screen.getByRole('button', { name: 'Empresa' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Empresa' })).toBeNull();
+    // COMPANY-SETTINGS-R1-EXEC: Super Admin agora cai na aba 'Usuários' por
+    // padrão (primeiro item permitido, já que Empresa não existe mais para
+    // este ator) — Usuários é conteúdo REAL (InviteList/company selector) e
+    // legitimamente chama supabase.from() antes mesmo de navegar para
+    // Etapas. A asserção original ("m.from nunca chamado") media a ausência
+    // de chamadas do PIPELINE/Etapas especificamente — reseta a contagem
+    // aqui para isolar só o que a navegação para Etapas dispara.
+    m.from.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Etapas' }));
     expect(screen.getByTestId('stages-remote-state'))
       .toHaveTextContent('Sessão indisponível. Entre novamente para gerenciar as etapas.');
@@ -223,29 +239,25 @@ describe('fluxo de permissões — acesso por role e flag', () => {
     expect(m.from).not.toHaveBeenCalled();
   });
 
-  it('manager com membership ativa + flag ON: vê Usuários e Etapas (nunca Empresa); reorder remoto funciona ao navegar explicitamente para Etapas', async () => {
-    // M1-F S7-B: um Manager com activeMembership real (companyId vindo dela,
-    // nunca do legado currentUser.companyId) também vê a aba Usuários, por
-    // canManageInvites (§4-F1) — "somente Etapas" deixou de ser verdade
-    // assim que o pipeline passou a depender de uma membership real (o
-    // cenário antigo só existia via o consumo legado que este S7-B remove
-    // de propósito). A aba padrão pode não ser Etapas — por isso a
-    // navegação para Etapas agora é EXPLÍCITA.
+  it('manager com membership ativa + flag ON: vê Empresa, Usuários e Etapas; reorder remoto funciona ao navegar explicitamente para Etapas', async () => {
+    // COMPANY-SETTINGS-R1-EXEC: Manager com membership ativa agora vê
+    // Empresa (canManageCompanySettings) ALÉM de Usuários (canManageInvites,
+    // §4-F1) e Etapas (flag ON) — as três capabilities são independentes.
+    // A aba padrão ('Empresa', primeiro item de allowedTabs) mostra o
+    // fixture local (isLocalCommercialDataAllowed não é mockado neste
+    // arquivo — flag remota de leads OFF por padrão no ambiente de teste).
     m.flag.current = true;
     mockSelect();
     await renderApp(userWithActiveMembership('manager'));
     fireEvent.click(navAjustes()!);
 
-    // Matriz real de abas: Usuários e Etapas presentes; Empresa nunca
-    // (exclusiva de admin/fullSettingsAccess) — "Equipe" (título de
-    // InviteList) agora aparece legitimamente dentro de Usuários, então
-    // deixou de ser um proxy válido de "nenhum conteúdo administrativo".
+    // Matriz real de abas: Empresa, Usuários e Etapas presentes.
+    expect(screen.getByRole('button', { name: 'Empresa' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Usuários' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Etapas' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Empresa' })).toBeNull();
-    expect(screen.queryByText('Dados da loja')).toBeNull();
+    expect(screen.getByText('Dados da loja')).toBeInTheDocument();
 
-    // Navegação explícita — Etapas não é presumida como aba padrão.
+    // Navegação explícita para Etapas.
     fireEvent.click(screen.getByRole('button', { name: 'Etapas' }));
     await waitFor(() => expect(screen.getByTestId('stage-row-new')).toBeInTheDocument());
 
@@ -278,25 +290,28 @@ describe('fluxo de permissões — acesso por role e flag', () => {
 });
 
 describe('fluxo de permissões — troca de usuário com Ajustes aberto', () => {
-  it('Super Admin → manager com flag ON: aba administrativa (Empresa) some; Manager com membership ativa vê Usuários/Etapas conforme a matriz real', async () => {
-    // M1-F S8-B1: fixture desatualizado — canAccessFullSettings migrou para
-    // platformRole.
+  it('Super Admin → manager com flag ON: aba Empresa aparece pela primeira vez; Manager com membership ativa vê Empresa/Usuários/Etapas conforme a matriz real', async () => {
+    // COMPANY-SETTINGS-R1-EXEC: Super Admin nunca vê Empresa (allowedTabs
+    // cai para 'Usuários', primeiro item permitido).
     m.flag.current = true;
     mockSelect();
     await renderApp({ ...user('admin'), platformRole: 'super_admin' });
     fireEvent.click(navAjustes()!);
-    // Super Admin cai na aba default 'Empresa' com o conteúdo administrativo.
-    expect(screen.getByText('Dados da loja')).toBeInTheDocument();
+    // Super Admin: sem Empresa, cai em 'Usuários' (primeiro item permitido).
+    expect(screen.queryByRole('button', { name: 'Empresa' })).toBeNull();
+    expect(screen.queryByText('Dados da loja')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Usuários' })).toBeInTheDocument();
 
     // M1-F S7-B: transição para Manager com activeMembership real (nunca só
     // o role legado) — companyId coerente com a empresa de origem.
     switchUser(userWithActiveMembership('manager'));
 
-    // Empresa nunca aparece para Manager. Usuários aparece por
-    // canManageInvites (membership ativa real, §4-F1) — "somente Etapas"
-    // deixou de ser verdade; não presumimos qual das duas é a aba padrão.
-    expect(screen.queryByText('Dados da loja')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Empresa' })).toBeNull();
+    // Empresa aparece pela primeira vez (canManageCompanySettings, exclusiva
+    // de Manager agora) — o `tab` state interno nunca foi alterado por
+    // clique (ainda 'Empresa', valor inicial), então reaparece assim que
+    // entra em allowedTabs, sem precisar clicar em nada.
+    expect(screen.getByRole('button', { name: 'Empresa' })).toBeInTheDocument();
+    expect(screen.getByText('Dados da loja')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Usuários' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Etapas' })).toBeInTheDocument();
 

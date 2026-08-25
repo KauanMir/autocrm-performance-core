@@ -24,8 +24,13 @@ import { useCreateCompany, getCreateCompanyErrorMessage } from '@/lib/hooks/useC
 import { useActivateCompany, getActivateCompanyErrorMessage } from '@/lib/hooks/useActivateCompany';
 import type { PlatformCompanyRow } from '@/lib/companies/repository';
 import type { CreateCompanyInput } from '@/lib/companies/repository';
+import { listTimezones } from '@/lib/date/timezoneOptions';
 
 const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
+
+// COMPANY-SETTINGS-R1-EXEC: listTimezones() foi extraída para
+// lib/date/timezoneOptions.ts (mesma lógica exata) para ser reaproveitada
+// também por ScreenAjustes > Empresa — ver import abaixo.
 
 // Estados exibidos: implantacao/ativa/suspensa — cancelada nunca aparece
 // porque a RLS (can_access_company) já a omite, inclusive para Super Admin
@@ -48,26 +53,6 @@ function formatCreatedAt(iso: string): string {
   } catch {
     return iso;
   }
-}
-
-// Mecanismo NATIVO do navegador para listar timezones IANA — sem lista
-// externa, sem rede. Intl.supportedValuesOf é suportado nos navegadores/
-// Node atuais; navegadores antigos caem numa lista curta e conhecida (o
-// campo continua sendo um <input> livre com sugestões — nunca bloqueia um
-// valor fora da lista, o backend é quem valida de verdade, ver §8).
-const FALLBACK_TIMEZONES = [
-  'America/Sao_Paulo', 'America/Manaus', 'America/Bahia', 'America/Fortaleza',
-  'America/Belem', 'America/Recife', 'America/Cuiaba', 'America/Rio_Branco',
-];
-function listTimezones(): string[] {
-  try {
-    const supported = (Intl as unknown as { supportedValuesOf?: (key: string) => string[] })
-      .supportedValuesOf?.('timeZone');
-    if (Array.isArray(supported) && supported.length > 0) return supported;
-  } catch {
-    // Intl.supportedValuesOf ausente — cai no fallback abaixo.
-  }
-  return FALLBACK_TIMEZONES;
 }
 
 function CompanyRow({ company, onActivate, isActivating, justActivated }: {

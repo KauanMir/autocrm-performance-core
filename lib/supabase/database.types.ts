@@ -2119,6 +2119,27 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      update_company_settings: {
+        Args: { p_company_id: string; p_phone: string; p_timezone: string }
+        Returns: {
+          cnpj: string | null
+          created_at: string
+          created_by_profile_id: string | null
+          id: string
+          name: string
+          phone: string | null
+          status: Database["public"]["Enums"]["company_status"]
+          timezone: string
+          trade_name: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "companies"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       update_deal: {
         Args: {
           p_assigned_seller_id?: string

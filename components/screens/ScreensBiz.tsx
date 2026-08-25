@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard, Stat } from '@/components/ui/kit';
 import { VISIT_STATUS, DEAL_STATUS, SALE_STATUS, USERS } from '@/lib/data';
@@ -9,10 +9,14 @@ import { PLACE } from '@/components/podiums/Podiums';
 import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
-import { canAccessFullSettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites } from '@/lib/capabilities';
+import { canManageCompanySettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites } from '@/lib/capabilities';
 import { UsersTabSection } from '@/components/users/UsersTabSection';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
+import { useCompanySettings } from '@/lib/hooks/useCompanySettings';
+import { useUpdateCompanySettings, getUpdateCompanySettingsErrorMessage } from '@/lib/hooks/useUpdateCompanySettings';
+import type { PlatformCompanyRow } from '@/lib/companies/repository';
+import { listTimezones } from '@/lib/date/timezoneOptions';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
 import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
@@ -1209,12 +1213,155 @@ export function ScreenResultados({ go }: any) {
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function Field({ label, value, onChange, list, hint, disabled }: {
+  label: string; value: string; onChange: (v: string) => void; list?: string; hint?: string; disabled?: boolean;
+}) {
   return (
     <div style={{ marginBottom: 14 }}>
       <label style={{ display: 'block', fontSize: 12.5, fontWeight: 600, color: 'var(--t-700)', marginBottom: 6 }}>{label}</label>
-      <input value={value} onChange={(e: any) => onChange(e.target.value)} style={{ width: '100%', padding: '10px 13px', borderRadius: 9, border: '1px solid var(--border)', fontFamily: 'inherit', fontSize: 14, color: 'var(--t-900)', background: 'var(--surface-2)', outline: 'none' }} />
+      <input value={value} onChange={(e: any) => onChange(e.target.value)} list={list} disabled={disabled}
+        style={{ width: '100%', padding: '10px 13px', borderRadius: 9, border: '1px solid var(--border)', fontFamily: 'inherit', fontSize: 14, color: 'var(--t-900)', background: 'var(--surface-2)', outline: 'none', opacity: disabled ? 0.6 : 1 }} />
+      {hint && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--t-400)', marginTop: 5 }}>{hint}</span>}
     </div>
+  );
+}
+
+// COMPANY-SETTINGS-R1-EXEC §17 — name/cnpj precisam parecer read-only de
+// verdade (nunca um <input> normal que só rejeita o save) — apresentação
+// própria, visualmente distinta de Field, com um selo "Somente leitura".
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+        <label style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-700)' }}>{label}</label>
+        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: 'var(--t-400)' }}>Somente leitura</span>
+      </div>
+      <div style={{ width: '100%', padding: '10px 13px', borderRadius: 9, border: '1px solid var(--border)', fontSize: 14, color: 'var(--t-500)', background: 'rgba(255,255,255,.02)' }}>
+        {value || '-'}
+      </div>
+    </div>
+  );
+}
+
+// COMPANY-SETTINGS-R1-EXEC — corpo real da aba Empresa em modo remoto:
+// nome/CNPJ read-only (§9/§10 do PRECHECK: sem contrato de edição segura
+// para esses dois na V1), telefone/timezone editáveis via
+// update_company_settings. Recebe `company` já resolvida (settings.status
+// === 'ready') como prop — useState(company.phone/timezone) inicializa o
+// draft uma vez; o useEffect abaixo resincroniza SOMENTE quando o valor
+// confirmado pelo servidor muda de verdade (primeira carga, ou depois de
+// um save bem-sucedido — nunca durante digitação normal, porque as
+// dependências são os valores string, não a identidade do objeto).
+function RemoteCompanySettingsForm({ userId, companyId, authorized, company }: {
+  userId: string; companyId: string; authorized: boolean; company: PlatformCompanyRow;
+}) {
+  const [phone, setPhone] = useState(company.phone ?? '');
+  const [timezone, setTimezone] = useState(company.timezone);
+  const [justSaved, setJustSaved] = useState(false);
+  const timezones = React.useMemo(listTimezones, []);
+
+  const { updateCompanySettings, isPending, error, reset } = useUpdateCompanySettings({ userId, companyId, authorized });
+
+  useEffect(() => {
+    setPhone(company.phone ?? '');
+    setTimezone(company.timezone);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [company.id, company.phone, company.timezone]);
+
+  const timezoneTrimmed = timezone.trim();
+  const dirty = phone.trim() !== (company.phone ?? '').trim() || timezoneTrimmed !== company.timezone;
+  const canSave = authorized && dirty && timezoneTrimmed !== '' && !isPending;
+
+  const submit = async () => {
+    if (!canSave) return;
+    setJustSaved(false);
+    reset();
+    try {
+      await updateCompanySettings({ phone, timezone });
+      setJustSaved(true);
+    } catch {
+      // erro mapeado abaixo via getUpdateCompanySettingsErrorMessage —
+      // campos preenchidos permanecem intactos (nenhum reset em caso de erro).
+    }
+  };
+
+  return (
+    <LCard style={{ maxWidth: 640 }}>
+      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 18 }}>Dados da loja</div>
+      {error != null && (
+        <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 10, background: 'var(--red-bg)', border: '1px solid var(--red-line)', color: 'var(--red)', fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Icon name="alert" size={16} stroke={2.2} />
+          {getUpdateCompanySettingsErrorMessage(error)}
+        </div>
+      )}
+      <ReadOnlyField label="Nome da loja" value={company.name} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <ReadOnlyField label="CNPJ" value={company.cnpj ?? ''} />
+        <Field label="Telefone" value={phone} onChange={(v: string) => { setPhone(v); setJustSaved(false); }} />
+      </div>
+      <Field
+        label="Fuso horário" value={timezone} list="ajustes-empresa-timezones"
+        onChange={(v: string) => { setTimezone(v); setJustSaved(false); }}
+        hint="Selecione um fuso horário IANA (ex.: America/Sao_Paulo). É o mesmo valor que o Pódio usa para calcular o período."
+      />
+      <datalist id="ajustes-empresa-timezones">
+        {timezones.map((tz) => <option key={tz} value={tz} />)}
+      </datalist>
+      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <LBtn
+          kind="primary" icon={isPending ? 'refresh' : 'check'} onClick={submit}
+          style={{ opacity: canSave ? 1 : 0.6, cursor: canSave ? 'pointer' : 'not-allowed' }}
+        >
+          {isPending ? 'Salvando…' : 'Salvar alterações'}
+        </LBtn>
+        {justSaved && !dirty && <span style={{ fontSize: 12.5, color: 'var(--green)', fontWeight: 600 }}>Salvo.</span>}
+      </div>
+    </LCard>
+  );
+}
+
+// COMPANY-SETTINGS-R1-EXEC — roteador de estado da aba Empresa remota:
+// nunca renderiza o formulário antes de `company` estar de verdade
+// carregada (RemoteCompanySettingsForm só monta com dado real, nunca com
+// um placeholder disfarçado de dado).
+function ScreenAjustesEmpresaRemote({ userId, companyId, authorized }: {
+  userId: string; companyId: string | null; authorized: boolean;
+}) {
+  const settings = useCompanySettings({ userId, companyId, authorized });
+
+  if (settings.status === 'loading') {
+    return (
+      <LCard style={{ maxWidth: 640, display: 'grid', placeItems: 'center', height: 160, color: 'var(--t-400)' }}>
+        Carregando dados da empresa…
+      </LCard>
+    );
+  }
+  if (settings.status === 'error') {
+    return (
+      <LCard style={{ maxWidth: 640, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, height: 160, justifyContent: 'center', color: 'var(--t-500)' }}>
+        <Icon name="wifiOff" size={24} stroke={2} />
+        <span>Não foi possível carregar os dados da empresa.</span>
+        <LBtn kind="ghost" icon="refresh" onClick={() => settings.retry()}>Tentar novamente</LBtn>
+      </LCard>
+    );
+  }
+  if (settings.status === 'unavailable') {
+    return (
+      <LCard style={{ maxWidth: 640 }}>
+        <div data-testid="company-settings-unavailable" style={{ padding: '18px 6px', fontSize: 13.5, color: 'var(--t-500)' }}>
+          Configurações da empresa indisponíveis nesta sessão.
+        </div>
+      </LCard>
+    );
+  }
+
+  return (
+    <RemoteCompanySettingsForm
+      userId={userId}
+      companyId={companyId as string}
+      authorized={authorized}
+      company={settings.company}
+    />
   );
 }
 
@@ -1234,9 +1381,23 @@ export function ScreenAjustes({ go }: any) {
   // LeadService.getAll() já lança ao ser chamada, antes de qualquer JSX.
   const leads = currentUser?.activeMembership ? LeadService.getAll() : [];
   const [tab, setTab] = useState('Empresa');
+  // COMPANY-SETTINGS-R1-EXEC §23 — estado do fixture LOCAL preservado
+  // integralmente para preview/dev (isLocalCompany abaixo decide qual dos
+  // dois caminhos é renderizado). CompanyService.get() nunca lança
+  // (StoreAdapter.getCompany() é uma leitura pura), seguro chamar
+  // incondicionalmente mesmo quando o branch remoto é quem vai renderizar.
   const [companyForm, setCompanyForm] = useState(() => CompanyService.get());
   const [saved, setSaved] = useState(false);
   const setField = (k: keyof typeof companyForm, v: string) => { setCompanyForm((f: any) => ({ ...f, [k]: v })); setSaved(false); };
+  // COMPANY-SETTINGS-R1-EXEC §14/§16 — Manager com membership ATIVA edita a
+  // PRÓPRIA empresa; Super Admin nunca ganha esta aba na superfície
+  // genérica de Ajustes (sem company context ainda, ver ScreenEmpresas).
+  // isLocalCommercialDataAllowed() é o MESMO gate mestre que já decide
+  // local/remoto para leads/tasks/visits/deals/sales — Ajustes > Empresa
+  // segue exatamente a mesma regra (§16 do PRECHECK).
+  const isLocalCompany = isLocalCommercialDataAllowed();
+  const companySettingsAccess = canManageCompanySettings(currentUser);
+  const companyId = currentUser?.activeMembership?.companyId ?? null;
 
   // Same drag-and-drop pattern as the Pipeline Kanban (M0-K1): lifted React
   // state as the source of truth for what's being dragged, dataTransfer only
@@ -1266,17 +1427,13 @@ export function ScreenAjustes({ go }: any) {
     localStageNames: PipelineService.getStages(),
   });
 
-  // Acesso efetivo: admin sempre tem os Ajustes completos; manager só a área
-  // de Etapas e SOMENTE com a flag remota ON; seller nada. Flag OFF ⇒
-  // stageSettingsAccess=false ⇒ manager não ganha nenhum acesso (legado).
-  //
-  // M1-F S4-F1: "Usuários" ganhou uma capability PRÓPRIA (canManageInvites —
-  // Super Admin OU Manager com membership ativa), independente de
-  // canAccessFullSettings/flag de Etapas. fullSettingsAccess (admin) continua
-  // liberando Empresa+Usuários+Etapas juntos, exatamente como antes — a
-  // capability nova só amplia quem vê Usuários SEM ganhar Empresa/Etapas
-  // (decisão explícita do usuário: não ampliar canAccessFullSettings).
-  const fullSettingsAccess = canAccessFullSettings(currentUser);
+  // Acesso efetivo: cada aba tem sua PRÓPRIA capability, nenhuma delas
+  // amplia as demais. Etapas exige a flag remota ON; Usuários independe de
+  // flag (canManageInvites); Empresa é Manager-only (companySettingsAccess,
+  // COMPANY-SETTINGS-R1-EXEC §14 — Super Admin nunca ganha esta aba na
+  // superfície genérica, decisão que substitui a antiga canAccessFullSettings
+  // — removida: bundlava Empresa+Usuários+Etapas exclusivamente para Super
+  // Admin, exatamente o contrário do que este lote pede).
   const invitesAccess = canManageInvites(currentUser);
   // M1-F S4-F2/S4-F3: actor da área Usuários (modal Convidar + escopo da
   // listagem em InviteList) — resolvido a cada render, nunca congelado.
@@ -1291,6 +1448,15 @@ export function ScreenAjustes({ go }: any) {
       ? { kind: 'manager', companyId: currentUser.activeMembership.companyId }
       : null;
   const stageSettingsAccess = pipeline.remoteStagesEnabled && canAccessStageSettings(currentUser);
+  // Visibilidade da ABA Etapas: Super Admin sempre vê a aba (local OU
+  // remoto — mesmo comportamento pré-existente da antiga fullSettingsAccess,
+  // preservado aqui explicitamente para não regredir com a remoção de
+  // canAccessFullSettings); Manager só quando a flag remota está ON
+  // (stageSettingsAccess). O CONTEÚDO da aba (local vs remoto) e a
+  // autorização de reorder REMOTO continuam decididos exclusivamente por
+  // stageSettingsAccess/pipeline.source — este bypass é só para a lista de
+  // abas, nunca usado como autorização de escrita.
+  const stageTabVisible = stageSettingsAccess || currentUser?.platformRole === 'super_admin';
   // M1-F S5-D: seção "Usuários ativos" — mesma capability de InviteList
   // (invitesAccess), combinada aqui com a flag de rollout PRÓPRIA desta
   // seção (NEXT_PUBLIC_FF_ACTIVE_USERS). As RPCs que ela consome
@@ -1313,12 +1479,11 @@ export function ScreenAjustes({ go }: any) {
   // reactivate_membership/offboard_seller/offboard_manager/
   // transfer_membership) ainda não foram aplicadas no banco remoto.
   const userLifecycleEnabled = activeUsersEnabled && isUserLifecycleEnabled();
-  const allowedTabs: string[] = fullSettingsAccess
-    ? ['Empresa', 'Usuários', 'Etapas']
-    : [
-        ...(invitesAccess ? ['Usuários'] : []),
-        ...(stageSettingsAccess ? ['Etapas'] : []),
-      ];
+  const allowedTabs: string[] = [
+    ...(companySettingsAccess ? ['Empresa'] : []),
+    ...(invitesAccess ? ['Usuários'] : []),
+    ...(stageTabVisible ? ['Etapas'] : []),
+  ];
   // Derivação SÍNCRONA: aba proibida nunca renderiza, nem por um frame, e o
   // estado antigo de aba não atravessa troca de usuário.
   const activeTab: string | null = allowedTabs.includes(tab) ? tab : (allowedTabs[0] ?? null);
@@ -1394,19 +1559,29 @@ export function ScreenAjustes({ go }: any) {
         </LCard>
       )}
       {activeTab === 'Empresa' && (
-        <LCard style={{ maxWidth: 640 }}>
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 18 }}>Dados da loja</div>
-          <Field label="Nome da loja" value={companyForm.name} onChange={(v: string) => setField('name', v)} />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <Field label="CNPJ" value={companyForm.cnpj} onChange={(v: string) => setField('cnpj', v)} />
-            <Field label="Telefone" value={companyForm.phone} onChange={(v: string) => setField('phone', v)} />
-          </div>
-          <Field label="Fuso horário" value={companyForm.timezone} onChange={(v: string) => setField('timezone', v)} />
-          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <LBtn kind="primary" icon="check" onClick={() => { CompanyService.update(companyForm); setSaved(true); }}>Salvar alterações</LBtn>
-            {saved && <span style={{ fontSize: 12.5, color: 'var(--green)', fontWeight: 600 }}>Salvo.</span>}
-          </div>
-        </LCard>
+        isLocalCompany ? (
+          <LCard style={{ maxWidth: 640 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 18 }}>Dados da loja</div>
+            <Field label="Nome da loja" value={companyForm.name} onChange={(v: string) => setField('name', v)} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <Field label="CNPJ" value={companyForm.cnpj} onChange={(v: string) => setField('cnpj', v)} />
+              <Field label="Telefone" value={companyForm.phone} onChange={(v: string) => setField('phone', v)} />
+            </div>
+            <Field label="Fuso horário" value={companyForm.timezone} onChange={(v: string) => setField('timezone', v)} />
+            <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <LBtn kind="primary" icon="check" onClick={() => { CompanyService.update(companyForm); setSaved(true); }}>Salvar alterações</LBtn>
+              {saved && <span style={{ fontSize: 12.5, color: 'var(--green)', fontWeight: 600 }}>Salvo.</span>}
+            </div>
+          </LCard>
+        ) : (
+          currentUser && (
+            <ScreenAjustesEmpresaRemote
+              userId={currentUser.id}
+              companyId={companyId}
+              authorized={companySettingsAccess}
+            />
+          )
+        )
       )}
       {/* M1-F S5-D/S6-F/S7-C: composição completa da aba "Usuários"
           (seletor contextual de empresa + Usuários ativos + Usuários

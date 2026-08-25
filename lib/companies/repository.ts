@@ -81,6 +81,40 @@ export async function createCompanyRpc(input: CreateCompanyInput): Promise<Platf
   return data as unknown as PlatformCompanyRow;
 }
 
+// COMPANY-SETTINGS-R1-EXEC — único caminho de escrita de phone/timezone
+// (update_company_settings). Nunca envia name/trade_name/cnpj/status — a
+// RPC nem aceita esses parâmetros (fecha o achado BLOCKER do
+// PILOT-UI-TRUTH-AUDIT-A1: Ajustes > Empresa usava CompanyService fixture,
+// sem contrato remoto real).
+export type UpdateCompanySettingsInput = {
+  companyId: string;
+  phone: string;
+  timezone: string;
+};
+
+export async function updateCompanySettingsRpc(input: UpdateCompanySettingsInput): Promise<PlatformCompanyRow> {
+  const { data, error } = await supabase.rpc('update_company_settings', {
+    p_company_id: input.companyId,
+    p_phone: input.phone,
+    p_timezone: input.timezone,
+  });
+
+  if (error) {
+    throw new PlatformCompanyError('platform_companies_update_settings_failed', {
+      code: typeof error.code === 'string' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined,
+    });
+  }
+  if (!data) {
+    throw new PlatformCompanyError('platform_companies_update_settings_failed', {
+      operation: 'update_company_settings',
+      message: 'empty_response',
+    });
+  }
+
+  return data as unknown as PlatformCompanyRow;
+}
+
 // PLATFORM-COMPANY-ACTIVATION-A1 — transição implantacao -> ativa, único
 // caminho de escrita em companies.status (nenhum UPDATE direto, mesmo
 // motivo estrutural de createCompanyRpc). Idempotente no backend: chamar

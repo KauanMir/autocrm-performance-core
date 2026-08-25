@@ -1,7 +1,7 @@
 // Testes das capabilities puras (M1-D, commit 8).
 import { describe, expect, it } from 'vitest';
 import {
-  canAccessFullSettings,
+  canManageCompanySettings,
   canAccessStageSettings,
   canReorderPipelineStages,
   canManageInvites,
@@ -22,18 +22,18 @@ const activeManager = { platformRole: null, activeMembership: { companyId: 'comp
 const activeSeller = { platformRole: null, activeMembership: { companyId: 'company-a', role: 'seller', sellerId: null } } as const;
 const managerNoMembership = { platformRole: null, activeMembership: null } as const;
 
-describe('canAccessFullSettings — M1-F S8-B1', () => {
-  it('Super Admin (platformRole=super_admin) acessa full settings, mesmo sem membership', () => {
-    expect(canAccessFullSettings(superAdmin)).toBe(true);
+describe('canManageCompanySettings — COMPANY-SETTINGS-R1-EXEC', () => {
+  it('Manager com membership ATIVA acessa company settings (superfície exclusiva de Manager)', () => {
+    expect(canManageCompanySettings(activeManager)).toBe(true);
   });
-  it('Manager com membership ATIVA não acessa full settings (superfície exclusiva de Super Admin)', () => {
-    expect(canAccessFullSettings(activeManager)).toBe(false);
+  it('Super Admin (platformRole=super_admin) NÃO acessa company settings, mesmo sem company context (decisão deliberada, diferente de canAccessStageSettings)', () => {
+    expect(canManageCompanySettings(superAdmin)).toBe(false);
   });
-  it('Seller com membership ativa não acessa full settings', () => expect(canAccessFullSettings(activeSeller)).toBe(false));
-  it('sem membership e sem platformRole: não acessa full settings', () => expect(canAccessFullSettings(managerNoMembership)).toBe(false));
+  it('Seller com membership ativa não acessa company settings', () => expect(canManageCompanySettings(activeSeller)).toBe(false));
+  it('sem membership e sem platformRole: não acessa company settings', () => expect(canManageCompanySettings(managerNoMembership)).toBe(false));
   it('role legado "admin" isolado (sem platformRole/activeMembership) NUNCA concede acesso — a capability nem lê o campo', () => {
     const legacyAdmin = { role: 'admin', platformRole: null, activeMembership: null } as const;
-    expect(canAccessFullSettings(legacyAdmin)).toBe(false);
+    expect(canManageCompanySettings(legacyAdmin)).toBe(false);
   });
 });
 
@@ -295,13 +295,13 @@ describe('membershipLifecycleCapabilities — Manager', () => {
 
 describe('entradas nulas e integridade', () => {
   it('null retorna false nas três', () => {
-    expect(canAccessFullSettings(null)).toBe(false);
+    expect(canManageCompanySettings(null)).toBe(false);
     expect(canAccessStageSettings(null)).toBe(false);
     expect(canReorderPipelineStages(null)).toBe(false);
   });
 
   it('undefined retorna false nas três', () => {
-    expect(canAccessFullSettings(undefined)).toBe(false);
+    expect(canManageCompanySettings(undefined)).toBe(false);
     expect(canAccessStageSettings(undefined)).toBe(false);
     expect(canReorderPipelineStages(undefined)).toBe(false);
   });
@@ -309,7 +309,7 @@ describe('entradas nulas e integridade', () => {
   it('o objeto do usuário não é modificado', () => {
     const user = { role: 'manager' as const };
     const frozen = Object.freeze(user);
-    canAccessFullSettings(frozen);
+    canManageCompanySettings(frozen);
     canAccessStageSettings(frozen);
     canReorderPipelineStages(frozen);
     expect(user).toEqual({ role: 'manager' });

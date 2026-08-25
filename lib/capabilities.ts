@@ -15,12 +15,19 @@ function isActiveManager(user: CapabilityUser): boolean {
   return user?.activeMembership?.role === 'manager';
 }
 
-// Ajustes completos (Empresa/Usuários/Etapas): exclusivo de Super Admin.
-// Manager (mesmo com membership ativa) nunca recebe esta superfície — só
-// Usuários (canManageInvites) e Etapas (canAccessStageSettings), nunca
-// Empresa (decisão congelada em §28.3 do design).
-export function canAccessFullSettings(user: CapabilityUser): boolean {
-  return user?.platformRole === 'super_admin';
+// COMPANY-SETTINGS-R1-EXEC — aba "Empresa" de Ajustes: Manager com
+// membership ATIVA na própria empresa (edita phone/timezone reais via
+// update_company_settings; name/cnpj somente leitura). Decisão de produto
+// invertida em relação ao §28.3 original (que dava Empresa exclusivamente a
+// Super Admin, canAccessFullSettings) — Super Admin NÃO tem companyId
+// nenhum sem membership (nunca tem, por design) e a superfície genérica de
+// Ajustes não tem company context ainda (ver ScreenEmpresas — só depois que
+// esse modo existir, um Super Admin poderá editar configurações de uma
+// empresa escolhida, por uma tela própria, nunca esta aba genérica). Nunca
+// reutiliza canManageInvites/canAccessStageSettings (capabilities próprias,
+// intocadas por esta função).
+export function canManageCompanySettings(user: CapabilityUser): boolean {
+  return isActiveManager(user);
 }
 
 // Área de Etapas: Super Admin (sempre) ou Manager com membership ATIVA. (A

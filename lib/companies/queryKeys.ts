@@ -21,4 +21,15 @@ export const platformCompanyQueryKeys = {
     ['platform-admin', requireUserId(userId), 'companies'] as const,
 
   list: (userId: string) => platformCompanyQueryKeys.root(userId),
+
+  // COMPANY-SETTINGS-R1-EXEC — leitura de UMA empresa (Ajustes > Empresa),
+  // parametrizada por companyId explícito (nunca "descoberto" internamente
+  // a partir de membership — o chamador resolve e passa, mesmo contrato de
+  // useCurrentCompanyTimezone). Namespace PRÓPRIO, separado de list()
+  // (Super Admin/Empresas) e do namespace de useCurrentCompanyTimezone
+  // (Pódio) — os três leem a mesma fetchAccessibleCompanies(), mas cada um
+  // cacheia sob sua própria chave; useUpdateCompanySettings invalida os
+  // três explicitamente após sucesso (nunca silenciosamente desatualizado).
+  detail: (companyId: string, userId: string) =>
+    ['company-settings', requireUserId(userId), companyId] as const,
 };

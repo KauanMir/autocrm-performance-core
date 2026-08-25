@@ -257,13 +257,14 @@ describe('ScreenAjustes/Etapas — estados remotos bloqueiam reorder', () => {
 // ── D. Capabilities por role (commit 8) ──────────────────────────────────
 
 describe('ScreenAjustes — capabilities e abas permitidas', () => {
-  it('Super Admin flag OFF: abas completas e Etapas local preservada', () => {
-    // M1-F S8-B1: canAccessFullSettings migrou de role='admin' (legado) para
-    // platformRole='super_admin' — "abas completas" (Empresa/Usuários/
-    // Etapas) agora é superfície exclusiva de Super Admin.
+  it('Super Admin flag OFF: Usuários/Etapas (nunca Empresa) e Etapas local preservada', () => {
+    // COMPANY-SETTINGS-R1-EXEC: Empresa deixou de ser superfície de Super
+    // Admin (canAccessFullSettings removida) — Super Admin nunca tem
+    // activeMembership.companyId, então nunca ganha esta aba na Ajustes
+    // genérica. "Abas completas" para Super Admin agora é Usuários+Etapas.
     m.user.current = { ...m.user.current, platformRole: 'super_admin' };
     render(<ScreenAjustes go={() => {}} />);
-    expect(screen.getByText('Empresa')).toBeInTheDocument();
+    expect(screen.queryByText('Empresa')).toBeNull();
     expect(screen.getByText('Usuários')).toBeInTheDocument();
     expect(screen.getByText('Etapas')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Etapas'));
@@ -271,29 +272,29 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
     expect(screen.getByTestId('stage-row-qualified')).toHaveAttribute('draggable', 'true');
   });
 
-  it('Super Admin flag ON: abas completas e reorder remoto permitido, mesmo sem membership (canReorder=true, companyId=null)', () => {
+  it('Super Admin flag ON: Usuários/Etapas (nunca Empresa) e reorder remoto permitido, mesmo sem membership (canReorder=true, companyId=null)', () => {
     // M1-F S8-B1: Super Admin nunca tem activeMembership, por design — o
     // pipeline nunca é autorizado por Super Admin sem membership real
     // (§26.10/§27.6, inalterado por esta etapa): companyId chega null ao
-    // hook mesmo com canReorder=true. "Abas completas" é exclusivo de Super
-    // Admin agora — o teste equivalente para Manager real (que nunca vê
+    // hook mesmo com canReorder=true. COMPANY-SETTINGS-R1-EXEC: Empresa
+    // nunca aparece para Super Admin na Ajustes genérica (sem company
+    // context) — o teste equivalente para Manager real (que agora VÊ
     // Empresa) está logo abaixo.
     m.user.current = { ...m.user.current, platformRole: 'super_admin', activeMembership: null };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
     openEtapas();
-    expect(screen.getByText('Empresa')).toBeInTheDocument();
+    expect(screen.queryByText('Empresa')).toBeNull();
     expect(screen.getByTestId('stage-row-new')).toHaveAttribute('draggable', 'true');
     expect(m.useReorderStages).toHaveBeenCalledWith(
       expect.objectContaining({ canReorder: true, companyId: null }),
     );
   });
 
-  it('Manager com membership ATIVA, flag ON: Usuários e Etapas, nunca Empresa (superfície exclusiva de Super Admin)', () => {
-    // M1-F S8-B1: fixture desatualizado — manager real precisa de
-    // activeMembership (role legado isolado nunca concede nada). Consequência
-    // já estabelecida em S7-B/stagePermissionsFlow: um Manager com membership
-    // real legitimamente vê Usuários (canManageInvites) JUNTO com Etapas —
-    // "somente Etapas" deixou de ser um estado alcançável por um Manager real.
+  it('Manager com membership ATIVA, flag ON: Empresa, Usuários e Etapas (Empresa é superfície exclusiva de Manager)', () => {
+    // COMPANY-SETTINGS-R1-EXEC: Manager com membership ativa agora ganha
+    // Empresa (canManageCompanySettings) além de Usuários (canManageInvites)
+    // e Etapas (canAccessStageSettings, flag ON) — as três capabilities são
+    // independentes entre si, todas satisfeitas aqui.
     m.user.current = {
       ...m.user.current,
       activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
@@ -303,16 +304,15 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
     m.useReorderStages.mockReturnValue(reorder);
     render(<ScreenAjustes go={() => {}} />);
 
-    // Usuários E Etapas aparecem; Empresa nunca.
+    // Empresa, Usuários E Etapas aparecem. Aba default 'Empresa' já
+    // renderiza o fixture local (isLocalCommercialDataAllowed não é
+    // mockado neste arquivo — flag remota OFF por padrão no ambiente de
+    // teste, então o caminho local do fixture é o que sempre roda aqui).
+    expect(screen.getByText('Empresa')).toBeInTheDocument();
     expect(screen.getByText('Usuários')).toBeInTheDocument();
     expect(screen.getByText('Etapas')).toBeInTheDocument();
-    expect(screen.queryByText('Empresa')).toBeNull();
-    expect(screen.queryByText('Dados da loja')).toBeNull();
+    expect(screen.getByText('Dados da loja')).toBeInTheDocument();
 
-    // allowedTabs = [Usuários, Etapas] — activeTab cai para o primeiro item
-    // permitido (Usuários), nunca Etapas diretamente; navegação explícita
-    // necessária para inspecionar o drag (mesmo padrão já resolvido em
-    // stagePermissionsFlow.test.tsx no S7-B).
     fireEvent.click(screen.getByText('Etapas'));
     expect(screen.getByTestId('stage-row-new')).toHaveAttribute('draggable', 'true');
     expect(m.useReorderStages).toHaveBeenCalledWith(
@@ -338,15 +338,20 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
     expect(m.reorderStagesLocal).not.toHaveBeenCalled();
   });
 
-  it('troca Super Admin → Manager com membership ativa: aba administrativa (Empresa) some imediatamente, Manager cai em Usuários/Etapas', () => {
-    // M1-F S8-B1: fixture desatualizado — Super Admin via platformRole;
-    // Manager real precisa de activeMembership (role legado isolado não
-    // concede nada).
+  it('troca Super Admin → Manager com membership ativa: Empresa aparece pela primeira vez (Super Admin nunca a tinha)', () => {
+    // COMPANY-SETTINGS-R1-EXEC: Super Admin nunca vê Empresa (allowedTabs
+    // cai para Usuários, primeiro item permitido — o `tab` state interno
+    // continua 'Empresa' por baixo, sem efeito visível enquanto não está em
+    // allowedTabs). Ao virar Manager, Empresa passa a existir em
+    // allowedTabs e o `tab` state (nunca alterado por clique) já aponta pra
+    // ela — reaparece imediatamente, sem precisar clicar em nada.
     m.user.current = { ...m.user.current, platformRole: 'super_admin' };
     m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
     const view = render(<ScreenAjustes go={() => {}} />);
-    // Super Admin na aba default 'Empresa'.
-    expect(screen.getByText('Dados da loja')).toBeInTheDocument();
+    // Super Admin: sem Empresa, cai em 'Usuários' (primeiro item permitido).
+    expect(screen.queryByText('Empresa')).toBeNull();
+    expect(screen.queryByText('Dados da loja')).toBeNull();
+    expect(screen.getByTestId('invite-list-stub')).toBeInTheDocument();
 
     m.user.current = {
       ...m.user.current,
@@ -354,7 +359,8 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
       activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
     };
     view.rerender(<ScreenAjustes go={() => {}} />);
-    expect(screen.queryByText('Dados da loja')).toBeNull();
+    expect(screen.getByText('Empresa')).toBeInTheDocument();
+    expect(screen.getByText('Dados da loja')).toBeInTheDocument();
     expect(screen.getByText('Usuários')).toBeInTheDocument();
     expect(screen.getByText('Etapas')).toBeInTheDocument();
   });
@@ -386,14 +392,15 @@ describe('ScreenAjustes — capabilities e abas permitidas', () => {
 });
 
 // ── E. canManageInvites — aba "Usuários" (M1-F S4-F1) ────────────────────
-// capability PRÓPRIA, independente de canAccessFullSettings/flag de Etapas.
-// Manager com membership ativa vê Usuários MAS NUNCA Empresa/Etapas
-// (decisão explícita: não ampliar canAccessFullSettings). Super Admin
-// (platformRole) também vê Usuários. Seller e Manager sem membership ativa
-// continuam sem nenhum acesso, exatamente como antes desta etapa.
+// capability PRÓPRIA, independente de canManageCompanySettings/flag de
+// Etapas. Manager com membership ativa vê Usuários E Empresa (COMPANY-
+// SETTINGS-R1-EXEC: canManageCompanySettings, capability independente).
+// Super Admin (platformRole) vê Usuários, mas NUNCA Empresa (exclusiva de
+// Manager agora). Seller e Manager sem membership ativa continuam sem
+// nenhum acesso, exatamente como antes desta etapa.
 
 describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
-  it('Manager com membership ATIVA (role=manager) vê Usuários mesmo com flag de Etapas OFF, mas NÃO vê Empresa/Etapas', () => {
+  it('Manager com membership ATIVA (role=manager) vê Usuários E Empresa mesmo com flag de Etapas OFF, mas NÃO vê Etapas', () => {
     m.user.current = {
       ...m.user.current,
       activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
@@ -401,12 +408,12 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     render(<ScreenAjustes go={() => {}} />);
 
     expect(screen.getByText('Usuários')).toBeInTheDocument();
-    expect(screen.queryByText('Empresa')).toBeNull();
+    expect(screen.getByText('Empresa')).toBeInTheDocument();
     expect(screen.queryByText('Etapas')).toBeNull();
     expect(screen.queryByTestId('settings-denied')).toBeNull();
   });
 
-  it('Manager com membership ATIVA + flag de Etapas ON: vê Usuários E Etapas, mas nunca Empresa', () => {
+  it('Manager com membership ATIVA + flag de Etapas ON: vê Usuários, Etapas E Empresa', () => {
     m.user.current = {
       ...m.user.current,
       activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null },
@@ -416,7 +423,7 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
 
     expect(screen.getByText('Usuários')).toBeInTheDocument();
     expect(screen.getByText('Etapas')).toBeInTheDocument();
-    expect(screen.queryByText('Empresa')).toBeNull();
+    expect(screen.getByText('Empresa')).toBeInTheDocument();
   });
 
   it('Manager com membership INATIVA (activeMembership null): sem acesso a Usuários — sem identidade empresarial, nenhuma capability concede nada', () => {
@@ -427,13 +434,11 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
   });
 
-  it('Super Admin (platformRole=super_admin) vê Usuários — e, desde S8-B1, também Empresa/Etapas (fullSettingsAccess) — mesmo sem companyId/membership', () => {
-    // M1-F S8-B1: canAccessFullSettings migrou para platformRole —
-    // "abas completas" deixou de exigir role='admin' legado e passou a
-    // acompanhar exatamente o mesmo sinal que já autorizava Usuários aqui
-    // (canManageInvites via platformRole). Antes desta etapa, Super Admin
-    // via canManageInvites via platformRole via role legado — este era
-    // precisamente o gap que a migração fecha (§28.3 do design).
+  it('Super Admin (platformRole=super_admin) vê Usuários e Etapas — nunca Empresa (canManageCompanySettings é Manager-only), mesmo sem companyId/membership', () => {
+    // COMPANY-SETTINGS-R1-EXEC: canAccessFullSettings foi removida —
+    // Empresa não acompanha mais platformRole nenhum. Super Admin continua
+    // vendo Usuários (canManageInvites) e Etapas (canAccessStageSettings),
+    // capabilities independentes, intocadas por este lote.
     m.user.current = {
       ...m.user.current,
       platformRole: 'super_admin',
@@ -442,7 +447,7 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     render(<ScreenAjustes go={() => {}} />);
 
     expect(screen.getByText('Usuários')).toBeInTheDocument();
-    expect(screen.getByText('Empresa')).toBeInTheDocument();
+    expect(screen.queryByText('Empresa')).toBeNull();
     expect(screen.getByText('Etapas')).toBeInTheDocument();
   });
 
@@ -459,26 +464,19 @@ describe('ScreenAjustes — canManageInvites (S4-F1)', () => {
     expect(screen.getByTestId('settings-denied')).toBeInTheDocument();
   });
 
-  it('Super Admin (canAccessFullSettings) vê Empresa+Usuários+Etapas juntos', () => {
-    // M1-F S8-B1: fixture desatualizado — canAccessFullSettings migrou de
-    // role='admin' (legado) para platformRole='super_admin'.
-    m.user.current = { ...m.user.current, platformRole: 'super_admin', activeMembership: null };
-    render(<ScreenAjustes go={() => {}} />);
-
-    expect(screen.getByText('Empresa')).toBeInTheDocument();
-    expect(screen.getByText('Usuários')).toBeInTheDocument();
-    expect(screen.getByText('Etapas')).toBeInTheDocument();
-  });
-
-  it('troca Manager-sem-membership → Manager-com-membership-ativa: Usuários aparece imediatamente, Empresa continua nunca aparecendo', () => {
+  it('troca Manager-sem-membership → Manager-com-membership-ativa: Usuários E Empresa aparecem imediatamente juntos', () => {
+    // COMPANY-SETTINGS-R1-EXEC: Empresa (canManageCompanySettings) e
+    // Usuários (canManageInvites) são capabilities independentes, mas
+    // ambas dependem da MESMA membership ativa — aparecem juntas.
     m.user.current = { ...m.user.current, activeMembership: null };
     const view = render(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Usuários')).toBeNull();
+    expect(screen.queryByText('Empresa')).toBeNull();
 
     m.user.current = { ...m.user.current, activeMembership: { companyId: 'company-a', role: 'manager', sellerId: null } };
     view.rerender(<ScreenAjustes go={() => {}} />);
     expect(screen.getByText('Usuários')).toBeInTheDocument();
-    expect(screen.queryByText('Empresa')).toBeNull();
+    expect(screen.getByText('Empresa')).toBeInTheDocument();
   });
 });
 
@@ -573,9 +571,10 @@ describe('ScreenAjustes — Super Admin nunca toca LeadService (COMMERCIAL-REMOT
     m.user.current = { ...m.user.current, platformRole: 'super_admin', activeMembership: null };
     render(<ScreenAjustes go={() => {}} />);
 
-    // Aba default 'Empresa' renderiza normalmente — a tela inteira não caiu
-    // no AuthenticatedShellErrorBoundary.
-    expect(screen.getByText('Dados da loja')).toBeInTheDocument();
+    // COMPANY-SETTINGS-R1-EXEC: Super Admin nunca vê Empresa — aba default
+    // cai para 'Usuários' (primeiro item permitido), que renderiza
+    // normalmente — a tela inteira não caiu no AuthenticatedShellErrorBoundary.
+    expect(screen.getByTestId('invite-list-stub')).toBeInTheDocument();
     expect(m.leadServiceGetAll).not.toHaveBeenCalled();
   });
 

@@ -41,6 +41,14 @@ export type UseCurrentCompanyTimezoneOptions = {
 // colide com uma key real (mesmo padrão de useCurrentCompanySellerLabels).
 const DISABLED_QUERY_KEY = ['company', null, 'timezone', 'remote', null] as const;
 
+// COMPANY-SETTINGS-R1-EXEC §20 — exportada para que useUpdateCompanySettings
+// possa invalidar EXATAMENTE esta chave depois de um save bem-sucedido (o
+// Pódio precisa refletir o timezone novo sem esperar staleTime/reload).
+// Builder puro, sem side effect — nunca duplica o literal em dois arquivos.
+export function currentCompanyTimezoneQueryKey(companyId: string, userId: string) {
+  return ['company', companyId, 'timezone', 'remote', userId] as const;
+}
+
 export function useCurrentCompanyTimezone(options: UseCurrentCompanyTimezoneOptions): HomeCompanyTimezone {
   const { userId, companyId, membershipRole, userIsActive } = options;
 
@@ -51,7 +59,7 @@ export function useCurrentCompanyTimezone(options: UseCurrentCompanyTimezoneOpti
 
   const queryEnabled = remoteLeadsEnabled && hasUser && hasCompany && userIsActive && isManagerOrSeller;
   const queryKey = hasCompany && hasUser
-    ? (['company', companyId, 'timezone', 'remote', userId] as const)
+    ? currentCompanyTimezoneQueryKey(companyId, userId)
     : DISABLED_QUERY_KEY;
 
   // Declarada SEMPRE (flag OFF, Super Admin ou sem membership ⇒
