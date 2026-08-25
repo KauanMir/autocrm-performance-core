@@ -24,6 +24,14 @@ import { registerRemoteVisitResult } from '@/lib/visits/remoteMutationRepository
 import type { RemoteVisitRow } from '@/lib/visits/adapter';
 import { isRemoteVisitsError, mapRemoteVisitsMutationError } from '@/lib/visits/errors';
 import { runVisitMutationWithGenerationGuard } from '@/lib/visits/mutationGeneration';
+// PODIUM-COMPETITION-R2C-B1-EXEC §36/§37 — completedVisitCount é o
+// critério #2 do ranking oficial: uma Visit concluída pode mudar
+// Pódio/Ranking/Minha Disputa/CompTicker (mesmo hook de leaderboard) e
+// pode gerar um competition event real (register_visit_result agora faz
+// isso na mesma transação) — sem isto, nenhum dos dois refletia sem
+// reload manual, mesmo gap que existia em useRegisterSale antes do R2B.
+import { companySellerLeaderboardQueryPrefix } from '@/lib/hooks/useCompanySellerLeaderboard';
+import { sellerCompetitionEventsQueryKey } from '@/lib/hooks/useSellerCompetitionEvents';
 
 export type UseRegisterVisitResultOptions = {
   userId?: string | null;
@@ -107,6 +115,14 @@ export function useRegisterVisitResult(options: UseRegisterVisitResultOptions): 
       queryClient.invalidateQueries({ queryKey: visitQueryKeys.active(capturedCompanyId) });
       if (row.lead_id !== null) {
         queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, row.lead_id) });
+      }
+      // §36/§37 do EXEC — mesma lógica de useRegisterSale: incondicional
+      // (inofensivo quando não havia nada cacheado, ex. Manager concluindo
+      // a Visit de outro Seller) — sellerCompetitionEventsQueryKey só é
+      // populada de fato quando a própria sessão é Seller.
+      queryClient.invalidateQueries({ queryKey: companySellerLeaderboardQueryPrefix(capturedCompanyId) });
+      if (userId) {
+        queryClient.invalidateQueries({ queryKey: sellerCompetitionEventsQueryKey(capturedCompanyId, userId) });
       }
     },
   });

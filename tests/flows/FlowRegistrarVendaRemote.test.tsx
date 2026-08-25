@@ -192,7 +192,7 @@ describe('FlowRegistrarVenda — remoto: comemoração real (PODIUM-COMPETITION-
 
   function unseenEvent(over: Partial<Record<string, unknown>> = {}) {
     return {
-      id: 'evt-1', eventType: 'rank_up', oldRank: 4, newRank: 1, saleCount: 5,
+      id: 'evt-1', eventType: 'rank_up', sourceType: 'sale', oldRank: 4, newRank: 1, saleCount: 5,
       relatedSellerId: null, relatedSellerLabel: null, competitionStarted: true,
       periodStart: '2026-08-01T00:00:00Z', periodEnd: '2026-09-01T00:00:00Z',
       createdAt: '2026-08-10T12:00:00Z', ...over,

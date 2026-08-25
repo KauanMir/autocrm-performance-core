@@ -837,7 +837,7 @@ describe('Home — comemoração pendente no load (PODIUM-COMPETITION-R2B-B1-EXE
 
   function unseenEvent(over: Partial<Record<string, unknown>> = {}) {
     return {
-      id: 'evt-1', eventType: 'rank_up', oldRank: 4, newRank: 1, saleCount: 5,
+      id: 'evt-1', eventType: 'rank_up', sourceType: 'sale', oldRank: 4, newRank: 1, saleCount: 5,
       relatedSellerId: null, relatedSellerLabel: null, competitionStarted: true,
       periodStart: '2026-08-01T00:00:00Z', periodEnd: '2026-09-01T00:00:00Z',
       createdAt: '2026-08-10T12:00:00Z', ...over,
@@ -901,6 +901,20 @@ describe('Home — comemoração pendente no load (PODIUM-COMPETITION-R2B-B1-EXE
     // competition_started tem prioridade — só essa mensagem aparece.
     expect(screen.getByText('Primeira venda do mês!')).toBeInTheDocument();
     expect(screen.queryByText(/Você ganhou \d+ posiç/)).toBeNull();
+  });
+
+  // PODIUM-COMPETITION-R2C-B1-EXEC §34 — evento por Visit entra pelo MESMO
+  // fluxo de pendência, sem nenhuma mudança estrutural em Home; só a copy
+  // (via sourceType) muda, nunca atribuindo o avanço a uma venda.
+  it('evento de origem Visit: comemoração real aparece com copy honesta (nunca menciona venda)', () => {
+    m.useSellerCompetitionEvents.mockReturnValue({
+      status: 'ready',
+      events: [unseenEvent({ sourceType: 'visit', competitionStarted: false, oldRank: 2, newRank: 1, relatedSellerLabel: null })],
+    });
+    renderHome(seller('s1'));
+    expect(screen.getByText('Parabéns!')).toBeInTheDocument();
+    expect(screen.getByText('Você concluiu uma visita e assumiu o 1º lugar.')).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ vendas?/)).toBeNull();
   });
 });
 

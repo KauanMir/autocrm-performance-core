@@ -356,7 +356,11 @@ select is(
 select col_not_null('public', 'seller_competition_events', 'company_id', 'company_id NOT NULL');
 select col_not_null('public', 'seller_competition_events', 'seller_id', 'seller_id NOT NULL');
 select col_not_null('public', 'seller_competition_events', 'actor_profile_id', 'actor_profile_id NOT NULL');
-select col_not_null('public', 'seller_competition_events', 'source_sale_id', 'source_sale_id NOT NULL');
+-- PODIUM-COMPETITION-R2C-B1-EXEC evoluiu source_sale_id para nullable
+-- (eventos de origem Visit não têm Sale de origem) — a proteção real
+-- continua sendo a constraint XOR (coberta no arquivo 63), nunca esta
+-- coluna sozinha NOT NULL.
+select col_is_null('public', 'seller_competition_events', 'source_sale_id', 'source_sale_id nullable desde R2C (XOR com source_visit_id garante a integridade real)');
 select col_not_null('public', 'seller_competition_events', 'old_rank', 'old_rank NOT NULL');
 select col_not_null('public', 'seller_competition_events', 'new_rank', 'new_rank NOT NULL');
 select col_is_null('public', 'seller_competition_events', 'related_seller_id', 'related_seller_id nullable (NULL quando competition_started)');

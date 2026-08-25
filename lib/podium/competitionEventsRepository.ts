@@ -7,9 +7,16 @@
 import { supabase } from '@/lib/supabase/client';
 import { PodiumCompetitionEventsError } from '@/lib/podium/errors';
 
+// PODIUM-COMPETITION-R2C-B1-EXEC — sourceType distingue a origem real do
+// evento (Sale vs Visit completed) para a celebração nunca atribuir o
+// avanço à causa errada (§27 do EXEC — nunca dizer "com esta venda" para
+// um evento que na verdade veio de uma Visit).
+export type CompetitionEventSourceType = 'sale' | 'visit';
+
 export interface UnseenCompetitionEvent {
   id: string;
   eventType: string;
+  sourceType: CompetitionEventSourceType;
   oldRank: number;
   newRank: number;
   saleCount: number;
@@ -34,6 +41,7 @@ export async function fetchUnseenCompetitionEvents(): Promise<UnseenCompetitionE
   return (data ?? []).map((row) => ({
     id: row.id,
     eventType: row.event_type,
+    sourceType: row.source_type === 'visit' ? 'visit' : 'sale',
     oldRank: row.old_rank,
     newRank: row.new_rank,
     saleCount: row.sale_count,

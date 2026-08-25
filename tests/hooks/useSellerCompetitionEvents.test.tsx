@@ -21,7 +21,7 @@ vi.mock('@/lib/flags', async (importOriginal) => {
 
 function rpcRow(over: Partial<Record<string, unknown>> = {}) {
   return {
-    id: 'evt-1', event_type: 'rank_up', old_rank: 4, new_rank: 3, sale_count: 3,
+    id: 'evt-1', event_type: 'rank_up', source_type: 'sale', old_rank: 4, new_rank: 3, sale_count: 3,
     related_seller_id: 's2', related_seller_label: 'Ana Souza',
     competition_started: false, period_start: '2026-08-01T00:00:00Z', period_end: '2026-09-01T00:00:00Z',
     created_at: '2026-08-10T12:00:00Z', ...over,
@@ -89,7 +89,7 @@ describe('useSellerCompetitionEvents — gating por papel (§21/§32 do EXEC)', 
 describe('useSellerCompetitionEvents — sucesso', () => {
   it('Seller: chama list_my_unseen_competition_events e mapeia snake_case -> camelCase', async () => {
     m.rpc.mockResolvedValue({
-      data: [rpcRow({ id: 'evt-9', old_rank: 4, new_rank: 1, sale_count: 5, related_seller_id: null, related_seller_label: null, competition_started: true })],
+      data: [rpcRow({ id: 'evt-9', source_type: 'visit', old_rank: 4, new_rank: 1, sale_count: 5, related_seller_id: null, related_seller_label: null, competition_started: true })],
       error: null,
     });
     const { wrapper } = createWrapper();
@@ -100,7 +100,7 @@ describe('useSellerCompetitionEvents — sucesso', () => {
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(m.rpc).toHaveBeenCalledWith('list_my_unseen_competition_events');
     expect(result.current.status === 'ready' && result.current.events).toEqual([{
-      id: 'evt-9', eventType: 'rank_up', oldRank: 4, newRank: 1, saleCount: 5,
+      id: 'evt-9', eventType: 'rank_up', sourceType: 'visit', oldRank: 4, newRank: 1, saleCount: 5,
       relatedSellerId: null, relatedSellerLabel: null, competitionStarted: true,
       periodStart: '2026-08-01T00:00:00Z', periodEnd: '2026-09-01T00:00:00Z', createdAt: '2026-08-10T12:00:00Z',
     }]);

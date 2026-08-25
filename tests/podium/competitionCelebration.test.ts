@@ -11,6 +11,7 @@ function event(over: Partial<UnseenCompetitionEvent> = {}): UnseenCompetitionEve
   return {
     id: 'evt-1',
     eventType: 'rank_up',
+    sourceType: 'sale',
     oldRank: 4,
     newRank: 3,
     saleCount: 3,
@@ -77,6 +78,43 @@ describe('buildCompetitionCelebration — rank up generico', () => {
   });
 });
 
+// PODIUM-COMPETITION-R2C-B1-EXEC §27/§28/§29/§30 — eventos causados por
+// Visit NUNCA atribuem o avanço a uma venda. competitionStarted é sempre
+// false para source='visit' (garantido pelo backend), então não há um
+// caso "primeira venda do mês" aqui.
+describe('buildCompetitionCelebration — origem Visit (nunca atribui a uma venda)', () => {
+  it('liderança via Visit, sem rival: menciona a visita, nunca "com N vendas"', () => {
+    const copy = buildCompetitionCelebration(event({ sourceType: 'visit', newRank: 1, relatedSellerLabel: null, saleCount: 3 }));
+    expect(copy.headline).toBe('Parabéns!');
+    expect(copy.message).toBe('Você concluiu uma visita e assumiu o 1º lugar.');
+    expect(copy.message).not.toMatch(/vendas?/);
+  });
+
+  it('liderança via Visit, com rival: mesma copy de "ultrapassou" (nao menciona mecanismo)', () => {
+    const copy = buildCompetitionCelebration(event({ sourceType: 'visit', newRank: 1, relatedSellerLabel: 'João Ferreira' }));
+    expect(copy.message).toBe('Você ultrapassou João e assumiu o 1º lugar.');
+  });
+
+  it('Top 3 via Visit: menciona a visita, nunca saleCount/vendas', () => {
+    const copy = buildCompetitionCelebration(event({ sourceType: 'visit', oldRank: 5, newRank: 3, saleCount: 4 }));
+    expect(copy.headline).toBe('Você entrou no Top 3!');
+    expect(copy.message).toBe('Sua visita realizada levou você ao 3º lugar.');
+    expect(copy.message).not.toMatch(/vendas?/);
+  });
+
+  it('rank up generico via Visit: menciona a visita, nunca "vendas"', () => {
+    const copy = buildCompetitionCelebration(event({ sourceType: 'visit', oldRank: 6, newRank: 4 }));
+    expect(copy.headline).toBe('Você ganhou 2 posições!');
+    expect(copy.message).toBe('Sua visita realizada levou você ao 4º lugar.');
+    expect(copy.message).not.toMatch(/vendas?/);
+  });
+
+  it('mesmo evento (old/new rank iguais) com source diferente: copy Sale continua igual a antes do R2C', () => {
+    const copy = buildCompetitionCelebration(event({ sourceType: 'sale', oldRank: 6, newRank: 4 }));
+    expect(copy.message).toBe('Agora você está em 4º lugar.');
+  });
+});
+
 describe('buildCompetitionCelebration — regras gerais (§26/§27)', () => {
   it('nenhuma copy contem em dash', () => {
     const cases = [
@@ -84,6 +122,9 @@ describe('buildCompetitionCelebration — regras gerais (§26/§27)', () => {
       event({ newRank: 1, relatedSellerLabel: 'Ana Souza' }),
       event({ oldRank: 5, newRank: 3 }),
       event({ oldRank: 6, newRank: 4 }),
+      event({ sourceType: 'visit', newRank: 1 }),
+      event({ sourceType: 'visit', oldRank: 5, newRank: 3 }),
+      event({ sourceType: 'visit', oldRank: 6, newRank: 4 }),
     ];
     for (const e of cases) {
       const copy = buildCompetitionCelebration(e);
@@ -97,6 +138,9 @@ describe('buildCompetitionCelebration — regras gerais (§26/§27)', () => {
       event({ newRank: 1 }),
       event({ oldRank: 5, newRank: 3 }),
       event({ oldRank: 6, newRank: 4 }),
+      event({ sourceType: 'visit', newRank: 1 }),
+      event({ sourceType: 'visit', oldRank: 5, newRank: 3 }),
+      event({ sourceType: 'visit', oldRank: 6, newRank: 4 }),
     ];
     for (const e of cases) {
       const copy = buildCompetitionCelebration(e);

@@ -1,14 +1,24 @@
-// lib/podium/competitionCelebration.ts — PODIUM-COMPETITION-R2B-B1-EXEC
-// §25/§26/§27. Puro: sem React, sem rede — transforma um evento real
-// (seller_competition_events, já lido via list_my_unseen_competition_events)
-// em copy pronta para a comemoração. Fatos persistidos (old_rank/new_rank/
-// sale_count/related_seller/competition_started), nunca texto pronto no
-// banco (§20 do EXEC) — só este helper decide a frase, então mudar copy
-// nunca precisa de migration.
+// lib/podium/competitionCelebration.ts — PODIUM-COMPETITION-R2B/R2C-B1-EXEC
+// §25/§26/§27 (R2B) + §27-§31 (R2C). Puro: sem React, sem rede —
+// transforma um evento real (seller_competition_events, já lido via
+// list_my_unseen_competition_events) em copy pronta para a comemoração.
+// Fatos persistidos (old_rank/new_rank/sale_count/related_seller/
+// competition_started/sourceType), nunca texto pronto no banco (§20 do
+// R2B) — só este helper decide a frase, então mudar copy nunca precisa de
+// migration.
 //
-// ZERO copy negativa (§26): este helper só é chamado para eventos que já
-// passaram pelo filtro de melhora real dentro de register_sale (nunca
-// "caiu"/"perdeu"/"ultrapassado por"). ZERO em dash (§27).
+// ZERO copy negativa (§26 do R2B): este helper só é chamado para eventos
+// que já passaram pelo filtro de melhora real dentro de register_sale/
+// register_visit_result (nunca "caiu"/"perdeu"/"ultrapassado por"). ZERO
+// em dash (§27 do R2B).
+//
+// sourceType (R2C §27): eventos causados por Visit NUNCA atribuem o
+// avanço a uma venda — "com N vendas" (métrica de conquista real, mas
+// mecanismo de venda) só aparece em eventos source='sale'; eventos
+// source='visit' descrevem a visita concluída como a causa real.
+// competitionStarted é sempre false para source='visit' (garantido pelo
+// backend — não existe "primeira venda do mês" causada por uma Visit),
+// então esse branch permanece Sale-only por construção.
 import type { UnseenCompetitionEvent } from '@/lib/podium/competitionEventsRepository';
 import { firstName, vendaWord } from '@/lib/podium/competition';
 
@@ -22,6 +32,8 @@ export interface CompetitionCelebrationCopy {
 // confundir com a prioridade de escolha do evento principal quando há
 // vários unseen, ver selectPrimaryCompetitionEvent abaixo).
 export function buildCompetitionCelebration(event: UnseenCompetitionEvent): CompetitionCelebrationCopy {
+  const isVisit = event.sourceType === 'visit';
+
   if (event.competitionStarted) {
     return {
       eyebrow: 'PRIMEIRA VENDA DO MÊS',
@@ -37,7 +49,9 @@ export function buildCompetitionCelebration(event: UnseenCompetitionEvent): Comp
       headline: 'Parabéns!',
       message: rival
         ? `Você ultrapassou ${rival} e assumiu o 1º lugar.`
-        : `Você assumiu o 1º lugar com ${vendaWord(event.saleCount)}.`,
+        : isVisit
+          ? 'Você concluiu uma visita e assumiu o 1º lugar.'
+          : `Você assumiu o 1º lugar com ${vendaWord(event.saleCount)}.`,
     };
   }
 
@@ -45,7 +59,9 @@ export function buildCompetitionCelebration(event: UnseenCompetitionEvent): Comp
     return {
       eyebrow: 'VOCÊ ENTROU NO TOP 3',
       headline: 'Você entrou no Top 3!',
-      message: `Agora você está em ${event.newRank}º lugar com ${vendaWord(event.saleCount)}.`,
+      message: isVisit
+        ? `Sua visita realizada levou você ao ${event.newRank}º lugar.`
+        : `Agora você está em ${event.newRank}º lugar com ${vendaWord(event.saleCount)}.`,
     };
   }
 
@@ -53,7 +69,9 @@ export function buildCompetitionCelebration(event: UnseenCompetitionEvent): Comp
   return {
     eyebrow: 'VOCÊ SUBIU NO RANKING',
     headline: positionsGained === 1 ? 'Você ganhou 1 posição!' : `Você ganhou ${positionsGained} posições!`,
-    message: `Agora você está em ${event.newRank}º lugar.`,
+    message: isVisit
+      ? `Sua visita realizada levou você ao ${event.newRank}º lugar.`
+      : `Agora você está em ${event.newRank}º lugar.`,
   };
 }
 

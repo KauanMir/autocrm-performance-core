@@ -10,6 +10,8 @@ import { useRegisterVisitResult, type UseRegisterVisitResultOptions } from '@/li
 import { visitQueryKeys } from '@/lib/visits/visitQueryKeys';
 import { leadQueryKeys } from '@/lib/leads/queryKeys';
 import { bumpQueryCacheGeneration } from '@/lib/query/cacheIdentity';
+import { companySellerLeaderboardQueryPrefix } from '@/lib/hooks/useCompanySellerLeaderboard';
+import { sellerCompetitionEventsQueryKey } from '@/lib/hooks/useSellerCompetitionEvents';
 
 const mocks = vi.hoisted(() => ({ rpc: vi.fn(), resolveVisitRemoteMode: vi.fn() }));
 
@@ -113,11 +115,30 @@ describe('useRegisterVisitResult — invalidação de sucesso e geração', () =
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
   });
 
-  it('sem lead_id: invalida só Visits', async () => {
+  // PODIUM-COMPETITION-R2C-B1-EXEC §36/§37 — completedVisitCount pode
+  // mudar Pódio/Ranking/Minha Disputa/CompTicker (mesmo hook de
+  // leaderboard) e pode ter gerado um competition event real — as duas
+  // invalidações são incondicionais no sucesso (mesmo padrão já aplicado
+  // a useRegisterSale no R2B).
+  it('sucesso: invalida SEMPRE o leaderboard da empresa (Pódio/Ranking/Minha Disputa/CompTicker)', async () => {
+    const { hook, invalidateSpy } = setup();
+    await hook.result.current.registerVisitResult(input);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: companySellerLeaderboardQueryPrefix('company-a') });
+  });
+
+  it('sucesso com userId presente: invalida a query de eventos unseen do próprio Seller', async () => {
+    const { hook, invalidateSpy } = setup({ userId: 'seller-self' });
+    await hook.result.current.registerVisitResult(input);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: sellerCompetitionEventsQueryKey('company-a', 'seller-self') });
+  });
+
+  it('sem lead_id: continua invalidando Visits + leaderboard + eventos (nunca só Visits)', async () => {
     mocks.rpc.mockResolvedValue({ data: resultRow({ lead_id: null, client_name: 'Avulso' }), error: null });
     const { hook, invalidateSpy } = setup();
     await hook.result.current.registerVisitResult(input);
-    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: visitQueryKeys.active('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: companySellerLeaderboardQueryPrefix('company-a') });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
   });
 
   it('geração muda antes da resposta: identity_changed, zero invalidação', async () => {

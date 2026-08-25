@@ -806,7 +806,9 @@ export type Database = {
           sale_count: number
           seen_at: string | null
           seller_id: string
-          source_sale_id: string
+          source_sale_id: string | null
+          source_type: string
+          source_visit_id: string | null
         }
         Insert: {
           actor_profile_id: string
@@ -823,7 +825,9 @@ export type Database = {
           sale_count: number
           seen_at?: string | null
           seller_id: string
-          source_sale_id: string
+          source_sale_id?: string | null
+          source_type: string
+          source_visit_id?: string | null
         }
         Update: {
           actor_profile_id?: string
@@ -840,7 +844,9 @@ export type Database = {
           sale_count?: number
           seen_at?: string | null
           seller_id?: string
-          source_sale_id?: string
+          source_sale_id?: string | null
+          source_type?: string
+          source_visit_id?: string | null
         }
         Relationships: [
           {
@@ -876,6 +882,13 @@ export type Database = {
             columns: ["source_sale_id"]
             isOneToOne: true
             referencedRelation: "sales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "seller_competition_events_source_visit_id_fkey"
+            columns: ["source_visit_id"]
+            isOneToOne: true
+            referencedRelation: "visits"
             referencedColumns: ["id"]
           },
         ]
@@ -1152,6 +1165,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      _lock_company_and_resolve_official_period: {
+        Args: { p_company_id: string }
+        Returns: {
+          period_end: string
+          period_start: string
+        }[]
+      }
       _rank_company_sellers: {
         Args: {
           p_company_id: string
@@ -1809,6 +1829,7 @@ export type Database = {
           related_seller_id: string
           related_seller_label: string
           sale_count: number
+          source_type: string
         }[]
       }
       list_pipeline_stages_for_company: {
