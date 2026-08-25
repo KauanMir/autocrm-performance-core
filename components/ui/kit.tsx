@@ -218,6 +218,18 @@ export function FitBox({ naturalWidth, align = 'center', children }: {
 }
 
 export function TopBar() {
+  // PILOT-UI-TRUTH-FIXES-R1-EXEC §8 — achado surgido durante a execução
+  // deste lote (não estava no PILOT-UI-TRUTH-AUDIT-A1): o sino de
+  // notificações do TopBar é um SEGUNDO ponto de entrada para
+  // FlowNotificacoes, independente do TweaksPanel — TopBar monta em toda
+  // tela exceto Início (Clientes/Andamento/Pendências/Visitas/Propostas/
+  // Vendas/Resultados/Ajustes/Empresas), para Manager/Seller/Super Admin
+  // reais. O conteúdo de FlowNotificacoes (grupos "Hoje"/"Esta semana") é
+  // hardcoded incondicionalmente — só gatear o TweaksPanel não bastava para
+  // cumprir "não pode mais ser alcançável por usuário remoto real". Mesmo
+  // contrato de NODE_ENV do TweaksPanel — sem sistema de notificações novo,
+  // sem migração, só deixa de expor o que hoje é fixture.
+  const isDevPreview = process.env.NODE_ENV === 'development';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '13px 28px', borderBottom: '1px solid var(--border)', background: 'rgba(10,10,11,.7)', backdropFilter: 'blur(10px)', position: 'sticky', top: 0, zIndex: 6 }}>
       <div onClick={() => (window as any).__openFlow && (window as any).__openFlow('busca')} className="lift" style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, maxWidth: 460, background: 'rgba(255,255,255,.04)', border: '1px solid var(--border)', borderRadius: 11, padding: '10px 14px', cursor: 'pointer' }}>
@@ -226,10 +238,12 @@ export function TopBar() {
         <kbd style={{ fontSize: 10.5, color: 'var(--t-400)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 7px', fontFamily: 'inherit', flexShrink: 0 }}>⌘K</kbd>
       </div>
       <div style={{ flex: 1 }} />
-      <button onClick={() => (window as any).__openFlow && (window as any).__openFlow('notificacoes')} className="focus-ring lift" style={{ position: 'relative', width: 42, height: 42, borderRadius: 11, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--t-700)' }}>
-        <Icon name="bell" size={19} stroke={2} />
-        <span style={{ position: 'absolute', top: 9, right: 9, width: 8, height: 8, borderRadius: '50%', background: '#FF3B3B', border: '2px solid #0a0a0b', boxShadow: '0 0 8px 1px rgba(255,46,46,.7)', animation: 'dotPulse 2s ease-in-out infinite' }} />
-      </button>
+      {isDevPreview && (
+        <button onClick={() => (window as any).__openFlow && (window as any).__openFlow('notificacoes')} className="focus-ring lift" style={{ position: 'relative', width: 42, height: 42, borderRadius: 11, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--t-700)' }}>
+          <Icon name="bell" size={19} stroke={2} />
+          <span style={{ position: 'absolute', top: 9, right: 9, width: 8, height: 8, borderRadius: '50%', background: '#FF3B3B', border: '2px solid #0a0a0b', boxShadow: '0 0 8px 1px rgba(255,46,46,.7)', animation: 'dotPulse 2s ease-in-out infinite' }} />
+        </button>
+      )}
     </div>
   );
 }

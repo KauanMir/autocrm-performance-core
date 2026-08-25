@@ -859,8 +859,11 @@ export function ScreenVendas({ go }: any) {
             solta — o CTA global aqui navega para Negociações (onde o
             Manager/Seller abre a Deal OPEN que fechou e usa o botão
             "Registrar venda" de dentro dela, FlowVerNegociacao), nunca abre
-            um formulário remoto sem Deal. */}
-        <PageHead title={pageHeadTitle} sub={pageHeadSub} actions={<LBtn kind="gold" icon="trophy" size="lg" onClick={() => go('propostas')}>Registrar venda</LBtn>} />
+            um formulário remoto sem Deal.
+            PILOT-UI-TRUTH-FIXES-R1-EXEC §13: copy trocada de "Registrar
+            venda" para "Ir para negociações" — o botão só navega, nunca
+            registra nada por si só (achado do PILOT-UI-TRUTH-AUDIT-A1). */}
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} actions={<LBtn kind="gold" icon="trophy" size="lg" onClick={() => go('propostas')}>Ir para negociações</LBtn>} />
         {remoteSalesScreen.sales.length === 0
           ? <DealStateCard testId="vendas-state-empty">Nenhuma venda registrada.</DealStateCard>
           : (

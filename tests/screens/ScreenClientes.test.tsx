@@ -96,8 +96,8 @@ function screenState(mode: string, over: {
   };
 }
 
-function renderScreen() {
-  return render(<ScreenClientes go={() => {}} />);
+function renderScreen(initialFilter?: string) {
+  return render(<ScreenClientes go={() => {}} initialFilter={initialFilter ?? null} />);
 }
 
 function archivedLeadsResult(over: Partial<Record<string, unknown>> = {}) {
@@ -154,6 +154,31 @@ describe('ScreenClientes — remote_unavailable_identity', () => {
     renderScreen();
     expect(screen.getByTestId('clientes-state-disabled')).toHaveTextContent('Sessão indisponível');
     expect(screen.queryByText('Carlos Andrade')).toBeNull();
+  });
+});
+
+// PILOT-UI-TRUTH-FIXES-R1-EXEC §11 — achado do PILOT-UI-TRUTH-AUDIT-A1: Home
+// "Ver atrasados" navegava para Clientes sem aplicar filtro nenhum. Agora
+// App.tsx repassa go('clientes', {filter:'Atrasados'}) como initialFilter;
+// ScreenClientes só aceita um valor pertencente a CLIENT_FILTERS, senão cai
+// no padrão 'Todos' de sempre (comportamento intocado sem o parâmetro).
+describe('ScreenClientes — initialFilter vindo da navegação (PILOT-UI-TRUTH-FIXES-R1-EXEC §11)', () => {
+  it('initialFilter="Atrasados" abre a tela já filtrada (só o Lead urgency=red aparece)', () => {
+    renderScreen('Atrasados');
+    expect(screen.getByText('Carlos Andrade')).toBeInTheDocument();
+    expect(screen.queryByText('Juliana Prado')).toBeNull();
+  });
+
+  it('sem initialFilter: comportamento padrão intacto (Todos, ambos os Leads aparecem)', () => {
+    renderScreen();
+    expect(screen.getByText('Carlos Andrade')).toBeInTheDocument();
+    expect(screen.getByText('Juliana Prado')).toBeInTheDocument();
+  });
+
+  it('initialFilter com valor desconhecido é ignorado (cai em Todos, nunca quebra)', () => {
+    renderScreen('valor-que-nao-existe');
+    expect(screen.getByText('Carlos Andrade')).toBeInTheDocument();
+    expect(screen.getByText('Juliana Prado')).toBeInTheDocument();
   });
 });
 

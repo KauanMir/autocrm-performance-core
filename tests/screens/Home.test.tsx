@@ -1640,7 +1640,9 @@ describe('Home — Quick Action "Ver atrasados" usa clock, não flame (HOME-CONV
     // troca sem depender de detalhe de implementação do Icon.
     expect(btn.querySelector('circle')).not.toBeNull();
     fireEvent.click(btn);
-    expect(go).toHaveBeenCalledWith('clientes');
+    // PILOT-UI-TRUTH-FIXES-R1-EXEC §11: agora carrega {filter:'Atrasados'}
+    // (cobertura dedicada em "Home — Ações rápidas 'Ver atrasados'" abaixo).
+    expect(go).toHaveBeenCalledWith('clientes', { filter: 'Atrasados' });
   });
 });
 
@@ -1835,5 +1837,61 @@ describe('Home — Manager Team Attention (Equipe precisa de atenção)', () => 
     expect(screen.queryByText(/^Aprovar$/)).toBeNull();
     expect(screen.queryByText(/Score/)).toBeNull();
     expect(screen.queryByText(/Performance/)).toBeNull();
+  });
+});
+
+// PILOT-UI-TRUTH-FIXES-R1-EXEC §11 — achado do PILOT-UI-TRUTH-AUDIT-A1: "Ver
+// atrasados" navegava para Clientes sem aplicar nenhum filtro (go() não
+// aceitava parâmetro nenhum). go() agora aceita um segundo argumento
+// opcional (mesmo padrão de openFlow(id, payload) em App.tsx) — QuickActions
+// passa {filter:'Atrasados'} só para esta ação; as demais continuam sem
+// parâmetro algum.
+function renderHomeWithGo(currentUser: any, go: (id: string, params?: any) => void) {
+  return render(<Home t={{ podium: 'B' }} setTweak={vi.fn()} go={go} active={false} currentUser={currentUser} />);
+}
+
+describe('Home — Ações rápidas "Ver atrasados" (PILOT-UI-TRUTH-FIXES-R1-EXEC §11)', () => {
+  beforeEach(() => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+  });
+
+  it('"Ver atrasados" chama go com {filter: "Atrasados"}, não só o id da tela', () => {
+    const go = vi.fn();
+    renderHomeWithGo(manager(), go);
+    fireEvent.click(screen.getByText('Ver atrasados'));
+    expect(go).toHaveBeenCalledWith('clientes', { filter: 'Atrasados' });
+  });
+
+  it('demais Ações rápidas continuam sem parâmetro nenhum (nenhum filtro inventado)', () => {
+    const go = vi.fn();
+    renderHomeWithGo(manager(), go);
+    fireEvent.click(screen.getByText('Novo cliente'));
+    expect(go).toHaveBeenCalledWith('clientes', undefined);
+  });
+});
+
+// PILOT-UI-TRUTH-FIXES-R1-EXEC §12 — achado do PILOT-UI-TRUTH-AUDIT-A1: o
+// badge "AO VIVO"/"ao vivo" (Pódio/ControlBar) não tinha nenhum polling real
+// por trás (staleTime de 5min, sem refetchInterval/websocket) — copy
+// removida por completo, local e remoto, sem substituto.
+describe('Home — badge "AO VIVO" removido (PILOT-UI-TRUTH-FIXES-R1-EXEC §12)', () => {
+  it('nunca aparece no Pódio/Home no modo local', () => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+    renderHome(manager());
+    expect(screen.queryByText('AO VIVO')).toBeNull();
+    expect(screen.queryByText('ao vivo')).toBeNull();
+  });
+
+  it('nunca aparece no Pódio/Home no modo remoto', () => {
+    m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
+    );
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { hasData: true, isEmpty: true, sales: [] }));
+    renderHome(manager());
+    expect(screen.queryByText('AO VIVO')).toBeNull();
+    expect(screen.queryByText('ao vivo')).toBeNull();
   });
 });

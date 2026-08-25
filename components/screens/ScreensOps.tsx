@@ -238,7 +238,7 @@ function ArchivedLeadRow({ lead }: { lead: any }) {
 // LeadService/SellerService/StoreAdapter é consultado nesse caminho; local
 // (REMOTE_LEADS=false) permanece 100% intacto, corpo original preservado
 // abaixo sem nenhuma alteração.
-function ScreenClientesLegacy({ go }: any) {
+function ScreenClientesLegacy({ go, initialFilter }: any) {
   useStore();
   const currentUser = AuthService.getCurrentUser();
   const isSeller = currentUser?.activeMembership?.role === 'seller';
@@ -266,7 +266,13 @@ function ScreenClientesLegacy({ go }: any) {
   const userId = currentUser?.id ?? null;
   const userIsActive = Boolean(currentUser);
   const [sellerFilter, setSellerFilter] = useState<string>('Todos');
-  const [filter, setFilter] = useState('Todos');
+  // PILOT-UI-TRUTH-FIXES-R1-EXEC §11 — seed opcional vindo da navegação
+  // (Home "Ver atrasados" → go('clientes', { filter: 'Atrasados' })). Só
+  // aceita um valor pertencente a CLIENT_FILTERS — qualquer outra coisa
+  // (undefined, filtro desconhecido) cai no padrão 'Todos' de sempre.
+  const [filter, setFilter] = useState(
+    typeof initialFilter === 'string' && CLIENT_FILTERS.includes(initialFilter) ? initialFilter : 'Todos',
+  );
   // Ativos/Arquivados — Manager-only (gate real é capabilities.canArchive,
   // calculado abaixo; Seller nunca vê o toggle, então nunca sai de
   // 'ativos'). Chamado sempre (Rules of Hooks) — useArchivedLeads já gateia
@@ -447,13 +453,13 @@ function ScreenClientesLegacy({ go }: any) {
 // (Manager/Seller, ou Super Admin com a flag OFF) monta o corpo legado
 // intacto. `User.role` legado nem existe mais no tipo — nunca decidiu
 // este switch.
-export function ScreenClientes({ go }: any) {
+export function ScreenClientes({ go, initialFilter }: any) {
   const currentUser = AuthService.getCurrentUser();
   const isSuperAdmin = currentUser?.platformRole === 'super_admin';
   if (isSuperAdmin && isSuperAdminCommercialReadEnabled()) {
     return <PlatformCommercialClientsView userId={currentUser!.id} platformRole={currentUser!.platformRole} />;
   }
-  return <ScreenClientesLegacy go={go} />;
+  return <ScreenClientesLegacy go={go} initialFilter={initialFilter} />;
 }
 
 function PipeCard({ lead, go, dragging, onDragStart, onDragEnd, capabilities, moveAuthorized, isPending, errorMessage }: {

@@ -118,8 +118,14 @@ function Divider({ children }: { children: React.ReactNode }) {
 function LoginView({ go, onDone }: { go: (v: string) => void; onDone: (user: User) => void }) {
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
-  const [remember, setRemember] = useState(true);
   const [err, setErr] = useState('');
+  // PILOT-UI-TRUTH-FIXES-R1-EXEC — BLOCKERs do PILOT-UI-TRUTH-AUDIT-A1: não
+  // existe OAuth Google real ("Entrar com Google" reusava handleLogin) nem
+  // signup self-service real (o onboarding de 4 passos não persiste nada).
+  // Mesmo contrato de NODE_ENV que já gateia TweaksPanel (components/App.tsx)
+  // — essas superfícies continuam existindo para preview/dev, mas nunca
+  // alcançam um usuário real em produção/preview deploy.
+  const isDevPreview = process.env.NODE_ENV === 'development';
 
   // M1-B: AuthService.login now talks to Supabase Auth for real, so this has
   // to await it — React onClick handlers are fine being async (fire-and-forget
@@ -141,19 +147,17 @@ function LoginView({ go, onDone }: { go: (v: string) => void; onDone: (user: Use
         <FField label="E-mail" icon="user" type="email" placeholder="voce@empresa.com.br" value={email} onChange={(e: any) => setEmail(e.target.value)} />
         <PwField label="Senha" value={pw} onChange={(e: any) => setPw(e.target.value)} />
         {err && <div style={{ fontSize: 13, color: '#FF4242', marginBottom: 10, padding: '8px 12px', borderRadius: 8, background: 'rgba(255,66,66,.1)', border: '1px solid rgba(255,66,66,.25)' }}>{err}</div>}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '4px 0 22px' }}>
-          <button onClick={() => setRemember(r => !r)} style={{ display: 'flex', alignItems: 'center', gap: 9, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}>
-            <span style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${remember ? 'var(--gold)' : 'var(--border)'}`, background: remember ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : 'transparent', display: 'grid', placeItems: 'center', color: '#241c04' }}>{remember && <Icon name="check" size={12} stroke={3} />}</span>
-            <span style={{ fontSize: 13.5, color: 'var(--t-700)' }}>Lembrar acesso</span>
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', margin: '4px 0 22px' }}>
           <button onClick={() => go('recover')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 600, color: '#E8CE72' }}>Esqueci minha senha</button>
         </div>
         <LBtn kind="gold" size="lg" icon="arrowRight" onClick={handleLogin} style={{ width: '100%', justifyContent: 'center' }}>Entrar</LBtn>
-        <Divider>ou</Divider>
-        <GoogleBtn onClick={handleLogin} label="Entrar com Google" />
-        <p style={{ textAlign: 'center', margin: '24px 0 0', fontSize: 13.5, color: 'var(--t-500)' }}>
+        {isDevPreview && <>
+          <Divider>ou</Divider>
+          <GoogleBtn onClick={handleLogin} label="Entrar com Google" />
+        </>}
+        {isDevPreview && <p style={{ textAlign: 'center', margin: '24px 0 0', fontSize: 13.5, color: 'var(--t-500)' }}>
           Não tem conta? <button onClick={() => go('signup')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13.5, fontWeight: 700, color: '#E8CE72' }}>Criar conta</button>
-        </p>
+        </p>}
       </AuthCard>
     </AuthStage>
   );
@@ -568,9 +572,21 @@ export function AuthFlow({ view, setView, onAuthed, onSignedUp }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (view === 'signup') return <SignupView go={setView} onDone={onSignedUp} />;
+  // PILOT-UI-TRUTH-FIXES-R1-EXEC §2/§3 — signup self-service e o onboarding
+  // de 4 passos que ele leva a não persistem NADA no backend (achado
+  // BLOCKER do PILOT-UI-TRUTH-AUDIT-A1: nenhum supabase.auth.signUp() em
+  // lugar nenhum do fluxo). O piloto usa exclusivamente convite; essas
+  // views continuam existindo para preview/dev (mesmo isDevPreview do
+  // LoginView acima), mas em produção/preview deploy caem para o login —
+  // nunca renderizam para um visitante real.
+  const isDevPreview = process.env.NODE_ENV === 'development';
+  if (view === 'signup') return isDevPreview
+    ? <SignupView go={setView} onDone={onSignedUp} />
+    : <LoginView go={setView} onDone={onAuthed} />;
   if (view === 'recover') return <RecoverView go={setView} />;
   if (view === 'reset-password') return <ResetPasswordView go={setView} />;
-  if (view === 'onboarding') return <OnboardingView onDone={() => setView('login')} />;
+  if (view === 'onboarding') return isDevPreview
+    ? <OnboardingView onDone={() => setView('login')} />
+    : <LoginView go={setView} onDone={onAuthed} />;
   return <LoginView go={setView} onDone={onAuthed} />;
 }

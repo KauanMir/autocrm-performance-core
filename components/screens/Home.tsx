@@ -380,11 +380,6 @@ function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam, isS
           ))}
         </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9, paddingLeft: 14, borderLeft: '1px solid var(--line-dark)' }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#27C75F', animation: 'livePulse 2s infinite' }} />
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: '#fff' }}>AO VIVO</span>
-        <span style={{ fontSize: 11.5, color: 'var(--txt-lo)' }}>· agora</span>
-      </div>
     </div>
   );
 }
@@ -841,13 +836,19 @@ function ManagerTeamAttentionSection({ tasksSummary, dealsSummary, sellersById }
   );
 }
 
-function QuickActions({ go }: { go: (id: string) => void }) {
+function QuickActions({ go }: { go: (id: string, params?: any) => void }) {
   const actions = [
     { label: 'Novo cliente', icon: 'plus', tone: 'gold', to: 'clientes' },
     { label: 'Agendar visita', icon: 'calendar', to: 'visitas' },
     { label: 'Registrar venda', icon: 'trophy', to: 'vendas' },
     { label: 'Atualizar cliente', icon: 'user', to: 'clientes' },
-    { label: 'Ver atrasados', icon: 'clock', tone: 'red', to: 'clientes' },
+    // PILOT-UI-TRUTH-FIXES-R1-EXEC §11 — achado do audit: "Ver atrasados"
+    // navegava para Clientes sem aplicar nenhum filtro (go() não aceitava
+    // parâmetro), prometendo um recorte que não entregava. Passa o mesmo
+    // valor de filtro ('Atrasados') que o Guide interno de ScreenClientes já
+    // usa (CLIENT_FILTERS em ScreensOps.tsx) via o initialFilter recebido
+    // pela tela — nenhum filtro novo, nenhuma rota nova.
+    { label: 'Ver atrasados', icon: 'clock', tone: 'red', to: 'clientes', params: { filter: 'Atrasados' } },
     { label: 'Criar proposta', icon: 'handshake', to: 'propostas' },
   ];
   return (
@@ -857,7 +858,7 @@ function QuickActions({ go }: { go: (id: string) => void }) {
         {actions.map((a, i) => {
           const gold = a.tone === 'gold'; const red = a.tone === 'red';
           return (
-            <button key={i} onClick={() => go(a.to)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '24px 12px', borderRadius: 16, cursor: 'pointer', fontFamily: 'inherit', transition: 'transform .14s, box-shadow .14s', background: gold ? 'linear-gradient(180deg,#211b09,#161103)' : red ? 'linear-gradient(180deg,#241011,#170a0b)' : 'linear-gradient(180deg,#1a1a1d,#131315)', border: `1px solid ${gold ? 'rgba(212,175,55,.4)' : red ? 'rgba(255,46,46,.38)' : 'var(--line-dark)'}`, boxShadow: 'var(--shadow-sm)' }}
+            <button key={i} onClick={() => go(a.to, (a as any).params)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '24px 12px', borderRadius: 16, cursor: 'pointer', fontFamily: 'inherit', transition: 'transform .14s, box-shadow .14s', background: gold ? 'linear-gradient(180deg,#211b09,#161103)' : red ? 'linear-gradient(180deg,#241011,#170a0b)' : 'linear-gradient(180deg,#1a1a1d,#131315)', border: `1px solid ${gold ? 'rgba(212,175,55,.4)' : red ? 'rgba(255,46,46,.38)' : 'var(--line-dark)'}`, boxShadow: 'var(--shadow-sm)' }}
               onMouseEnter={(e: any) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 16px 32px -16px ${gold ? 'rgba(212,175,55,.5)' : red ? 'rgba(255,46,46,.5)' : 'rgba(0,0,0,.8)'}`; }}
               onMouseLeave={(e: any) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; }}>
               <div style={{ width: 52, height: 52, borderRadius: 15, display: 'grid', placeItems: 'center', background: gold ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : red ? 'linear-gradient(180deg,#FF4242,#D81F2C)' : 'rgba(255,255,255,.06)', color: gold ? '#2a2104' : '#fff', boxShadow: 'inset 0 1px 0 rgba(255,255,255,.2)' }}>
@@ -1163,9 +1164,6 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 7 }}>
           <span style={{ height: 1, width: 60, background: 'linear-gradient(90deg, transparent, rgba(212,175,55,.6))' }} />
           <span style={{ fontSize: 12, color: 'var(--txt-mid)', fontWeight: 600 }}>{period} · {team}</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--txt-lo)' }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#27C75F', animation: 'livePulse 2s infinite' }} /> ao vivo
-          </span>
           <span style={{ height: 1, width: 60, background: 'linear-gradient(90deg, rgba(212,175,55,.6), transparent)' }} />
         </div>
       </div>

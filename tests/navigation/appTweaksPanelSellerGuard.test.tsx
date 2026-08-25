@@ -9,11 +9,26 @@
 // painel real (irrelevante para o que este teste prova); TweakSection/
 // TweakRadio/TweakToggle/TweakButton continuam sendo a implementação real,
 // para inspecionar se o botão entra na árvore do App conforme o modo.
+//
+// PILOT-UI-TRUTH-FIXES-R1-EXEC §6/§7: App.tsx agora só monta <TweaksPanel>
+// em NODE_ENV==='development' (achado BLOCKER do PILOT-UI-TRUTH-AUDIT-A1 —
+// dev/QA tool exposta sem gate a usuários reais). Este arquivo testa o
+// comportamento INTERNO do painel (que continua existindo para dev), então
+// força NODE_ENV='development' — a ausência em produção tem cobertura
+// própria (appTweaksPanelProductionGate.test.tsx).
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { User } from '@/lib/data';
+
+beforeEach(() => {
+  vi.stubEnv('NODE_ENV', 'development');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 beforeEach(() => {
   (Element.prototype as any).scrollTo = () => {};

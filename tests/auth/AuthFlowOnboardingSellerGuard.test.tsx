@@ -7,9 +7,24 @@
 // ainda, então o gate depende só da flag global. Este teste trava que o
 // modo remoto nunca chama SellerService.getAll() aqui (lista vazia em vez
 // de crash), e que o modo local continua funcionando como antes.
+//
+// PILOT-UI-TRUTH-FIXES-R1-EXEC §3: view="onboarding" agora só renderiza em
+// NODE_ENV==='development' (fora disso cai para o login — signup
+// self-service não persiste nada, BLOCKER do PILOT-UI-TRUTH-AUDIT-A1). Este
+// arquivo testa o comportamento INTERNO de OnboardingView (que continua
+// existindo para preview/dev), então força NODE_ENV='development' — a
+// reachability em produção tem cobertura própria (AuthFlowProductionGates).
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+
+beforeEach(() => {
+  vi.stubEnv('NODE_ENV', 'development');
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 const m = vi.hoisted(() => ({
   isRemoteLeadsEnabled: vi.fn(),

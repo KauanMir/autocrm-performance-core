@@ -13,7 +13,8 @@
 // Cliente/Veículo são resolvidos via useRemoteDealsScreenState (join com a
 // Deal correspondente, SALES-A2-PRECHECK §7) — mockado aqui também.
 //
-// CTA global "Registrar venda" no branch remote_active NUNCA abre o flow
+// CTA global "Ir para negociações" (PILOT-UI-TRUTH-FIXES-R1-EXEC §13,
+// renomeado de "Registrar venda") no branch remote_active NUNCA abre o flow
 // diretamente — navega para Negociações (go('propostas')), nunca cria uma
 // Sale solta.
 import React from 'react';
@@ -294,7 +295,11 @@ describe('ScreenVendas — sale_remote_active com dado', () => {
     expect(screen.queryByText('Editar')).toBeNull();
   });
 
-  it('CTA "Registrar venda" NUNCA abre o flow remoto diretamente — navega para Negociações', () => {
+  it('CTA "Ir para negociações" NUNCA abre o flow remoto diretamente — navega para Negociações', () => {
+    // PILOT-UI-TRUTH-FIXES-R1-EXEC §13: copy renomeada de "Registrar venda"
+    // para "Ir para negociações" no branch remote_active — o botão sempre
+    // só navegou (go('propostas')), nunca abriu um formulário de venda
+    // remoto direto; a copy antiga prometia mais do que entregava.
     m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
       hasData: true, sales: [remoteSale()],
     }));
@@ -304,7 +309,7 @@ describe('ScreenVendas — sale_remote_active com dado', () => {
 
     render(<ScreenVendas go={m.go} />);
 
-    fireEvent.click(screen.getByText('Registrar venda'));
+    fireEvent.click(screen.getByText('Ir para negociações'));
     expect(m.go).toHaveBeenCalledWith('propostas');
     expect(m.openFlow).not.toHaveBeenCalled();
   });

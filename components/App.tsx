@@ -26,7 +26,6 @@ import { FlowLayer } from '@/components/flows/FlowLayer';
 const TWEAK_DEFAULTS = {
   podium: 'D',
   anim: true,
-  showRevenue: false,
 };
 
 // M1-D (commit 8): navegação efetiva. Base = lista de nav ids por ator; o
@@ -243,8 +242,25 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
 }
 
 export function App() {
+  // PILOT-UI-TRUTH-FIXES-R1-EXEC — TweaksPanel é uma ferramenta de dev/QA
+  // (edit-mode via postMessage, revisão de telas de Auth, fixtures locais),
+  // nunca deve alcançar um usuário real (Manager/Seller/Super Admin) em
+  // produção/preview — achado BLOCKER do PILOT-UI-TRUTH-AUDIT-A1 §6/§7.
+  // NODE_ENV === 'development' é o mesmo contrato já usado por
+  // lib/flags.ts (resolveFlag) para distinguir dev de "produção" — nunca
+  // role de negócio, que não é autorização de dev tool. Lida DENTRO da
+  // função (não em constante de módulo) pelo mesmo motivo documentado em
+  // resolveFlag: permite testes isolados com vi.stubEnv — uma constante de
+  // módulo capturaria o valor de NODE_ENV no import, antes de qualquer stub
+  // de teste rodar.
+  const isDevPreview = process.env.NODE_ENV === 'development';
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [current, setCurrent] = useState('home');
+  // PILOT-UI-TRUTH-FIXES-R1-EXEC §11 — parâmetros opcionais de navegação
+  // (ex.: filtro inicial de Clientes), mesmo padrão de payload já usado por
+  // openFlow. Nunca persiste entre navegações: cada chamada de go()
+  // substitui o valor anterior (null quando nenhum parâmetro é passado).
+  const [navParams, setNavParams] = useState<any>(null);
   const [animKey, setAnimKey] = useState(0);
   const [flow, setFlow] = useState<{ id: string; payload: any } | null>(null);
   // M1-B: Supabase session recovery is async (there's no synchronous way to
@@ -296,11 +312,12 @@ export function App() {
   // snapshot mudar, mesmo depois de Rail deixar de depender dele.
   useTasksRemoteBridgeLifecycle(currentUser, () => _setTick(n => n + 1));
 
-  const go = (id: string) => {
+  const go = (id: string, params: any = null) => {
     if (!currentUser) return;
     const allowed = allowedNavIds(currentUser);
     if (!allowed.includes(id)) return;
     setCurrent(id);
+    setNavParams(params);
     document.querySelector('#scroll-host')?.scrollTo(0, 0);
   };
   const openFlow = (id: string, payload: any = {}) => setFlow({ id, payload });
@@ -402,29 +419,29 @@ export function App() {
           <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
             {effectiveCurrent === 'home'
               ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />
-              : (Cur ? <Cur go={go} t={t} /> : <PlaceholderScreen title={navItem?.label} />)}
+              : (Cur ? <Cur go={go} t={t} initialFilter={navParams?.filter ?? null} /> : <PlaceholderScreen title={navItem?.label} />)}
           </main>
 
-          <TweaksPanel>
-            <TweakSection label="Pódio (tela inicial)" />
-            <TweakRadio label="Estilo do pódio" value={t.podium} options={['A', 'B', 'C', 'D']} onChange={(v: string) => setTweak('podium', v)} />
-            <div style={{ fontSize: 11.5, color: '#9aa1ac', padding: '0 2px 8px', lineHeight: 1.5 }}>A · Pódio, B · Líder, C · Galeria, D · Campeão (fotos reais)</div>
-            <TweakToggle label="Animações (coroa, partículas, brilho)" value={t.anim} onChange={(v: boolean) => setTweak('anim', v)} />
-            <TweakSection label="Métricas" />
-            <TweakToggle label="Mostrar receita (discreto)" value={t.showRevenue} onChange={(v: boolean) => setTweak('showRevenue', v)} />
-            <TweakButton label="Reproduzir animação de entrada" onClick={() => setAnimKey(k => k + 1)} />
-            <TweakSection label="Telas novas (revisão)" />
-            <TweakButton label="Ver Login" onClick={() => (window as any).__reviewAuth('login')} />
-            <TweakButton label="Ver Cadastro" onClick={() => (window as any).__reviewAuth('signup')} />
-            <TweakButton label="Ver Recuperação de senha" onClick={() => (window as any).__reviewAuth('recover')} />
-            <TweakButton label="Ver Onboarding" onClick={() => (window as any).__reviewAuth('onboarding')} />
-            {isLocalCommercialDataAllowed() && (
-              <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
-            )}
-            <TweakButton label="Ver Central de notificações" onClick={() => openFlow('notificacoes')} />
-            <TweakButton label="Ver Busca global" onClick={() => openFlow('busca')} />
-            <TweakButton label="Ver Galeria de estados" onClick={() => openFlow('estados')} />
-          </TweaksPanel>
+          {isDevPreview && (
+            <TweaksPanel>
+              <TweakSection label="Pódio (tela inicial)" />
+              <TweakRadio label="Estilo do pódio" value={t.podium} options={['A', 'B', 'C', 'D']} onChange={(v: string) => setTweak('podium', v)} />
+              <div style={{ fontSize: 11.5, color: '#9aa1ac', padding: '0 2px 8px', lineHeight: 1.5 }}>A · Pódio, B · Líder, C · Galeria, D · Campeão (fotos reais)</div>
+              <TweakToggle label="Animações (coroa, partículas, brilho)" value={t.anim} onChange={(v: boolean) => setTweak('anim', v)} />
+              <TweakButton label="Reproduzir animação de entrada" onClick={() => setAnimKey(k => k + 1)} />
+              <TweakSection label="Telas novas (revisão)" />
+              <TweakButton label="Ver Login" onClick={() => (window as any).__reviewAuth('login')} />
+              <TweakButton label="Ver Cadastro" onClick={() => (window as any).__reviewAuth('signup')} />
+              <TweakButton label="Ver Recuperação de senha" onClick={() => (window as any).__reviewAuth('recover')} />
+              <TweakButton label="Ver Onboarding" onClick={() => (window as any).__reviewAuth('onboarding')} />
+              {isLocalCommercialDataAllowed() && (
+                <TweakButton label="Ver Perfil do vendedor" onClick={() => openFlow('perfil-vendedor', { seller: SellerService.getAll()[0] })} />
+              )}
+              <TweakButton label="Ver Central de notificações" onClick={() => openFlow('notificacoes')} />
+              <TweakButton label="Ver Busca global" onClick={() => openFlow('busca')} />
+              <TweakButton label="Ver Galeria de estados" onClick={() => openFlow('estados')} />
+            </TweaksPanel>
+          )}
 
           <FlowLayer flow={flow} close={closeFlow} openFlow={openFlow} go={go} />
         </div>
