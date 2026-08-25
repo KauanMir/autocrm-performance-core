@@ -26,6 +26,7 @@ function companyRow(overrides: Partial<PlatformCompanyRow> = {}): PlatformCompan
     timezone: 'America/Sao_Paulo',
     status: 'ativa',
     created_at: '2026-07-20T12:00:00+00:00',
+    logo_path: null,
     ...overrides,
   };
 }
@@ -88,14 +89,14 @@ describe('useCompanies — sucesso', () => {
     expect(result.current.queryKey).toEqual(platformCompanyQueryKeys.list('user-1'));
   });
 
-  it('SELECT exato: só as 8 colunas esperadas, sem company_id/membership/profile/auth.users', async () => {
+  it('SELECT exato: só as 9 colunas esperadas, sem company_id/membership/profile/auth.users', async () => {
     const { select } = mockCompaniesResponse({ data: [], error: null });
     const { wrapper } = createWrapper();
     renderHook(() => useCompanies({ userId: 'user-1', authorized: true }), { wrapper });
 
     await waitFor(() => expect(select).toHaveBeenCalled());
     expect(mocks.from).toHaveBeenCalledWith('companies');
-    expect(select).toHaveBeenCalledWith('id, name, trade_name, cnpj, phone, timezone, status, created_at');
+    expect(select).toHaveBeenCalledWith('id, name, trade_name, cnpj, phone, timezone, status, created_at, logo_path');
   });
 
   it('empty state: lista vazia', async () => {

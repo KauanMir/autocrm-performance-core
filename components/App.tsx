@@ -12,6 +12,8 @@ import { useQueryCacheIdentity } from '@/lib/hooks/useQueryCacheIdentity';
 import { useLeadsRemoteBridgeLifecycle } from '@/lib/hooks/useLeadsRemoteBridgeLifecycle';
 import { useTasksRemoteBridgeLifecycle } from '@/lib/hooks/useTasksRemoteBridgeLifecycle';
 import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState';
+import { useActiveCompanyIdentity } from '@/lib/hooks/useActiveCompanyIdentity';
+import { CompanyLogo } from '@/components/company/CompanyLogo';
 import { CommercialCompanyProvider } from '@/lib/commercial/CommercialCompanyContext';
 import { subscribeStore } from '@/lib/store';
 import { AuthService, SellerService, TaskService } from '@/lib/services';
@@ -130,6 +132,20 @@ function PlaceholderScreen({ title }: { title: string }) {
 
 function Rail({ current, go, currentUser }: { current: string; go: (id: string) => void; currentUser: User }) {
   const allowedIds = allowedNavIds(currentUser);
+  // COMPANY-IDENTITY-LOGO-R1-EXEC §22/§24/§25/§30 — identidade visual da
+  // empresa ativa, abaixo do bloco KAPA CRM/PERFORMANCE (co-branding, nunca
+  // rebranding — §31). Manager/Seller: companyId = activeMembership.
+  // companyId (nunca escolha arbitrária, §24). Super Admin sem membership
+  // nunca recebe uma empresa "ativa" implícita — o hook devolve
+  // 'unavailable' e o bloco simplesmente não renderiza (§25/§50).
+  // Hook chamado INCONDICIONALMENTE (Rules of Hooks, mesmo padrão de
+  // useRemoteTasksScreenState logo abaixo).
+  const activeCompanyIdentity = useActiveCompanyIdentity({
+    userId: currentUser.id,
+    companyId: currentUser.activeMembership?.companyId ?? null,
+    membershipRole: currentUser.activeMembership?.role ?? null,
+    userIsActive: true,
+  });
   // M1-E E7-A1: SellerService (lib/services.ts) lê um catálogo LOCAL, sem
   // company_id, sem namespace por empresa (achado do E7-A0) — fora do modo
   // local ele nunca é consultado aqui, para não misturar Seller de
@@ -196,6 +212,15 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
           <div style={{ fontSize: 9.5, color: 'var(--gold-ink)', letterSpacing: '.22em', marginTop: 4, fontWeight: 700, opacity: .8 }}>PERFORMANCE</div>
         </div>
       </div>
+
+      {activeCompanyIdentity.status === 'ready' && (
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 10, padding: '0 22px 18px' }}>
+          <CompanyLogo name={activeCompanyIdentity.company.name} logoPath={activeCompanyIdentity.company.logoPath} size={30} />
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--txt-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {activeCompanyIdentity.company.name}
+          </div>
+        </div>
+      )}
 
       <nav style={{ position: 'relative', flex: 1, overflowY: 'auto', padding: '6px 14px' }}>
         {(NAV as any[]).filter((item: any) => allowedIds.includes(item.id)).map((item: any) => {

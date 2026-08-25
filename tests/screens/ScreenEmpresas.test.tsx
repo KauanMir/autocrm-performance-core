@@ -55,6 +55,7 @@ function company(overrides: Partial<PlatformCompanyRow> = {}): PlatformCompanyRo
     timezone: 'America/Sao_Paulo',
     status: 'ativa',
     created_at: '2026-07-20T12:00:00+00:00',
+    logo_path: null,
     ...overrides,
   };
 }

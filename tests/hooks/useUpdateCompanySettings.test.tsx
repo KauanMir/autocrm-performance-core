@@ -34,6 +34,7 @@ const TARGET: PlatformCompanyRow = {
   timezone: 'America/Sao_Paulo',
   status: 'ativa',
   created_at: '2026-08-01T10:00:00+00:00',
+  logo_path: null,
 };
 
 const UPDATED: PlatformCompanyRow = { ...TARGET, phone: '(11) 9999-8888', timezone: 'America/Bahia' };

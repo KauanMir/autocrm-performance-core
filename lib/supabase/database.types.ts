@@ -100,6 +100,7 @@ export type Database = {
           created_at: string
           created_by_profile_id: string | null
           id: string
+          logo_path: string | null
           name: string
           phone: string | null
           status: Database["public"]["Enums"]["company_status"]
@@ -112,6 +113,7 @@ export type Database = {
           created_at?: string
           created_by_profile_id?: string | null
           id?: string
+          logo_path?: string | null
           name: string
           phone?: string | null
           status?: Database["public"]["Enums"]["company_status"]
@@ -124,6 +126,7 @@ export type Database = {
           created_at?: string
           created_by_profile_id?: string | null
           id?: string
+          logo_path?: string | null
           name?: string
           phone?: string | null
           status?: Database["public"]["Enums"]["company_status"]
@@ -1077,6 +1080,7 @@ export type Database = {
           created_at: string
           created_by_profile_id: string | null
           id: string
+          logo_path: string | null
           name: string
           phone: string | null
           status: Database["public"]["Enums"]["company_status"]
@@ -1389,6 +1393,7 @@ export type Database = {
           created_at: string
           created_by_profile_id: string | null
           id: string
+          logo_path: string | null
           name: string
           phone: string | null
           status: Database["public"]["Enums"]["company_status"]
@@ -2119,6 +2124,28 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      update_company_logo: {
+        Args: { p_company_id: string; p_logo_path: string }
+        Returns: {
+          cnpj: string | null
+          created_at: string
+          created_by_profile_id: string | null
+          id: string
+          logo_path: string | null
+          name: string
+          phone: string | null
+          status: Database["public"]["Enums"]["company_status"]
+          timezone: string
+          trade_name: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "companies"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       update_company_settings: {
         Args: { p_company_id: string; p_phone: string; p_timezone: string }
         Returns: {
@@ -2126,6 +2153,7 @@ export type Database = {
           created_at: string
           created_by_profile_id: string | null
           id: string
+          logo_path: string | null
           name: string
           phone: string | null
           status: Database["public"]["Enums"]["company_status"]

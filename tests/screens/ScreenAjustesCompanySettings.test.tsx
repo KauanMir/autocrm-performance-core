@@ -19,6 +19,7 @@ const m = vi.hoisted(() => ({
   useReorderStages: vi.fn(),
   useCompanySettings: vi.fn(),
   useUpdateCompanySettings: vi.fn(),
+  useUpdateCompanyLogo: vi.fn(),
   updateCompanySettings: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   companyServiceGet: vi.fn(),
@@ -42,6 +43,17 @@ vi.mock('@/lib/hooks/useCompanySettings', () => ({
 vi.mock('@/lib/hooks/useUpdateCompanySettings', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/hooks/useUpdateCompanySettings')>();
   return { ...actual, useUpdateCompanySettings: m.useUpdateCompanySettings };
+});
+
+// CompanyLogoSection (COMPANY-IDENTITY-LOGO-R1-EXEC) usa useUpdateCompanyLogo
+// dentro da aba Empresa — mockado aqui pelo MESMO motivo de
+// useUpdateCompanySettings acima (comportamento interno já é coberto em
+// teste próprio; este arquivo cobre só o que ScreenAjustes faz com o
+// resultado). Sem este mock, a versão real do hook chamaria useQueryClient()
+// sem um QueryClientProvider no wrapper deste teste.
+vi.mock('@/lib/hooks/useUpdateCompanyLogo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/hooks/useUpdateCompanyLogo')>();
+  return { ...actual, useUpdateCompanyLogo: m.useUpdateCompanyLogo };
 });
 
 vi.mock('@/lib/leads/localCommercialAccess', () => ({
@@ -94,6 +106,7 @@ function remoteCompanyRow(over: Partial<Record<string, unknown>> = {}) {
   return {
     id: 'company-a', name: 'Revenda Real Ltda', trade_name: null, cnpj: '11.222.333/0001-44',
     phone: '(11) 4000-0000', timezone: 'America/Sao_Paulo', status: 'ativa', created_at: '2026-01-01T00:00:00Z',
+    logo_path: null,
     ...over,
   };
 }
@@ -101,6 +114,14 @@ function remoteCompanyRow(over: Partial<Record<string, unknown>> = {}) {
 function updateHookResult(over: Partial<Record<string, unknown>> = {}) {
   return {
     updateCompanySettings: m.updateCompanySettings,
+    isPending: false, isError: false, isSuccess: false, error: null, reset: vi.fn(),
+    ...over,
+  };
+}
+
+function updateLogoHookResult(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    setLogo: vi.fn(), removeLogo: vi.fn(),
     isPending: false, isError: false, isSuccess: false, error: null, reset: vi.fn(),
     ...over,
   };
@@ -119,6 +140,7 @@ beforeEach(() => {
   m.useCompanySettings.mockReturnValue({ status: 'unavailable' });
   m.updateCompanySettings.mockReset().mockResolvedValue(remoteCompanyRow());
   m.useUpdateCompanySettings.mockReturnValue(updateHookResult());
+  m.useUpdateCompanyLogo.mockReturnValue(updateLogoHookResult());
 });
 
 function openEmpresa() {
@@ -198,6 +220,36 @@ describe('ScreenAjustes — Empresa em modo REMOTO (COMPANY-SETTINGS-R1-EXEC)', 
     // Fixture local nunca aparece na tela nem é gravado no branch remoto.
     expect(screen.queryByDisplayValue('Loja Fixture')).toBeNull();
     expect(m.companyServiceUpdate).not.toHaveBeenCalled();
+  });
+
+  it('ready: Manager ve o bloco "Logo da empresa" com botao "Enviar logo" quando nao ha logo', () => {
+    m.useCompanySettings.mockReturnValue({ status: 'ready', company: remoteCompanyRow({ logo_path: null }) });
+    openEmpresa();
+    expect(screen.getByText('Logo da empresa')).toBeInTheDocument();
+    expect(screen.getByText('Enviar logo')).toBeInTheDocument();
+    expect(screen.queryByText('Remover logo')).toBeNull();
+  });
+
+  it('ready: com logo existente, mostra "Trocar logo" e "Remover logo"', () => {
+    m.useCompanySettings.mockReturnValue({
+      status: 'ready',
+      company: remoteCompanyRow({ logo_path: 'company-a/logos/abc.png' }),
+    });
+    openEmpresa();
+    expect(screen.getByText('Trocar logo')).toBeInTheDocument();
+    expect(screen.getByText('Remover logo')).toBeInTheDocument();
+  });
+
+  it('Remover logo chama removeLogo com o logo_path atual', () => {
+    const removeLogo = vi.fn().mockResolvedValue({ company: remoteCompanyRow({ logo_path: null }), oldObjectCleanupFailed: false });
+    m.useCompanySettings.mockReturnValue({
+      status: 'ready',
+      company: remoteCompanyRow({ logo_path: 'company-a/logos/abc.png' }),
+    });
+    m.useUpdateCompanyLogo.mockReturnValue(updateLogoHookResult({ removeLogo }));
+    openEmpresa();
+    fireEvent.click(screen.getByText('Remover logo'));
+    expect(removeLogo).toHaveBeenCalledWith('company-a/logos/abc.png');
   });
 
   it('Salvar alterações comeca desabilitado (sem dirty state) e habilita ao editar', () => {

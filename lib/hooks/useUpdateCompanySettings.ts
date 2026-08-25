@@ -7,6 +7,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { getQueryCacheGeneration } from '@/lib/query/cacheIdentity';
 import { platformCompanyQueryKeys } from '@/lib/companies/queryKeys';
 import { currentCompanyTimezoneQueryKey } from '@/lib/hooks/useCurrentCompanyTimezone';
+import { currentCompanyIdentityQueryKey } from '@/lib/hooks/useActiveCompanyIdentity';
 import { updateCompanySettingsRpc, type PlatformCompanyRow } from '@/lib/companies/repository';
 import { isPlatformCompanyError } from '@/lib/companies/errors';
 
@@ -119,6 +120,10 @@ export function useUpdateCompanySettings(options: UseUpdateCompanySettingsOption
       // desatualizados até o staleTime de 5min expirar.
       queryClient.invalidateQueries({ queryKey: platformCompanyQueryKeys.list(userId) });
       queryClient.invalidateQueries({ queryKey: currentCompanyTimezoneQueryKey(companyId, userId) });
+      // COMPANY-IDENTITY-LOGO-R1-EXEC — timezone também é cacheado sob o
+      // namespace do Rail/shell (useActiveCompanyIdentity); invalidar aqui
+      // evita drift entre os dois, mesmo custo zero de uma invalidação a mais.
+      queryClient.invalidateQueries({ queryKey: currentCompanyIdentityQueryKey(companyId, userId) });
     },
   });
 

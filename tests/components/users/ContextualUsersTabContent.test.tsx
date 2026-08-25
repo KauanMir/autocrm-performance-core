@@ -42,7 +42,7 @@ const SUPER_ADMIN: CreateInviteActor = { kind: 'super_admin' };
 function company(overrides: Partial<PlatformCompanyRow> = {}): PlatformCompanyRow {
   return {
     id: 'company-a', name: 'Revenda Premium', trade_name: null, cnpj: null, phone: null,
-    timezone: 'America/Sao_Paulo', status: 'ativa', created_at: '2026-07-20T12:00:00+00:00',
+    timezone: 'America/Sao_Paulo', status: 'ativa', created_at: '2026-07-20T12:00:00+00:00', logo_path: null,
     ...overrides,
   };
 }

@@ -27,6 +27,7 @@ function companyRow(overrides: Partial<PlatformCompanyRow> = {}): PlatformCompan
     timezone: 'America/Sao_Paulo',
     status: 'ativa',
     created_at: '2026-07-20T12:00:00+00:00',
+    logo_path: null,
     ...overrides,
   };
 }
@@ -100,7 +101,7 @@ describe('useCompanySettings — sucesso', () => {
     expect(result.current.status === 'ready' && result.current.company.phone).toBe('(11) 9999-0000');
   });
 
-  it('SELECT exato: mesmas 8 colunas de useCompanies, mesma fetchAccessibleCompanies', async () => {
+  it('SELECT exato: mesmas 9 colunas de useCompanies, mesma fetchAccessibleCompanies', async () => {
     const { select } = mockCompaniesResponse({ data: [companyRow()], error: null });
     const { wrapper } = createWrapper();
     renderHook(
@@ -110,7 +111,7 @@ describe('useCompanySettings — sucesso', () => {
 
     await waitFor(() => expect(select).toHaveBeenCalled());
     expect(mocks.from).toHaveBeenCalledWith('companies');
-    expect(select).toHaveBeenCalledWith('id, name, trade_name, cnpj, phone, timezone, status, created_at');
+    expect(select).toHaveBeenCalledWith('id, name, trade_name, cnpj, phone, timezone, status, created_at, logo_path');
   });
 
   it('empresa fora da lista retornada (RLS não devolveu essa linha): unavailable, nunca undefined solto', async () => {

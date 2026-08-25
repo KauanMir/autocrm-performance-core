@@ -15,6 +15,9 @@ import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
 import { useCompanySettings } from '@/lib/hooks/useCompanySettings';
 import { useUpdateCompanySettings, getUpdateCompanySettingsErrorMessage } from '@/lib/hooks/useUpdateCompanySettings';
+import { useUpdateCompanyLogo, getUpdateCompanyLogoErrorMessage } from '@/lib/hooks/useUpdateCompanyLogo';
+import { validateCompanyLogoFile } from '@/lib/companies/logoStorage';
+import { CompanyLogo } from '@/components/company/CompanyLogo';
 import type { PlatformCompanyRow } from '@/lib/companies/repository';
 import { listTimezones } from '@/lib/date/timezoneOptions';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
@@ -1243,6 +1246,104 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
   );
 }
 
+// COMPANY-IDENTITY-LOGO-R1-EXEC §33 — bloco "Logo da empresa" no topo da
+// aba Empresa, ANTES dos campos read-only/editáveis. Manager only (mesmo
+// `authorized` de RemoteCompanySettingsForm — Seller nunca chega aqui,
+// ScreenAjustes já filtra a aba antes). Fluxo (§18): validação client-side
+// só para feedback rápido, upload real, RPC, e só então UI/cache — nunca
+// mostra sucesso antes de upload + RPC concluírem (garantido por
+// useUpdateCompanyLogo, este componente só orquestra a UI).
+function CompanyLogoSection({ userId, companyId, authorized, company }: {
+  userId: string; companyId: string; authorized: boolean; company: PlatformCompanyRow;
+}) {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [cleanupNotice, setCleanupNotice] = useState(false);
+
+  const { setLogo, removeLogo, isPending, error, reset } = useUpdateCompanyLogo({ userId, companyId, authorized });
+  const busy = isPending;
+  const controlsEnabled = authorized && !busy;
+
+  const pickFile = () => {
+    if (!controlsEnabled) return;
+    setLocalError(null);
+    setCleanupNotice(false);
+    reset();
+    fileInputRef.current?.click();
+  };
+
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    e.target.value = ''; // permite selecionar o MESMO arquivo de novo depois de um erro
+    if (!file) return;
+
+    const validationError = validateCompanyLogoFile(file);
+    if (validationError) {
+      setLocalError(validationError === 'invalid_type'
+        ? 'Envie uma imagem PNG, JPEG ou WEBP.'
+        : 'A imagem precisa ter no máximo 2 MB.');
+      return;
+    }
+
+    try {
+      const result = await setLogo(file, company.logo_path);
+      if (result.oldObjectCleanupFailed) setCleanupNotice(true);
+    } catch {
+      // erro mapeado abaixo via getUpdateCompanyLogoErrorMessage — a logo
+      // anterior continua sendo a oficial (§19, garantido pelo hook).
+    }
+  };
+
+  const onRemove = async () => {
+    if (!controlsEnabled || !company.logo_path) return;
+    setLocalError(null);
+    setCleanupNotice(false);
+    reset();
+    try {
+      const result = await removeLogo(company.logo_path);
+      if (result.oldObjectCleanupFailed) setCleanupNotice(true);
+    } catch {
+      // erro mapeado abaixo
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: 22, paddingBottom: 22, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 16 }}>
+      <CompanyLogo name={company.name} logoPath={company.logo_path} size={64} radius={14} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Logo da empresa</div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <LBtn
+            kind="ghost" size="sm" icon={busy ? 'refresh' : 'upload'} onClick={pickFile}
+            style={{ opacity: controlsEnabled ? 1 : 0.6, cursor: controlsEnabled ? 'pointer' : 'not-allowed' }}
+          >
+            {busy ? 'Enviando…' : company.logo_path ? 'Trocar logo' : 'Enviar logo'}
+          </LBtn>
+          {company.logo_path && (
+            <LBtn
+              kind="ghost" size="sm" icon="x" onClick={onRemove}
+              style={{ opacity: controlsEnabled ? 1 : 0.6, cursor: controlsEnabled ? 'pointer' : 'not-allowed' }}
+            >
+              Remover logo
+            </LBtn>
+          )}
+        </div>
+        <input
+          ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp"
+          onChange={onFileChange} style={{ display: 'none' }} disabled={!controlsEnabled}
+        />
+        {localError && <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--red)' }}>{localError}</div>}
+        {error != null && <div style={{ marginTop: 8, fontSize: 12.5, color: 'var(--red)' }}>{getUpdateCompanyLogoErrorMessage(error)}</div>}
+        {cleanupNotice && (
+          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--t-400)' }}>
+            Logo atualizada. Um arquivo antigo pode não ter sido removido, mas isso não afeta o funcionamento.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // COMPANY-SETTINGS-R1-EXEC — corpo real da aba Empresa em modo remoto:
 // nome/CNPJ read-only (§9/§10 do PRECHECK: sem contrato de edição segura
 // para esses dois na V1), telefone/timezone editáveis via
@@ -1294,6 +1395,7 @@ function RemoteCompanySettingsForm({ userId, companyId, authorized, company }: {
           {getUpdateCompanySettingsErrorMessage(error)}
         </div>
       )}
+      <CompanyLogoSection userId={userId} companyId={companyId} authorized={authorized} company={company} />
       <ReadOnlyField label="Nome da loja" value={company.name} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <ReadOnlyField label="CNPJ" value={company.cnpj ?? ''} />

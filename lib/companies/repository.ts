@@ -10,10 +10,11 @@ import { PlatformCompanyError } from '@/lib/companies/errors';
 
 // Somente os campos exibidos pela tela (design §7.8: listagem global, sem
 // empresa alvo) — created_by_profile_id não é selecionado por não ter uso
-// visual nesta etapa.
+// visual nesta etapa. logo_path (COMPANY-IDENTITY-LOGO-R1-EXEC) reaproveita
+// esta MESMA leitura — nenhum SELECT paralelo novo (§22 do EXEC).
 export type PlatformCompanyRow = Pick<
   Database['public']['Tables']['companies']['Row'],
-  'id' | 'name' | 'trade_name' | 'cnpj' | 'phone' | 'timezone' | 'status' | 'created_at'
+  'id' | 'name' | 'trade_name' | 'cnpj' | 'phone' | 'timezone' | 'status' | 'created_at' | 'logo_path'
 >;
 
 // Lê as empresas visíveis para a sessão atual. Nenhum filtro de usuário/
@@ -23,7 +24,7 @@ export type PlatformCompanyRow = Pick<
 export async function fetchAccessibleCompanies(): Promise<PlatformCompanyRow[]> {
   const { data, error } = await supabase
     .from('companies')
-    .select('id, name, trade_name, cnpj, phone, timezone, status, created_at')
+    .select('id, name, trade_name, cnpj, phone, timezone, status, created_at, logo_path')
     .order('created_at', { ascending: false })
     .order('id', { ascending: true });
 
@@ -108,6 +109,38 @@ export async function updateCompanySettingsRpc(input: UpdateCompanySettingsInput
   if (!data) {
     throw new PlatformCompanyError('platform_companies_update_settings_failed', {
       operation: 'update_company_settings',
+      message: 'empty_response',
+    });
+  }
+
+  return data as unknown as PlatformCompanyRow;
+}
+
+// COMPANY-IDENTITY-LOGO-R1-EXEC — único caminho de escrita de logo_path
+// (update_company_logo). p_logo_path null remove a logo (empresa sem
+// logo); não-null precisa ser o OBJECT PATH devolvido por
+// buildCompanyLogoObjectPath/uploadCompanyLogoObject
+// (lib/companies/logoStorage.ts) — nunca uma URL completa, a RPC rejeita.
+export type UpdateCompanyLogoInput = {
+  companyId: string;
+  logoPath: string | null;
+};
+
+export async function updateCompanyLogoRpc(input: UpdateCompanyLogoInput): Promise<PlatformCompanyRow> {
+  const { data, error } = await supabase.rpc('update_company_logo', {
+    p_company_id: input.companyId,
+    p_logo_path: input.logoPath,
+  });
+
+  if (error) {
+    throw new PlatformCompanyError('platform_companies_update_logo_failed', {
+      code: typeof error.code === 'string' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined,
+    });
+  }
+  if (!data) {
+    throw new PlatformCompanyError('platform_companies_update_logo_failed', {
+      operation: 'update_company_logo',
       message: 'empty_response',
     });
   }

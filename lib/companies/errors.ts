@@ -7,7 +7,10 @@ export type PlatformCompanyErrorCode =
   | 'platform_companies_fetch_failed'
   | 'platform_companies_create_failed'
   | 'platform_companies_activate_failed'
-  | 'platform_companies_update_settings_failed';
+  | 'platform_companies_update_settings_failed'
+  | 'platform_companies_update_logo_failed'
+  | 'platform_companies_logo_upload_failed'
+  | 'platform_companies_logo_delete_failed';
 
 // Causa técnica segura: somente código (SQLSTATE) e mensagem do PostgREST —
 // nunca token, credencial, URL ou query completa.

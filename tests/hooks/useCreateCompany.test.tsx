@@ -30,6 +30,7 @@ const CREATED: PlatformCompanyRow = {
   timezone: 'America/Sao_Paulo',
   status: 'implantacao',
   created_at: '2026-07-21T10:00:00+00:00',
+  logo_path: null,
 };
 
 const KEY_A = platformCompanyQueryKeys.list('user-a');
