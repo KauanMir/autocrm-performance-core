@@ -310,6 +310,85 @@ export type Database = {
           },
         ]
       }
+      followup_templates: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string
+          default_time: string | null
+          id: string
+          is_active: boolean
+          name: string
+          offset_unit: string
+          offset_value: number
+          priority: Database["public"]["Enums"]["task_priority"]
+          sort_order: number
+          task_note: string
+          task_title: string
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by: string
+          default_time?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          offset_unit: string
+          offset_value: number
+          priority: Database["public"]["Enums"]["task_priority"]
+          sort_order: number
+          task_note?: string
+          task_title: string
+          updated_at?: string
+          updated_by: string
+          version?: number
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string
+          default_time?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          offset_unit?: string
+          offset_value?: number
+          priority?: Database["public"]["Enums"]["task_priority"]
+          sort_order?: number
+          task_note?: string
+          task_title?: string
+          updated_at?: string
+          updated_by?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "followup_templates_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "followup_templates_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "followup_templates_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       import_batches: {
         Row: {
           actor_kind: string
@@ -1231,6 +1310,11 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      _followup_template_active_count: {
+        Args: { p_company_id: string }
+        Returns: number
+      }
+      _followup_template_active_limit: { Args: never; Returns: number }
       _lock_company_and_resolve_official_period: {
         Args: { p_company_id: string }
         Returns: {
@@ -1654,6 +1738,43 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_followup_template: {
+        Args: {
+          p_company_id?: string
+          p_default_time?: string
+          p_name: string
+          p_offset_unit: string
+          p_offset_value: number
+          p_priority: Database["public"]["Enums"]["task_priority"]
+          p_sort_order?: number
+          p_task_note?: string
+          p_task_title: string
+        }
+        Returns: {
+          company_id: string
+          created_at: string
+          created_by: string
+          default_time: string | null
+          id: string
+          is_active: boolean
+          name: string
+          offset_unit: string
+          offset_value: number
+          priority: Database["public"]["Enums"]["task_priority"]
+          sort_order: number
+          task_note: string
+          task_title: string
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "followup_templates"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_invite: {
         Args: {
           p_actor_profile_id: string
@@ -2009,6 +2130,33 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      list_platform_followup_templates_for_company: {
+        Args: { p_company_id: string; p_include_inactive?: boolean }
+        Returns: {
+          company_id: string
+          created_at: string
+          created_by: string
+          default_time: string | null
+          id: string
+          is_active: boolean
+          name: string
+          offset_unit: string
+          offset_value: number
+          priority: Database["public"]["Enums"]["task_priority"]
+          sort_order: number
+          task_note: string
+          task_title: string
+          updated_at: string
+          updated_by: string
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "followup_templates"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       list_platform_lead_timeline: {
         Args: { p_company_id: string; p_lead_id: string }
         Returns: {
@@ -2349,6 +2497,33 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      reorder_followup_templates: {
+        Args: { p_company_id?: string; p_ordered_ids: string[] }
+        Returns: {
+          company_id: string
+          created_at: string
+          created_by: string
+          default_time: string | null
+          id: string
+          is_active: boolean
+          name: string
+          offset_unit: string
+          offset_value: number
+          priority: Database["public"]["Enums"]["task_priority"]
+          sort_order: number
+          task_note: string
+          task_title: string
+          updated_at: string
+          updated_by: string
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "followup_templates"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       reorder_pipeline_stages: {
         Args: { p_ordered_ids: string[] }
         Returns: {
@@ -2439,6 +2614,15 @@ export type Database = {
           resolved_company_id: string
         }[]
       }
+      resolve_followup_template_mutation_context: {
+        Args: { p_company_id?: string }
+        Returns: {
+          actor_kind: string
+          actor_profile_id: string
+          company_status: Database["public"]["Enums"]["company_status"]
+          resolved_company_id: string
+        }[]
+      }
       resolve_lead_mutation_context: {
         Args: { p_company_id?: string; p_read_only?: boolean }
         Returns: {
@@ -2448,6 +2632,38 @@ export type Database = {
           company_status: Database["public"]["Enums"]["company_status"]
           resolved_company_id: string
         }[]
+      }
+      set_followup_template_active: {
+        Args: {
+          p_company_id?: string
+          p_expected_version: number
+          p_id: string
+          p_is_active: boolean
+        }
+        Returns: {
+          company_id: string
+          created_at: string
+          created_by: string
+          default_time: string | null
+          id: string
+          is_active: boolean
+          name: string
+          offset_unit: string
+          offset_value: number
+          priority: Database["public"]["Enums"]["task_priority"]
+          sort_order: number
+          task_note: string
+          task_title: string
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "followup_templates"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       suspend_membership: {
         Args: { p_membership_id: string; p_note: string }
@@ -2600,6 +2816,44 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "deals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      update_followup_template: {
+        Args: {
+          p_company_id?: string
+          p_default_time: string
+          p_expected_version: number
+          p_id: string
+          p_name: string
+          p_offset_unit: string
+          p_offset_value: number
+          p_priority: Database["public"]["Enums"]["task_priority"]
+          p_task_note: string
+          p_task_title: string
+        }
+        Returns: {
+          company_id: string
+          created_at: string
+          created_by: string
+          default_time: string | null
+          id: string
+          is_active: boolean
+          name: string
+          offset_unit: string
+          offset_value: number
+          priority: Database["public"]["Enums"]["task_priority"]
+          sort_order: number
+          task_note: string
+          task_title: string
+          updated_at: string
+          updated_by: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "followup_templates"
           isOneToOne: true
           isSetofReturn: false
         }
