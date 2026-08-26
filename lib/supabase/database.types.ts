@@ -310,6 +310,72 @@ export type Database = {
           },
         ]
       }
+      import_batches: {
+        Row: {
+          actor_kind: string
+          actor_profile_id: string | null
+          client_request_id: string
+          company_id: string
+          completed_at: string
+          created_at: string
+          duplicate_count: number
+          error_count: number
+          filename: string
+          id: string
+          imported_count: number
+          result_json: Json
+          status: string
+          total_rows: number
+        }
+        Insert: {
+          actor_kind: string
+          actor_profile_id?: string | null
+          client_request_id: string
+          company_id: string
+          completed_at?: string
+          created_at?: string
+          duplicate_count: number
+          error_count: number
+          filename: string
+          id?: string
+          imported_count: number
+          result_json: Json
+          status: string
+          total_rows: number
+        }
+        Update: {
+          actor_kind?: string
+          actor_profile_id?: string | null
+          client_request_id?: string
+          company_id?: string
+          completed_at?: string
+          created_at?: string
+          duplicate_count?: number
+          error_count?: number
+          filename?: string
+          id?: string
+          imported_count?: number
+          result_json?: Json
+          status?: string
+          total_rows?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_batches_actor_profile_id_fkey"
+            columns: ["actor_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_batches_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invite_activation_rate_limit_events: {
         Row: {
           actor_profile_id: string | null
@@ -1360,6 +1426,17 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      bulk_import_leads: {
+        Args: {
+          p_car_fallback_enabled: boolean
+          p_client_request_id: string
+          p_company_id?: string
+          p_dry_run: boolean
+          p_filename: string
+          p_rows: Json
+        }
+        Returns: Json
+      }
       can_access_company: {
         Args: { p_target_company_id: string }
         Returns: boolean
@@ -1733,6 +1810,50 @@ export type Database = {
           profile_exists: boolean
           profile_is_active: boolean
         }[]
+      }
+      insert_lead_row: {
+        Args: {
+          p_actor_kind: string
+          p_actor_profile_id: string
+          p_car: string
+          p_company_id: string
+          p_name: string
+          p_payment_preference: string
+          p_phone: string
+          p_seller_id: string
+          p_source: string
+          p_stage_id: string
+          p_temperature: Database["public"]["Enums"]["lead_temperature"]
+        }
+        Returns: {
+          alert_label: string | null
+          archived_at: string | null
+          car: string
+          company_id: string
+          created_at: string
+          created_by_profile_id: string | null
+          id: string
+          last_activity_label: string | null
+          name: string
+          payment_preference: string | null
+          phone: string
+          phone_digits: string | null
+          seller_id: string | null
+          source: string | null
+          stage_id: string
+          temperature: Database["public"]["Enums"]["lead_temperature"] | null
+          updated_at: string
+          updated_by_profile_id: string | null
+          urgency: Database["public"]["Enums"]["lead_urgency"]
+          value_amount: number | null
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "leads"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       is_manager_or_platform: {
         Args: { p_target_company_id: string }
