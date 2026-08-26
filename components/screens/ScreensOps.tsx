@@ -17,6 +17,8 @@ import { adaptLeadRows } from '@/lib/leads/adapter';
 import type { RemoteLeadsErrorCode } from '@/lib/leads/errors';
 import type { RemoteLeadsFlagMode } from '@/lib/leads/remoteLeadsMode';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
+import { canImportLeads } from '@/lib/capabilities';
+import { BulkImportLeadsWizard } from '@/components/leads/BulkImportLeadsWizard';
 
 // M1-E E5-B1: mensagens sanitizadas fixas do movimento remoto do Kanban —
 // mesmo modelo de remoteLeadErrorMessage (Flows2.tsx), próprio deste
@@ -254,6 +256,15 @@ function ScreenClientesLegacy({ go, initialFilter }: any) {
     profileIsActive: Boolean(currentUser),
     actor: currentUser,
   });
+  // CRM-BULK-IMPORT-B2 — "Importar CSV". canImportLeads sozinho não checa
+  // flagMode/profileIsActive (só exclui Seller/Super Admin/sem membership);
+  // combinado com capabilities.canCreate (que já resolve remote_ready +
+  // profile ativo + role operacional) o resultado é true SOMENTE para
+  // Manager operacional — nunca em modo local/misconfigured, nunca Seller,
+  // sem depender de nenhuma leitura de status de empresa ao vivo (mesmo
+  // padrão que "Novo Lead" já usa, ver lib/capabilities.ts).
+  const canImport = capabilities.canCreate
+    && canImportLeads({ actor: currentUser, companyStatus: null, superAdminWriteEnabled: false });
   // M1-E E5-B2-A2 — identidade do ator para autorização por Lead do botão
   // Ligar (canActorMutateLead) — mesmos campos que leadFlowContext.ts já
   // extrai do User, nunca inferidos pelo nome do Seller.
@@ -267,6 +278,7 @@ function ScreenClientesLegacy({ go, initialFilter }: any) {
   const companyId = currentUser?.activeMembership?.companyId ?? null;
   const userId = currentUser?.id ?? null;
   const userIsActive = Boolean(currentUser);
+  const [importOpen, setImportOpen] = useState(false);
   const [sellerFilter, setSellerFilter] = useState<string>('Todos');
   // PILOT-UI-TRUTH-FIXES-R1-EXEC §11 — seed opcional vindo da navegação
   // (Home "Ver atrasados" → go('clientes', { filter: 'Atrasados' })). Só
@@ -381,7 +393,12 @@ function ScreenClientesLegacy({ go, initialFilter }: any) {
     return (
       <LightScreen>
         <PageHead title="Clientes" sub="Cada cliente mostra na cor o que precisa de você. Vermelho = aja agora."
-          actions={capabilities.canCreate ? <LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('novo-cliente')}>Novo Lead</LBtn> : undefined} />
+          actions={(capabilities.canCreate || canImport) ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              {canImport && <LBtn kind="ghost" icon="upload" onClick={() => setImportOpen(true)}>Importar CSV</LBtn>}
+              {capabilities.canCreate && <LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('novo-cliente')}>Novo Lead</LBtn>}
+            </div>
+          ) : undefined} />
         {showArchivedArea && (
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }} data-testid="clientes-area-toggle">
             <Chip active={clientsArea === 'ativos'} onClick={() => setClientsArea('ativos')}>Ativos</Chip>
@@ -415,6 +432,14 @@ function ScreenClientesLegacy({ go, initialFilter }: any) {
             )}
             {gridBody}
           </>
+        )}
+        {importOpen && companyId && (
+          <BulkImportLeadsWizard
+            companyId={companyId}
+            isSuperAdmin={false}
+            userId={userId}
+            onClose={() => setImportOpen(false)}
+          />
         )}
       </LightScreen>
     );

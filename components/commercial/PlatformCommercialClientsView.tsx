@@ -17,8 +17,9 @@ import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompa
 import { useCommercialCompanies } from '@/lib/hooks/useCommercialCompanies';
 import { usePlatformLeads } from '@/lib/hooks/usePlatformLeads';
 import { usePlatformPipelineStages } from '@/lib/hooks/usePlatformPipelineStages';
-import { canMutateCommercialWorkspace } from '@/lib/capabilities';
+import { canMutateCommercialWorkspace, canImportLeads } from '@/lib/capabilities';
 import { isSuperAdminCommercialWriteEnabled } from '@/lib/flags';
+import { BulkImportLeadsWizard } from '@/components/leads/BulkImportLeadsWizard';
 import { formatLeadAssignmentLabel, resolveLeadAssignmentState, resolveLeadStageName } from '@/lib/commercial/leadDisplay';
 import type { PlatformLeadRow } from '@/lib/commercial/repository';
 
@@ -90,6 +91,7 @@ export function PlatformCommercialClientsView({ userId, platformRole }: Platform
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   // Troca de empresa: fecha o detalhe/modais e limpa filtros locais que não
   // fazem mais sentido para o novo contexto (decisão do S8-C2-B2 §6/§11,
@@ -101,6 +103,7 @@ export function PlatformCommercialClientsView({ userId, platformRole }: Platform
     setArchived(false);
     setCreateModalOpen(false);
     setEditingLeadId(null);
+    setImportOpen(false);
   }, [selectedCompanyId]);
 
   const filteredLeads = leadsQuery.leads.filter((lead) => {
@@ -123,6 +126,15 @@ export function PlatformCommercialClientsView({ userId, platformRole }: Platform
     writeEnabled: isSuperAdminCommercialWriteEnabled(),
     selectedCompanyStatus: selectedCompany?.status ?? null,
   });
+  // CRM-BULK-IMPORT-B2 — capability PRÓPRIA, nunca amarrada a canMutate:
+  // mesma matriz de status (ativa/implantacao) + a flag de escrita, mas uma
+  // ação distinta com seu próprio botão. selectedCompany null (nenhuma
+  // empresa escolhida ainda) já cai em companyStatus=null -> false.
+  const canImport = canImportLeads({
+    actor: { platformRole, activeMembership: null },
+    companyStatus: selectedCompany?.status ?? null,
+    superAdminWriteEnabled: isSuperAdminCommercialWriteEnabled(),
+  });
 
   return (
     <LightScreen>
@@ -131,8 +143,11 @@ export function PlatformCommercialClientsView({ userId, platformRole }: Platform
         sub={canMutate
           ? 'Acompanhamento comercial da KAPA. Dados reais da empresa selecionada.'
           : 'Acompanhamento comercial da KAPA, leitura somente. Dados reais da empresa selecionada.'}
-        actions={canMutate && (
-          <LBtn kind="gold" icon="plus" onClick={() => setCreateModalOpen(true)}>Novo Lead</LBtn>
+        actions={(canMutate || canImport) && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            {canImport && <LBtn kind="ghost" icon="upload" onClick={() => setImportOpen(true)}>Importar CSV</LBtn>}
+            {canMutate && <LBtn kind="gold" icon="plus" onClick={() => setCreateModalOpen(true)}>Novo Lead</LBtn>}
+          </div>
         )}
       />
       <CommercialWorkspaceHeader
@@ -213,6 +228,15 @@ export function PlatformCommercialClientsView({ userId, platformRole }: Platform
           lead={editingLead}
           company={selectedCompany}
           onClose={() => setEditingLeadId(null)}
+        />
+      )}
+
+      {importOpen && canImport && selectedCompany && (
+        <BulkImportLeadsWizard
+          companyId={selectedCompany.id}
+          isSuperAdmin
+          userId={userId}
+          onClose={() => setImportOpen(false)}
         />
       )}
     </LightScreen>

@@ -151,6 +151,59 @@ export function canMutateCommercialWorkspace(input: CommercialMutationCapability
   return input.selectedCompanyStatus === 'ativa' || input.selectedCompanyStatus === 'implantacao';
 }
 
+// CRM-BULK-IMPORT-A2/B2 — importação em massa de Leads via CSV: capability
+// PRÓPRIA, nunca uma ampliação de canMutateCommercialWorkspace (aquela
+// decide a superfície de mutation manual do Super Admin como um todo;
+// importar é uma ação distinta, com seu próprio botão e seu próprio gate).
+//
+// Manager: SEM checagem de companyStatus aqui, de propósito — mesmo
+// contrato já usado por resolveLeadMutationCapabilities.canCreate (que
+// autoriza "Novo Lead" só por role/flag/profile, nunca lendo o status ao
+// vivo da empresa): tentar mutar numa empresa não-ativa já é recusado pelo
+// próprio bulk_import_leads (resolve_lead_mutation_context) no momento do
+// clique, exatamente como create_lead já faz para "Novo Lead" hoje — nunca
+// um gap de segurança, só onde a checagem acontece. Ajustado nesta forma
+// depois de uma regressão real: a primeira versão exigia companyStatus
+// também para Manager, o que forçava esta tela a depender de
+// OperationalCompanyContext só para isso e quebrou os testes de
+// ScreenClientes que renderizam a tela sem esse Provider (o mesmo padrão
+// que "Novo Lead" já evita há muito tempo).
+//
+// Super Admin contextual: true somente com a flag de escrita comercial
+// ligada E a empresa selecionada 'ativa'/'implantacao' (mesma matriz de
+// canMutateCommercialWorkspace) — aqui o status FAZ sentido checar no
+// cliente porque a superfície Platform já mantém o status da empresa
+// selecionada em memória para outra finalidade (o seletor de empresas).
+// Super Admin GENÉRICO, sem nenhuma empresa selecionada (companyStatus
+// null), é sempre false.
+//
+// Seller: sempre false — decisão de produto (A1 §28), não limitação
+// técnica. Backend (bulk_import_leads) continua sendo a autoridade REAL —
+// esta função só decide se o botão "Importar CSV" existe na UI.
+export type ImportLeadsCapabilityUser = Pick<User, 'platformRole' | 'activeMembership'> | null | undefined;
+
+export type ImportLeadsCapabilityInput = {
+  actor: ImportLeadsCapabilityUser;
+  // Só consultado no ramo Super Admin — null = nenhuma empresa selecionada
+  // (Super Admin genérico) ou irrelevante (Manager/Seller, ver acima).
+  companyStatus: 'implantacao' | 'ativa' | 'suspensa' | 'cancelada' | null;
+  // Resolvido pelo chamador a partir de isSuperAdminCommercialWriteEnabled()
+  // — só relevante para o ramo Super Admin; ignorado para Manager/Seller
+  // (mesmo padrão de canMutateCommercialWorkspace, que também nunca lê
+  // flag dentro desta camada).
+  superAdminWriteEnabled: boolean;
+};
+
+export function canImportLeads(input: ImportLeadsCapabilityInput): boolean {
+  if (input.actor?.platformRole === 'super_admin') {
+    if (!input.superAdminWriteEnabled) return false;
+    if (input.companyStatus === null) return false;
+    return input.companyStatus === 'ativa' || input.companyStatus === 'implantacao';
+  }
+
+  return input.actor?.activeMembership?.role === 'manager';
+}
+
 // M1-F S6-F — ciclo de vida empresarial de usuários (suspender/reativar/
 // desligar/transferir). Ator resolvido pelo chamador (nunca lido de
 // AuthService aqui, mesmo padrão do restante deste arquivo): Super Admin
