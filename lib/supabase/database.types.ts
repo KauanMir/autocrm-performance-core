@@ -1186,6 +1186,10 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      _resolve_commercial_read_company: {
+        Args: { p_company_id: string }
+        Returns: string
+      }
       accept_invite: {
         Args: { p_token_hash: string }
         Returns: {
@@ -1853,6 +1857,37 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      list_platform_deals_for_company: {
+        Args: { p_company_id: string }
+        Returns: {
+          assigned_seller_id: string
+          client_name_snapshot: string
+          company_id: string
+          created_at: string
+          created_by: string
+          discount_percent: number
+          down_payment_cents: number | null
+          id: string
+          installments: string | null
+          lead_id: string
+          lost_at: string | null
+          lost_by: string | null
+          note: string
+          payment_method: Database["public"]["Enums"]["deal_payment_method"]
+          status: Database["public"]["Enums"]["deal_status"]
+          updated_at: string
+          updated_by: string
+          value_cents: number
+          vehicle: string
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "deals"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       list_platform_lead_timeline: {
         Args: { p_company_id: string; p_lead_id: string }
         Returns: {
@@ -1912,6 +1947,62 @@ export type Database = {
           name: string
           seller_id: string
         }[]
+      }
+      list_platform_tasks_for_company: {
+        Args: { p_company_id: string }
+        Returns: {
+          assigned_seller_id: string | null
+          company_id: string
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          created_by: string | null
+          due_at: string
+          id: string
+          lead_id: string | null
+          note: string
+          priority: Database["public"]["Enums"]["task_priority"]
+          status: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      list_platform_visits_for_company: {
+        Args: { p_company_id: string }
+        Returns: {
+          assigned_seller_id: string
+          client_name: string | null
+          closed_at: string | null
+          closed_by: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          lead_id: string | null
+          note: string
+          outcome: Database["public"]["Enums"]["visit_outcome"] | null
+          result_note: string | null
+          scheduled_at: string
+          status: Database["public"]["Enums"]["visit_status"]
+          updated_at: string
+          updated_by: string | null
+          vehicles: string[]
+          version: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "visits"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       mark_competition_events_seen: {
         Args: { p_event_ids: string[] }

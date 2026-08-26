@@ -8,7 +8,8 @@ import { AuthService, SellerService, LeadService, VisitService, DealService, Sal
 import { VISIT_STATUS, DEAL_STATUS, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
-import { useRemoteTasksScreenState } from '@/lib/hooks/useRemoteTasksScreenState';
+import { useRemoteTasksScreenState, type UseRemoteTasksScreenStateResult } from '@/lib/hooks/useRemoteTasksScreenState';
+import { usePlatformTasksScreenState } from '@/lib/hooks/usePlatformTasksScreenState';
 import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
 import { useRemoteDealsScreenState } from '@/lib/hooks/useRemoteDealsScreenState';
 import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
@@ -112,9 +113,12 @@ type HomeTasksSummary =
   | { status: 'error'; retry: () => void }
   | { status: 'ready'; lateCount: number; lateTasks: readonly RemoteTaskModel[] };
 
-function useHomeTasksSummary(currentUser: User | null): HomeTasksSummary {
-  const remote = useRemoteTasksScreenState(currentUser);
-
+// SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §24/§33 — extraído para
+// função pura reaproveitável tanto pelo caminho membership (hook abaixo)
+// quanto pelo caminho platform do Super Admin contextual (Home chama
+// usePlatformTasksScreenState diretamente e passa o resultado aqui) —
+// mesma derivação, nunca duas lógicas de "o que é atrasado" divergindo.
+function deriveHomeTasksSummary(remote: UseRemoteTasksScreenStateResult): HomeTasksSummary {
   if (remote.mode === 'task_local') return { status: 'local' };
   if (remote.mode === 'task_blocked') return { status: 'unavailable' };
   if (remote.mode === 'task_remote_misconfigured') return { status: 'unavailable' };
@@ -136,6 +140,11 @@ function useHomeTasksSummary(currentUser: User | null): HomeTasksSummary {
     lateCount: lateTasks.length,
     lateTasks,
   };
+}
+
+function useHomeTasksSummary(currentUser: User | null): HomeTasksSummary {
+  const remote = useRemoteTasksScreenState(currentUser);
+  return deriveHomeTasksSummary(remote);
 }
 
 // COMMERCIAL-REMOTE-VISITS-B7 — resumo de Visits da Home, independente de
@@ -1015,6 +1024,11 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   }, []);
 
   useStore(); // subscribes to store changes for re-render — sellers read via SellerService below (Correção 9)
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §24/§33 — movido para
+  // antes das summaries: tasksSummary abaixo já precisa saber se está em
+  // contexto operacional Super Admin para escolher a fonte certa.
+  const operational = useOperationalCompanyContext();
+  const isOperationalSuperAdmin = operational.mode === 'super_admin';
   // M1-E E7-A1 — chamado SEMPRE (Rules of Hooks), independente do modo;
   // useRemoteLeadsScreenState já gateia local/remote_ready/misconfigured/
   // sem-identidade internamente.
@@ -1023,7 +1037,19 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // garantia de leadsSummary acima; independente dela por design
   // (G-PRECHECK §8/§9 — Leads e Tasks nunca voltam a compartilhar um
   // proxy de estado).
-  const tasksSummary = useHomeTasksSummary(currentUser ?? null);
+  //
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §24/§33 — Atenção
+  // imediata passa a usar Tasks company-wide reais para Super Admin
+  // contextual (ambos os hooks SEMPRE chamados, Rules of Hooks; só a
+  // SAÍDA é selecionada condicionalmente, mesmo padrão já usado em
+  // ScreenPendencias/ScreenVisitas/ScreenPropostas).
+  const membershipTasksSummary = useHomeTasksSummary(currentUser ?? null);
+  const platformTasksScreenForHome = usePlatformTasksScreenState(
+    isOperationalSuperAdmin ? operational.companyId : null,
+  );
+  const tasksSummary = isOperationalSuperAdmin
+    ? deriveHomeTasksSummary(platformTasksScreenForHome)
+    : membershipTasksSummary;
   // COMMERCIAL-REMOTE-VISITS-B7 — chamado SEMPRE (Rules of Hooks), mesma
   // garantia de leadsSummary/tasksSummary acima; independente de ambas por
   // design (B7-PRECHECK §18 — Leads/Tasks/Visits nunca voltam a
@@ -1056,14 +1082,17 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // própria linha por RLS — nenhuma ampliação de visão aqui.
   const isSeller = currentUser?.activeMembership?.role === 'seller';
   // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — companyId/flag de leitura do
-  // Pódio/Ranking/movement (§18 do EXEC): SOMENTE leaderboard/timezone
-  // recebem o companyId operacional do Super Admin. leadsSummary/
-  // tasksSummary/visitsSummary/dealsSummary/salesSummary/sellerLabels
-  // continuam exclusivamente com activeMembership.companyId (sempre null
-  // para Super Admin) — Tasks/Visits/Deals/Sales/Resultados não têm
-  // contrato de Super Admin (PRECHECK §13-§17), nunca ampliado aqui.
-  const operational = useOperationalCompanyContext();
-  const isOperationalSuperAdmin = operational.mode === 'super_admin';
+  // Pódio/Ranking/movement (§18 do EXEC V1) e, desde
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC, tasksSummary também
+  // recebem o companyId operacional do Super Admin (via
+  // platformTasksScreenForHome, acima). leadsSummary/visitsSummary/
+  // dealsSummary/salesSummary/sellerLabels continuam exclusivamente com
+  // activeMembership.companyId (sempre null para Super Admin) —
+  // Leads/Home-leaderboard/Tasks são os únicos módulos com contrato de
+  // Super Admin explícito até aqui (PRECHECK V2-READ §13-§17); Visits/
+  // Deals têm contrato próprio mas não alimentam nenhuma summary da Home
+  // ainda (Funil continua oculto, §26 do EXEC V2A); Sales/Resultados
+  // continuam fora de escopo (V2B).
   const podiumCompanyId = isOperationalSuperAdmin
     ? operational.companyId
     : (currentUser?.activeMembership?.companyId ?? null);
@@ -1329,11 +1358,11 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
           </div>
         )}
 
-        {/* SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §21/§22/§23 — Funil comercial/
-            Atenção imediata/Ações rápidas dependem de Tasks/Visits/Deals/
-            Sales, que não têm contrato de Super Admin (PRECHECK §13-§17):
-            ocultas por inteiro (nunca o aviso "indisponível nesta sessão",
-            nunca um zero falso) para Super Admin, operacional ou não. */}
+        {/* SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §21/§22/§23 — Funil comercial
+            depende de Visits/Deals/Sales agregados como cohort (não só
+            Tasks): continua oculto por inteiro para Super Admin, mesmo
+            contextual (V2A-READ-B1-EXEC §26 — "não habilitar Funil
+            comercial completo ainda", Sales é V2B). */}
         {currentUser?.platformRole !== 'super_admin' && (
           <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} dealsSummary={dealsSummary} salesSummary={salesSummary} /></div>
         )}
@@ -1343,7 +1372,12 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
             <MinhaDisputa active={active} remote={{ me: (remoteCompetitionState as any).me, lines: remoteMinhaDisputaLines }} />
           </div>
         )}
-        {currentUser?.platformRole !== 'super_admin' && (
+        {/* SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §24/§33 — Atenção
+            imediata agora usa Tasks company-wide reais para Super Admin
+            CONTEXTUAL (tasksSummary já aponta para a fonte certa, ver
+            acima) — continua ausente para Super Admin GENÉRICO (sem
+            /company/[id], zero contrato de company). */}
+        {(currentUser?.platformRole !== 'super_admin' || isOperationalSuperAdmin) && (
           <div style={{ marginBottom: 26 }}><UrgentAttention go={go} leadsSummary={leadsSummary} tasksSummary={tasksSummary} visitsSummary={visitsSummary} /></div>
         )}
         {isManager && (
@@ -1351,6 +1385,8 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
             <ManagerTeamAttentionSection tasksSummary={tasksSummary} dealsSummary={dealsSummary} sellersById={sellerLabels.sellersById} />
           </div>
         )}
+        {/* Ações rápidas são mutation entry points — continuam ausentes
+            para QUALQUER Super Admin, contextual ou não (§27 do EXEC V2A). */}
         {currentUser?.platformRole !== 'super_admin' && <QuickActions go={go} />}
       </div>
       {showHomeCelebration && primaryPendingCompetitionEvent && (

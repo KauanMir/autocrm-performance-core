@@ -20,4 +20,7 @@ function requireCompanyId(value: string): string {
 export const dealQueryKeys = {
   root: (companyId: string) => ['company', requireCompanyId(companyId), 'deals'] as const,
   active: (companyId: string) => dealQueryKeys.root(companyId),
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — partição PRÓPRIA
+  // (nunca a mesma key de `.active`), mesmo motivo de taskQueryKeys.platform.
+  platform: (companyId: string) => ['company', requireCompanyId(companyId), 'deals', 'platform'] as const,
 };

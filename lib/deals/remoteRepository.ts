@@ -52,6 +52,28 @@ export async function fetchVisibleDealRows(): Promise<RemoteDealRow[]> {
   return (data ?? []) as unknown as RemoteDealRow[];
 }
 
+// SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — bridge EXCLUSIVO do
+// Super Admin contextual (/company/[id]): chama list_platform_deals_for_
+// company (SECURITY DEFINER, company explícita + can_access_company),
+// nunca o SELECT direto acima. Manager/Seller continuam 100% em
+// fetchVisibleDealRows/RLS — esta função nunca é chamada para eles.
+// Mesmo shape de row (RemoteDealRow), sem filtro de status (paridade
+// exata com fetchVisibleDealRows).
+export async function fetchPlatformDealRows(companyId: string): Promise<RemoteDealRow[]> {
+  const { data, error } = await supabase.rpc('list_platform_deals_for_company', {
+    p_company_id: companyId,
+  });
+
+  if (error) {
+    throw new RemoteDealsError('remote_deals_fetch_failed', {
+      code: typeof error.code === 'string' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined,
+    });
+  }
+
+  return (data ?? []) as unknown as RemoteDealRow[];
+}
+
 // ── create_deal ───────────────────────────────────────────────────────
 // p_lead_id/p_vehicle/p_value_cents/p_discount_percent/p_payment_method
 // obrigatórios (sem default no SQL); p_down_payment_cents/p_installments/

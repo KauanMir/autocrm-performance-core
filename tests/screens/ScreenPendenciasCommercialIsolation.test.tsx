@@ -14,6 +14,8 @@ import { RemoteTasksError } from '@/lib/tasks/errors';
 
 const m = vi.hoisted(() => ({
   useRemoteTasksScreenState: vi.fn(),
+  usePlatformTasksScreenState: vi.fn(),
+  useOperationalCompanyContext: vi.fn(),
   useCompleteTask: vi.fn(),
   tasks: vi.fn(() => [] as any[]),
   taskServiceUpdate: vi.fn(),
@@ -24,6 +26,21 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks/useRemoteTasksScreenState', () => ({
   useRemoteTasksScreenState: m.useRemoteTasksScreenState,
+}));
+
+// SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — ScreenPendencias agora
+// chama useOperationalCompanyContext() e usePlatformTasksScreenState()
+// incondicionalmente (dual-hook, mesmo padrão de Home/ScreenVisitas/
+// ScreenPropostas). usePlatformTasksScreenState usa useQuery real por
+// dentro (ausente QueryClientProvider neste harness) — mockado direto,
+// mesma razão de useRemoteTasksScreenState acima. Default mode:'none'
+// preserva 100% o comportamento Manager/Seller já coberto abaixo; só o
+// describe block "Super Admin operacional" sobrescreve.
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: m.useOperationalCompanyContext,
+}));
+vi.mock('@/lib/hooks/usePlatformTasksScreenState', () => ({
+  usePlatformTasksScreenState: m.usePlatformTasksScreenState,
 }));
 
 vi.mock('@/lib/hooks/useCompleteTask', () => ({
@@ -92,6 +109,10 @@ beforeEach(() => {
   m.taskServiceUpdate.mockReset();
   m.leadServiceGetAll.mockReset().mockReturnValue([]);
   m.useRemoteTasksScreenState.mockReset().mockReturnValue(taskScreenState('task_local'));
+  m.usePlatformTasksScreenState.mockReset().mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+  m.useOperationalCompanyContext.mockReset().mockReturnValue({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  });
   completeTaskSpy = vi.fn().mockResolvedValue({});
   m.useCompleteTask.mockReset().mockImplementation(() => completeHookResult(completeTaskSpy));
   m.user.current = LOCAL_MANAGER;
@@ -415,5 +436,74 @@ describe('ScreenPendencias — conclusão remota: reset de erro', () => {
     completeTaskSpy.mockResolvedValueOnce({});
     fireEvent.click(screen.getByTitle('Concluir pendência'));
     await waitFor(() => expect(screen.queryByText('Esta pendência foi alterada. Os dados foram atualizados.')).toBeNull());
+  });
+});
+
+// ── SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — Super Admin operacional ──
+
+describe('ScreenPendencias — Super Admin operacional (contextual)', () => {
+  beforeEach(() => {
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-1',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+  });
+
+  it('fonte é usePlatformTasksScreenState (companyId explícito), useRemoteTasksScreenState (membership) é ignorado mesmo chamado', () => {
+    m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask({ id: 't-plat-1', title: 'Tarefa da empresa aberta' })],
+    }));
+    // Membership hook continua "vazando" dados antigos no mock — prova que
+    // a tela NUNCA usa esse resultado quando isOperationalSuperAdmin=true.
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask({ id: 't-membership-1', title: 'Tarefa de membership (não deve aparecer)' })],
+    }));
+
+    render(<ScreenPendencias go={() => {}} />);
+    fireEvent.click(screen.getByText('Todas'));
+
+    expect(screen.getByText('Tarefa da empresa aberta')).toBeInTheDocument();
+    expect(screen.queryByText('Tarefa de membership (não deve aparecer)')).toBeNull();
+  });
+
+  it('usePlatformTasksScreenState recebe o companyId do contexto operacional', () => {
+    m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isEmpty: true }));
+    render(<ScreenPendencias go={() => {}} />);
+    expect(m.usePlatformTasksScreenState).toHaveBeenCalledWith('company-op-1');
+  });
+
+  it('"Nova pendência" ausente (mutation entry point oculto para Super Admin contextual)', () => {
+    m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask()],
+    }));
+    render(<ScreenPendencias go={() => {}} />);
+    expect(screen.queryByText('Nova pendência')).toBeNull();
+  });
+
+  it('"Concluir pendência" e "Reagendar" ausentes (read-only estrutural, não só desabilitado)', () => {
+    m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask()],
+    }));
+    render(<ScreenPendencias go={() => {}} />);
+    expect(screen.queryByTitle('Concluir pendência')).toBeNull();
+    expect(screen.queryByText('Reagendar')).toBeNull();
+  });
+
+  it('troca de empresa (companyId muda): nenhuma Task da empresa anterior sobrevive', () => {
+    m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true, tasks: [remoteTask({ id: 't-a', title: 'Tarefa da Empresa A' })],
+    }));
+    const { rerender } = render(<ScreenPendencias go={() => {}} />);
+    expect(screen.getByText('Tarefa da Empresa A')).toBeInTheDocument();
+
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-2',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+    m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isLoading: true }));
+    rerender(<ScreenPendencias go={() => {}} />);
+
+    expect(screen.queryByText('Tarefa da Empresa A')).toBeNull();
+    expect(screen.getByTestId('pendencias-state-loading')).toBeInTheDocument();
   });
 });

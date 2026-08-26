@@ -32,6 +32,7 @@ const m = vi.hoisted(() => ({
   useRemoteVisitsScreenState: vi.fn(),
   useRemoteDealsScreenState: vi.fn(),
   useRemoteSalesScreenState: vi.fn(),
+  usePlatformTasksScreenState: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
   useCurrentCompanyTimezone: vi.fn(),
   useCompanySellerLeaderboard: vi.fn(),
@@ -67,6 +68,17 @@ vi.mock('@/lib/hooks/useRemoteDealsScreenState', () => ({
 
 vi.mock('@/lib/hooks/useRemoteSalesScreenState', () => ({
   useRemoteSalesScreenState: m.useRemoteSalesScreenState,
+}));
+
+// SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — usePlatformTasksScreenState
+// usa useQuery real internamente (via usePlatformLeads/fetchPlatformTaskRows),
+// que exige QueryClientProvider ausente neste harness — mesmo motivo de
+// useCurrentCompanyTimezone/useCompanySellerLeaderboard acima. Cobertura
+// própria do hook em si fica em tests/hooks/usePlatformTasksScreenState.test.tsx
+// — aqui só se valida o que Home FAZ com o resultado (Atenção imediata real
+// para Super Admin contextual).
+vi.mock('@/lib/hooks/usePlatformTasksScreenState', () => ({
+  usePlatformTasksScreenState: m.usePlatformTasksScreenState,
 }));
 
 vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
@@ -331,6 +343,13 @@ beforeEach(() => {
   // sobrescreve para um mode não-local próprio (nunca 'task_local' junto de
   // Leads remoto — violaria a garantia estrutural de resolveTaskRemoteMode()).
   m.useRemoteTasksScreenState.mockReset().mockReturnValue(taskScreenState('task_local'));
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — default
+  // 'task_remote_unavailable_identity' (companyId ainda null, mesmo
+  // contrato do hook real quando desabilitado): preserva o baseline para
+  // todo teste que não é do describe block "Super Admin operacional"
+  // (novo, abaixo) — só ele sobrescreve para 'task_remote_active' com
+  // Tasks reais.
+  m.usePlatformTasksScreenState.mockReset().mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
   // COMMERCIAL-REMOTE-VISITS-B7 — default 'visit_local', mesmo raciocínio
   // do default de Tasks acima: preserva o baseline local de todos os
   // testes escritos antes do B7. Toda describe com Leads remoto sobrescreve
@@ -1251,6 +1270,62 @@ describe('Home — Super Admin sem companyId operacional', () => {
     expect(screen.queryByText('Funil comercial')).toBeNull();
     expect(screen.queryByText('Atenção imediata')).toBeNull();
     expect(screen.queryByText('Ações rápidas')).toBeNull();
+  });
+});
+
+// ── D2. Super Admin operacional (contextual, /company/[id]) ────────────
+// SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §24/§33 — diferente da
+// suíte D acima (Super Admin GENÉRICO, mode:'none'), aqui
+// useOperationalCompanyContext retorna mode:'super_admin': tasksSummary
+// passa a vir de usePlatformTasksScreenState (Tasks company-wide reais),
+// "Atenção imediata" volta a existir — Funil comercial/Ações rápidas
+// continuam ausentes (Sales é V2B, Ações são mutation entry points).
+describe('Home — Super Admin operacional (contextual): Atenção imediata real', () => {
+  beforeEach(() => {
+    m.authGetCurrentUser.mockReturnValue(superAdmin());
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-1',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_unavailable_identity'));
+    m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+  });
+
+  it('Tasks atrasadas reais da empresa aberta → "Atenção imediata" aparece com o count real', () => {
+    m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true,
+      tasks: [
+        { id: 't-op-1', title: 'Ligar cliente', lead: 'Cliente X', leadId: 'lead-x', assignedTo: 's1', when: 'Hoje', prio: 'alta', state: TASK_STATE.LATE, note: '', createdAt: '2026-08-24T12:00:00Z', dueAt: '2026-08-24T12:00:00Z', version: 1 },
+      ],
+    }));
+    renderHome(superAdmin());
+    expect(screen.getByText('Atenção imediata')).toBeInTheDocument();
+    expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  it('sem Tasks atrasadas (lateCount=0): "Atenção imediata" continua ausente, nenhum card falso', () => {
+    m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isEmpty: true, tasks: [] }));
+    renderHome(superAdmin());
+    expect(screen.queryByText('Atenção imediata')).toBeNull();
+  });
+
+  it('Funil comercial e Ações rápidas continuam ausentes mesmo com Atenção real (Sales é V2B, Ações são mutation)', () => {
+    m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
+      hasData: true,
+      tasks: [{ id: 't-op-1', title: 'Ligar cliente', lead: 'Cliente X', leadId: 'lead-x', assignedTo: 's1', when: 'Hoje', prio: 'alta', state: TASK_STATE.LATE, note: '', createdAt: '2026-08-24T12:00:00Z', dueAt: '2026-08-24T12:00:00Z', version: 1 }],
+    }));
+    renderHome(superAdmin());
+    expect(screen.getByText('Atenção imediata')).toBeInTheDocument();
+    expect(screen.queryByText('Funil comercial')).toBeNull();
+    expect(screen.queryByText('Ações rápidas')).toBeNull();
+  });
+
+  it('usePlatformTasksScreenState recebe o companyId do contexto operacional, nunca null', () => {
+    m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isEmpty: true, tasks: [] }));
+    renderHome(superAdmin());
+    expect(m.usePlatformTasksScreenState).toHaveBeenCalledWith('company-op-1');
   });
 });
 

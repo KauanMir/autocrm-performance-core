@@ -22,4 +22,10 @@ function requireCompanyId(value: string): string {
 export const taskQueryKeys = {
   root: (companyId: string) => ['company', requireCompanyId(companyId), 'tasks'] as const,
   active: (companyId: string) => taskQueryKeys.root(companyId),
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — partição PRÓPRIA
+  // (nunca a mesma key de `.active`, §16/§23 do EXEC): o bridge do Super
+  // Admin contextual (list_platform_tasks_for_company) nunca deve
+  // colidir/reaproveitar o cache de Manager/Seller (fontes e autoridades
+  // diferentes, mesmo quando apontam para a mesma empresa).
+  platform: (companyId: string) => ['company', requireCompanyId(companyId), 'tasks', 'platform'] as const,
 };

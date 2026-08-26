@@ -22,6 +22,9 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 const m = vi.hoisted(() => ({
   useRemoteDealsScreenState: vi.fn(),
+  usePlatformDealsScreenState: vi.fn(),
+  usePlatformSellers: vi.fn(),
+  useOperationalCompanyContext: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   deals: vi.fn(() => [] as any[]),
@@ -33,6 +36,20 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks/useRemoteDealsScreenState', () => ({
   useRemoteDealsScreenState: m.useRemoteDealsScreenState,
+}));
+// SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — mesmo padrão de
+// tests/screens/ScreenVisitasCommercialIsolation.test.tsx: dual-hook
+// sempre chamado, usePlatformDealsScreenState/usePlatformSellers usam
+// useQuery real por dentro (mockados direto), default mode:'none' preserva
+// 100% o comportamento Manager/Seller já coberto acima.
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: m.useOperationalCompanyContext,
+}));
+vi.mock('@/lib/hooks/usePlatformDealsScreenState', () => ({
+  usePlatformDealsScreenState: m.usePlatformDealsScreenState,
+}));
+vi.mock('@/lib/hooks/usePlatformSellers', () => ({
+  usePlatformSellers: m.usePlatformSellers,
 }));
 vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
   useCurrentCompanySellerLabels: m.useCurrentCompanySellerLabels,
@@ -112,6 +129,14 @@ beforeEach(() => {
   m.isManager.mockReset().mockReturnValue(false);
   m.isLocalCommercialDataAllowed.mockReset().mockReturnValue(true);
   m.useRemoteDealsScreenState.mockReset().mockReturnValue(dealScreenState('deal_local'));
+  m.usePlatformDealsScreenState.mockReset().mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+  m.usePlatformSellers.mockReset().mockReturnValue({
+    queryEnabled: false, sellers: [] as any[], isLoading: false, isFetching: false,
+    isError: false, error: null, isEmpty: true, hasData: false, refetch: vi.fn(),
+  });
+  m.useOperationalCompanyContext.mockReset().mockReturnValue({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  });
   m.useCurrentCompanySellerLabels.mockReset().mockReturnValue(sellerLabelsState());
   m.user.current = LOCAL_MANAGER;
   (window as any).__openFlow = m.openFlow;
@@ -393,5 +418,95 @@ describe('ScreenPropostas — deal_remote_active com dado', () => {
     expect(screen.queryByText('Revisar')).toBeNull();
     expect(screen.queryByText('Aprovar')).toBeNull();
     expect(screen.queryByText(/propostas fechadas/)).toBeNull();
+  });
+});
+
+// ── SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — Super Admin operacional ──
+
+const SUPER_ADMIN = { id: 'sa-1', name: 'Admin', email: 'a@a.com', platformRole: 'super_admin', activeMembership: null };
+
+describe('ScreenPropostas — Super Admin operacional (contextual)', () => {
+  beforeEach(() => {
+    m.user.current = SUPER_ADMIN;
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-1',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+  });
+
+  it('fonte é usePlatformDealsScreenState (companyId explícito), membership hook é ignorado mesmo chamado', () => {
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal({ id: 'deal-plat-1', clientName: 'Cliente da empresa aberta' })],
+    }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal({ id: 'deal-membership-1', clientName: 'Cliente de membership (não deve aparecer)' })],
+    }));
+
+    render(<ScreenPropostas go={() => {}} />);
+
+    expect(screen.getByText('Cliente da empresa aberta')).toBeInTheDocument();
+    expect(screen.queryByText('Cliente de membership (não deve aparecer)')).toBeNull();
+  });
+
+  it('usePlatformDealsScreenState/usePlatformSellers recebem o companyId do contexto operacional', () => {
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isEmpty: true }));
+    render(<ScreenPropostas go={() => {}} />);
+    expect(m.usePlatformDealsScreenState).toHaveBeenCalledWith('company-op-1');
+    expect(m.usePlatformSellers).toHaveBeenCalledWith({ companyId: 'company-op-1', authorized: true });
+  });
+
+  it('vendedor exibido vem de usePlatformSellers (showSeller=true para Super Admin contextual), nunca de useCurrentCompanySellerLabels', () => {
+    m.usePlatformSellers.mockReturnValue({
+      queryEnabled: true, sellers: [{ seller_id: 's1', name: 'Fernanda Plataforma' }],
+      isLoading: false, isFetching: false, isError: false, error: null, isEmpty: false, hasData: true, refetch: vi.fn(),
+    });
+    m.useCurrentCompanySellerLabels.mockReturnValue(sellerLabelsState({ sellersById: { s1: { id: 's1', name: 'Ricardo Membership' } } }));
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal({ assignedSellerId: 's1' })],
+    }));
+
+    render(<ScreenPropostas go={() => {}} />);
+
+    expect(screen.getByText(/Fernanda/)).toBeInTheDocument();
+    expect(screen.queryByText(/Ricardo/)).toBeNull();
+  });
+
+  it('"Nova negociação" ausente (mutation entry point oculto para Super Admin contextual)', () => {
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal()],
+    }));
+    render(<ScreenPropostas go={() => {}} />);
+    expect(screen.queryByText('Nova negociação')).toBeNull();
+  });
+
+  it('"Abrir" ausente nos três status (FlowVerNegociacao mistura leitura com register_sale — hidden por inteiro, §22/§29 do EXEC)', () => {
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true,
+      deals: [
+        remoteDeal({ id: 'open-1', status: 'open' }),
+        remoteDeal({ id: 'lost-1', status: 'lost', lostBy: 'profile-1', lostAt: '2026-08-20T10:00:00Z' }),
+        remoteDeal({ id: 'sold-1', status: 'sold' }),
+      ],
+    }));
+    render(<ScreenPropostas go={() => {}} />);
+    expect(screen.queryByText('Abrir')).toBeNull();
+  });
+
+  it('troca de empresa (companyId muda): nenhuma Deal da empresa anterior sobrevive', () => {
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal({ id: 'deal-a', clientName: 'Cliente da Empresa A' })],
+    }));
+    const { rerender } = render(<ScreenPropostas go={() => {}} />);
+    expect(screen.getByText('Cliente da Empresa A')).toBeInTheDocument();
+
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-2',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', { isLoading: true }));
+    rerender(<ScreenPropostas go={() => {}} />);
+
+    expect(screen.queryByText('Cliente da Empresa A')).toBeNull();
+    expect(screen.getByTestId('negociacoes-state-loading')).toBeInTheDocument();
   });
 });

@@ -77,6 +77,8 @@ function flagModeFromScreenState(mode: RemoteLeadsScreenMode): RemoteLeadsFlagMo
 import { isSuperAdminCommercialReadEnabled } from '@/lib/flags';
 import { PlatformCommercialClientsView } from '@/components/commercial/PlatformCommercialClientsView';
 import { PlatformCommercialPipelineView } from '@/components/commercial/PlatformCommercialPipelineView';
+import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
+import { usePlatformTasksScreenState } from '@/lib/hooks/usePlatformTasksScreenState';
 
 const STAGE_TONE: Record<string, string> = {
   'Novo': 'green', 'Qualificado': 'green', 'Visita agendada': 'amber',
@@ -882,7 +884,7 @@ const PRIO: Record<string, { c: string; label: string }> = {
 //     aceita só leadId, confirmado por leitura direta de
 //     components/flows/FlowsShared.tsx:840) — nenhum caminho comprovadamente
 //     seguro existe ainda para abrir o Lead a partir daqui.
-function TaskRow({ task, go, remoteActive, currentUser }: any) {
+function TaskRow({ task, go, remoteActive, currentUser, readOnly }: any) {
   // No local "done" state — a task marked TASK_STATE.DONE stops matching any
   // of the 3 active groups in ScreenPendencias and simply stops rendering
   // here, via the real store mutation + F5-safe persistence (M0-K2, was a
@@ -936,15 +938,20 @@ function TaskRow({ task, go, remoteActive, currentUser }: any) {
       border: `1px solid ${late ? 'var(--red-line)' : 'var(--border)'}`,
       borderRadius: 11, transition: 'all .2s',
     }}>
-      <button
-        onClick={remoteActive ? handleComplete : () => TaskService.update(task.id, { state: TASK_STATE.DONE })}
-        disabled={completeDisabled}
-        className="focus-ring" title="Concluir pendência" style={{
-        width: 24, height: 24, borderRadius: 7, flexShrink: 0, cursor: completeDisabled ? 'default' : 'pointer',
-        opacity: completeDisabled ? 0.5 : 1,
-        border: `2px solid ${late ? 'var(--red)' : 'var(--border)'}`,
-        background: 'transparent', display: 'grid', placeItems: 'center', color: '#fff',
-      }} />
+      {/* SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §18/§22 — "Concluir
+          pendência" é mutation entry point: HIDE (nunca só disabled) para
+          Super Admin contextual — nenhum flow escape possível por aqui. */}
+      {!readOnly && (
+        <button
+          onClick={remoteActive ? handleComplete : () => TaskService.update(task.id, { state: TASK_STATE.DONE })}
+          disabled={completeDisabled}
+          className="focus-ring" title="Concluir pendência" style={{
+          width: 24, height: 24, borderRadius: 7, flexShrink: 0, cursor: completeDisabled ? 'default' : 'pointer',
+          opacity: completeDisabled ? 0.5 : 1,
+          border: `2px solid ${late ? 'var(--red)' : 'var(--border)'}`,
+          background: 'transparent', display: 'grid', placeItems: 'center', color: '#fff',
+        }} />
+      )}
       <div style={{ width: 4, height: 34, borderRadius: 3, background: p.c, flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 14.5, color: 'var(--t-900)' }}>{task.title}</div>
@@ -954,10 +961,13 @@ function TaskRow({ task, go, remoteActive, currentUser }: any) {
       {/* COMMERCIAL-REMOTE-B1-B3-E: sempre visível — por construção, este
           ponto só é alcançado em task_local ou task_remote_active pronto.
           FlowReagendarPendencia decide sozinho local/remoto (FlowLayer não
-          bloqueia mais 'reagendar-pendencia' fora do modo local). */}
-      <button onClick={() => (window as any).__openFlow('reagendar-pendencia', { task })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-        <Icon name="refresh" size={14} stroke={2} /> Reagendar
-      </button>
+          bloqueia mais 'reagendar-pendencia' fora do modo local). HIDE
+          para Super Admin contextual (§18/§22 do EXEC V2A). */}
+      {!readOnly && (
+        <button onClick={() => (window as any).__openFlow('reagendar-pendencia', { task })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+          <Icon name="refresh" size={14} stroke={2} /> Reagendar
+        </button>
+      )}
       {remoteActive ? (
         <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', whiteSpace: 'nowrap' }}>
           <Icon name="user" size={14} stroke={2} /> {task.lead.split(' ')[0]}
@@ -990,7 +1000,18 @@ export function ScreenPendencias({ go }: any) {
   useStore();
   const [tab, setTab] = useState('Atrasadas');
   const currentUser = AuthService.getCurrentUser();
-  const remoteTasksScreen = useRemoteTasksScreenState(currentUser);
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — bridge exclusivo do
+  // Super Admin contextual: ambos os hooks são SEMPRE chamados (Rules of
+  // Hooks), mas só um produz rede real por vez (o membership-based fica
+  // 'task_remote_unavailable_identity' para Super Admin — sem
+  // activeMembership; o platform-based fica desabilitado sem companyId
+  // operacional — §11/§12 do EXEC: nenhum dos dois "vaza" para o papel
+  // errado).
+  const operational = useOperationalCompanyContext();
+  const isOperationalSuperAdmin = operational.mode === 'super_admin';
+  const membershipTasksScreen = useRemoteTasksScreenState(currentUser);
+  const platformTasksScreen = usePlatformTasksScreenState(isOperationalSuperAdmin ? operational.companyId : null);
+  const remoteTasksScreen = isOperationalSuperAdmin ? platformTasksScreen : membershipTasksScreen;
   const mode = remoteTasksScreen.mode;
 
   if (mode === 'task_blocked' || mode === 'task_remote_misconfigured') {
@@ -1056,7 +1077,10 @@ export function ScreenPendencias({ go }: any) {
           identity/loading/erro/configError já retornaram antes, acima).
           FlowNovaPendencia decide sozinho local/remoto (FlowLayer não
           bloqueia mais 'nova-pendencia' fora do modo local). */}
-      <PageHead title="Pendências" sub="O que você precisa fazer e o que já passou da hora." actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-pendencia')}>Nova pendência</LBtn>} />
+      {/* SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §18 — "Nova
+          pendência" é mutation entry point: HIDE para Super Admin
+          contextual (READ ONLY neste V2A), preservado para Manager/Seller. */}
+      <PageHead title="Pendências" sub="O que você precisa fazer e o que já passou da hora." actions={!isOperationalSuperAdmin && <LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-pendencia')}>Nova pendência</LBtn>} />
       <Guide tone="red" icon="alert" text={<span>Você tem <b>{late} pendências atrasadas</b>. Resolva primeiro as vermelhas. Cada dia parado é uma venda mais distante.</span>} action="Ver atrasadas" onAction={() => setTab('Atrasadas')} />
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
         {['Atrasadas', 'Hoje', 'Próximas', 'Todas'].map(t => (
@@ -1072,7 +1096,7 @@ export function ScreenPendencias({ go }: any) {
               <span style={{ fontSize: 12.5, color: 'var(--t-400)' }}>{items.length}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {items.length ? items.map((t: any) => <TaskRow key={t.id} task={t} go={go} remoteActive={remoteActive} currentUser={currentUser} />)
+              {items.length ? items.map((t: any) => <TaskRow key={t.id} task={t} go={go} remoteActive={remoteActive} currentUser={currentUser} readOnly={isOperationalSuperAdmin} />)
                 : <LCard style={{ textAlign: 'center', color: 'var(--green)', fontWeight: 600 }}>Tudo em dia por aqui. Ótimo trabalho!</LCard>}
             </div>
           </div>

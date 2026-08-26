@@ -47,6 +47,16 @@ vi.mock('@/lib/flags', async (importOriginal) => {
 
 vi.mock('@/lib/store', () => ({ subscribeStore: () => () => {} }));
 
+// SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — testes abaixo (describe
+// "Super Admin operacional") sobrescrevem para mode:'super_admin'; todos os
+// demais (generic Super Admin, Manager, Seller) mantêm o default 'none' já
+// provado pela suíte inteira acima.
+const opContext = { current: { mode: 'none' as 'none' | 'super_admin', companyId: null as string | null, identity: { status: 'unavailable' as const }, isReadOnly: false } };
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: () => opContext.current,
+  OperationalCompanyProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — Rail (dentro de App real) agora usa
 // next/navigation's useRouter ("Voltar para Empresas"). App Router real
 // exige contexto ausente neste harness de render isolado.
@@ -161,6 +171,7 @@ beforeEach(() => {
   m.remoteSalesFlag.current = false;
   m.isManager.current = false;
   m.restoredUser.current = null;
+  opContext.current = { mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false };
 });
 
 describe('Super Admin — ids operacionais Manager/Seller-only nunca aparecem no menu (R1-EXEC §8)', () => {
@@ -232,5 +243,49 @@ describe('Seller — navegação preservada, Resultados continua ausente (R1-EXE
     expect(screen.getByRole('button', { name: 'Propostas' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Vendas' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Resultados' })).toBeNull();
+  });
+});
+
+// ── SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — Super Admin OPERACIONAL ──
+// Diferente de todo o resto deste arquivo (Super Admin GENÉRICO, mode:
+// 'none', sempre excluído dos 5 ids): aqui operational.mode==='super_admin'
+// — Pendências/Visitas/Propostas passam a ser permitidos (operationalSuperAdminNavIds,
+// components/App.tsx), Vendas/Resultados continuam AUSENTES (V2B, fora de
+// escopo deste lote).
+describe('Super Admin operacional (contextual): Pendências/Visitas/Propostas aparecem, Vendas/Resultados continuam ausentes', () => {
+  beforeEach(() => {
+    m.superAdminReadFlag.current = true;
+    opContext.current = {
+      mode: 'super_admin', companyId: 'company-op-1',
+      identity: { status: 'ready', company: { id: 'company-op-1', name: 'Empresa Aberta', logoPath: null, timezone: 'America/Sao_Paulo', status: 'ativa' } } as any,
+      isReadOnly: false,
+    };
+  });
+
+  it('Pendências/Visitas/Propostas aparecem no Rail', async () => {
+    await renderApp(user('admin', 'super_admin'));
+    expect(screen.getByRole('button', { name: 'Pendências' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Visitas' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Propostas' })).toBeInTheDocument();
+  });
+
+  it('Vendas/Resultados continuam ausentes (V2B, fora de escopo)', async () => {
+    await renderApp(user('admin', 'super_admin'));
+    expect(screen.queryByRole('button', { name: 'Vendas' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Resultados' })).toBeNull();
+  });
+
+  it('SUPER_ADMIN_COMMERCIAL_READ=false: Pendências/Visitas/Propostas voltam a ficar ausentes mesmo com mode super_admin', async () => {
+    m.superAdminReadFlag.current = false;
+    await renderApp(user('admin', 'super_admin'));
+    expect(screen.queryByRole('button', { name: 'Pendências' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Visitas' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Propostas' })).toBeNull();
+  });
+
+  it('clique em Pendências navega e monta ScreenPendencias', async () => {
+    await renderApp(user('admin', 'super_admin'));
+    fireEvent.click(screen.getByRole('button', { name: 'Pendências' }));
+    await waitFor(() => expect(screen.getByTestId('screen-pendencias')).toBeInTheDocument());
   });
 });

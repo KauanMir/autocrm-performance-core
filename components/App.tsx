@@ -88,20 +88,26 @@ const COMMERCIAL_NAV_IDS = ['clientes', 'andamento'];
 // mais abaixo os devolve.
 const SUPER_ADMIN_OPERATIONAL_NAV_IDS = [...COMMERCIAL_NAV_IDS, 'pendencias', 'visitas', 'propostas', 'vendas', 'resultados'];
 
-// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — dentro do contexto operacional
-// explícito (/company/[id]), a lista de nav ids do Super Admin é
-// COMPLETAMENTE diferente da lista genérica acima: só as superfícies com
-// contrato real pronto (PRECHECK §12-§17/§20/§31/§32) — nunca os 5 ids
-// membership-only (Tasks/Visits/Deals/Sales/Resultados continuam sem
-// contrato de Super Admin, mesmo dentro do contexto operacional) nem
-// 'empresas' (a ação "Voltar para Empresas" do Rail cobre essa navegação,
-// nunca duplicada como item de nav). Cada superfície continua atrás da
-// PRÓPRIA capability+flag — nunca um hardcode que ignore
+// SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC / V2A-READ-B1-EXEC — dentro do
+// contexto operacional explícito (/company/[id]), a lista de nav ids do
+// Super Admin é COMPLETAMENTE diferente da lista genérica acima: só as
+// superfícies com contrato real pronto — nunca 'empresas' (a ação
+// "Voltar para Empresas" do Rail cobre essa navegação, nunca duplicada
+// como item de nav). Cada superfície continua atrás da PRÓPRIA
+// capability+flag — nunca um hardcode que ignore
 // isSuperAdminCommercialReadEnabled/canManageInvites/etc.
+//
+// V2A-READ (SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §23): Pendências/
+// Visitas/Negociações entram company-wide READ ONLY, atrás da MESMA flag
+// de leitura comercial já usada por Clientes/Andamento (nenhuma flag nova
+// — a autorização real é list_platform_tasks_for_company/
+// list_platform_visits_for_company/list_platform_deals_for_company, todas
+// SECURITY DEFINER). Vendas/Resultados continuam AUSENTES (Sales/
+// register_sale são V2B, fora de escopo deste lote).
 function operationalSuperAdminNavIds(user: User): string[] {
   const ids = ['home'];
   if (isSuperAdminCommercialReadEnabled() && canAccessCommercialWorkspace(user)) {
-    ids.push('clientes', 'andamento');
+    ids.push('clientes', 'andamento', 'pendencias', 'visitas', 'propostas');
   }
   if (canManageInvites(user) || (isRemoteStagesEnabled() && canAccessStageSettings(user))) {
     ids.push('ajustes');

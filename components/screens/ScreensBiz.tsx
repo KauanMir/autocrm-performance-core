@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard, Stat } from '@/components/ui/kit';
 import { VISIT_STATUS, DEAL_STATUS, SALE_STATUS, USERS } from '@/lib/data';
@@ -22,6 +22,9 @@ import type { PlatformCompanyRow } from '@/lib/companies/repository';
 import { listTimezones } from '@/lib/date/timezoneOptions';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
+import { usePlatformVisitsScreenState } from '@/lib/hooks/usePlatformVisitsScreenState';
+import { usePlatformDealsScreenState } from '@/lib/hooks/usePlatformDealsScreenState';
+import { usePlatformSellers } from '@/lib/hooks/usePlatformSellers';
 import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
 import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
 import { useConfirmVisit } from '@/lib/hooks/useConfirmVisit';
@@ -199,11 +202,12 @@ function remoteVisitCancelErrorMessage(error: unknown): string {
 // compartilhado de identidade de Visits a reusar (mesmo raciocínio já
 // registrado para TaskRow); reimplementar estas 4 linhas é o padrão já
 // estabelecido, não duplicação indevida.
-function RemoteVisitRow({ visit, sellersById, showDate, isPendingResult }: {
+function RemoteVisitRow({ visit, sellersById, showDate, isPendingResult, readOnly }: {
   visit: RemoteVisitModel;
   sellersById: Readonly<Record<string, { id: string; name: string }>>;
   showDate: boolean;
   isPendingResult: boolean;
+  readOnly?: boolean;
 }) {
   const scheduledAtDate = new Date(visit.scheduledAt);
   const statusInfo = VISIT_REMOTE_STATUS_LABEL[visit.status];
@@ -281,7 +285,10 @@ function RemoteVisitRow({ visit, sellersById, showDate, isPendingResult }: {
           </div>
         </div>
         <LBadge tone={statusInfo.tone} solid={statusInfo.solid}>{statusInfo.label}</LBadge>
-        {canConfirm && (
+        {/* SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §18/§22 — Confirmar/
+            Registrar resultado/Remarcar/Cancelar são mutation entry points:
+            HIDE (nunca só disabled) para Super Admin contextual. */}
+        {!readOnly && canConfirm && (
           <LBtn size="sm" kind="primary" icon="checkCircle" onClick={handleConfirm} style={{ opacity: confirmHook.isPending ? 0.6 : 1 }}>
             {confirmHook.isPending ? 'Confirmando…' : 'Confirmar'}
           </LBtn>
@@ -292,11 +299,13 @@ function RemoteVisitRow({ visit, sellersById, showDate, isPendingResult }: {
             mesmo padrão de canConfirm/B6-A). Abre um flow dedicado
             REMOTE-ONLY (registrar-resultado-remoto) — nunca o
             'registrar-resultado' local. */}
-        {isPendingResult && (
+        {!readOnly && isPendingResult && (
           <LBtn size="sm" kind="primary" icon="clipboard" onClick={() => (window as any).__openFlow('registrar-resultado-remoto', { visit })}>Registrar resultado</LBtn>
         )}
-        <LBtn size="sm" kind="ghost" icon="refresh" onClick={() => (window as any).__openFlow('reagendar-visita', { visit })}>Remarcar</LBtn>
-        {!cancelConfirming ? (
+        {!readOnly && (
+          <LBtn size="sm" kind="ghost" icon="refresh" onClick={() => (window as any).__openFlow('reagendar-visita', { visit })}>Remarcar</LBtn>
+        )}
+        {!readOnly && (!cancelConfirming ? (
           <LBtn size="sm" kind="ghost" icon="xCircle" onClick={() => setCancelConfirming(true)}>Cancelar</LBtn>
         ) : (
           <>
@@ -306,7 +315,7 @@ function RemoteVisitRow({ visit, sellersById, showDate, isPendingResult }: {
             </LBtn>
             <LBtn size="sm" kind="ghost" onClick={() => { setCancelConfirming(false); setCancelError(null); }}>Voltar</LBtn>
           </>
-        )}
+        ))}
       </div>
       {confirmError && (
         <div data-testid="visit-confirm-error" style={{ fontSize: 12, color: 'var(--red)', padding: '0 4px' }}>{confirmError}</div>
@@ -336,7 +345,14 @@ function RemoteVisitRow({ visit, sellersById, showDate, isPendingResult }: {
 export function ScreenVisitas({ go }: any) {
   useStore();
   const currentUser = AuthService.getCurrentUser();
-  const remoteVisitsScreen = useRemoteVisitsScreenState(currentUser);
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — mesmo padrão de
+  // ScreenPendencias: ambos os hooks SEMPRE chamados (Rules of Hooks), só
+  // um produz rede real por vez.
+  const operational = useOperationalCompanyContext();
+  const isOperationalSuperAdmin = operational.mode === 'super_admin';
+  const membershipVisitsScreen = useRemoteVisitsScreenState(currentUser);
+  const platformVisitsScreen = usePlatformVisitsScreenState(isOperationalSuperAdmin ? operational.companyId : null);
+  const remoteVisitsScreen = isOperationalSuperAdmin ? platformVisitsScreen : membershipVisitsScreen;
   const mode = remoteVisitsScreen.mode;
 
   // Mesma identidade (userId/companyId/membershipRole/userIsActive) já
@@ -350,6 +366,18 @@ export function ScreenVisitas({ go }: any) {
     membershipRole: currentUser?.activeMembership?.role ?? null,
     userIsActive: Boolean(currentUser),
   });
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — mesma fonte já usada
+  // pelo Seller picker de Leads (M1-F S8-C2-C2), reaproveitada aqui só
+  // para exibição (nunca para escrita) — zero RPC nova.
+  const platformSellers = usePlatformSellers({
+    companyId: isOperationalSuperAdmin ? operational.companyId : null,
+    authorized: isOperationalSuperAdmin,
+  });
+  const platformSellersById = useMemo(() => {
+    const map: Record<string, { id: string; name: string }> = {};
+    for (const s of platformSellers.sellers) map[s.seller_id] = { id: s.seller_id, name: s.name };
+    return map;
+  }, [platformSellers.sellers]);
 
   const pageHeadSub = 'A agenda do dia e o que precisa ser confirmado.';
 
@@ -403,7 +431,7 @@ export function ScreenVisitas({ go }: any) {
   if (remoteActive) {
     const now = new Date();
     const groups = groupVisitsForScreen(remoteVisitsScreen.visits, now);
-    const sellersById = sellerLabels.sellersById;
+    const sellersById = isOperationalSuperAdmin ? platformSellersById : sellerLabels.sellersById;
     const remoteGroups = [
       { key: 'today', name: 'Hoje', items: groups.today, showDate: false, isPendingResult: false },
       { key: 'tomorrow', name: 'Amanhã', items: groups.tomorrow, showDate: false, isPendingResult: false },
@@ -426,7 +454,7 @@ export function ScreenVisitas({ go }: any) {
             B6-PRECHECK §14-16) — sucesso mostra mensagem de continuidade
             adiada. FlowLayer continua bloqueando 'confirmar-visita'/
             'registrar-resultado' (os flows LOCAIS) fora do modo local. */}
-        <PageHead title="Visitas" sub={pageHeadSub} actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
+        <PageHead title="Visitas" sub={pageHeadSub} actions={!isOperationalSuperAdmin && <LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('criar-visita')}>Agendar visita</LBtn>} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {remoteGroups.map((g) => (
             <div key={g.key}>
@@ -436,7 +464,7 @@ export function ScreenVisitas({ go }: any) {
                 <span style={{ fontSize: 12.5, color: 'var(--t-400)' }}>{g.items.length} {g.items.length === 1 ? 'visita' : 'visitas'}</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {g.items.map((v) => <RemoteVisitRow key={v.id} visit={v} sellersById={sellersById} showDate={g.showDate} isPendingResult={g.isPendingResult} />)}
+                {g.items.map((v) => <RemoteVisitRow key={v.id} visit={v} sellersById={sellersById} showDate={g.showDate} isPendingResult={g.isPendingResult} readOnly={isOperationalSuperAdmin} />)}
               </div>
             </div>
           ))}
@@ -554,11 +582,12 @@ function DealStateCard({ testId, children, onRetry }: { testId: string; children
 // nunca o card inteiro clicável (B5-PRECHECK §6/§41). Abre o flow remoto
 // dedicado 'ver-negociacao' com a própria row já carregada (nenhuma query
 // nova, B5-PRECHECK §2/§9/§38) — nunca LeadService/DealService.
-function RemoteDealRow({ deal, sellersById, showSeller, now }: {
+function RemoteDealRow({ deal, sellersById, showSeller, now, readOnly }: {
   deal: RemoteDealModel;
   sellersById: Readonly<Record<string, { id: string; name: string }>>;
   showSeller: boolean;
   now: Date;
+  readOnly?: boolean;
 }) {
   const sellerDisplay = resolveDealSellerDisplayName(deal.assignedSellerId, sellersById);
   const updatedDisplay = formatDealUpdatedAt(deal.updatedAt, now);
@@ -578,7 +607,17 @@ function RemoteDealRow({ deal, sellersById, showSeller, now }: {
         <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{formatCentsToBRL(deal.valueCents)}</div>
         <div style={{ fontSize: 11, color: 'var(--t-400)' }}>atualizada {updatedDisplay}</div>
       </div>
-      <LBtn size="sm" kind="ghost" icon="arrowRight" onClick={() => (window as any).__openFlow('ver-negociacao', { deal })}>Abrir</LBtn>
+      {/* SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §22/§29 — FlowVerNegociacao
+          mistura leitura com Registrar venda/Editar/Marcar como perdida
+          (write real, inclusive fora de escopo deste V2A — register_sale
+          nunca deve ficar alcançável). Auditar/reforçar esse flow por
+          dentro fica fora do orçamento deste lote: "Abrir" fica oculto
+          para Super Admin contextual — a lista já mostra cliente/veículo/
+          valor/vendedor/atualizado em, o detalhe fica para um lote de
+          acompanhamento. Nenhum flow escape possível por aqui. */}
+      {!readOnly && (
+        <LBtn size="sm" kind="ghost" icon="arrowRight" onClick={() => (window as any).__openFlow('ver-negociacao', { deal })}>Abrir</LBtn>
+      )}
     </div>
   );
 }
@@ -597,7 +636,14 @@ function RemoteDealRow({ deal, sellersById, showSeller, now }: {
 export function ScreenPropostas({ go }: any) {
   useStore();
   const currentUser = AuthService.getCurrentUser();
-  const remoteDealsScreen = useRemoteDealsScreenState(currentUser);
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — mesmo padrão de
+  // ScreenPendencias/ScreenVisitas: ambos os hooks SEMPRE chamados (Rules
+  // of Hooks), só um produz rede real por vez.
+  const operational = useOperationalCompanyContext();
+  const isOperationalSuperAdmin = operational.mode === 'super_admin';
+  const membershipDealsScreen = useRemoteDealsScreenState(currentUser);
+  const platformDealsScreen = usePlatformDealsScreenState(isOperationalSuperAdmin ? operational.companyId : null);
+  const remoteDealsScreen = isOperationalSuperAdmin ? platformDealsScreen : membershipDealsScreen;
   const mode = remoteDealsScreen.mode;
 
   // Mesma identidade já usada por useRemoteDealsScreenState internamente —
@@ -610,6 +656,15 @@ export function ScreenPropostas({ go }: any) {
     membershipRole: currentUser?.activeMembership?.role ?? null,
     userIsActive: Boolean(currentUser),
   });
+  const platformSellersForDeals = usePlatformSellers({
+    companyId: isOperationalSuperAdmin ? operational.companyId : null,
+    authorized: isOperationalSuperAdmin,
+  });
+  const platformSellersByIdForDeals = useMemo(() => {
+    const map: Record<string, { id: string; name: string }> = {};
+    for (const s of platformSellersForDeals.sellers) map[s.seller_id] = { id: s.seller_id, name: s.name };
+    return map;
+  }, [platformSellersForDeals.sellers]);
 
   const pageHeadTitle = 'Negociações';
   const pageHeadSub = 'Acompanhe as negociações em andamento e o histórico.';
@@ -662,8 +717,9 @@ export function ScreenPropostas({ go }: any) {
   if (remoteActive) {
     const now = new Date();
     const groups = groupDealsForScreen(remoteDealsScreen.deals);
-    const sellersById = sellerLabels.sellersById;
+    const sellersById = isOperationalSuperAdmin ? platformSellersByIdForDeals : sellerLabels.sellersById;
     const isManager = currentUser?.activeMembership?.role === 'manager';
+    const showSeller = isManager || isOperationalSuperAdmin;
     return (
       <LightScreen>
         {/* COMMERCIAL-REMOTE-DEALS-B4: "Nova negociação" abre o mesmo flow
@@ -671,27 +727,29 @@ export function ScreenPropostas({ go }: any) {
             resolveDealRemoteMode() (FlowNovaProposta) — nunca chama
             DealService. Ausente nos demais 5 modos desta tela (blocked/
             misconfigured/unavailable_identity/loading/error/configError),
-            herdado do B3 (nenhum deles renderiza actions no PageHead). */}
-        <PageHead title={pageHeadTitle} sub={pageHeadSub} actions={<LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-proposta')}>Nova negociação</LBtn>} />
+            herdado do B3 (nenhum deles renderiza actions no PageHead).
+            SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §18 — HIDE para
+            Super Admin contextual (mutation entry point). */}
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} actions={!isOperationalSuperAdmin && <LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-proposta')}>Nova negociação</LBtn>} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <div>
             <SubHead icon="handshake">Em negociação · {groups.open.length}</SubHead>
             {groups.open.length === 0
               ? <DealStateCard testId="negociacoes-open-empty">Nenhuma negociação em andamento.</DealStateCard>
               : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {groups.open.map((d) => <RemoteDealRow key={d.id} deal={d} sellersById={sellersById} showSeller={isManager} now={now} />)}
+                  {groups.open.map((d) => <RemoteDealRow key={d.id} deal={d} sellersById={sellersById} showSeller={showSeller} now={now} readOnly={isOperationalSuperAdmin} />)}
                 </div>}
           </div>
           {groups.lost.length > 0 && <div>
             <SubHead icon="xCircle">Perdidas · {groups.lost.length}</SubHead>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {groups.lost.map((d) => <RemoteDealRow key={d.id} deal={d} sellersById={sellersById} showSeller={isManager} now={now} />)}
+              {groups.lost.map((d) => <RemoteDealRow key={d.id} deal={d} sellersById={sellersById} showSeller={showSeller} now={now} readOnly={isOperationalSuperAdmin} />)}
             </div>
           </div>}
           {groups.sold.length > 0 && <div>
             <SubHead icon="trophy">Vendidas · {groups.sold.length}</SubHead>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {groups.sold.map((d) => <RemoteDealRow key={d.id} deal={d} sellersById={sellersById} showSeller={isManager} now={now} />)}
+              {groups.sold.map((d) => <RemoteDealRow key={d.id} deal={d} sellersById={sellersById} showSeller={showSeller} now={now} readOnly={isOperationalSuperAdmin} />)}
             </div>
           </div>}
         </div>

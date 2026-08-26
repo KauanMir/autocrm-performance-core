@@ -38,3 +38,25 @@ export async function fetchPendingTaskRows(): Promise<RemoteTaskRow[]> {
 
   return (data ?? []) as unknown as RemoteTaskRow[];
 }
+
+// SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — bridge EXCLUSIVO do
+// Super Admin contextual (/company/[id]): chama list_platform_tasks_for_
+// company (SECURITY DEFINER, company explícita + can_access_company),
+// nunca o SELECT direto acima. Manager/Seller continuam 100% em
+// fetchPendingTaskRows/RLS — esta função nunca é chamada para eles.
+// Mesmo shape de row (RemoteTaskRow), mesmo filtro de status='pending' já
+// aplicado na RPC (paridade exata com o que a tela Pendências mostra).
+export async function fetchPlatformTaskRows(companyId: string): Promise<RemoteTaskRow[]> {
+  const { data, error } = await supabase.rpc('list_platform_tasks_for_company', {
+    p_company_id: companyId,
+  });
+
+  if (error) {
+    throw new RemoteTasksError('remote_tasks_fetch_failed', {
+      code: typeof error.code === 'string' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined,
+    });
+  }
+
+  return (data ?? []) as unknown as RemoteTaskRow[];
+}

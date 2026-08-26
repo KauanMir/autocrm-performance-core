@@ -40,3 +40,26 @@ export async function fetchVisibleVisitRows(): Promise<RemoteVisitRow[]> {
 
   return (data ?? []) as unknown as RemoteVisitRow[];
 }
+
+// SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — bridge EXCLUSIVO do
+// Super Admin contextual (/company/[id]): chama list_platform_visits_for_
+// company (SECURITY DEFINER, company explícita + can_access_company),
+// nunca o SELECT direto acima. Manager/Seller continuam 100% em
+// fetchVisibleVisitRows/RLS — esta função nunca é chamada para eles.
+// Mesmo shape de row (RemoteVisitRow), sem filtro de status (paridade
+// exata com fetchVisibleVisitRows — a tela decide qual subconjunto
+// mostrar).
+export async function fetchPlatformVisitRows(companyId: string): Promise<RemoteVisitRow[]> {
+  const { data, error } = await supabase.rpc('list_platform_visits_for_company', {
+    p_company_id: companyId,
+  });
+
+  if (error) {
+    throw new RemoteVisitsError('remote_visits_fetch_failed', {
+      code: typeof error.code === 'string' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined,
+    });
+  }
+
+  return (data ?? []) as unknown as RemoteVisitRow[];
+}

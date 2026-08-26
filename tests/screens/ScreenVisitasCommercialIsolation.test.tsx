@@ -23,6 +23,9 @@ import { RemoteVisitsError } from '@/lib/visits/errors';
 
 const m = vi.hoisted(() => ({
   useRemoteVisitsScreenState: vi.fn(),
+  usePlatformVisitsScreenState: vi.fn(),
+  usePlatformSellers: vi.fn(),
+  useOperationalCompanyContext: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
   useConfirmVisit: vi.fn(),
   useCancelVisit: vi.fn(),
@@ -33,6 +36,20 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks/useRemoteVisitsScreenState', () => ({
   useRemoteVisitsScreenState: m.useRemoteVisitsScreenState,
+}));
+// SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — mesmo padrão de
+// tests/screens/ScreenPendenciasCommercialIsolation.test.tsx: dual-hook
+// sempre chamado, usePlatformVisitsScreenState/usePlatformSellers usam
+// useQuery real por dentro (mockados direto), default mode:'none' preserva
+// 100% o comportamento Manager/Seller já coberto acima.
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: m.useOperationalCompanyContext,
+}));
+vi.mock('@/lib/hooks/usePlatformVisitsScreenState', () => ({
+  usePlatformVisitsScreenState: m.usePlatformVisitsScreenState,
+}));
+vi.mock('@/lib/hooks/usePlatformSellers', () => ({
+  usePlatformSellers: m.usePlatformSellers,
 }));
 vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
   useCurrentCompanySellerLabels: m.useCurrentCompanySellerLabels,
@@ -129,6 +146,14 @@ let cancelVisitSpy: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   m.visits.mockReset().mockReturnValue([]);
   m.useRemoteVisitsScreenState.mockReset().mockReturnValue(visitScreenState('visit_local'));
+  m.usePlatformVisitsScreenState.mockReset().mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+  m.usePlatformSellers.mockReset().mockReturnValue({
+    queryEnabled: false, sellers: [] as any[], isLoading: false, isFetching: false,
+    isError: false, error: null, isEmpty: true, hasData: false, refetch: vi.fn(),
+  });
+  m.useOperationalCompanyContext.mockReset().mockReturnValue({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  });
   m.useCurrentCompanySellerLabels.mockReset().mockReturnValue(sellerLabelsState());
   confirmVisitSpy = vi.fn().mockResolvedValue({});
   cancelVisitSpy = vi.fn().mockResolvedValue({});
@@ -607,6 +632,92 @@ describe('ScreenVisitas — transição local → remote loading', () => {
     rerender(<ScreenVisitas go={() => {}} />);
 
     expect(screen.queryByText('Carlos Andrade')).toBeNull();
+    expect(screen.getByTestId('visitas-state-loading')).toBeInTheDocument();
+  });
+});
+
+// ── SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC — Super Admin operacional ──
+
+describe('ScreenVisitas — Super Admin operacional (contextual)', () => {
+  beforeEach(() => {
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-1',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+  });
+
+  it('fonte é usePlatformVisitsScreenState (companyId explícito), membership hook é ignorado mesmo chamado', () => {
+    m.usePlatformVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [remoteVisit({ id: 'visit-plat-1', clientName: 'Cliente da empresa aberta' })],
+    }));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [remoteVisit({ id: 'visit-membership-1', clientName: 'Cliente de membership (não deve aparecer)' })],
+    }));
+
+    render(<ScreenVisitas go={() => {}} />);
+
+    expect(screen.getByText('Cliente da empresa aberta')).toBeInTheDocument();
+    expect(screen.queryByText('Cliente de membership (não deve aparecer)')).toBeNull();
+  });
+
+  it('usePlatformVisitsScreenState/usePlatformSellers recebem o companyId do contexto operacional', () => {
+    m.usePlatformVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { isEmpty: true }));
+    render(<ScreenVisitas go={() => {}} />);
+    expect(m.usePlatformVisitsScreenState).toHaveBeenCalledWith('company-op-1');
+    expect(m.usePlatformSellers).toHaveBeenCalledWith({ companyId: 'company-op-1', authorized: true });
+  });
+
+  it('vendedor exibido vem de usePlatformSellers, nunca de useCurrentCompanySellerLabels (membership)', () => {
+    m.usePlatformSellers.mockReturnValue({
+      queryEnabled: true, sellers: [{ seller_id: 's1', name: 'Fernanda Plataforma' }],
+      isLoading: false, isFetching: false, isError: false, error: null, isEmpty: false, hasData: true, refetch: vi.fn(),
+    });
+    m.useCurrentCompanySellerLabels.mockReturnValue(sellerLabelsState({ sellersById: { s1: { id: 's1', name: 'Ricardo Membership' } } }));
+    m.usePlatformVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [remoteVisit({ assignedSellerId: 's1' })],
+    }));
+
+    render(<ScreenVisitas go={() => {}} />);
+
+    expect(screen.getByText(/Fernanda/)).toBeInTheDocument();
+    expect(screen.queryByText(/Ricardo/)).toBeNull();
+  });
+
+  it('"Agendar visita" ausente (mutation entry point oculto para Super Admin contextual)', () => {
+    m.usePlatformVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [remoteVisit()],
+    }));
+    render(<ScreenVisitas go={() => {}} />);
+    expect(screen.queryByText('Agendar visita')).toBeNull();
+  });
+
+  it('Confirmar/Remarcar/Cancelar/Registrar resultado ausentes (read-only estrutural, não só desabilitado)', () => {
+    const REAL_PAST = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    m.usePlatformVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [remoteVisit({ status: 'scheduled', scheduledAt: REAL_PAST })],
+    }));
+    render(<ScreenVisitas go={() => {}} />);
+    expect(screen.queryByText('Confirmar')).toBeNull();
+    expect(screen.queryByText('Remarcar')).toBeNull();
+    expect(screen.queryByText('Cancelar')).toBeNull();
+    expect(screen.queryByText('Registrar resultado')).toBeNull();
+  });
+
+  it('troca de empresa (companyId muda): nenhuma Visit da empresa anterior sobrevive', () => {
+    m.usePlatformVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [remoteVisit({ id: 'visit-a', clientName: 'Cliente da Empresa A' })],
+    }));
+    const { rerender } = render(<ScreenVisitas go={() => {}} />);
+    expect(screen.getByText('Cliente da Empresa A')).toBeInTheDocument();
+
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-2',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+    m.usePlatformVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', { isLoading: true }));
+    rerender(<ScreenVisitas go={() => {}} />);
+
+    expect(screen.queryByText('Cliente da Empresa A')).toBeNull();
     expect(screen.getByTestId('visitas-state-loading')).toBeInTheDocument();
   });
 });
