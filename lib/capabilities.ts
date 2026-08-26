@@ -284,3 +284,42 @@ export function membershipLifecycleCapabilities(
   }
   return NO_MEMBERSHIP_LIFECYCLE_CAPABILITIES;
 }
+
+// FOLLOW-UP-TEMPLATES-A3-EXEC — usar um template (Lead > Follow-up): Manager
+// e Seller com membership ATIVA, nunca Super Admin (create_task continua
+// hard-forbidden para ele — precheck A2-EXEC §30, nunca reaberto aqui).
+// Sem checagem de companyStatus aqui de propósito, mesmo raciocínio já
+// documentado em canImportLeads: tentar aplicar um template numa empresa
+// não-ativa já é recusado pelo próprio create_task no momento do clique —
+// nunca um gap de segurança, só onde a checagem acontece.
+export type FollowUpTemplateCapabilityUser = Pick<User, 'platformRole' | 'activeMembership'> | null | undefined;
+
+export function canUseFollowUpTemplate(user: FollowUpTemplateCapabilityUser): boolean {
+  const role = user?.activeMembership?.role;
+  return role === 'manager' || role === 'seller';
+}
+
+// FOLLOW-UP-TEMPLATES-A3-EXEC — gerenciar templates (Ajustes > Follow-ups):
+// Manager da própria empresa SEMPRE; Super Admin contextual SOMENTE quando
+// a empresa selecionada está 'ativa'/'implantacao' (mesma matriz de
+// canImportLeads/canMutateCommercialWorkspace — 'suspensa'/'cancelada'
+// sempre false). Seller: sempre false — decisão de produto (precheck A1 §6),
+// não limitação técnica. Esta capability decide só ESCRITA (create/update/
+// active/reorder); a VISIBILIDADE da aba Ajustes > Follow-ups é mais ampla
+// (Manager OU qualquer Super Admin contextual, inclusive empresa suspensa,
+// que só perde a escrita — precheck A3-EXEC §18) e é resolvida direto no
+// componente, mesmo padrão de companySettingsAccess em ScreenAjustes.
+export type ManageFollowUpTemplatesCapabilityInput = {
+  actor: FollowUpTemplateCapabilityUser;
+  // Só consultado no ramo Super Admin — null = nenhuma empresa selecionada
+  // (Super Admin genérico) ou irrelevante (Manager).
+  companyStatus: 'implantacao' | 'ativa' | 'suspensa' | 'cancelada' | null;
+};
+
+export function canManageFollowUpTemplates(input: ManageFollowUpTemplatesCapabilityInput): boolean {
+  if (input.actor?.platformRole === 'super_admin') {
+    if (input.companyStatus === null) return false;
+    return input.companyStatus === 'ativa' || input.companyStatus === 'implantacao';
+  }
+  return input.actor?.activeMembership?.role === 'manager';
+}

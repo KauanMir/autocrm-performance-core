@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   resolveVisitRemoteMode: vi.fn(),
   resolveDealRemoteMode: vi.fn(),
   resolveSalesRemoteMode: vi.fn(),
+  resolveTaskRemoteMode: vi.fn(),
 }));
 
 vi.mock('@/lib/leads/localCommercialAccess', () => ({
@@ -39,6 +40,10 @@ vi.mock('@/lib/deals/remoteDealsMode', () => ({
 
 vi.mock('@/lib/sales/remoteSalesMode', () => ({
   resolveSalesRemoteMode: mocks.resolveSalesRemoteMode,
+}));
+
+vi.mock('@/lib/tasks/remoteTasksMode', () => ({
+  resolveTaskRemoteMode: mocks.resolveTaskRemoteMode,
 }));
 
 function stub(label: string) {
@@ -76,6 +81,7 @@ vi.mock('@/components/flows/Flows2', () => ({
   FlowNovaPendencia: stub('FlowNovaPendencia'),
   FlowReagendarPendencia: stub('FlowReagendarPendencia'),
   FlowCriarAcompanhamento: stub('FlowCriarAcompanhamento'),
+  FlowFollowUp: stub('FlowFollowUp'),
 }));
 
 vi.mock('@/components/flows/Flows3', () => ({
@@ -123,6 +129,8 @@ beforeEach(() => {
   mocks.resolveDealRemoteMode.mockReset().mockReturnValue('deal_local');
   // Default 'sale_local' — mesmo raciocínio, só registrar-venda consulta.
   mocks.resolveSalesRemoteMode.mockReset().mockReturnValue('sale_local');
+  // Default 'task_local' — mesmo raciocínio, só follow-up consulta.
+  mocks.resolveTaskRemoteMode.mockReset().mockReturnValue('task_local');
 });
 
 describe('FlowLayer — flow.id nulo/desconhecido', () => {
@@ -508,6 +516,48 @@ describe('FlowLayer — criar-acompanhamento continua bloqueado (regressão)', (
     renderFlow('criar-acompanhamento');
     expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
     expect(screen.queryByText('FlowCriarAcompanhamento')).toBeNull();
+  });
+});
+
+// FOLLOW-UP-TEMPLATES-A3-EXEC — 'follow-up' é um flow id NOVO REMOTE-ONLY,
+// mesmo contrato exato de 'reagendar-visita'/'registrar-resultado-remoto':
+// 'task_local' também bloqueia aqui (Follow-up Templates não têm nenhum
+// caminho local — o atalho "Personalizado" dentro do próprio flow abre
+// 'nova-pendencia', nunca este id de novo).
+describe('FlowLayer — follow-up permitido em task_remote_ready', () => {
+  it('monta o componente real', () => {
+    mocks.resolveTaskRemoteMode.mockReturnValue('task_remote_ready');
+    renderFlow('follow-up', { lead: { id: 'lead-1' } });
+    expect(screen.getByText('FlowFollowUp')).toBeInTheDocument();
+    expect(screen.queryByText('Módulo indisponível')).toBeNull();
+  });
+});
+
+describe.each(['task_local', 'task_blocked', 'task_remote_misconfigured'] as const)('FlowLayer — follow-up bloqueado em %s', (mode) => {
+  it('mostra estado indisponível, nunca monta o componente real', () => {
+    mocks.resolveTaskRemoteMode.mockReturnValue(mode);
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(true);
+    renderFlow('follow-up', { lead: { id: 'lead-1' } });
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+    expect(screen.queryByText('FlowFollowUp')).toBeNull();
+  });
+});
+
+describe('FlowLayer — follow-up: gate caller-independent, e nova-pendencia/reagendar-pendencia sem widening', () => {
+  it('bloqueia mesmo com payload.lead anexado, sem lê-lo', () => {
+    mocks.resolveTaskRemoteMode.mockReturnValue('task_blocked');
+    renderFlow('follow-up', { lead: { id: 'lead-1', name: 'Nome Real' } });
+    expect(screen.queryByText('Nome Real')).toBeNull();
+    expect(screen.getByText('Módulo indisponível')).toBeInTheDocument();
+  });
+
+  it('nova-pendencia/reagendar-pendencia continuam corretos (regressão, não afetados pelo gate de follow-up)', () => {
+    mocks.resolveTaskRemoteMode.mockReturnValue('task_blocked');
+    mocks.isLocalCommercialDataAllowed.mockReturnValue(true);
+    renderFlow('nova-pendencia', { task: { id: 't1' } });
+    expect(screen.getByText('FlowNovaPendencia')).toBeInTheDocument();
+    renderFlow('reagendar-pendencia', { task: { id: 't1' } });
+    expect(screen.getByText('FlowReagendarPendencia')).toBeInTheDocument();
   });
 });
 

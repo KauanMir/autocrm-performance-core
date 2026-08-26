@@ -4,7 +4,37 @@
 // determinística de data/hora inválida (nunca `Invalid Date`.toISOString()
 // silencioso).
 import { describe, expect, it } from 'vitest';
-import { combineLocalDateAndTimeToIso } from '@/lib/tasks/dueAtHelpers';
+import { combineLocalDateAndTimeToIso, localYMD, addLocalDays } from '@/lib/tasks/dueAtHelpers';
+
+// FOLLOW-UP-TEMPLATES-A3-EXEC: localYMD/addLocalDays foram extraídos de
+// components/flows/Flows2.tsx (eram privados ali) para este módulo — mesmo
+// comportamento exato, agora testado diretamente e reusado por
+// lib/followupTemplates/dueAt.ts.
+describe('localYMD', () => {
+  it('formata YYYY-MM-DD com zero à esquerda', () => {
+    expect(localYMD(new Date(2026, 0, 5))).toBe('2026-01-05');
+  });
+
+  it('nunca usa toISOString() (que converteria para UTC)', () => {
+    expect(localYMD(new Date(2026, 7, 20, 23, 59))).toBe('2026-08-20');
+  });
+});
+
+describe('addLocalDays', () => {
+  it('soma dias em cima do início do dia civil local (zera hora/minuto/segundo)', () => {
+    const result = addLocalDays(new Date(2026, 7, 20, 23, 59, 59), 1);
+    expect(localYMD(result)).toBe('2026-08-21');
+    expect(result.getHours()).toBe(0);
+  });
+
+  it('atravessa virada de mês corretamente', () => {
+    expect(localYMD(addLocalDays(new Date(2026, 7, 31), 1))).toBe('2026-09-01');
+  });
+
+  it('0 dias: retorna o mesmo dia civil (início do dia)', () => {
+    expect(localYMD(addLocalDays(new Date(2026, 7, 20, 14, 30), 0))).toBe('2026-08-20');
+  });
+});
 
 describe('combineLocalDateAndTimeToIso — casos válidos', () => {
   it('data e hora válidas produzem um ISO válido e reversível', () => {

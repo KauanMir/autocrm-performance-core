@@ -11,7 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FlowVerCliente } from '@/components/flows/FlowsShared';
 import type { LeadMutationCapabilities } from '@/lib/leads/mutationCapabilities';
 
-const m = vi.hoisted(() => ({ user: { current: null as any }, from: vi.fn(), rpc: vi.fn() }));
+const m = vi.hoisted(() => ({ user: { current: null as any }, from: vi.fn(), rpc: vi.fn(), resolveTaskRemoteMode: vi.fn() }));
 
 vi.mock('@/lib/services', () => ({
   AuthService: { getCurrentUser: () => m.user.current },
@@ -19,6 +19,15 @@ vi.mock('@/lib/services', () => ({
   TaskService: { getAll: () => [] },
   SellerService: { getAll: () => [] },
 }));
+
+// FOLLOW-UP-TEMPLATES-A3-EXEC — default 'task_local' preserva o
+// comportamento de todos os testes pré-existentes deste arquivo (nenhum
+// deles espera o botão "Follow-up"); só o describe dedicado abaixo troca o
+// mock para 'task_remote_ready'.
+vi.mock('@/lib/tasks/remoteTasksMode', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/tasks/remoteTasksMode')>();
+  return { ...actual, resolveTaskRemoteMode: m.resolveTaskRemoteMode };
+});
 
 // M1-E E7-B2-A1 — mock isolado do cliente Supabase para os testes de
 // timeline remota (RemoteLeadTimelinePanel); os testes de botões acima não
@@ -41,6 +50,7 @@ function mockTimelineReadResponse(response: { data: unknown; error: unknown }) {
 beforeEach(() => {
   m.from.mockReset();
   m.rpc.mockReset();
+  m.resolveTaskRemoteMode.mockReset().mockReturnValue('task_local');
   mockTimelineReadResponse({ data: [], error: null });
 });
 
@@ -323,5 +333,45 @@ describe('FlowVerCliente — timeline (E7-B2-A1)', () => {
 
     await waitFor(() => expect(screen.getByText('Não foi possível adicionar a observação.')).toBeInTheDocument());
     expect(textarea.value).toBe('Texto que não deve sumir');
+  });
+});
+
+// FOLLOW-UP-TEMPLATES-A3-EXEC §19 — botão "Follow-up" no mesmo nível
+// visual das demais ações do Lead. Só existe em modo remoto real
+// (capabilities presente) E com Tasks remoto pronto — Follow-up Templates
+// não têm nenhum caminho local.
+describe('FlowVerCliente — botão Follow-up (FOLLOW-UP-TEMPLATES-A3-EXEC)', () => {
+  it('task_remote_ready + Manager: botão aparece e abre o flow follow-up com o Lead', () => {
+    m.resolveTaskRemoteMode.mockReturnValue('task_remote_ready');
+    m.user.current = manager();
+    const openFlow = vi.fn();
+    const capabilities: LeadMutationCapabilities = { ...NO_CAPS };
+    renderWithClient(<FlowVerCliente payload={{ lead: lead(), capabilities }} close={vi.fn()} openFlow={openFlow} />);
+    expect(screen.getByText('Follow-up')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Follow-up'));
+    expect(openFlow).toHaveBeenCalledWith('follow-up', { lead: expect.objectContaining({ id: 'lead-1' }) });
+  });
+
+  it('task_remote_ready + Seller: botão também aparece (use YES na matriz)', () => {
+    m.resolveTaskRemoteMode.mockReturnValue('task_remote_ready');
+    m.user.current = seller('s1');
+    const capabilities: LeadMutationCapabilities = { ...NO_CAPS };
+    renderWithClient(<FlowVerCliente payload={{ lead: lead({ sellerId: 's1' }), capabilities }} close={vi.fn()} openFlow={vi.fn()} />);
+    expect(screen.getByText('Follow-up')).toBeInTheDocument();
+  });
+
+  it('task_local: botão NUNCA aparece, mesmo com capabilities presente', () => {
+    m.resolveTaskRemoteMode.mockReturnValue('task_local');
+    m.user.current = manager();
+    const capabilities: LeadMutationCapabilities = { ...NO_CAPS };
+    renderWithClient(<FlowVerCliente payload={{ lead: lead(), capabilities }} close={vi.fn()} openFlow={vi.fn()} />);
+    expect(screen.queryByText('Follow-up')).toBeNull();
+  });
+
+  it('sem capabilities (Lead local legado): botão NUNCA aparece, mesmo com task_remote_ready', () => {
+    m.resolveTaskRemoteMode.mockReturnValue('task_remote_ready');
+    m.user.current = manager();
+    renderWithClient(<FlowVerCliente payload={{ lead: lead() }} close={vi.fn()} openFlow={vi.fn()} />);
+    expect(screen.queryByText('Follow-up')).toBeNull();
   });
 });

@@ -9,8 +9,9 @@ import { PLACE } from '@/components/podiums/Podiums';
 import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
-import { canManageCompanySettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites } from '@/lib/capabilities';
+import { canManageCompanySettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites, canManageFollowUpTemplates } from '@/lib/capabilities';
 import { UsersTabSection } from '@/components/users/UsersTabSection';
+import { FollowUpsTabSection } from '@/components/followUpTemplates/FollowUpsTabSection';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
 import { useCompanySettings } from '@/lib/hooks/useCompanySettings';
@@ -1628,6 +1629,20 @@ export function ScreenAjustes({ go }: any) {
     : (currentUser?.activeMembership?.companyId ?? null);
   const companyWriteAccess = companySettingsAccess && !(isOperationalSuperAdmin && operational.isReadOnly);
 
+  // FOLLOW-UP-TEMPLATES-A3-EXEC — mesma matriz de acesso da aba Empresa
+  // (companySettingsAccess/companyWriteAccess): Manager SEMPRE (leitura E
+  // escrita, capability própria decide status internamente); Super Admin
+  // contextual LÊ mesmo em empresa suspensa (precheck A3-EXEC §18 — "pode
+  // visualizar templates se backend read permite"), mas só ESCREVE quando
+  // a empresa está ativa/implantação (mesmo companyStatus já resolvido para
+  // a aba Empresa). Seller nunca chega aqui (nem companySettingsAccess nem
+  // isOperationalSuperAdmin são true para ele).
+  const followUpCompanyStatus = isOperationalSuperAdmin && operational.identity.status === 'ready'
+    ? operational.identity.company.status
+    : null;
+  const followUpReadAccess = companySettingsAccess;
+  const followUpWriteAccess = canManageFollowUpTemplates({ actor: currentUser, companyStatus: followUpCompanyStatus });
+
   // Same drag-and-drop pattern as the Pipeline Kanban (M0-K1): lifted React
   // state as the source of truth for what's being dragged, dataTransfer only
   // used to satisfy Firefox's requirement to start a drag at all. No caminho
@@ -1712,6 +1727,7 @@ export function ScreenAjustes({ go }: any) {
     ...(companySettingsAccess ? ['Empresa'] : []),
     ...(invitesAccess ? ['Usuários'] : []),
     ...(stageTabVisible ? ['Etapas'] : []),
+    ...(followUpReadAccess ? ['Follow-ups'] : []),
   ];
   // Derivação SÍNCRONA: aba proibida nunca renderiza, nem por um frame, e o
   // estado antigo de aba não atravessa troca de usuário.
@@ -1880,6 +1896,15 @@ export function ScreenAjustes({ go }: any) {
             </>
           )}
         </LCard>
+      )}
+      {activeTab === 'Follow-ups' && currentUser && (
+        <FollowUpsTabSection
+          userId={currentUser.id}
+          companyId={companyId}
+          isSuperAdminContext={isOperationalSuperAdmin}
+          readAuthorized={followUpReadAccess}
+          writeAuthorized={followUpWriteAccess}
+        />
       )}
     </LightScreen>
   );

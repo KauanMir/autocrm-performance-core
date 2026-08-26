@@ -8,6 +8,8 @@ import {
   canAccessCommercialWorkspace,
   canMutateCommercialWorkspace,
   membershipLifecycleCapabilities,
+  canUseFollowUpTemplate,
+  canManageFollowUpTemplates,
   type MembershipLifecycleActor,
   type MembershipLifecycleTargetRow,
   type CommercialMutationCapabilityInput,
@@ -313,5 +315,62 @@ describe('entradas nulas e integridade', () => {
     canAccessStageSettings(frozen);
     canReorderPipelineStages(frozen);
     expect(user).toEqual({ role: 'manager' });
+  });
+});
+
+// FOLLOW-UP-TEMPLATES-A3-EXEC — matriz de capabilities congelada (precheck
+// A1 §6, A3-EXEC §5/§48): Manager use+manage; Seller use, nunca manage;
+// Super Admin contextual manage (quando company write-authorized), nunca
+// use; Super Admin global nenhuma das duas; empresa suspensa/cancelada
+// nunca escreve (manage) para Super Admin.
+describe('canUseFollowUpTemplate', () => {
+  it('Manager: true', () => {
+    expect(canUseFollowUpTemplate({ platformRole: null, activeMembership: { role: 'manager', companyId: 'c1', sellerId: null } })).toBe(true);
+  });
+  it('Seller: true', () => {
+    expect(canUseFollowUpTemplate({ platformRole: null, activeMembership: { role: 'seller', companyId: 'c1', sellerId: 's1' } })).toBe(true);
+  });
+  it('Super Admin: false, mesmo com activeMembership presente (nunca deveria existir, mas nunca autoriza)', () => {
+    expect(canUseFollowUpTemplate({ platformRole: 'super_admin', activeMembership: null })).toBe(false);
+  });
+  it('sem membership (Auth sem profile): false', () => {
+    expect(canUseFollowUpTemplate({ platformRole: null, activeMembership: null })).toBe(false);
+  });
+  it('null/undefined: false', () => {
+    expect(canUseFollowUpTemplate(null)).toBe(false);
+    expect(canUseFollowUpTemplate(undefined)).toBe(false);
+  });
+});
+
+describe('canManageFollowUpTemplates', () => {
+  const manager = { platformRole: null, activeMembership: { role: 'manager' as const, companyId: 'c1', sellerId: null } };
+  const seller = { platformRole: null, activeMembership: { role: 'seller' as const, companyId: 'c1', sellerId: 's1' } };
+  const superAdmin = { platformRole: 'super_admin' as const, activeMembership: null };
+
+  it('Manager: true, independente de companyStatus (backend decide no clique)', () => {
+    expect(canManageFollowUpTemplates({ actor: manager, companyStatus: null })).toBe(true);
+    expect(canManageFollowUpTemplates({ actor: manager, companyStatus: 'suspensa' })).toBe(true);
+  });
+  it('Seller: sempre false, mesmo com companyStatus ativa (decisão de produto, não limitação técnica)', () => {
+    expect(canManageFollowUpTemplates({ actor: seller, companyStatus: 'ativa' })).toBe(false);
+  });
+  it('Super Admin sem empresa selecionada (companyStatus null): false', () => {
+    expect(canManageFollowUpTemplates({ actor: superAdmin, companyStatus: null })).toBe(false);
+  });
+  it('Super Admin contextual em empresa ativa: true', () => {
+    expect(canManageFollowUpTemplates({ actor: superAdmin, companyStatus: 'ativa' })).toBe(true);
+  });
+  it('Super Admin contextual em empresa em implantação: true', () => {
+    expect(canManageFollowUpTemplates({ actor: superAdmin, companyStatus: 'implantacao' })).toBe(true);
+  });
+  it('Super Admin contextual em empresa suspensa: false (só leitura, nunca escrita)', () => {
+    expect(canManageFollowUpTemplates({ actor: superAdmin, companyStatus: 'suspensa' })).toBe(false);
+  });
+  it('Super Admin contextual em empresa cancelada: false', () => {
+    expect(canManageFollowUpTemplates({ actor: superAdmin, companyStatus: 'cancelada' })).toBe(false);
+  });
+  it('sem ator (null/undefined): false', () => {
+    expect(canManageFollowUpTemplates({ actor: null, companyStatus: 'ativa' })).toBe(false);
+    expect(canManageFollowUpTemplates({ actor: undefined, companyStatus: 'ativa' })).toBe(false);
   });
 });

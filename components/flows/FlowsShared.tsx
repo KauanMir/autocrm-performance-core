@@ -18,6 +18,8 @@ import { useUnarchiveLead } from '@/lib/hooks/useUnarchiveLead';
 import { useLeadTimeline } from '@/lib/hooks/useLeadTimeline';
 import { useAddLeadTimelineEntry } from '@/lib/hooks/useAddLeadTimelineEntry';
 import type { LeadModel } from '@/lib/leads/adapter';
+import { resolveTaskRemoteMode } from '@/lib/tasks/remoteTasksMode';
+import { canUseFollowUpTemplate } from '@/lib/capabilities';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -944,6 +946,14 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
   let timelineUserId: string | null = null;
   let timelineMembershipRole: 'manager' | 'seller' | null = null;
   let canAddNote = false;
+  // FOLLOW-UP-TEMPLATES-A3-EXEC §19: Manager/Seller com capability de uso,
+  // NUNCA Super Admin (que nunca tem capabilities.canLogCallOutcome/etc. no
+  // sentido de posse de Lead comercial — mas a checagem real é role, não
+  // posse: qualquer Manager/Seller pode aplicar um follow-up em QUALQUER
+  // Lead que já consiga abrir aqui, RLS de Leads já cobre o resto). Só
+  // existe em modo remoto (capabilities presente) E com Tasks remoto
+  // efetivamente pronto (Follow-up Templates não têm caminho local).
+  let canFollowUp = false;
   if (capabilities) {
     const currentUser = AuthService.getCurrentUser();
     const membershipRole: 'manager' | 'seller' | null =
@@ -968,6 +978,7 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
       actorSellerId: currentUser?.activeMembership?.sellerId ?? null,
       leadSellerId: lead.sellerId ?? null,
     });
+    canFollowUp = canUseFollowUpTemplate(currentUser) && resolveTaskRemoteMode() === 'task_remote_ready';
   } else {
     canLigar = canApplyEvents;
   }
@@ -992,6 +1003,7 @@ export function FlowVerCliente({ payload, close, openFlow }: any) {
   const canArchiveLead = capabilities ? capabilities.canArchive : false;
   const actions = [
     ...(canLigar ? [{ icon: 'phone', label: 'Ligar', flow: 'ligar', accent: '#27C75F' }] : []),
+    ...(canFollowUp ? [{ icon: 'clock', label: 'Follow-up', flow: 'follow-up', accent: '#E8CE72' }] : []),
     ...(canApplyEvents ? [
       { icon: 'calendar', label: 'Agendar visita', flow: 'criar-visita', accent: '#E8CE72' },
       { icon: 'handshake', label: 'Nova proposta', flow: 'nova-proposta', accent: '#E8CE72' },

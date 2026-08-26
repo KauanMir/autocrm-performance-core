@@ -20,8 +20,7 @@ import { isRemoteLeadsError } from '@/lib/leads/errors';
 import { useCreateTask } from '@/lib/hooks/useCreateTask';
 import { useUpdateTask } from '@/lib/hooks/useUpdateTask';
 import { resolveTaskRemoteMode } from '@/lib/tasks/remoteTasksMode';
-import { combineLocalDateAndTimeToIso } from '@/lib/tasks/dueAtHelpers';
-import { startOfLocalDay } from '@/lib/tasks/deriveTaskState';
+import { combineLocalDateAndTimeToIso, localYMD, addLocalDays } from '@/lib/tasks/dueAtHelpers';
 import { isRemoteTasksError } from '@/lib/tasks/errors';
 import { useCreateVisit } from '@/lib/hooks/useCreateVisit';
 import { useUpdateVisit } from '@/lib/hooks/useUpdateVisit';
@@ -52,6 +51,13 @@ import { useSellerCompetitionEvents } from '@/lib/hooks/useSellerCompetitionEven
 import { useMarkCompetitionEventsSeen } from '@/lib/hooks/useMarkCompetitionEventsSeen';
 import { selectPrimaryCompetitionEvent, buildCompetitionCelebration } from '@/lib/podium/competitionCelebration';
 import { CompetitionCelebration } from '@/components/podiums/CompetitionCelebration';
+// FOLLOW-UP-TEMPLATES-A3-EXEC
+import { useActiveFollowUpTemplates } from '@/lib/hooks/useActiveFollowUpTemplates';
+import { resolveFollowUpTemplateDueAt, formatFollowUpDueAtPreview } from '@/lib/followupTemplates/dueAt';
+import { formatFollowUpTemplateSubtitle } from '@/lib/followupTemplates/offsetLabel';
+import { FOLLOWUP_PRIORITY_LABEL } from '@/lib/followupTemplates/labels';
+import { canManageFollowUpTemplates } from '@/lib/capabilities';
+import type { FollowUpTemplateModel } from '@/lib/followupTemplates/adapter';
 
 const TEMP_MAP: Record<string, 'hot' | 'warm' | 'cold'> = { Quente: 'hot', Morno: 'warm', Frio: 'cold' };
 const TEMP_INFO: Record<string, string> = {
@@ -2901,18 +2907,195 @@ const NOVA_PENDENCIA_WHEN_STATE: Record<string, string> = {
   'Personalizado': TASK_STATE.UPCOMING,
 };
 
-// COMMERCIAL-REMOTE-B1-B3-D: 'YYYY-MM-DD' local (mesmo formato de <input
-// type="date">/dueAtHelpers.ts) — nunca via toISOString() (que converteria
-// para UTC e poderia mostrar o dia errado perto da virada de meia-noite
-// local). addLocalDays reusa startOfLocalDay (lib/tasks/deriveTaskState.ts)
-// — mesmo conceito de "dia local" do resto do rollout, nunca uma segunda
-// noção divergente.
-function localYMD(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// COMMERCIAL-REMOTE-B1-B3-D: localYMD/addLocalDays extraídos para
+// lib/tasks/dueAtHelpers.ts (FOLLOW-UP-TEMPLATES-A3-EXEC) — reusados aqui
+// via import (topo do arquivo), nunca redefinidos localmente. Mesmo
+// comportamento exato de antes (addLocalDays reusa startOfLocalDay,
+// lib/tasks/deriveTaskState.ts).
+
+// ── FlowFollowUp — FOLLOW-UP-TEMPLATES-A3-EXEC ──────────────────────────
+// Picker de Follow-up Templates + confirmação. REMOTE-ONLY (gate dedicado
+// em FlowLayer.tsx, isFollowUpFlowAllowed) — Follow-up Templates não têm
+// caminho local (precheck A1 §6/§35). Aplicar um template NUNCA cria a Task
+// no primeiro clique (precheck A3-EXEC §24 — create_task não é idempotente,
+// um duplo toque criaria uma segunda Task) — sempre uma etapa de
+// confirmação antes, reaproveitando useCreateTask/create_task ATUAL, o
+// MESMO hook/RPC de FlowNovaPendencia (precheck A3-EXEC §38, nenhuma RPC
+// nova). `now` capturado UMA vez na abertura do flow (useState lazy) — o
+// horário calculado na confirmação nunca muda enquanto o usuário revisa.
+function remoteFollowUpTaskCreateErrorMessage(error: unknown): string {
+  return remoteTaskCreateErrorMessage(error);
 }
-function addLocalDays(d: Date, days: number): Date {
-  const base = startOfLocalDay(d);
-  return new Date(base.getFullYear(), base.getMonth(), base.getDate() + days);
+
+export function FlowFollowUp({ payload, close, openFlow, go }: any) {
+  const lead = payload.lead;
+  const user = AuthService.getCurrentUser();
+  const isSeller = user?.activeMembership?.role === 'seller';
+  const isManager = user?.activeMembership?.role === 'manager';
+
+  const identityUserId = user?.id ?? null;
+  const identityCompanyId = user?.activeMembership?.companyId ?? null;
+  const identityMembershipRole = user?.activeMembership?.role ?? null;
+  const identityUserIsActive = Boolean(user);
+  const identityKey = identityUserId && identityCompanyId ? `${identityUserId}:${identityCompanyId}` : null;
+  useCloseOnIdentityChange(identityKey, close);
+
+  const [now] = useState(() => new Date());
+  const [selected, setSelected] = useState<FollowUpTemplateModel | null>(null);
+  const [chosenTime, setChosenTime] = useState('');
+  const [assignedSellerId, setAssignedSellerId] = useState<string | null>(lead?.sellerId ?? null);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  // Hooks SEMPRE chamados, mesma ordem (Rules of Hooks) — mesmo padrão de
+  // FlowNovaPendencia (assignableSellers só é usado de fato para Manager,
+  // mas o hook roda sempre).
+  const templatesQuery = useActiveFollowUpTemplates({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  const assignableSellers = useCurrentCompanyAssignableSellers({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+  const createHook = useCreateTask({
+    userId: identityUserId, companyId: identityCompanyId,
+    membershipRole: identityMembershipRole, userIsActive: identityUserIsActive,
+  });
+
+  if (!lead) {
+    return (
+      <FlowShell eyebrow="FOLLOW-UP" title="Cliente indisponível" icon="clock" accent="#8B8B93" onClose={close}>
+        <div style={{ padding: '40px 12px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>
+          Não foi possível localizar este cliente.
+        </div>
+      </FlowShell>
+    );
+  }
+
+  if (done) {
+    return (
+      <FlowShell eyebrow="FOLLOW-UP" title="Pendência criada" icon="check" accent="#27C75F" onClose={close}>
+        <FlowSuccess title="Pendência criada!" sub={`"${selected ? selected.taskTitle : ''}" foi adicionada para ${lead.name}.`}
+          actions={<LBtn kind="gold" size="lg" icon="check" onClick={close}>Concluir</LBtn>} />
+      </FlowShell>
+    );
+  }
+
+  // ── Etapa 1: escolher o follow-up ───────────────────────────────────
+  if (!selected) {
+    const templates = templatesQuery.templates;
+    const canConfigure = isManager && canManageFollowUpTemplates({ actor: user, companyStatus: null });
+    return (
+      <FlowShell eyebrow="FOLLOW-UP" title={`Follow-up${lead.name ? ' de ' + lead.name.split(' ')[0] : ''}`} icon="clock" accent="#E8CE72" onClose={close}>
+        {templatesQuery.isLoading && (
+          <div style={{ padding: '40px 12px', textAlign: 'center', color: 'var(--t-500)', fontSize: 14 }}>Carregando follow-ups…</div>
+        )}
+        {templatesQuery.isError && (
+          <div style={{ padding: '40px 12px', textAlign: 'center', color: 'var(--red)', fontSize: 14 }}>Não foi possível carregar os follow-ups.</div>
+        )}
+        {!templatesQuery.isLoading && !templatesQuery.isError && templates.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '32px 12px' }}>
+            <div style={{ fontSize: 13.5, color: 'var(--t-500)', marginBottom: 18 }}>Nenhum follow-up configurado.</div>
+            <LBtn kind="gold" icon="check" onClick={() => { close(); openFlow('nova-pendencia', { lead }); }}>Criar pendência personalizada</LBtn>
+            {canConfigure && (
+              <div style={{ marginTop: 12 }}>
+                <LBtn kind="ghost" icon="gear" onClick={() => { close(); go('ajustes'); }}>Configurar follow-ups</LBtn>
+              </div>
+            )}
+          </div>
+        )}
+        {!templatesQuery.isLoading && !templatesQuery.isError && templates.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {templates.map((t) => (
+              <ChoiceTile key={t.id} icon="clock" title={t.name} desc={formatFollowUpTemplateSubtitle(t)} onClick={() => setSelected(t)} />
+            ))}
+            <ChoiceTile icon="calendar" title="Personalizado" desc="Escolher outra data"
+              onClick={() => { close(); openFlow('nova-pendencia', { lead }); }} />
+          </div>
+        )}
+      </FlowShell>
+    );
+  }
+
+  // ── Etapa 2: confirmar ──────────────────────────────────────────────
+  const dueAt = resolveFollowUpTemplateDueAt(selected, chosenTime, now);
+  const needsTime = selected.offsetUnit === 'day' && !selected.defaultTime;
+  const remoteSellerItems: SellerPickerItem[] = assignableSellers.assignableSellers.map((s) => ({ id: s.seller_id, name: s.name }));
+  const canConfirm = Boolean(
+    dueAt.ok && !submitting && !createHook.isPending
+    && (isSeller || (!!assignedSellerId && !assignableSellers.isLoading)),
+  );
+
+  const handleConfirm = async () => {
+    if (!canConfirm || !dueAt.ok || submitting || createHook.isPending) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      if (isSeller) {
+        await createHook.createTask({
+          actorRole: 'seller', title: selected.taskTitle, priority: selected.priority,
+          dueAt: dueAt.iso, leadId: lead.id, note: selected.taskNote,
+        });
+      } else {
+        if (!assignedSellerId) return;
+        await createHook.createTask({
+          actorRole: 'manager', title: selected.taskTitle, priority: selected.priority,
+          dueAt: dueAt.iso, assignedSellerId, leadId: lead.id, note: selected.taskNote,
+        });
+      }
+      setDone(true);
+    } catch (err) {
+      if (isRemoteTasksError(err) && err.code === 'remote_tasks_mutation_identity_changed') {
+        close();
+        return;
+      }
+      setSubmitError(remoteFollowUpTaskCreateErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <FlowShell eyebrow="FOLLOW-UP" title="Confirmar pendência" icon="check" accent="#E8CE72" onClose={close}
+      footer={<>
+        <LBtn kind="ghost" size="lg" onClick={() => setSelected(null)}>Voltar</LBtn>
+        <LBtn kind="gold" size="lg" icon="check" onClick={handleConfirm} style={{ marginLeft: 'auto', opacity: canConfirm ? 1 : .5 }}>
+          {submitting || createHook.isPending ? 'Criando…' : 'Criar pendência'}
+        </LBtn>
+      </>}>
+      <div style={{ maxWidth: 560 }}>
+        <FPanel>
+          <SummaryRow label="Título" value={selected.taskTitle} />
+          <SummaryRow label="Cliente" value={lead.name} />
+          <SummaryRow label="Quando" value={dueAt.ok ? formatFollowUpDueAtPreview(dueAt.previewDateYMD, dueAt.previewTime, now) : 'Escolha um horário'} />
+          <SummaryRow label="Prioridade" value={FOLLOWUP_PRIORITY_LABEL[selected.priority]} />
+          {selected.taskNote && <SummaryRow label="Observação" value={selected.taskNote} />}
+        </FPanel>
+        {!isSeller && (
+          <FPanel style={{ marginTop: 16 }}>
+            <SellerPicker
+              items={remoteSellerItems}
+              value={assignedSellerId}
+              onChange={setAssignedSellerId}
+              loading={assignableSellers.isLoading}
+              disabled={submitting || createHook.isPending}
+              error={assignableSellers.isError ? 'Não foi possível carregar os vendedores.' : null}
+              allowNone={false}
+              placeholder="Selecione o vendedor…"
+            />
+          </FPanel>
+        )}
+        {needsTime && (
+          <FPanel style={{ marginTop: 16 }}>
+            <FField label="Hora" icon="clock" type="time" value={chosenTime} onChange={(e: any) => setChosenTime(e.target.value)} />
+          </FPanel>
+        )}
+        {submitError && <ErrorBanner>{submitError}</ErrorBanner>}
+      </div>
+    </FlowShell>
+  );
 }
 
 // COMMERCIAL-REMOTE-B1-B3-E: extração mínima da regra remota de dueAt —

@@ -16,6 +16,24 @@
 // existem no projeto) — Date nativo é suficiente para este contrato.
 //
 // Puro, determinístico: sem Date.now() implícito, sem React, sem I/O.
+import { startOfLocalDay } from '@/lib/tasks/deriveTaskState';
+
+// 'YYYY-MM-DD' local (nunca via toISOString(), que converteria para UTC e
+// poderia mostrar o dia errado perto da virada de meia-noite local).
+// Extraído de components/flows/Flows2.tsx (era privado, já compartilhado
+// ali por 3 consumidores — Tasks/Visits/reagendamento — antes desta
+// extração) para o FOLLOW-UP-TEMPLATES-A3 poder reusar a MESMA noção de
+// "dia local", nunca uma quarta reimplementação divergente. addLocalDays
+// reusa startOfLocalDay (lib/tasks/deriveTaskState.ts) — mesmo conceito de
+// "dia local" do resto do rollout, nunca uma segunda noção divergente.
+export function localYMD(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function addLocalDays(d: Date, days: number): Date {
+  const base = startOfLocalDay(d);
+  return new Date(base.getFullYear(), base.getMonth(), base.getDate() + days);
+}
 
 export interface LocalDateTimeInput {
   // 'YYYY-MM-DD' — mesmo formato de <input type="date">.

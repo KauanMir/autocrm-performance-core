@@ -8,7 +8,7 @@ import {
   FlowNovoCliente, FlowEditarCliente, FlowCriarVisita, FlowReagendarVisita, FlowConfirmarVisita,
   FlowRegistrarResultado, FlowRegistrarResultadoRemoto, FlowNovaProposta, FlowAprovarProposta,
   FlowRegistrarVenda, FlowNovaPendencia, FlowReagendarPendencia, FlowCriarAcompanhamento,
-  FlowVerNegociacao,
+  FlowVerNegociacao, FlowFollowUp,
 } from './Flows2';
 import {
   FlowPerfilVendedor, FlowNotificacoes, FlowBusca,
@@ -18,6 +18,7 @@ import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess'
 import { resolveVisitRemoteMode } from '@/lib/visits/remoteVisitsMode';
 import { resolveDealRemoteMode } from '@/lib/deals/remoteDealsMode';
 import { resolveSalesRemoteMode } from '@/lib/sales/remoteSalesMode';
+import { resolveTaskRemoteMode } from '@/lib/tasks/remoteTasksMode';
 
 const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'ligar': FlowLigar,
@@ -39,6 +40,7 @@ const FLOW_MAP: Record<string, React.ComponentType<any>> = {
   'registrar-venda': FlowRegistrarVenda,
   'nova-pendencia': FlowNovaPendencia,
   'reagendar-pendencia': FlowReagendarPendencia,
+  'follow-up': FlowFollowUp,
   'criar-acompanhamento': FlowCriarAcompanhamento,
   'perfil-vendedor': FlowPerfilVendedor,
   'notificacoes': FlowNotificacoes,
@@ -216,6 +218,16 @@ function isSaleRegisterFlowAllowed(): boolean {
   return mode === 'sale_local' || mode === 'sale_remote_ready';
 }
 
+// FOLLOW-UP-TEMPLATES-A3-EXEC — gate DEDICADO de 'follow-up', mesmo espírito
+// de isVisitRescheduleFlowAllowed/isDealDetailFlowAllowed: flow id NOVO,
+// REMOTE-ONLY — Follow-up Templates não têm nenhum caminho local (nenhuma
+// linha local jamais chama openFlow('follow-up')), então 'task_local'
+// também bloqueia aqui, igual aos outros gates remote-only. Decide só por
+// flow.id + resolveTaskRemoteMode(), nunca por quem chamou openFlow.
+function isFollowUpFlowAllowed(): boolean {
+  return resolveTaskRemoteMode() === 'task_remote_ready';
+}
+
 export function FlowLayer({ flow, close, openFlow, go }: {
   flow: { id: string; payload: any } | null;
   close: () => void;
@@ -247,6 +259,9 @@ export function FlowLayer({ flow, close, openFlow, go }: {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   if (flow.id === 'registrar-venda' && !isSaleRegisterFlowAllowed()) {
+    return <LocalCommercialFlowUnavailable close={close} />;
+  }
+  if (flow.id === 'follow-up' && !isFollowUpFlowAllowed()) {
     return <LocalCommercialFlowUnavailable close={close} />;
   }
   return <Comp payload={flow.payload || {}} close={close} openFlow={openFlow} go={go} />;
