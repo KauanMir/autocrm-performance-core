@@ -102,12 +102,17 @@ const SUPER_ADMIN_OPERATIONAL_NAV_IDS = [...COMMERCIAL_NAV_IDS, 'pendencias', 'v
 // de leitura comercial já usada por Clientes/Andamento (nenhuma flag nova
 // — a autorização real é list_platform_tasks_for_company/
 // list_platform_visits_for_company/list_platform_deals_for_company, todas
-// SECURITY DEFINER). Vendas/Resultados continuam AUSENTES (Sales/
-// register_sale são V2B, fora de escopo deste lote).
+// SECURITY DEFINER).
+// V2B-READ (SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §19): Vendas/
+// Resultados entram na MESMA lista, atrás da MESMA flag (nenhuma flag
+// nova) — autorização real é list_platform_sales_for_company (SECURITY
+// DEFINER, reaproveita _resolve_commercial_read_company do V2A). Usuários/
+// Convites continuam fora da operação da empresa (nunca entram nesta
+// lista).
 function operationalSuperAdminNavIds(user: User): string[] {
   const ids = ['home'];
   if (isSuperAdminCommercialReadEnabled() && canAccessCommercialWorkspace(user)) {
-    ids.push('clientes', 'andamento', 'pendencias', 'visitas', 'propostas');
+    ids.push('clientes', 'andamento', 'pendencias', 'visitas', 'propostas', 'vendas', 'resultados');
   }
   if (canManageInvites(user) || (isRemoteStagesEnabled() && canAccessStageSettings(user))) {
     ids.push('ajustes');

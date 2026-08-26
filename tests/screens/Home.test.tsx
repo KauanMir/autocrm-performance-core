@@ -33,6 +33,10 @@ const m = vi.hoisted(() => ({
   useRemoteDealsScreenState: vi.fn(),
   useRemoteSalesScreenState: vi.fn(),
   usePlatformTasksScreenState: vi.fn(),
+  usePlatformLeads: vi.fn(),
+  usePlatformVisitsScreenState: vi.fn(),
+  usePlatformDealsScreenState: vi.fn(),
+  usePlatformSalesScreenState: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
   useCurrentCompanyTimezone: vi.fn(),
   useCompanySellerLeaderboard: vi.fn(),
@@ -79,6 +83,26 @@ vi.mock('@/lib/hooks/useRemoteSalesScreenState', () => ({
 // para Super Admin contextual).
 vi.mock('@/lib/hooks/usePlatformTasksScreenState', () => ({
   usePlatformTasksScreenState: m.usePlatformTasksScreenState,
+}));
+
+// SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC — mesmo motivo de
+// usePlatformTasksScreenState acima: usePlatformLeads/
+// usePlatformVisitsScreenState/usePlatformDealsScreenState/
+// usePlatformSalesScreenState usam useQuery real internamente, ausente
+// neste harness. Cobertura própria de cada hook fica nas suítes
+// dedicadas — aqui só se valida o que Home FAZ com o resultado (Funil
+// comercial real para Super Admin contextual).
+vi.mock('@/lib/hooks/usePlatformLeads', () => ({
+  usePlatformLeads: m.usePlatformLeads,
+}));
+vi.mock('@/lib/hooks/usePlatformVisitsScreenState', () => ({
+  usePlatformVisitsScreenState: m.usePlatformVisitsScreenState,
+}));
+vi.mock('@/lib/hooks/usePlatformDealsScreenState', () => ({
+  usePlatformDealsScreenState: m.usePlatformDealsScreenState,
+}));
+vi.mock('@/lib/hooks/usePlatformSalesScreenState', () => ({
+  usePlatformSalesScreenState: m.usePlatformSalesScreenState,
 }));
 
 vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
@@ -350,6 +374,17 @@ beforeEach(() => {
   // (novo, abaixo) — só ele sobrescreve para 'task_remote_active' com
   // Tasks reais.
   m.usePlatformTasksScreenState.mockReset().mockReturnValue(taskScreenState('task_remote_unavailable_identity'));
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC — defaults "desabilitado"
+  // (companyId ainda null, mesmo contrato real quando desabilitado):
+  // preservam o baseline para todo teste que não é do describe block
+  // "Super Admin operacional" (abaixo) — só ele sobrescreve.
+  m.usePlatformLeads.mockReset().mockReturnValue({
+    queryEnabled: false, leads: [] as any[], isLoading: false, isFetching: false,
+    isError: false, error: null, isEmpty: true, hasData: false, refetch: vi.fn(),
+  });
+  m.usePlatformVisitsScreenState.mockReset().mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+  m.usePlatformDealsScreenState.mockReset().mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+  m.usePlatformSalesScreenState.mockReset().mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
   // COMMERCIAL-REMOTE-VISITS-B7 — default 'visit_local', mesmo raciocínio
   // do default de Tasks acima: preserva o baseline local de todos os
   // testes escritos antes do B7. Toda describe com Leads remoto sobrescreve
@@ -1311,14 +1346,22 @@ describe('Home — Super Admin operacional (contextual): Atenção imediata real
     expect(screen.queryByText('Atenção imediata')).toBeNull();
   });
 
-  it('Funil comercial e Ações rápidas continuam ausentes mesmo com Atenção real (Sales é V2B, Ações são mutation)', () => {
+  it('Funil comercial agora aparece (V2B), Ações rápidas continua ausente mesmo com Atenção real (Ações são mutation)', () => {
+    // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §20 — Funil comercial
+    // deixou de ficar oculto para Super Admin contextual: com Leads/
+    // Visits/Deals/Sales ainda 'unavailable' neste teste específico
+    // (defaults do beforeEach, nenhum platform*ForHome sobrescrito), a
+    // seção renderiza com a notice sanitizada — nunca desaparece por
+    // inteiro, nunca um número fake. Cobertura da versão "com dado real"
+    // fica na suíte dedicada "Funil comercial (V2B): Super Admin
+    // operacional" abaixo.
     m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', {
       hasData: true,
       tasks: [{ id: 't-op-1', title: 'Ligar cliente', lead: 'Cliente X', leadId: 'lead-x', assignedTo: 's1', when: 'Hoje', prio: 'alta', state: TASK_STATE.LATE, note: '', createdAt: '2026-08-24T12:00:00Z', dueAt: '2026-08-24T12:00:00Z', version: 1 }],
     }));
     renderHome(superAdmin());
     expect(screen.getByText('Atenção imediata')).toBeInTheDocument();
-    expect(screen.queryByText('Funil comercial')).toBeNull();
+    expect(screen.getByText('Funil comercial')).toBeInTheDocument();
     expect(screen.queryByText('Ações rápidas')).toBeNull();
   });
 
@@ -1326,6 +1369,99 @@ describe('Home — Super Admin operacional (contextual): Atenção imediata real
     m.usePlatformTasksScreenState.mockReturnValue(taskScreenState('task_remote_active', { isEmpty: true, tasks: [] }));
     renderHome(superAdmin());
     expect(m.usePlatformTasksScreenState).toHaveBeenCalledWith('company-op-1');
+  });
+});
+
+// ── D3. Funil comercial (V2B): Super Admin operacional ──────────────────
+// SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §20/§21/§22/§23 — Funil
+// comercial passa a usar Leads/Visits/Deals/Sales reais da empresa
+// explícita para Super Admin contextual, via o MESMO ConversionFunnel do
+// Manager (nenhum componente novo). loading/error nunca viram zero; troca
+// de empresa nunca mistura dados.
+function platformLeadsResult(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    queryEnabled: true, leads: [] as { id: string; name: string; urgency: string }[],
+    isLoading: false, isFetching: false, isError: false, error: null,
+    isEmpty: true, hasData: false, refetch: vi.fn(),
+    ...over,
+  };
+}
+
+describe('Home — Funil comercial (V2B): Super Admin operacional', () => {
+  beforeEach(() => {
+    m.authGetCurrentUser.mockReturnValue(superAdmin());
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-1',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('remote_unavailable_identity'));
+    m.useRemoteVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_unavailable_identity'));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
+  });
+
+  it('4 etapas reais (Leads/Visitas/Negociações/Vendas) a partir das fontes platform*, título "Funil comercial"', () => {
+    m.usePlatformLeads.mockReturnValue(platformLeadsResult({
+      leads: [{ id: 'l1', name: 'Lead 1', urgency: 'green' }, { id: 'l2', name: 'Lead 2', urgency: 'red' }],
+      hasData: true, isEmpty: false,
+    }));
+    m.usePlatformVisitsScreenState.mockReturnValue(visitScreenState('visit_remote_active', {
+      hasData: true, visits: [{ id: 'v1', status: 'scheduled' }, { id: 'v2', status: 'confirmed' }, { id: 'v3', status: 'completed' }],
+    }));
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [{ id: 'd1', status: 'open' }, { id: 'd2', status: 'sold' }],
+    }));
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [{ id: 's1' }, { id: 's2' }, { id: 's3' }],
+    }));
+
+    renderHome(superAdmin());
+
+    expect(screen.getByText('Funil comercial')).toBeInTheDocument();
+    const stageOf = (label: string) => screen.getAllByText(label).map((el) => el.closest('.lift')).find((el) => el !== null)!;
+    expect(stageOf('Leads').textContent).toContain('2');
+    expect(stageOf('Visitas').textContent).toContain('2'); // scheduled + confirmed, completed nunca conta
+    expect(stageOf('Negociações').textContent).toContain('1'); // só open, sold nunca conta
+    expect(stageOf('Vendas').textContent).toContain('3');
+  });
+
+  it('loading em Leads: placeholder na etapa, nunca "0" antes da resposta', () => {
+    m.usePlatformLeads.mockReturnValue(platformLeadsResult({ isLoading: true }));
+    renderHome(superAdmin());
+    expect(screen.getByText('Carregando…')).toBeInTheDocument();
+  });
+
+  it('erro em Sales: mensagem sanitizada com retry, sem derrubar o funil inteiro', () => {
+    const retry = vi.fn();
+    m.usePlatformLeads.mockReturnValue(platformLeadsResult({ leads: [{ id: 'l1', name: 'Lead 1', urgency: 'green' }], hasData: true, isEmpty: false }));
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isError: true, error: new Error('boom'), refetch: retry }));
+    renderHome(superAdmin());
+    expect(screen.getByText('Funil comercial')).toBeInTheDocument();
+    expect(screen.queryByText(/boom/)).toBeNull();
+  });
+
+  it('troca de empresa (companyId muda): usePlatformLeads/Visits/Deals/Sales recebem o novo companyId', () => {
+    m.usePlatformLeads.mockReturnValue(platformLeadsResult({ leads: [{ id: 'l1', name: 'Lead 1', urgency: 'green' }], hasData: true, isEmpty: false }));
+    const { rerender } = renderHome(superAdmin());
+    expect(m.usePlatformLeads).toHaveBeenCalledWith({ companyId: 'company-op-1', archived: false, authorized: true });
+
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-2',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+    rerender(<Home t={{ podium: 'B' }} setTweak={vi.fn()} go={vi.fn()} active={false} currentUser={superAdmin() as any} />);
+    expect(m.usePlatformLeads).toHaveBeenCalledWith({ companyId: 'company-op-2', archived: false, authorized: true });
+    expect(m.usePlatformVisitsScreenState).toHaveBeenCalledWith('company-op-2');
+    expect(m.usePlatformDealsScreenState).toHaveBeenCalledWith('company-op-2');
+    expect(m.usePlatformSalesScreenState).toHaveBeenCalledWith('company-op-2');
+  });
+
+  it('Super Admin GENÉRICO (mode: none): Funil comercial continua ausente', () => {
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+    });
+    renderHome(superAdmin());
+    expect(screen.queryByText('Funil comercial')).toBeNull();
   });
 });
 

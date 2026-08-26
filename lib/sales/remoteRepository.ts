@@ -47,6 +47,27 @@ export async function fetchVisibleSaleRows(): Promise<RemoteSaleRow[]> {
   return (data ?? []) as unknown as RemoteSaleRow[];
 }
 
+// SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC — bridge EXCLUSIVO do Super
+// Admin contextual, via list_platform_sales_for_company (SECURITY DEFINER,
+// company explícita + can_access_company via _resolve_commercial_read_company,
+// reaproveitado do V2A). Manager/Seller continuam 100% em
+// fetchVisibleSaleRows/RLS — esta função nunca é chamada para eles. Mesmo
+// shape de row (RemoteSaleRow), mesma ordenação (sold_at desc, id asc).
+export async function fetchPlatformSaleRows(companyId: string): Promise<RemoteSaleRow[]> {
+  const { data, error } = await supabase.rpc('list_platform_sales_for_company', {
+    p_company_id: companyId,
+  });
+
+  if (error) {
+    throw new RemoteSalesError('remote_sales_fetch_failed', {
+      code: typeof error.code === 'string' ? error.code : undefined,
+      message: typeof error.message === 'string' ? error.message : undefined,
+    });
+  }
+
+  return (data ?? []) as unknown as RemoteSaleRow[];
+}
+
 // ── register_sale ─────────────────────────────────────────────────────
 // Único input real: dealId/expectedVersion/soldValueCents/paymentMethod.
 // company_id/lead_id/assigned_seller_id/sold_by NUNCA são parâmetros —

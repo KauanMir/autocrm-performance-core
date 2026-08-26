@@ -252,7 +252,7 @@ describe('Seller — navegação preservada, Resultados continua ausente (R1-EXE
 // — Pendências/Visitas/Propostas passam a ser permitidos (operationalSuperAdminNavIds,
 // components/App.tsx), Vendas/Resultados continuam AUSENTES (V2B, fora de
 // escopo deste lote).
-describe('Super Admin operacional (contextual): Pendências/Visitas/Propostas aparecem, Vendas/Resultados continuam ausentes', () => {
+describe('Super Admin operacional (contextual): Pendências/Visitas/Propostas/Vendas/Resultados aparecem (V2B)', () => {
   beforeEach(() => {
     m.superAdminReadFlag.current = true;
     opContext.current = {
@@ -262,25 +262,31 @@ describe('Super Admin operacional (contextual): Pendências/Visitas/Propostas ap
     };
   });
 
-  it('Pendências/Visitas/Propostas aparecem no Rail', async () => {
+  it('Pendências/Visitas/Propostas/Vendas/Resultados aparecem no Rail', async () => {
     await renderApp(user('admin', 'super_admin'));
     expect(screen.getByRole('button', { name: 'Pendências' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Visitas' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Propostas' })).toBeInTheDocument();
+    // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §19 — Vendas/Resultados
+    // entram na mesma lista de ids operacionais (mesma flag, mesma
+    // condição de canAccessCommercialWorkspace).
+    expect(screen.getByRole('button', { name: 'Vendas' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resultados' })).toBeInTheDocument();
   });
 
-  it('Vendas/Resultados continuam ausentes (V2B, fora de escopo)', async () => {
+  it('Usuários/Convites continuam fora da operação da empresa (§19)', async () => {
     await renderApp(user('admin', 'super_admin'));
-    expect(screen.queryByRole('button', { name: 'Vendas' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Resultados' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Usuários' })).toBeNull();
   });
 
-  it('SUPER_ADMIN_COMMERCIAL_READ=false: Pendências/Visitas/Propostas voltam a ficar ausentes mesmo com mode super_admin', async () => {
+  it('SUPER_ADMIN_COMMERCIAL_READ=false: Pendências/Visitas/Propostas/Vendas/Resultados voltam a ficar ausentes mesmo com mode super_admin', async () => {
     m.superAdminReadFlag.current = false;
     await renderApp(user('admin', 'super_admin'));
     expect(screen.queryByRole('button', { name: 'Pendências' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Visitas' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Propostas' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Vendas' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Resultados' })).toBeNull();
   });
 
   it('clique em Pendências navega e monta ScreenPendencias', async () => {

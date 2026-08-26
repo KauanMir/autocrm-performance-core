@@ -14,4 +14,10 @@ function requireCompanyId(value: string): string {
 export const salesQueryKeys = {
   root: (companyId: string) => ['company', requireCompanyId(companyId), 'sales'] as const,
   active: (companyId: string) => salesQueryKeys.root(companyId),
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC — bridge EXCLUSIVO do
+  // Super Admin contextual (list_platform_sales_for_company), key
+  // estruturalmente distinta de `.active` — Company A e Company B nunca
+  // compartilham cache, mesmo padrão de taskQueryKeys/visitQueryKeys/
+  // dealQueryKeys.platform do V2A.
+  platform: (companyId: string) => ['company', requireCompanyId(companyId), 'sales', 'platform'] as const,
 };

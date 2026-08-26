@@ -8,12 +8,16 @@ import { AuthService, SellerService, LeadService, VisitService, DealService, Sal
 import { VISIT_STATUS, DEAL_STATUS, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
 import { useRemoteLeadsScreenState } from '@/lib/hooks/useRemoteLeadsScreenState';
+import { usePlatformLeads } from '@/lib/hooks/usePlatformLeads';
 import { useRemoteTasksScreenState, type UseRemoteTasksScreenStateResult } from '@/lib/hooks/useRemoteTasksScreenState';
 import { usePlatformTasksScreenState } from '@/lib/hooks/usePlatformTasksScreenState';
-import { useRemoteVisitsScreenState } from '@/lib/hooks/useRemoteVisitsScreenState';
-import { useRemoteDealsScreenState } from '@/lib/hooks/useRemoteDealsScreenState';
+import { useRemoteVisitsScreenState, type UseRemoteVisitsScreenStateResult } from '@/lib/hooks/useRemoteVisitsScreenState';
+import { usePlatformVisitsScreenState } from '@/lib/hooks/usePlatformVisitsScreenState';
+import { useRemoteDealsScreenState, type UseRemoteDealsScreenStateResult } from '@/lib/hooks/useRemoteDealsScreenState';
+import { usePlatformDealsScreenState } from '@/lib/hooks/usePlatformDealsScreenState';
 import { useCurrentCompanySellerLabels } from '@/lib/hooks/useCurrentCompanySellerLabels';
-import { useRemoteSalesScreenState } from '@/lib/hooks/useRemoteSalesScreenState';
+import { useRemoteSalesScreenState, type UseRemoteSalesScreenStateResult } from '@/lib/hooks/useRemoteSalesScreenState';
+import { usePlatformSalesScreenState } from '@/lib/hooks/usePlatformSalesScreenState';
 import { useCurrentCompanyTimezone } from '@/lib/hooks/useCurrentCompanyTimezone';
 import { useCompanySellerLeaderboard } from '@/lib/hooks/useCompanySellerLeaderboard';
 import { usePodiumViewPreference } from '@/lib/hooks/usePodiumViewPreference';
@@ -97,6 +101,26 @@ function useHomeLeadsSummary(currentUser: User | null): HomeLeadsSummary {
   };
 }
 
+// SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §21 — fonte de Leads do
+// Funil comercial para Super Admin contextual: usePlatformLeads (M1-F
+// S8-C2-B2, já usado por ScreenClientes via PlatformCommercialClientsView),
+// NUNCA useRemoteLeadsScreenState (membership-only, sempre
+// remote_unavailable_identity para Super Admin — activeMembership é
+// sempre null). Shape de entrada bem mais simples que o membership
+// (usePlatformLeads não tem pipeline/stages, só leads company-wide) — por
+// isso uma derivação própria, nunca uma tentativa de encaixar no cascade
+// de useHomeLeadsSummary acima. Mesmo campo `urgency` usado ali.
+function deriveHomeLeadsSummaryFromPlatformLeads(platform: ReturnType<typeof usePlatformLeads>): HomeLeadsSummary {
+  if (!platform.queryEnabled) return { status: 'unavailable' };
+  if (platform.isLoading) return { status: 'loading' };
+  if (platform.isError) return { status: 'error', retry: platform.refetch };
+  return {
+    status: 'ready',
+    totalLeads: platform.leads.length,
+    delayedLeads: platform.leads.filter((l) => l.urgency === 'red').length,
+  };
+}
+
 // COMMERCIAL-REMOTE-B1-B3-G — resumo de Tasks da Home, independente de
 // leadsSummary (achado do G-PRECHECK: o card de pendências usava
 // leadsSummary.status como proxy incorreto — Tasks tem modo remoto
@@ -165,9 +189,12 @@ type HomeVisitsSummary =
   | { status: 'error'; retry: () => void }
   | { status: 'ready'; unconfirmedCount: number; openCount: number };
 
-function useHomeVisitsSummary(currentUser: User | null): HomeVisitsSummary {
-  const remote = useRemoteVisitsScreenState(currentUser);
-
+// SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §21 — extraída para função
+// pura (mesmo padrão de deriveHomeTasksSummary no V2A), reaproveitada tanto
+// pelo caminho membership (hook abaixo) quanto pelo caminho platform do
+// Super Admin contextual (Home chama usePlatformVisitsScreenState
+// diretamente e passa o resultado aqui).
+function deriveHomeVisitsSummary(remote: UseRemoteVisitsScreenStateResult): HomeVisitsSummary {
   if (remote.mode === 'visit_local') return { status: 'local' };
   if (remote.mode === 'visit_blocked') return { status: 'unavailable' };
   if (remote.mode === 'visit_remote_misconfigured') return { status: 'unavailable' };
@@ -190,6 +217,11 @@ function useHomeVisitsSummary(currentUser: User | null): HomeVisitsSummary {
   };
 }
 
+function useHomeVisitsSummary(currentUser: User | null): HomeVisitsSummary {
+  const remote = useRemoteVisitsScreenState(currentUser);
+  return deriveHomeVisitsSummary(remote);
+}
+
 // COMMERCIAL-REMOTE-DEALS-B7-B1 — resumo de Deals da Home, independente de
 // leadsSummary/tasksSummary/visitsSummary (mesmo raciocínio de
 // useHomeTasksSummary/useHomeVisitsSummary — B7-B-PRECHECK §5: cada domínio
@@ -204,9 +236,11 @@ type HomeDealsSummary =
   | { status: 'error'; retry: () => void }
   | { status: 'ready'; openCount: number; openDeals: readonly RemoteDealModel[] };
 
-function useHomeDealsSummary(currentUser: User | null): HomeDealsSummary {
-  const remote = useRemoteDealsScreenState(currentUser);
-
+// SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §21 — extraída para função
+// pura (mesmo padrão de deriveHomeTasksSummary/deriveHomeVisitsSummary),
+// reaproveitada tanto pelo caminho membership (hook abaixo) quanto pelo
+// caminho platform do Super Admin contextual.
+function deriveHomeDealsSummary(remote: UseRemoteDealsScreenStateResult): HomeDealsSummary {
   if (remote.mode === 'deal_local') return { status: 'local' };
   if (remote.mode === 'deal_blocked') return { status: 'unavailable' };
   if (remote.mode === 'deal_remote_misconfigured') return { status: 'unavailable' };
@@ -229,6 +263,11 @@ function useHomeDealsSummary(currentUser: User | null): HomeDealsSummary {
   };
 }
 
+function useHomeDealsSummary(currentUser: User | null): HomeDealsSummary {
+  const remote = useRemoteDealsScreenState(currentUser);
+  return deriveHomeDealsSummary(remote);
+}
+
 // HOME-CONVERSION-FUNNEL-R1-EXEC — resumo de Sales da Home ("Funil
 // comercial", etapa Vendas), independente de leadsSummary/tasksSummary/
 // visitsSummary/dealsSummary (mesmo raciocínio de useHomeDealsSummary
@@ -245,9 +284,13 @@ type HomeSalesSummary =
   | { status: 'error'; retry: () => void }
   | { status: 'ready'; totalSales: number };
 
-function useHomeSalesSummary(currentUser: User | null): HomeSalesSummary {
-  const remote = useRemoteSalesScreenState(currentUser);
-
+// SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §21 — extraída para função
+// pura (mesmo padrão de deriveHomeTasksSummary/deriveHomeVisitsSummary/
+// deriveHomeDealsSummary), reaproveitada tanto pelo caminho membership
+// (hook abaixo) quanto pelo caminho platform do Super Admin contextual
+// (usePlatformSalesScreenState, mesma fonte já usada por ScreenVendas/
+// ScreenResultados).
+function deriveHomeSalesSummary(remote: UseRemoteSalesScreenStateResult): HomeSalesSummary {
   if (remote.mode === 'sale_local') return { status: 'local' };
   if (remote.mode === 'sale_blocked') return { status: 'unavailable' };
   if (remote.mode === 'sale_remote_misconfigured') return { status: 'unavailable' };
@@ -259,6 +302,11 @@ function useHomeSalesSummary(currentUser: User | null): HomeSalesSummary {
   if (remote.configError !== null) return { status: 'unavailable' };
 
   return { status: 'ready', totalSales: remote.sales.length };
+}
+
+function useHomeSalesSummary(currentUser: User | null): HomeSalesSummary {
+  const remote = useRemoteSalesScreenState(currentUser);
+  return deriveHomeSalesSummary(remote);
 }
 
 // Estado compacto de loading/erro/indisponível para os widgets comerciais —
@@ -1032,7 +1080,22 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // M1-E E7-A1 — chamado SEMPRE (Rules of Hooks), independente do modo;
   // useRemoteLeadsScreenState já gateia local/remote_ready/misconfigured/
   // sem-identidade internamente.
-  const leadsSummary = useHomeLeadsSummary(currentUser ?? null);
+  //
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §21 — Funil comercial
+  // agora precisa de Leads reais para Super Admin contextual também (dual-
+  // hook, ambos SEMPRE chamados, Rules of Hooks; só a SAÍDA é selecionada
+  // condicionalmente — mesmo padrão já usado para tasksSummary no V2A).
+  // usePlatformLeads é a MESMA fonte já usada por ScreenClientes via
+  // PlatformCommercialClientsView — nenhuma query nova.
+  const membershipLeadsSummary = useHomeLeadsSummary(currentUser ?? null);
+  const platformLeadsForHome = usePlatformLeads({
+    companyId: isOperationalSuperAdmin ? operational.companyId : null,
+    archived: false,
+    authorized: isOperationalSuperAdmin,
+  });
+  const leadsSummary = isOperationalSuperAdmin
+    ? deriveHomeLeadsSummaryFromPlatformLeads(platformLeadsForHome)
+    : membershipLeadsSummary;
   // COMMERCIAL-REMOTE-B1-B3-G — chamado SEMPRE (Rules of Hooks), mesma
   // garantia de leadsSummary acima; independente dela por design
   // (G-PRECHECK §8/§9 — Leads e Tasks nunca voltam a compartilhar um
@@ -1054,18 +1117,48 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // garantia de leadsSummary/tasksSummary acima; independente de ambas por
   // design (B7-PRECHECK §18 — Leads/Tasks/Visits nunca voltam a
   // compartilhar um proxy de estado).
-  const visitsSummary = useHomeVisitsSummary(currentUser ?? null);
+  //
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §21 — mesmo dual-hook do
+  // Funil comercial, reaproveitando usePlatformVisitsScreenState (V2A, já
+  // usado por ScreenVisitas) — nenhuma query nova.
+  const membershipVisitsSummary = useHomeVisitsSummary(currentUser ?? null);
+  const platformVisitsScreenForHome = usePlatformVisitsScreenState(
+    isOperationalSuperAdmin ? operational.companyId : null,
+  );
+  const visitsSummary = isOperationalSuperAdmin
+    ? deriveHomeVisitsSummary(platformVisitsScreenForHome)
+    : membershipVisitsSummary;
   // COMMERCIAL-REMOTE-DEALS-B7-B1 — chamado SEMPRE (Rules of Hooks), mesma
   // garantia de leadsSummary/tasksSummary/visitsSummary acima; independente
   // de todas por design (B7-B-PRECHECK §5 — cada domínio comercial resolve
   // seu próprio estado, nunca um proxy de outro).
-  const dealsSummary = useHomeDealsSummary(currentUser ?? null);
+  //
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §21 — mesmo dual-hook,
+  // reaproveitando usePlatformDealsScreenState (V2A, já usado por
+  // ScreenPropostas) — nenhuma query nova.
+  const membershipDealsSummary = useHomeDealsSummary(currentUser ?? null);
+  const platformDealsScreenForHome = usePlatformDealsScreenState(
+    isOperationalSuperAdmin ? operational.companyId : null,
+  );
+  const dealsSummary = isOperationalSuperAdmin
+    ? deriveHomeDealsSummary(platformDealsScreenForHome)
+    : membershipDealsSummary;
   // HOME-CONVERSION-FUNNEL-R1-EXEC — chamado SEMPRE (Rules of Hooks), mesma
   // garantia das demais summaries acima; independente de todas por design
   // (etapa "Vendas" do Funil comercial — mesmo useRemoteSalesScreenState já
   // usado pelo Pódio, TanStack Query dedupe por queryKey evita 2ª chamada
   // de rede).
-  const salesSummary = useHomeSalesSummary(currentUser ?? null);
+  //
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §14/§21 — mesmo dual-hook,
+  // via usePlatformSalesScreenState (nova, mesma fonte já usada por
+  // ScreenVendas/ScreenResultados) — nenhuma query nova.
+  const membershipSalesSummaryForHome = useHomeSalesSummary(currentUser ?? null);
+  const platformSalesScreenForHome = usePlatformSalesScreenState(
+    isOperationalSuperAdmin ? operational.companyId : null,
+  );
+  const salesSummary = isOperationalSuperAdmin
+    ? deriveHomeSalesSummary(platformSalesScreenForHome)
+    : membershipSalesSummaryForHome;
   // COMMERCIAL-REMOTE-DEALS-B7-B2 — apresentação apenas; RLS/backend
   // continua a única autoridade sobre quais rows cada usuário recebe.
   // membershipRole força 'manager' → null para Seller (nunca 'seller'),
@@ -1082,17 +1175,14 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // própria linha por RLS — nenhuma ampliação de visão aqui.
   const isSeller = currentUser?.activeMembership?.role === 'seller';
   // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — companyId/flag de leitura do
-  // Pódio/Ranking/movement (§18 do EXEC V1) e, desde
-  // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC, tasksSummary também
-  // recebem o companyId operacional do Super Admin (via
-  // platformTasksScreenForHome, acima). leadsSummary/visitsSummary/
-  // dealsSummary/salesSummary/sellerLabels continuam exclusivamente com
-  // activeMembership.companyId (sempre null para Super Admin) —
-  // Leads/Home-leaderboard/Tasks são os únicos módulos com contrato de
-  // Super Admin explícito até aqui (PRECHECK V2-READ §13-§17); Visits/
-  // Deals têm contrato próprio mas não alimentam nenhuma summary da Home
-  // ainda (Funil continua oculto, §26 do EXEC V2A); Sales/Resultados
-  // continuam fora de escopo (V2B).
+  // Pódio/Ranking/movement (§18 do EXEC V1). Desde
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §21, TODAS as summaries
+  // comerciais da Home (leads/tasks/visits/deals/sales) já recebem o
+  // companyId operacional do Super Admin, via seus respectivos
+  // platform*ScreenForHome acima — o Funil comercial inteiro (§20) usa a
+  // MESMA companyId aqui. sellerLabels (abaixo) continua exclusivamente
+  // com activeMembership.companyId — não alimenta o Funil, só a seção
+  // Manager (nunca renderiza para Super Admin).
   const podiumCompanyId = isOperationalSuperAdmin
     ? operational.companyId
     : (currentUser?.activeMembership?.companyId ?? null);
@@ -1358,12 +1448,15 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
           </div>
         )}
 
-        {/* SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §21/§22/§23 — Funil comercial
-            depende de Visits/Deals/Sales agregados como cohort (não só
-            Tasks): continua oculto por inteiro para Super Admin, mesmo
-            contextual (V2A-READ-B1-EXEC §26 — "não habilitar Funil
-            comercial completo ainda", Sales é V2B). */}
-        {currentUser?.platformRole !== 'super_admin' && (
+        {/* SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §20/§21 — agora
+            habilitado para Super Admin CONTEXTUAL: leads/visitsSummary/
+            dealsSummary/salesSummary acima já vêm da company explícita
+            (usePlatformLeads/usePlatformVisitsScreenState/
+            usePlatformDealsScreenState/usePlatformSalesScreenState) —
+            MESMO ConversionFunnel do Manager, zero componente novo.
+            Continua ausente para Super Admin GENÉRICO (mode:'none', sem
+            /company/[id], zero contrato de company). */}
+        {(currentUser?.platformRole !== 'super_admin' || isOperationalSuperAdmin) && (
           <div style={{ marginBottom: 26 }}><ConversionFunnel active={active} leadsSummary={leadsSummary} visitsSummary={visitsSummary} dealsSummary={dealsSummary} salesSummary={salesSummary} /></div>
         )}
         {isSellersLocal && <div style={{ marginBottom: 26 }}><MinhaDisputa active={active} comp={comp} /></div>}

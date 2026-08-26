@@ -48,6 +48,7 @@ import {
 } from '@/lib/deals/dealScreenGrouping';
 import { DEAL_PAYMENT_METHOD_LABELS_PT } from '@/lib/deals/labels';
 import { useRemoteSalesScreenState } from '@/lib/hooks/useRemoteSalesScreenState';
+import { usePlatformSalesScreenState } from '@/lib/hooks/usePlatformSalesScreenState';
 import type { RemoteSaleModel } from '@/lib/sales/adapter';
 import { buildSalesRanking } from '@/lib/sales/salesRanking';
 import type { SalesRankingRow as SalesRankingRowT } from '@/lib/sales/salesRanking';
@@ -849,7 +850,14 @@ function RemoteSaleRow({ sale, deal, sellersById, showSeller, now }: {
 export function ScreenVendas({ go }: any) {
   useStore();
   const currentUser = AuthService.getCurrentUser();
-  const remoteSalesScreen = useRemoteSalesScreenState(currentUser);
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC — mesmo padrão de
+  // ScreenVisitas/ScreenPropostas (V2A): ambos os hooks SEMPRE chamados
+  // (Rules of Hooks), só um produz rede real por vez.
+  const operational = useOperationalCompanyContext();
+  const isOperationalSuperAdmin = operational.mode === 'super_admin';
+  const membershipSalesScreen = useRemoteSalesScreenState(currentUser);
+  const platformSalesScreen = usePlatformSalesScreenState(isOperationalSuperAdmin ? operational.companyId : null);
+  const remoteSalesScreen = isOperationalSuperAdmin ? platformSalesScreen : membershipSalesScreen;
   const mode = remoteSalesScreen.mode;
 
   // Mesma identidade já usada por useRemoteSalesScreenState internamente —
@@ -857,13 +865,27 @@ export function ScreenVendas({ go }: any) {
   // resolve Cliente/Veículo por deal_id (mesmo dado de Negociações, zero
   // query nova); sellerLabels resolve o nome do vendedor (mesma
   // infraestrutura batch já usada por ScreenPropostas/ScreenVisitas).
-  const remoteDealsForSales = useRemoteDealsScreenState(currentUser);
+  // Super Admin contextual usa exatamente a MESMA fonte já usada por
+  // ScreenPropostas para Deals/sellers (usePlatformDealsScreenState/
+  // usePlatformSellers) — nenhuma query nova, nenhuma segunda autoridade.
+  const membershipDealsForSales = useRemoteDealsScreenState(currentUser);
+  const platformDealsForSales = usePlatformDealsScreenState(isOperationalSuperAdmin ? operational.companyId : null);
+  const remoteDealsForSales = isOperationalSuperAdmin ? platformDealsForSales : membershipDealsForSales;
   const sellerLabels = useCurrentCompanySellerLabels({
     userId: currentUser?.id ?? null,
     companyId: currentUser?.activeMembership?.companyId ?? null,
     membershipRole: currentUser?.activeMembership?.role ?? null,
     userIsActive: Boolean(currentUser),
   });
+  const platformSellersForSales = usePlatformSellers({
+    companyId: isOperationalSuperAdmin ? operational.companyId : null,
+    authorized: isOperationalSuperAdmin,
+  });
+  const platformSellersByIdForSales = useMemo(() => {
+    const map: Record<string, { id: string; name: string }> = {};
+    for (const s of platformSellersForSales.sellers) map[s.seller_id] = { id: s.seller_id, name: s.name };
+    return map;
+  }, [platformSellersForSales.sellers]);
 
   const pageHeadTitle = 'Vendas';
   const pageHeadSub = 'O que importa primeiro: quantas vendas você fechou.';
@@ -915,8 +937,9 @@ export function ScreenVendas({ go }: any) {
   // não-loading/não-erro/sem configError, já tratados acima).
   if (remoteActive) {
     const now = new Date();
-    const sellersById = sellerLabels.sellersById;
+    const sellersById = isOperationalSuperAdmin ? platformSellersByIdForSales : sellerLabels.sellersById;
     const isManager = currentUser?.activeMembership?.role === 'manager';
+    const showSeller = isManager || isOperationalSuperAdmin;
     const dealsById: Record<string, RemoteDealModel> = {};
     for (const d of remoteDealsForSales.deals) dealsById[d.id] = d;
     return (
@@ -928,14 +951,20 @@ export function ScreenVendas({ go }: any) {
             um formulário remoto sem Deal.
             PILOT-UI-TRUTH-FIXES-R1-EXEC §13: copy trocada de "Registrar
             venda" para "Ir para negociações" — o botão só navega, nunca
-            registra nada por si só (achado do PILOT-UI-TRUTH-AUDIT-A1). */}
-        <PageHead title={pageHeadTitle} sub={pageHeadSub} actions={<LBtn kind="gold" icon="trophy" size="lg" onClick={() => go('propostas')}>Ir para negociações</LBtn>} />
+            registra nada por si só (achado do PILOT-UI-TRUTH-AUDIT-A1).
+            SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §8/§9 — mesmo o
+            CTA sendo pura navegação (nunca uma mutation em si), ele aponta
+            direto para o fluxo de registrar venda (Negociações já oculta
+            "Abrir"/"Nova negociação" para Super Admin, mas o botão em si
+            comunicaria "vá completar uma venda" para quem está só
+            inspecionando) — oculto por inteiro para Super Admin contextual. */}
+        <PageHead title={pageHeadTitle} sub={pageHeadSub} actions={!isOperationalSuperAdmin && <LBtn kind="gold" icon="trophy" size="lg" onClick={() => go('propostas')}>Ir para negociações</LBtn>} />
         {remoteSalesScreen.sales.length === 0
           ? <DealStateCard testId="vendas-state-empty">Nenhuma venda registrada.</DealStateCard>
           : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {remoteSalesScreen.sales.map((s) => (
-                <RemoteSaleRow key={s.id} sale={s} deal={dealsById[s.dealId] ?? null} sellersById={sellersById} showSeller={isManager} now={now} />
+                <RemoteSaleRow key={s.id} sale={s} deal={dealsById[s.dealId] ?? null} sellersById={sellersById} showSeller={showSeller} now={now} />
               ))}
             </div>
           )}
@@ -1128,7 +1157,19 @@ export function ScreenResultados({ go }: any) {
   // remoto, zero query por Seller (useCurrentCompanySellerLabels é o mesmo
   // catálogo batch já usado por Propostas/Visitas/Vendas). Chamados SEMPRE,
   // na mesma ordem (Rules of Hooks), antes de qualquer branch de modo.
-  const remoteSalesScreen = useRemoteSalesScreenState(currentUser);
+  //
+  // SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §15/§16 — Resultados NÃO
+  // ganha nenhuma RPC própria (list_platform_results... nunca criada, por
+  // decisão explícita do PRECHECK): deriva 100% de Sales + roster de
+  // Sellers, exatamente como já faz para Manager/Seller — só a FONTE de
+  // Sales/Sellers muda para Super Admin contextual (mesma
+  // usePlatformSalesScreenState/usePlatformSellers já usada por
+  // ScreenVendas), buildSalesRanking permanece intocado.
+  const operational = useOperationalCompanyContext();
+  const isOperationalSuperAdmin = operational.mode === 'super_admin';
+  const membershipSalesScreen = useRemoteSalesScreenState(currentUser);
+  const platformSalesScreen = usePlatformSalesScreenState(isOperationalSuperAdmin ? operational.companyId : null);
+  const remoteSalesScreen = isOperationalSuperAdmin ? platformSalesScreen : membershipSalesScreen;
   const mode = remoteSalesScreen.mode;
   const sellerLabels = useCurrentCompanySellerLabels({
     userId: currentUser?.id ?? null,
@@ -1136,6 +1177,15 @@ export function ScreenResultados({ go }: any) {
     membershipRole: currentUser?.activeMembership?.role ?? null,
     userIsActive: Boolean(currentUser),
   });
+  const platformSellersForResults = usePlatformSellers({
+    companyId: isOperationalSuperAdmin ? operational.companyId : null,
+    authorized: isOperationalSuperAdmin,
+  });
+  const platformSellersByIdForResults = useMemo(() => {
+    const map: Record<string, { id: string; name: string }> = {};
+    for (const s of platformSellersForResults.sellers) map[s.seller_id] = { id: s.seller_id, name: s.name };
+    return map;
+  }, [platformSellersForResults.sellers]);
 
   const pageHeadTitle = 'Resultados';
   const pageHeadSub = 'Como a equipe está performando, em números simples.';
@@ -1196,7 +1246,8 @@ export function ScreenResultados({ go }: any) {
     // teve um ControlBar real (o "— Junho" do fixture não era um filtro
     // funcional), então o menor range compatível é "todas as Sales visíveis
     // agora" (R1-EXEC §4) — documentado, não inventado.
-    const ranking = buildSalesRanking(remoteSalesScreen.sales, sellerLabels.sellersById);
+    const resultsSellersById = isOperationalSuperAdmin ? platformSellersByIdForResults : sellerLabels.sellersById;
+    const ranking = buildSalesRanking(remoteSalesScreen.sales, resultsSellersById);
     return (
       <LightScreen>
         <PageHead title={pageHeadTitle} sub={pageHeadSub} />

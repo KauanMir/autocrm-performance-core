@@ -1941,6 +1941,27 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      list_platform_sales_for_company: {
+        Args: { p_company_id: string }
+        Returns: {
+          assigned_seller_id: string
+          company_id: string
+          created_at: string
+          deal_id: string
+          id: string
+          lead_id: string
+          payment_method: Database["public"]["Enums"]["deal_payment_method"]
+          sold_at: string
+          sold_by: string
+          sold_value_cents: number
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "sales"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       list_platform_sellers_for_company: {
         Args: { p_company_id: string }
         Returns: {

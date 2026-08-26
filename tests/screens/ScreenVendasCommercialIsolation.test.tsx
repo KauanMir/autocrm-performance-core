@@ -23,7 +23,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 const m = vi.hoisted(() => ({
   useRemoteSalesScreenState: vi.fn(),
+  usePlatformSalesScreenState: vi.fn(),
   useRemoteDealsScreenState: vi.fn(),
+  usePlatformDealsScreenState: vi.fn(),
+  usePlatformSellers: vi.fn(),
+  useOperationalCompanyContext: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   sales: vi.fn(() => [] as any[]),
@@ -35,6 +39,24 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks/useRemoteSalesScreenState', () => ({
   useRemoteSalesScreenState: m.useRemoteSalesScreenState,
+}));
+// SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC — mesmo padrão de
+// ScreenVisitasCommercialIsolation/ScreenPropostasCommercialIsolation
+// (V2A): dual-hook sempre chamado, usePlatformSalesScreenState/
+// usePlatformDealsScreenState/usePlatformSellers usam useQuery real por
+// dentro (mockados direto), default mode:'none' preserva 100% o
+// comportamento Manager/Seller já coberto acima.
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: m.useOperationalCompanyContext,
+}));
+vi.mock('@/lib/hooks/usePlatformSalesScreenState', () => ({
+  usePlatformSalesScreenState: m.usePlatformSalesScreenState,
+}));
+vi.mock('@/lib/hooks/usePlatformDealsScreenState', () => ({
+  usePlatformDealsScreenState: m.usePlatformDealsScreenState,
+}));
+vi.mock('@/lib/hooks/usePlatformSellers', () => ({
+  usePlatformSellers: m.usePlatformSellers,
 }));
 vi.mock('@/lib/hooks/useRemoteDealsScreenState', () => ({
   useRemoteDealsScreenState: m.useRemoteDealsScreenState,
@@ -132,7 +154,16 @@ beforeEach(() => {
   m.isManager.mockReset().mockReturnValue(false);
   m.isLocalCommercialDataAllowed.mockReset().mockReturnValue(true);
   m.useRemoteSalesScreenState.mockReset().mockReturnValue(saleScreenState('sale_local'));
+  m.usePlatformSalesScreenState.mockReset().mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
   m.useRemoteDealsScreenState.mockReset().mockReturnValue(dealScreenState('deal_local'));
+  m.usePlatformDealsScreenState.mockReset().mockReturnValue(dealScreenState('deal_remote_unavailable_identity'));
+  m.usePlatformSellers.mockReset().mockReturnValue({
+    queryEnabled: false, sellers: [] as any[], isLoading: false, isFetching: false,
+    isError: false, error: null, isEmpty: true, hasData: false, refetch: vi.fn(),
+  });
+  m.useOperationalCompanyContext.mockReset().mockReturnValue({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  });
   m.useCurrentCompanySellerLabels.mockReset().mockReturnValue(sellerLabelsState());
   m.user.current = LOCAL_MANAGER;
   m.go.mockReset();
@@ -312,5 +343,111 @@ describe('ScreenVendas — sale_remote_active com dado', () => {
     fireEvent.click(screen.getByText('Ir para negociações'));
     expect(m.go).toHaveBeenCalledWith('propostas');
     expect(m.openFlow).not.toHaveBeenCalled();
+  });
+});
+
+// ── SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC — Super Admin operacional ──
+
+const SUPER_ADMIN = { id: 'sa-1', name: 'Admin', email: 'a@a.com', platformRole: 'super_admin', activeMembership: null };
+
+describe('ScreenVendas — Super Admin operacional (contextual)', () => {
+  beforeEach(() => {
+    m.user.current = SUPER_ADMIN;
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-1',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+  });
+
+  it('fonte é usePlatformSalesScreenState (companyId explícito), membership hook é ignorado mesmo chamado', () => {
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [remoteSale({ id: 'sale-plat-1', dealId: 'deal-plat-1' })],
+    }));
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal({ id: 'deal-plat-1', clientName: 'Cliente da empresa aberta' })],
+    }));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [remoteSale({ id: 'sale-membership-1', dealId: 'deal-membership-1' })],
+    }));
+    m.useRemoteDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal({ id: 'deal-membership-1', clientName: 'Cliente de membership (não deve aparecer)' })],
+    }));
+
+    render(<ScreenVendas go={m.go} />);
+
+    expect(screen.getByText('Cliente da empresa aberta')).toBeInTheDocument();
+    expect(screen.queryByText('Cliente de membership (não deve aparecer)')).toBeNull();
+  });
+
+  it('usePlatformSalesScreenState/usePlatformDealsScreenState/usePlatformSellers recebem o companyId do contexto operacional', () => {
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isEmpty: true }));
+    render(<ScreenVendas go={m.go} />);
+    expect(m.usePlatformSalesScreenState).toHaveBeenCalledWith('company-op-1');
+    expect(m.usePlatformDealsScreenState).toHaveBeenCalledWith('company-op-1');
+    expect(m.usePlatformSellers).toHaveBeenCalledWith({ companyId: 'company-op-1', authorized: true });
+  });
+
+  it('vendedor aparece para Super Admin contextual (showSeller=true), vem de usePlatformSellers', () => {
+    m.usePlatformSellers.mockReturnValue({
+      queryEnabled: true, sellers: [{ seller_id: 's1', name: 'Fernanda Plataforma' }],
+      isLoading: false, isFetching: false, isError: false, error: null, isEmpty: false, hasData: true, refetch: vi.fn(),
+    });
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [remoteSale({ assignedSellerId: 's1' })],
+    }));
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal()],
+    }));
+
+    render(<ScreenVendas go={m.go} />);
+
+    expect(screen.getByText(/Fernanda/)).toBeInTheDocument();
+  });
+
+  it('"Ir para negociações" ausente (aponta para o fluxo de registrar venda — oculto por inteiro para Super Admin contextual)', () => {
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [remoteSale()],
+    }));
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal()],
+    }));
+
+    render(<ScreenVendas go={m.go} />);
+
+    expect(screen.queryByText('Ir para negociações')).toBeNull();
+  });
+
+  it('nenhum botão de mutation em nenhuma linha (RemoteSaleRow já não tem nenhum por padrão — regressão)', () => {
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [remoteSale()],
+    }));
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal()],
+    }));
+
+    render(<ScreenVendas go={m.go} />);
+
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('troca de empresa (companyId muda): nenhuma Sale da empresa anterior sobrevive', () => {
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [remoteSale({ id: 'sale-a', dealId: 'deal-a' })],
+    }));
+    m.usePlatformDealsScreenState.mockReturnValue(dealScreenState('deal_remote_active', {
+      hasData: true, deals: [remoteDeal({ id: 'deal-a', clientName: 'Cliente da Empresa A' })],
+    }));
+    const { rerender } = render(<ScreenVendas go={m.go} />);
+    expect(screen.getByText('Cliente da Empresa A')).toBeInTheDocument();
+
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-2',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isLoading: true }));
+    rerender(<ScreenVendas go={m.go} />);
+
+    expect(screen.queryByText('Cliente da Empresa A')).toBeNull();
+    expect(screen.getByTestId('vendas-state-loading')).toBeInTheDocument();
   });
 });

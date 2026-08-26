@@ -12,6 +12,9 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 const m = vi.hoisted(() => ({
   useRemoteSalesScreenState: vi.fn(),
+  usePlatformSalesScreenState: vi.fn(),
+  usePlatformSellers: vi.fn(),
+  useOperationalCompanyContext: vi.fn(),
   useCurrentCompanySellerLabels: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   sellers: vi.fn(() => [] as any[]),
@@ -21,6 +24,20 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/lib/hooks/useRemoteSalesScreenState', () => ({
   useRemoteSalesScreenState: m.useRemoteSalesScreenState,
+}));
+// SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC — mesmo padrão de
+// ScreenVendasCommercialIsolation.test.tsx: dual-hook sempre chamado,
+// usePlatformSalesScreenState/usePlatformSellers usam useQuery real por
+// dentro (mockados direto), default mode:'none' preserva 100% o
+// comportamento Manager/Seller já coberto acima.
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: m.useOperationalCompanyContext,
+}));
+vi.mock('@/lib/hooks/usePlatformSalesScreenState', () => ({
+  usePlatformSalesScreenState: m.usePlatformSalesScreenState,
+}));
+vi.mock('@/lib/hooks/usePlatformSellers', () => ({
+  usePlatformSellers: m.usePlatformSellers,
 }));
 vi.mock('@/lib/hooks/useCurrentCompanySellerLabels', () => ({
   useCurrentCompanySellerLabels: m.useCurrentCompanySellerLabels,
@@ -95,6 +112,14 @@ beforeEach(() => {
   m.sellers.mockReset().mockReturnValue([]);
   m.isLocalCommercialDataAllowed.mockReset().mockReturnValue(true);
   m.useRemoteSalesScreenState.mockReset().mockReturnValue(saleScreenState('sale_local'));
+  m.usePlatformSalesScreenState.mockReset().mockReturnValue(saleScreenState('sale_remote_unavailable_identity'));
+  m.usePlatformSellers.mockReset().mockReturnValue({
+    queryEnabled: false, sellers: [] as any[], isLoading: false, isFetching: false,
+    isError: false, error: null, isEmpty: true, hasData: false, refetch: vi.fn(),
+  });
+  m.useOperationalCompanyContext.mockReset().mockReturnValue({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  });
   m.useCurrentCompanySellerLabels.mockReset().mockReturnValue(sellerLabelsState());
   m.user.current = LOCAL_MANAGER;
   m.go.mockReset();
@@ -245,5 +270,98 @@ describe('ScreenResultados — sale_remote_active com dado: ranking real', () =>
     expect(rows).toHaveLength(1);
     expect(rows[0]).toHaveTextContent('Lucas Martins');
     expect(rows[0]).toHaveTextContent('R$ 40.000,00');
+  });
+});
+
+// ── SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC — Super Admin operacional ──
+
+const SUPER_ADMIN = { id: 'sa-1', name: 'Admin', email: 'a@a.com', platformRole: 'super_admin', activeMembership: null };
+
+describe('ScreenResultados — Super Admin operacional (contextual)', () => {
+  beforeEach(() => {
+    m.user.current = SUPER_ADMIN;
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-1',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+  });
+
+  it('fonte é usePlatformSalesScreenState (companyId explícito), membership hook é ignorado mesmo chamado', () => {
+    m.usePlatformSellers.mockReturnValue({
+      queryEnabled: true, sellers: [{ seller_id: 's1', name: 'Fernanda Plataforma' }],
+      isLoading: false, isFetching: false, isError: false, error: null, isEmpty: false, hasData: true, refetch: vi.fn(),
+    });
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [remoteSale({ id: 'sale-plat-1', assignedSellerId: 's1', soldValueCents: 7000000 })],
+    }));
+    m.useRemoteSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [remoteSale({ id: 'sale-membership-1', assignedSellerId: 's2', soldValueCents: 9000000 })],
+    }));
+
+    render(<ScreenResultados go={m.go} />);
+
+    const rows = screen.getAllByTestId('resultados-ranking-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent('Fernanda Plataforma');
+    expect(rows[0]).toHaveTextContent('R$ 70.000,00');
+    expect(screen.queryByText('Fernanda Dias')).toBeNull();
+  });
+
+  it('usePlatformSalesScreenState/usePlatformSellers recebem o companyId do contexto operacional', () => {
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isEmpty: true }));
+    render(<ScreenResultados go={m.go} />);
+    expect(m.usePlatformSalesScreenState).toHaveBeenCalledWith('company-op-1');
+    expect(m.usePlatformSellers).toHaveBeenCalledWith({ companyId: 'company-op-1', authorized: true });
+  });
+
+  it('Resultados bate com a mesma Sale já vista em Vendas: mesmo saleCount/revenueCents, sem recalcular fórmula', () => {
+    m.usePlatformSellers.mockReturnValue({
+      queryEnabled: true, sellers: [{ seller_id: 's1', name: 'Fernanda Plataforma' }],
+      isLoading: false, isFetching: false, isError: false, error: null, isEmpty: false, hasData: true, refetch: vi.fn(),
+    });
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true,
+      sales: [
+        remoteSale({ id: 'a', assignedSellerId: 's1', soldValueCents: 10000000 }),
+        remoteSale({ id: 'b', assignedSellerId: 's1', soldValueCents: 8000000 }),
+      ],
+    }));
+
+    render(<ScreenResultados go={m.go} />);
+
+    const rows = screen.getAllByTestId('resultados-ranking-row');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent('2');
+    expect(rows[0]).toHaveTextContent('R$ 180.000,00');
+  });
+
+  it('zero mutation/CTA (Resultados nunca teve nenhum, regressão)', () => {
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [remoteSale({ assignedSellerId: 's1' })],
+    }));
+    render(<ScreenResultados go={m.go} />);
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('troca de empresa (companyId muda): nenhum ranking da empresa anterior sobrevive', () => {
+    m.usePlatformSellers.mockReturnValue({
+      queryEnabled: true, sellers: [{ seller_id: 's1', name: 'Vendedor Empresa A' }],
+      isLoading: false, isFetching: false, isError: false, error: null, isEmpty: false, hasData: true, refetch: vi.fn(),
+    });
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', {
+      hasData: true, sales: [remoteSale({ id: 'sale-a', assignedSellerId: 's1' })],
+    }));
+    const { rerender } = render(<ScreenResultados go={m.go} />);
+    expect(screen.getByText('Vendedor Empresa A')).toBeInTheDocument();
+
+    m.useOperationalCompanyContext.mockReturnValue({
+      mode: 'super_admin', companyId: 'company-op-2',
+      identity: { status: 'ready' }, isReadOnly: false,
+    });
+    m.usePlatformSalesScreenState.mockReturnValue(saleScreenState('sale_remote_active', { isLoading: true }));
+    rerender(<ScreenResultados go={m.go} />);
+
+    expect(screen.queryByText('Vendedor Empresa A')).toBeNull();
+    expect(screen.getByTestId('resultados-state-loading')).toBeInTheDocument();
   });
 });
