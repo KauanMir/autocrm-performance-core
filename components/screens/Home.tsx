@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, CountUp, FitBox } from '@/components/ui/kit';
 import { PLACE, Podium } from '@/components/podiums/Podiums';
+import { MobilePodium } from '@/components/podiums/MobilePodium';
 import { useStore } from '@/lib/store';
 import { AuthService, SellerService, LeadService, VisitService, DealService, SaleService, TaskService } from '@/lib/services';
 import { VISIT_STATUS, DEAL_STATUS, TASK_STATE } from '@/lib/data';
@@ -353,8 +354,14 @@ function getCompetition(sellers: any[]) {
 // `isSellersLocal` já usada pelo resto da Home para decidir o que
 // renderizar.
 function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam, isSellersLocal }: any) {
+  // MOBILE-RESPONSIVENESS-V1-B4-EXEC §8/§16 — < md: gutter menor; o
+  // seletor de variante do pódio fica compacto (sem o rótulo "Pódio",
+  // pills A/B/C/D só). Período e filtros preservados; A/B/C/D e a
+  // persistência (localStorage/user preference) inalterados.
+  const { isMd, width } = useViewport();
+  const gx = gutterForWidth(width);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', padding: '14px 26px', borderBottom: '1px solid var(--line-dark)', background: 'rgba(8,8,9,.78)', backdropFilter: 'blur(10px)', position: 'sticky', top: 0, zIndex: 8 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: isMd ? 14 : 8, rowGap: 8, flexWrap: 'wrap', padding: isMd ? '14px 26px' : `10px ${gx}px`, borderBottom: '1px solid var(--line-dark)', background: 'rgba(8,8,9,.78)', backdropFilter: 'blur(10px)', position: 'sticky', top: 0, zIndex: 8 }}>
       {isSellersLocal && (
         <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
           {PERIODS.map(p => (
@@ -369,10 +376,10 @@ function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam, isS
           ))}
         </div>
       )}
-      <div style={{ flex: 1 }} />
+      <div style={{ flex: isMd ? 1 : undefined }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 11, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 700 }}>Pódio</span>
-        <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
+        {isMd && <span style={{ fontSize: 11, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 700 }}>Pódio</span>}
+        <div aria-label="Visual do pódio" style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
           {[['A', 'Pódio'], ['B', 'Líder'], ['C', 'Galeria'], ['D', 'Campeão']].map(([v, name]) => (
             <button key={v} onClick={() => setVariant(v)} title={name} style={{ padding: '8px 12px', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: 'none', fontFamily: 'Archivo, sans-serif', background: variant === v ? 'rgba(212,175,55,.16)' : 'transparent', color: variant === v ? '#E8CE72' : 'var(--txt-lo)', boxShadow: variant === v ? 'inset 0 0 0 1px rgba(212,175,55,.4)' : 'none', transition: 'all .15s' }}>{v}</button>
           ))}
@@ -514,6 +521,10 @@ function RaceMsg({ icon, c, title, children }: any) {
 // card legado (avatar, header, badge de posição, grid de stats, RaceMsg);
 // local/fixture (comp-based) permanece intocado abaixo.
 function MinhaDisputa({ active, comp, remote }: any) {
+  // MOBILE-RESPONSIVENESS-V1-B4-EXEC §11 — < md: trio de stats vira lista
+  // compacta "label ..... valor" (nunca 3 cards espremidos ilegíveis);
+  // callouts empilham abaixo. >= md: preserva o layout atual.
+  const { isMd } = useViewport();
   if (remote) {
     const { me, lines } = remote;
     // COMPETITION-V2-B2-EXEC §8 — os três critérios de produto, nesta
@@ -538,20 +549,32 @@ function MinhaDisputa({ active, comp, remote }: any) {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 18 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, alignContent: 'start' }}>
-            {stats.map((s: any) => (
-              <div key={s.label} style={{ background: 'rgba(0,0,0,.3)', border: '1px solid var(--line-dark)', borderRadius: 13, padding: '14px 10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9 }}>
-                  <Icon name={s.icon} size={14} stroke={2} style={{ color: s.gold ? '#D4AF37' : 'var(--txt-lo)' }} />
+        <div style={{ display: 'grid', gridTemplateColumns: isMd ? '1.15fr 1fr' : '1fr', gap: 18 }}>
+          {isMd ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, alignContent: 'start' }}>
+              {stats.map((s: any) => (
+                <div key={s.label} style={{ background: 'rgba(0,0,0,.3)', border: '1px solid var(--line-dark)', borderRadius: 13, padding: '14px 10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9 }}>
+                    <Icon name={s.icon} size={14} stroke={2} style={{ color: s.gold ? '#D4AF37' : 'var(--txt-lo)' }} />
+                  </div>
+                  <div className="display tnum" style={{ fontSize: 28, fontWeight: 800, color: s.gold ? '#E8CE72' : '#fff', lineHeight: 1 }}>
+                    {active ? <CountUp value={s.v} active={active} /> : s.v}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: 'var(--txt-lo)', fontWeight: 600, marginTop: 6 }}>{s.label}</div>
                 </div>
-                <div className="display tnum" style={{ fontSize: 28, fontWeight: 800, color: s.gold ? '#E8CE72' : '#fff', lineHeight: 1 }}>
-                  {active ? <CountUp value={s.v} active={active} /> : s.v}
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(0,0,0,.3)', border: '1px solid var(--line-dark)', borderRadius: 13, padding: '12px 14px' }}>
+              {stats.map((s: any) => (
+                <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Icon name={s.icon} size={14} stroke={2} style={{ color: s.gold ? '#D4AF37' : 'var(--txt-lo)', flexShrink: 0 }} />
+                  <span style={{ fontSize: 13, color: 'var(--txt-mid)', fontWeight: 600, flex: 1, minWidth: 0 }}>{s.label}</span>
+                  <span className="display tnum" style={{ fontSize: 20, fontWeight: 900, color: s.gold ? '#E8CE72' : '#fff', flexShrink: 0 }}>{s.v}</span>
                 </div>
-                <div style={{ fontSize: 10.5, color: 'var(--txt-lo)', fontWeight: 600, marginTop: 6 }}>{s.label}</div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {(lines as any[]).map((line) => (
@@ -1081,7 +1104,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // próprio; agora deriva do hook compartilhado `useViewport`. Limiar 1240
   // preservado EXATAMENTE (A1 §29 quer consolidar 1240→lg, mas isso fica
   // para o B4 junto do redesign mobile da Home; B1 não redesenha a Home).
-  const { width: viewportWidth } = useViewport();
+  const { width: viewportWidth, isMd } = useViewport();
   const narrow = viewportWidth < 1240;
   const homeGutter = gutterForWidth(viewportWidth);
 
@@ -1370,6 +1393,23 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   const top3 = sellers.slice(0, 3);
   const comp = isSellersLocal ? localComp : remoteComp;
 
+  // MOBILE-RESPONSIVENESS-V1-B4-EXEC §2-§6 — < md: layout mobile REAL.
+  // Sem FitBox (nada de fonte de 5-6px), sem altura fixa, sem 2-pane —
+  // Pódio nativo + Ranking empilhados, altura definida pelo conteúdo.
+  const isMobileHome = !isMd;
+  const podiumPeriodLabel = isSellersLocal ? `${period} · ${team}` : period;
+  const mobilePodiumBlock = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginBottom: 26 }}>
+      <MobilePodium
+        top3={top3}
+        period={podiumPeriodLabel}
+        meId={mySellerId}
+        targetId={comp?.rivalAhead?.id ?? null}
+      />
+      <RankingList sellers={sellers} active={active} comp={comp} />
+    </div>
+  );
+
   const podiumStage = (
     <div style={{ position: 'relative', background: 'radial-gradient(120% 80% at 50% 6%, #1d1d21 0%, #131315 48%, #0b0b0c 100%)', border: '1px solid var(--line-dark)', borderRadius: 22, padding: '0 16px 14px', height: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
       <div className="ambient" style={{ position: 'absolute', inset: 0, background: 'radial-gradient(60% 50% at 50% 0%, rgba(212,175,55,.14), transparent 70%), radial-gradient(40% 40% at 12% 92%, rgba(193,18,31,.07), transparent 70%)', pointerEvents: 'none' }} />
@@ -1419,7 +1459,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
           ficam para o B4. */}
       <div style={{ padding: `22px ${homeGutter}px 44px`, position: 'relative' }}>
         {isSellersLocal ? (
-          narrow ? (
+          isMobileHome ? mobilePodiumBlock : narrow ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginBottom: 26 }}>
               <div style={{ height: variant === 'A' ? 620 : variant === 'B' ? 540 : variant === 'D' ? 700 : 560 }}>{podiumStage}</div>
               <div style={{ height: 520 }}><RankingList sellers={sellers} active={active} comp={comp} /></div>
@@ -1450,7 +1490,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
             {(leaderboard.status === 'unavailable' || leaderboard.status === 'local') && <CommercialWidgetNotice>Métricas comerciais indisponíveis nesta sessão.</CommercialWidgetNotice>}
             {leaderboard.status === 'empty' && <PodiumEmptyState sellerCount={leaderboard.sellerCount} />}
             {leaderboard.status === 'ready' && (
-              narrow ? (
+              isMobileHome ? mobilePodiumBlock : narrow ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
                   <div style={{ height: variant === 'A' ? 620 : variant === 'B' ? 540 : variant === 'D' ? 700 : 560 }}>{podiumStage}</div>
                   <div style={{ height: 520 }}><RankingList sellers={sellers} active={active} comp={comp} /></div>

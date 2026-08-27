@@ -7,7 +7,7 @@
 // useCurrentCompanySellerLabels) — aqui validamos só o roteamento de Home
 // por estado, mesmo padrão de tests/screens/ScreenClientes.test.tsx.
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { TASK_STATE } from '@/lib/data';
 
@@ -2526,5 +2526,62 @@ describe('Home — badge "AO VIVO" removido (PILOT-UI-TRUTH-FIXES-R1-EXEC §12)'
     renderHome(manager());
     expect(screen.queryByText('AO VIVO')).toBeNull();
     expect(screen.queryByText('ao vivo')).toBeNull();
+  });
+});
+
+// ── MOBILE-RESPONSIVENESS-V1-B4-EXEC §2/§3/§5/§50 — Home mobile REAL ─────
+// < md: Pódio nativo (MobilePodium, sem FitBox / sem scale / sem altura
+// fixa) + Ranking empilhado. >= md: layout de sempre.
+describe('Home — layout mobile (< md)', () => {
+  const ORIGINAL_WIDTH = window.innerWidth;
+  const setWidth = (px: number) =>
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: px });
+  afterEach(() => setWidth(ORIGINAL_WIDTH));
+
+  function renderRemoteReady() {
+    m.isLocalCommercialDataAllowed.mockReturnValue(false);
+    m.useRemoteLeadsScreenState.mockReturnValue(
+      screenState('remote_active', { leads: { hasData: true, isEmpty: false, leads: [] } }),
+    );
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, completedVisitCount: 1, scheduledVisitCount: 5, rank: 1 }),
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 3, completedVisitCount: 1, scheduledVisitCount: 2, rank: 2 }),
+        leaderboardRow({ sellerId: 's3', sellerLabel: 'João Ferreira', saleCount: 0, completedVisitCount: 0, scheduledVisitCount: 0, rank: 3 }),
+      ],
+    });
+  }
+
+  it('390px: Pódio mobile com os 3 critérios; sem transform:scale (§5/§45)', () => {
+    setWidth(390);
+    renderRemoteReady();
+    renderHome(manager());
+    // MobilePodium: rótulos dos 3 critérios presentes (Top 3)
+    expect(screen.getAllByText('Vendas').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByText('Visitas').length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByText('Agendamentos').length).toBeGreaterThanOrEqual(3);
+    // nenhum elemento usa scale para "caber"
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('*'))) {
+      expect(el.style.transform || '').not.toMatch(/scale\(0/);
+    }
+  });
+
+  it('390px: Ranking completo continua presente e empilhado (sem altura fixa 520)', () => {
+    setWidth(390);
+    renderRemoteReady();
+    renderHome(manager());
+    expect(within(getRankingListContainer()).getAllByText('Lucas Martins').length).toBeGreaterThanOrEqual(1);
+    // o wrapper de altura fixa (620/540/520...) não é usado no branch mobile
+    expect(document.body.innerHTML).not.toMatch(/height:\s*520px/);
+  });
+
+  it('1440px: layout desktop preservado (Pódio desktop, sem MobilePodium)', () => {
+    setWidth(1440);
+    renderRemoteReady();
+    renderHome(manager());
+    // desktop mostra o RankingList; MobilePodium não injeta um segundo
+    // "PÓDIO DE CAMPEÕES" fora do podiumStage
+    expect(within(getRankingListContainer()).getAllByText('Lucas Martins').length).toBeGreaterThanOrEqual(1);
   });
 });

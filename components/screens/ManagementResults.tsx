@@ -24,6 +24,8 @@ import { AuthService } from '@/lib/services';
 import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
 import { useCurrentCompanyTimezone } from '@/lib/hooks/useCurrentCompanyTimezone';
 import { useViewport } from '@/lib/hooks/useViewport';
+import { BREAKPOINTS } from '@/lib/ui/breakpoints';
+import { TableScroller } from '@/components/ui/primitives';
 import {
   resolvePresetRange,
   resolveCustomRange,
@@ -49,14 +51,17 @@ const PRESETS: PeriodPreset[] = ['Hoje', '7 dias', '15 dias', '30 dias'];
 const DEFAULT_PERIOD = '30 dias'; // §11 — nunca all-time, nunca mês civil implícito
 type PeriodChoice = PeriodPreset | 'Personalizado';
 
-// ── responsividade — MOBILE-RESPONSIVENESS-V1-B1-EXEC §4 ────────────────
-// Antes: listener de resize próprio (`useColumns`). Agora deriva do hook
-// compartilhado `useViewport`. Limiares 980/640 PRESERVADOS exatamente
-// (A1 §29 quer consolidar 980→lg — fica para o B4). Helper puro extraído
-// para teste isolado (§37).
+// ── responsividade — MOBILE-RESPONSIVENESS-V1-B4-EXEC §19 ──────────────
+// Consolidado nos breakpoints GLOBAIS (sem magic numbers isolados):
+//   < sm (640)  → 1 coluna
+//   sm..lg      → 2 colunas
+//   >= lg (1024)→ 3 colunas
+// Mudança vs B1: o limiar superior era 980 (ad-hoc), agora é `lg` (1024).
+// Na faixa 980-1023 os 6 cards passam de 3 para 2 colunas — banda estreita
+// e incomum de desktop; ganho: um único conjunto de breakpoints.
 export function resultsColumnsForWidth(width: number): number {
-  if (width >= 980) return 3;
-  if (width >= 640) return 2;
+  if (width >= BREAKPOINTS.lg) return 3;
+  if (width >= BREAKPOINTS.sm) return 2;
   return 1;
 }
 function useColumns(): number {
@@ -399,7 +404,7 @@ function TeamSection({ report }: { report: ManagementReport }) {
         <ResultsMessage testId="results-team-empty">Nenhuma atividade da equipe neste período.</ResultsMessage>
       ) : (
         <LCard pad={0} style={{ overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
+          <TableScroller>
             <table style={{ width: '100%', minWidth: 620, borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr>
@@ -446,7 +451,7 @@ function TeamSection({ report }: { report: ManagementReport }) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroller>
         </LCard>
       )}
     </section>
@@ -464,7 +469,7 @@ function SourceSection({ report }: { report: ManagementReport }) {
         <ResultsMessage testId="results-sources-empty">Nenhuma origem registrada neste período.</ResultsMessage>
       ) : (
         <LCard pad={0} style={{ overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
+          <TableScroller>
             <table style={{ width: '100%', minWidth: 420, borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr>
@@ -498,7 +503,7 @@ function SourceSection({ report }: { report: ManagementReport }) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroller>
         </LCard>
       )}
     </section>

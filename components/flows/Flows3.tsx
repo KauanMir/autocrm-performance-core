@@ -404,7 +404,7 @@ export function FlowEstados({ payload, close }: any) {
         <Chip active={tab === 'vazios'} onClick={() => setTab('vazios')}>Estados vazios</Chip>
         <Chip active={tab === 'erros'} onClick={() => setTab('erros')}>Estados de erro</Chip>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 18 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(330px, 100%), 1fr))', gap: 18 }}>
         {list.map((s, i) => <StateCard key={i} {...(s as any)} />)}
       </div>
     </FlowShell>

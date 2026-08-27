@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard, Stat } from '@/components/ui/kit';
 import { DataRow, RowActionMenu } from '@/components/ui/DataRow';
+import { ChipRow, FormGrid } from '@/components/ui/primitives';
 import { useViewport } from '@/lib/hooks/useViewport';
 import { VISIT_STATUS, DEAL_STATUS, SALE_STATUS, USERS } from '@/lib/data';
 import { useStore } from '@/lib/store';
@@ -1348,6 +1349,11 @@ function ScreenAjustesEmpresaRemote({ userId, companyId, readAuthorized, writeAu
 
 export function ScreenAjustes({ go }: any) {
   useStore();
+  // MOBILE-RESPONSIVENESS-V1-B4-EXEC §26/§31 — tabs em ChipRow; reorder de
+  // Etapas ganha botões Subir/Descer em < md (drag-and-drop HTML5 não
+  // funciona em touch). Reusa a MESMA autoridade de reorder (RPC atômica
+  // remota / PipelineService.reorderStages local) — nenhum write novo.
+  const { isMd } = useViewport();
   const currentUser = AuthService.getCurrentUser();
   // COMMERCIAL-REMOTE-SUPER-ADMIN-S1-R1 — LeadService.getAll() exige um
   // contexto comercial (Manager/Seller com activeMembership); em modo
@@ -1519,6 +1525,27 @@ export function ScreenAjustes({ go }: any) {
     return index !== 0; // legado: "Novo" fixado no caminho local
   };
 
+  // MOBILE-RESPONSIVENESS-V1-B4-EXEC §31 — mover uma etapa por índice
+  // (botões Subir/Descer). Constrói a nova ordem e chama a MESMA
+  // autoridade de reorder usada pelo drag-and-drop — nunca N writes.
+  const moveStage = (index: number, dir: -1 | 1) => {
+    const to = index + dir;
+    if (to < 0 || to >= stages.length) return;
+    if (!isRemote && (index === 0 || to === 0)) return; // legado: "Novo" fixo em 1º
+    if (isRemote) {
+      if (!(remoteReady && canReorderRemote && !reorder.isPending)) return;
+      const ids = stages.map((s) => s.id);
+      const [moved] = ids.splice(index, 1);
+      ids.splice(to, 0, moved);
+      reorder.reorderStages(ids).catch(() => { /* exposto em reorder.error */ });
+    } else {
+      const names = stages.map((s) => s.name);
+      const [moved] = names.splice(index, 1);
+      names.splice(to, 0, moved);
+      PipelineService.reorderStages(names);
+    }
+  };
+
   const handleDropStage = (target: PipelineStage) => {
     const targetKey = stageDragKey(target);
     if (isRemote) {
@@ -1555,9 +1582,9 @@ export function ScreenAjustes({ go }: any) {
   return (
     <LightScreen>
       <PageHead title="Ajustes" sub="Configure o sistema para a realidade da sua loja." />
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+      <ChipRow style={{ marginBottom: 20 }}>
         {allowedTabs.map(t => <Chip key={t} active={activeTab === t} onClick={() => setTab(t)}>{t}</Chip>)}
-      </div>
+      </ChipRow>
       {activeTab === null && (
         <LCard style={{ maxWidth: 520 }}>
           <div data-testid="settings-denied" style={{ padding: '18px 6px', fontSize: 13.5, color: 'var(--t-500)' }}>
@@ -1570,10 +1597,10 @@ export function ScreenAjustes({ go }: any) {
           <LCard style={{ maxWidth: 640 }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 18 }}>Dados da loja</div>
             <Field label="Nome da loja" value={companyForm.name} onChange={(v: string) => setField('name', v)} />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <FormGrid gap={14}>
               <Field label="CNPJ" value={companyForm.cnpj} onChange={(v: string) => setField('cnpj', v)} />
               <Field label="Telefone" value={companyForm.phone} onChange={(v: string) => setField('phone', v)} />
-            </div>
+            </FormGrid>
             <Field label="Fuso horário" value={companyForm.timezone} onChange={(v: string) => setField('timezone', v)} />
             <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
               <LBtn kind="primary" icon="check" onClick={() => { CompanyService.update(companyForm); setSaved(true); }}>Salvar alterações</LBtn>
@@ -1638,10 +1665,27 @@ export function ScreenAjustes({ go }: any) {
                   onDragEnd={() => { setDraggedStage(null); setOverStage(null); }}
                   onDragOver={(e: any) => { e.preventDefault(); if (draggedStage && overStage !== stageDragKey(s)) setOverStage(stageDragKey(s)); }}
                   onDrop={(e: any) => { e.preventDefault(); handleDropStage(s); }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: `1px solid ${overStage === stageDragKey(s) ? 'var(--gold-line)' : 'var(--border)'}`, borderRadius: 10, marginBottom: 8, cursor: stageDraggable(s, i) ? 'grab' : 'default', opacity: draggedStage === stageDragKey(s) ? 0.4 : 1, transition: 'opacity .12s, border-color .15s' }}>
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: `1px solid ${overStage === stageDragKey(s) ? 'var(--gold-line)' : 'var(--border)'}`, borderRadius: 10, marginBottom: 8, cursor: isMd && stageDraggable(s, i) ? 'grab' : 'default', opacity: draggedStage === stageDragKey(s) ? 0.4 : 1, transition: 'opacity .12s, border-color .15s' }}>
                   <Icon name="list" size={16} stroke={2} style={{ color: 'var(--t-400)' }} />
-                  <span style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</span>
-                  <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--t-400)' }}>{leads.filter((l: any) => l.stage === s.name).length} clientes</span>
+                  <span style={{ fontWeight: 600, fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</span>
+                  <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--t-400)', flexShrink: 0 }}>{leads.filter((l: any) => l.stage === s.name).length} clientes</span>
+                  {/* < md: drag HTML5 não funciona em touch → Subir/Descer. */}
+                  {!isMd && (
+                    <span style={{ display: 'flex', gap: 4, flexShrink: 0 }} onClick={(e: any) => e.stopPropagation()}>
+                      <button aria-label={`Subir ${s.name}`} disabled={i === 0 || (!isRemote && i === 1) || !stageDraggable(s, i)}
+                        onClick={() => moveStage(i, -1)}
+                        className="focus-ring"
+                        style={{ width: 40, height: 40, borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--t-700)', opacity: (i === 0 || (!isRemote && i === 1) || !stageDraggable(s, i)) ? 0.35 : 1 }}>
+                        <Icon name="arrowUp" size={16} stroke={2.4} />
+                      </button>
+                      <button aria-label={`Descer ${s.name}`} disabled={i === stages.length - 1 || !stageDraggable(s, i)}
+                        onClick={() => moveStage(i, 1)}
+                        className="focus-ring"
+                        style={{ width: 40, height: 40, borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--t-700)', opacity: (i === stages.length - 1 || !stageDraggable(s, i)) ? 0.35 : 1 }}>
+                        <Icon name="arrowDown" size={16} stroke={2.4} />
+                      </button>
+                    </span>
+                  )}
                 </div>
               ))}
               {isRemote && reorder.isPending && (

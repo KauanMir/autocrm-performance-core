@@ -2,7 +2,7 @@
 // usePipelineStages/useReorderStages mockados; services mockados; sem rede.
 // O helper getReorderStagesErrorMessage permanece REAL (partial mock).
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { adaptLocalStageNames } from '@/lib/pipeline/localStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
@@ -612,5 +612,81 @@ describe('ScreenAjustes — Manager preserva a leitura de Leads (COMMERCIAL-REMO
 
     expect(m.leadServiceGetAll).toHaveBeenCalled();
     expect(screen.getByTestId('stage-row-new')).toHaveTextContent('2 clientes');
+  });
+});
+
+// ── C. MOBILE-RESPONSIVENESS-V1-B4-EXEC §31/§55 — reorder por toque ──────
+// Em < md o drag HTML5 não funciona: a aba Etapas ganha botões
+// Subir/Descer que reusam a MESMA autoridade de reorder (RPC atômica
+// remota / PipelineService.reorderStages local).
+describe('ScreenAjustes/Etapas — reorder por toque (< md)', () => {
+  const ORIGINAL_WIDTH = window.innerWidth;
+  const setWidth = (px: number) =>
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: px });
+
+  beforeEach(() => {
+    setWidth(390);
+    m.user.current = { ...m.user.current, platformRole: 'super_admin' };
+  });
+  afterEach(() => setWidth(ORIGINAL_WIDTH));
+
+  function reorder() {
+    const r = reorderResult();
+    m.useReorderStages.mockReturnValue(r);
+    m.usePipelineStages.mockReturnValue(pipelineResult({ stages: REMOTE_STAGES }));
+    return r;
+  }
+
+  it('mostra Subir/Descer em cada etapa (só < md)', () => {
+    reorder();
+    openEtapas();
+    expect(screen.getByRole('button', { name: 'Subir Qualificado' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Descer Qualificado' })).toBeInTheDocument();
+  });
+
+  it('primeiro não pode subir; último não pode descer', () => {
+    reorder();
+    openEtapas();
+    expect(screen.getByRole('button', { name: 'Subir Novo' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Descer Fechamento' })).toBeDisabled();
+    // meio é habilitado nos dois sentidos
+    expect(screen.getByRole('button', { name: 'Subir Em negociação' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Descer Em negociação' })).not.toBeDisabled();
+  });
+
+  it('Subir chama reorder.reorderStages UMA vez com a nova ordem (autoridade atômica)', () => {
+    const r = reorder();
+    openEtapas();
+    fireEvent.click(screen.getByRole('button', { name: 'Subir Qualificado' }));
+    expect(r.reorderStages).toHaveBeenCalledTimes(1);
+    expect(r.reorderStages).toHaveBeenCalledWith([
+      'uuid-qualified', 'uuid-new', 'uuid-visit_scheduled', 'uuid-negotiation', 'uuid-closing',
+    ]);
+    expect(m.reorderStagesLocal).not.toHaveBeenCalled();
+  });
+
+  it('Descer chama reorder.reorderStages UMA vez com a nova ordem', () => {
+    const r = reorder();
+    openEtapas();
+    fireEvent.click(screen.getByRole('button', { name: 'Descer Novo' }));
+    expect(r.reorderStages).toHaveBeenCalledTimes(1);
+    expect(r.reorderStages).toHaveBeenCalledWith([
+      'uuid-qualified', 'uuid-new', 'uuid-visit_scheduled', 'uuid-negotiation', 'uuid-closing',
+    ]);
+  });
+
+  it('caminho local: Subir/Descer usa PipelineService.reorderStages (nomes), "Novo" fixo em 1º', () => {
+    m.usePipelineStages.mockReturnValue(pipelineResult({
+      source: 'local', remoteStagesEnabled: false, queryEnabled: false,
+      stages: adaptLocalStageNames(LOCAL_NAMES),
+    }));
+    openEtapas();
+    // "Novo" (i=0) não move; "Qualificado" (i=1) não pode subir (iria p/ 1º)
+    expect(screen.getByRole('button', { name: 'Subir Qualificado' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Descer Qualificado' }));
+    expect(m.reorderStagesLocal).toHaveBeenCalledTimes(1);
+    expect(m.reorderStagesLocal).toHaveBeenCalledWith([
+      'Novo', 'Visita agendada', 'Qualificado', 'Em negociação', 'Fechamento',
+    ]);
   });
 });

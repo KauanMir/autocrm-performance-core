@@ -104,7 +104,9 @@ export function PageHead({ title, sub, actions }: { title: string; sub?: string;
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
       <div>
-        <h1 className="display" style={{ margin: 0, fontSize: 30, fontWeight: 800, color: 'var(--t-900)', letterSpacing: '-.02em' }}>{title}</h1>
+        {/* MOBILE-RESPONSIVENESS-V1-B4-EXEC §44 — token de tipografia
+            (30px desktop / 22px em <= 640, definido em globals.css). */}
+        <h1 className="display" style={{ margin: 0, fontSize: 'var(--fs-h1)', fontWeight: 800, color: 'var(--t-900)', letterSpacing: '-.02em' }}>{title}</h1>
         {sub && <p style={{ margin: '6px 0 0', color: 'var(--t-500)', fontSize: 14.5 }}>{sub}</p>}
       </div>
       {actions && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{actions}</div>}
