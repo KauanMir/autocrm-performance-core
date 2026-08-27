@@ -11,7 +11,7 @@ import {
 } from '@/lib/podium/competition';
 
 function row(over: Partial<CompetitionRow> = {}): CompetitionRow {
-  return { sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, completedVisitCount: 1, rank: 1, ...over };
+  return { sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, completedVisitCount: 1, scheduledVisitCount: 0, rank: 1, ...over };
 }
 
 describe('resolveMyCompetitionState — casos base', () => {
@@ -104,8 +104,8 @@ describe('buildMinhaDisputaLines — rival direto (gap)', () => {
   });
 });
 
-describe('buildMinhaDisputaLines — empate com rival', () => {
-  it('empate em vendas, desempate por visitas: copy honesta sem "0 vendas"', () => {
+describe('buildMinhaDisputaLines — empate com rival (COMPETITION-V2 §9)', () => {
+  it('Caso B — empate em vendas, decisão por visitas: nomeia o gap de visitas', () => {
     const state = {
       status: 'chasing' as const,
       me: row({ sellerId: 's1', saleCount: 4, completedVisitCount: 1 }),
@@ -113,20 +113,54 @@ describe('buildMinhaDisputaLines — empate com rival', () => {
     };
     const lines = buildMinhaDisputaLines(state, [state.me, state.rival]);
     const text = lines.find((l) => l.id === 'rival')!.text;
-    expect(text).toBe('Vocês estão empatados em vendas. Fernanda está na frente pelo número de visitas realizadas.');
+    expect(text).toBe('Vocês estão empatados em vendas. Fernanda está na frente por 2 visitas.');
     expect(text).not.toMatch(/0 vendas/);
   });
 
-  it('empate em vendas E visitas: copy honesta de desempate técnico, sem detalhe de SQL', () => {
+  it('Caso C — empate em vendas e visitas, decisão por agendamentos: nomeia o gap de agendamentos', () => {
     const state = {
       status: 'chasing' as const,
-      me: row({ sellerId: 's1', saleCount: 4, completedVisitCount: 2 }),
-      rival: row({ sellerId: 's2', sellerLabel: 'Fernanda Dias', saleCount: 4, completedVisitCount: 2, rank: 1 }),
+      me: row({ sellerId: 's1', saleCount: 4, completedVisitCount: 2, scheduledVisitCount: 5 }),
+      rival: row({ sellerId: 's2', sellerLabel: 'Fernanda Dias', saleCount: 4, completedVisitCount: 2, scheduledVisitCount: 8, rank: 1 }),
     };
     const lines = buildMinhaDisputaLines(state, [state.me, state.rival]);
     const text = lines.find((l) => l.id === 'rival')!.text;
-    expect(text).toBe('Vocês estão empatados em vendas e visitas. Fernanda está à frente pelo critério de desempate.');
-    expect(text).not.toMatch(/MAX\(|ORDER BY|sold_at/i);
+    expect(text).toBe('Vocês estão empatados em vendas e visitas. Fernanda está na frente por 3 agendamentos.');
+    expect(text).not.toMatch(/first-to-reach|desempate técnico|MAX\(|ORDER BY|sold_at/i);
+  });
+
+  it('Caso C singular — gap de 1 agendamento', () => {
+    const state = {
+      status: 'chasing' as const,
+      me: row({ sellerId: 's1', saleCount: 2, completedVisitCount: 1, scheduledVisitCount: 2 }),
+      rival: row({ sellerId: 's2', sellerLabel: 'Fernanda Dias', saleCount: 2, completedVisitCount: 1, scheduledVisitCount: 3, rank: 1 }),
+    };
+    const text = buildMinhaDisputaLines(state, [state.me, state.rival]).find((l) => l.id === 'rival')!.text;
+    expect(text).toBe('Vocês estão empatados em vendas e visitas. Fernanda está na frente por 1 agendamento.');
+  });
+
+  it('Caso D — empate total nos três critérios: nunca menciona first-to-reach', () => {
+    const state = {
+      status: 'chasing' as const,
+      me: row({ sellerId: 's1', saleCount: 4, completedVisitCount: 2, scheduledVisitCount: 3 }),
+      rival: row({ sellerId: 's2', sellerLabel: 'Fernanda Dias', saleCount: 4, completedVisitCount: 2, scheduledVisitCount: 3, rank: 1 }),
+    };
+    const text = buildMinhaDisputaLines(state, [state.me, state.rival]).find((l) => l.id === 'rival')!.text;
+    expect(text).toBe('Vocês estão empatados em vendas, visitas e agendamentos com Fernanda.');
+    expect(text).not.toMatch(/desempate|MAX\(|ORDER BY|sold_at/i);
+  });
+});
+
+describe('buildMinhaDisputaLines — liderança pelo 3º critério (§10)', () => {
+  it('empatado em vendas e visitas, na frente por agendamentos: "Você está na frente por N agendamentos"', () => {
+    const state = {
+      status: 'leading' as const,
+      me: row({ sellerId: 's1', saleCount: 4, completedVisitCount: 2, scheduledVisitCount: 6 }),
+      chaser: row({ sellerId: 's2', sellerLabel: 'Fernanda Dias', saleCount: 4, completedVisitCount: 2, scheduledVisitCount: 4, rank: 2 }),
+    };
+    const gapText = buildMinhaDisputaLines(state, [state.me, state.chaser]).find((l) => l.id === 'leader-gap')!.text;
+    expect(gapText).toBe('Vocês estão empatados em vendas e visitas. Você está na frente por 2 agendamentos.');
+    expect(gapText).not.toMatch(/humilha|caiu|perdeu/i);
   });
 });
 
@@ -143,7 +177,7 @@ describe('buildMinhaDisputaLines — liderança', () => {
     expect(lines.find((l) => l.id === 'chaser')!.text).toBe('Lucas está logo atrás com 3 vendas.');
   });
 
-  it('líder empatado em vendas mas na frente pelo desempate: "pelo desempate", nunca "lidera por 0 vendas"', () => {
+  it('líder empatado em vendas, na frente por visitas: nomeia o gap de visitas, nunca "lidera por 0 vendas"', () => {
     const state = {
       status: 'leading' as const,
       me: row({ sellerId: 's1', saleCount: 5, completedVisitCount: 3 }),
@@ -151,8 +185,19 @@ describe('buildMinhaDisputaLines — liderança', () => {
     };
     const lines = buildMinhaDisputaLines(state, [state.me, state.chaser]);
     const gapText = lines.find((l) => l.id === 'leader-gap')!.text;
-    expect(gapText).toBe('Você está na liderança pelo desempate.');
+    expect(gapText).toBe('Vocês estão empatados em vendas. Você está na frente por 2 visitas.');
     expect(gapText).not.toMatch(/0 vendas/);
+  });
+
+  it('líder empatado nos três critérios: "empatados em vendas, visitas e agendamentos", nunca first-to-reach', () => {
+    const state = {
+      status: 'leading' as const,
+      me: row({ sellerId: 's1', saleCount: 5, completedVisitCount: 3, scheduledVisitCount: 2 }),
+      chaser: row({ sellerId: 's2', sellerLabel: 'Lucas Martins', saleCount: 5, completedVisitCount: 3, scheduledVisitCount: 2, rank: 2 }),
+    };
+    const gapText = buildMinhaDisputaLines(state, [state.me, state.chaser]).find((l) => l.id === 'leader-gap')!.text;
+    expect(gapText).toBe('Vocês estão empatados em vendas, visitas e agendamentos.');
+    expect(gapText).not.toMatch(/desempate|0 vendas/);
   });
 
   it('empresa com 1 Seller (sem chaser): só a linha de liderança, nenhuma outra', () => {
@@ -229,14 +274,34 @@ describe('buildCompetitionTickerMessages — mensagens permitidas (§13)', () =>
     expect(top3?.text).toBe('Falta 1 venda para entrar no Top 3.');
   });
 
-  it('empate em vendas com rival: mensagem E, nunca B', () => {
+  it('empate em vendas, decisão por visitas: rival-tie nomeia o gap de visitas (§11 — nunca só "empatado em vendas")', () => {
     const leader = row({ sellerId: 's2', sellerLabel: 'Ana', saleCount: 5, rank: 1 });
     const me = row({ sellerId: 's1', saleCount: 3, completedVisitCount: 0, rank: 3 });
     const rival = row({ sellerId: 's3', sellerLabel: 'João Ferreira', saleCount: 3, completedVisitCount: 2, rank: 2 });
     const state = { status: 'chasing' as const, me, rival };
     const msgs = buildCompetitionTickerMessages(state, [leader, rival, me]);
-    expect(msgs.find((m) => m.id === 'rival-tie')?.text).toBe('Você está empatado em vendas com João.');
+    expect(msgs.find((m) => m.id === 'rival-tie')?.text).toBe('Você está empatado em vendas com João. João está na frente por 2 visitas.');
     expect(msgs.some((m) => m.id === 'rival-target')).toBe(false);
+  });
+
+  it('empate em vendas e visitas, decisão por agendamentos: rival-tie nomeia o gap de agendamentos', () => {
+    const leader = row({ sellerId: 's2', sellerLabel: 'Ana', saleCount: 5, rank: 1 });
+    const me = row({ sellerId: 's1', saleCount: 3, completedVisitCount: 1, scheduledVisitCount: 1, rank: 3 });
+    const rival = row({ sellerId: 's3', sellerLabel: 'João Ferreira', saleCount: 3, completedVisitCount: 1, scheduledVisitCount: 4, rank: 2 });
+    const state = { status: 'chasing' as const, me, rival };
+    const msgs = buildCompetitionTickerMessages(state, [leader, rival, me]);
+    expect(msgs.find((m) => m.id === 'rival-tie')?.text).toBe('Você está empatado em vendas e visitas com João. João está na frente por 3 agendamentos.');
+  });
+
+  it('empate total nos três critérios: rival-tie sem menção a first-to-reach', () => {
+    const leader = row({ sellerId: 's2', sellerLabel: 'Ana', saleCount: 5, rank: 1 });
+    const me = row({ sellerId: 's1', saleCount: 3, completedVisitCount: 2, scheduledVisitCount: 3, rank: 3 });
+    const rival = row({ sellerId: 's3', sellerLabel: 'João Ferreira', saleCount: 3, completedVisitCount: 2, scheduledVisitCount: 3, rank: 2 });
+    const state = { status: 'chasing' as const, me, rival };
+    const msgs = buildCompetitionTickerMessages(state, [leader, rival, me]);
+    const text = msgs.find((m) => m.id === 'rival-tie')?.text;
+    expect(text).toBe('Você está empatado em vendas, visitas e agendamentos com João.');
+    expect(text).not.toMatch(/desempate|MAX\(|sold_at/i);
   });
 
   it('sem disputa (unavailable/no_competition): nenhuma mensagem', () => {
@@ -251,5 +316,37 @@ describe('buildCompetitionTickerMessages — mensagens permitidas (§13)', () =>
     const msgs = buildCompetitionTickerMessages(state, [leader, me]);
     const allText = msgs.map((m) => m.text).join(' ');
     expect(allText).not.toMatch(/subiu|desceu|ultrapass|meta da semana|caiu|AO VIVO/i);
+  });
+});
+
+describe('COMPETITION-V2 §4 — rank do backend é a autoridade de posição', () => {
+  it('resolveMyCompetitionState usa row.rank; nunca recomputa a ordem a partir dos critérios', () => {
+    // Cenário deliberadamente "estranho": me tem MAIS vendas que o rival,
+    // mas o backend colocou o rival acima (ex.: first-to-reach). O helper
+    // deve confiar em rank e me tratar como chasing atrás desse rival.
+    const me = row({ sellerId: 's1', saleCount: 5, completedVisitCount: 0, scheduledVisitCount: 0, rank: 2 });
+    const rival = row({ sellerId: 's2', sellerLabel: 'Ana', saleCount: 5, completedVisitCount: 0, scheduledVisitCount: 0, rank: 1 });
+    const state = resolveMyCompetitionState([me, rival], 's1');
+    expect(state.status).toBe('chasing');
+    expect((state as any).rival.sellerId).toBe('s2');
+    expect((state as any).me.rank).toBe(2);
+  });
+});
+
+describe('COMPETITION-V2 §27 — sem sistema de pontos', () => {
+  it('nenhuma copy menciona pontos/score/peso', () => {
+    const chasing = {
+      status: 'chasing' as const,
+      me: row({ sellerId: 's1', saleCount: 3, completedVisitCount: 1, scheduledVisitCount: 2, rank: 3 }),
+      rival: row({ sellerId: 's2', sellerLabel: 'Ana', saleCount: 3, completedVisitCount: 1, scheduledVisitCount: 5, rank: 2 }),
+    };
+    const rows = [row({ sellerId: 's0', saleCount: 9, rank: 1 }), chasing.rival, chasing.me];
+    const all = [
+      ...buildMinhaDisputaLines(chasing, rows).map((l) => l.text),
+      ...buildCompetitionTickerMessages(chasing, rows).map((m) => m.text),
+    ].join(' ');
+    expect(all).not.toMatch(/\bpontos?\b|\bscore\b|\bpeso\b|=\s*\d+\s*(pt|ponto)/i);
+    // "por N agendamentos" aparece; "N pontos" nunca.
+    expect(all).toMatch(/agendamentos/);
   });
 });

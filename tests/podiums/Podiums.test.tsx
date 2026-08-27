@@ -64,6 +64,38 @@ describe('Podium — campos condicionais (shape real do leaderboard, sem team/le
   });
 });
 
+// COMPETITION-V2-B2-EXEC §5/§6/§32 — o ramo remoto seta `appointments`;
+// cada variante mostra "Agendamentos" com o valor real, e o campo é
+// condicional (fixture local, sem `appointments`, nunca mostra o label).
+describe('Podium — 3º critério "Agendamentos" (ramo remoto)', () => {
+  function remoteRow(over: Partial<Record<string, unknown>> = {}) {
+    return { id: 's1', name: 'Lucas Martins', sales: 3, visits: 5, appointments: 8, ...over };
+  }
+
+  for (const variant of ['A', 'B', 'C', 'D'] as const) {
+    it(`variante ${variant}: mostra o label "Agendamentos" e o valor real quando appointments é number`, () => {
+      const top3 = [
+        remoteRow(),
+        remoteRow({ id: 's2', name: 'Ana Souza', sales: 2, visits: 3, appointments: 4 }),
+        remoteRow({ id: 's3', name: 'João Ferreira', sales: 1, visits: 1, appointments: 1 }),
+      ];
+      render(<Podium variant={variant} top3={top3} />);
+      // label user-facing "Agendamentos" (nunca scheduled_visit_count)
+      expect(document.body.textContent).toMatch(/[Aa]gendamentos/);
+      expect(document.body.textContent).not.toMatch(/scheduled_visit_count|scheduled visit/i);
+      expect(document.body.textContent).toContain('8'); // valor do líder
+      expect(document.body.textContent).not.toMatch(/undefined/);
+    });
+
+    it(`variante ${variant}: sem appointments (fixture local), NÃO renderiza o label "Agendamentos"`, () => {
+      const top3 = [row(), row({ id: 's2', name: 'Ana Souza' }), row({ id: 's3', name: 'João Ferreira' })];
+      render(<Podium variant={variant} top3={top3} />);
+      expect(screen.queryByText('Agendamentos')).toBeNull();
+      expect(screen.queryByText(/\bagendamentos\b/)).toBeNull();
+    });
+  }
+});
+
 describe('PodiumD — sem <image-slot> morto, sempre iniciais reais', () => {
   it('nunca renderiza o elemento <image-slot> (Claude Design editor-only, sem upload real)', () => {
     const { container } = render(<Podium variant="D" top3={[row(), row({ id: 's2', name: 'Ana Souza' }), row({ id: 's3', name: 'João Ferreira' })]} />);

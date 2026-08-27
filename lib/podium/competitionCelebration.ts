@@ -12,13 +12,14 @@
 // register_visit_result (nunca "caiu"/"perdeu"/"ultrapassado por"). ZERO
 // em dash (§27 do R2B).
 //
-// sourceType (R2C §27): eventos causados por Visit NUNCA atribuem o
-// avanço a uma venda — "com N vendas" (métrica de conquista real, mas
-// mecanismo de venda) só aparece em eventos source='sale'; eventos
-// source='visit' descrevem a visita concluída como a causa real.
-// competitionStarted é sempre false para source='visit' (garantido pelo
-// backend — não existe "primeira venda do mês" causada por uma Visit),
-// então esse branch permanece Sale-only por construção.
+// sourceType (R2C §27 + COMPETITION-V2-B2-EXEC §15/§16): a causa real do
+// avanço nunca é atribuída errada. source='sale' fala de venda;
+// source='visit' fala de "visita realizada"; source='appointment' fala de
+// "agendamento" (a visita foi só GERADA, ainda não realizada — §16 pede
+// diferenciação clara). "com N vendas" só aparece em source='sale'.
+// competitionStarted é sempre false para 'visit' e 'appointment'
+// (garantido pelo backend — nunca "a primeira venda do mês"), então esse
+// branch permanece Sale-only por construção.
 import type { UnseenCompetitionEvent } from '@/lib/podium/competitionEventsRepository';
 import { firstName, vendaWord } from '@/lib/podium/competition';
 
@@ -33,6 +34,16 @@ export interface CompetitionCelebrationCopy {
 // vários unseen, ver selectPrimaryCompetitionEvent abaixo).
 export function buildCompetitionCelebration(event: UnseenCompetitionEvent): CompetitionCelebrationCopy {
   const isVisit = event.sourceType === 'visit';
+  const isAppointment = event.sourceType === 'appointment';
+
+  // Frase que atribui a CAUSA real do avanço (§16 — nunca misturar os
+  // motivos): venda / visita realizada / novo agendamento.
+  const causeToRank = (rankLabel: string): string =>
+    isAppointment
+      ? `Seu novo agendamento levou você ao ${rankLabel}.`
+      : isVisit
+        ? `Sua visita realizada levou você ao ${rankLabel}.`
+        : `Agora você está em ${rankLabel}.`;
 
   if (event.competitionStarted) {
     return {
@@ -49,9 +60,11 @@ export function buildCompetitionCelebration(event: UnseenCompetitionEvent): Comp
       headline: 'Parabéns!',
       message: rival
         ? `Você ultrapassou ${rival} e assumiu o 1º lugar.`
-        : isVisit
-          ? 'Você concluiu uma visita e assumiu o 1º lugar.'
-          : `Você assumiu o 1º lugar com ${vendaWord(event.saleCount)}.`,
+        : isAppointment
+          ? 'Seu novo agendamento levou você ao 1º lugar.'
+          : isVisit
+            ? 'Você concluiu uma visita e assumiu o 1º lugar.'
+            : `Você assumiu o 1º lugar com ${vendaWord(event.saleCount)}.`,
     };
   }
 
@@ -59,8 +72,8 @@ export function buildCompetitionCelebration(event: UnseenCompetitionEvent): Comp
     return {
       eyebrow: 'VOCÊ ENTROU NO TOP 3',
       headline: 'Você entrou no Top 3!',
-      message: isVisit
-        ? `Sua visita realizada levou você ao ${event.newRank}º lugar.`
+      message: (isAppointment || isVisit)
+        ? causeToRank(`${event.newRank}º lugar`)
         : `Agora você está em ${event.newRank}º lugar com ${vendaWord(event.saleCount)}.`,
     };
   }
@@ -69,9 +82,7 @@ export function buildCompetitionCelebration(event: UnseenCompetitionEvent): Comp
   return {
     eyebrow: 'VOCÊ SUBIU NO RANKING',
     headline: positionsGained === 1 ? 'Você ganhou 1 posição!' : `Você ganhou ${positionsGained} posições!`,
-    message: isVisit
-      ? `Sua visita realizada levou você ao ${event.newRank}º lugar.`
-      : `Agora você está em ${event.newRank}º lugar.`,
+    message: causeToRank(`${event.newRank}º lugar`),
   };
 }
 

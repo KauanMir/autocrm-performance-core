@@ -25,7 +25,8 @@ const READY_PERIOD: ResolvedPeriod = { kind: 'ready', startMillis: 1735689600000
 
 function rpcRow(over: Partial<Record<string, unknown>> = {}) {
   return {
-    seller_id: 's1', seller_label: 'Lucas Martins', sale_count: 3, completed_visit_count: 1, rank: 1,
+    seller_id: 's1', seller_label: 'Lucas Martins', sale_count: 3, completed_visit_count: 1,
+    scheduled_visit_count: 0, rank: 1,
     movement_positions_gained: null, movement_happened_at: null,
     ...over,
   };
@@ -138,9 +139,9 @@ describe('useCompanySellerLeaderboard — sucesso', () => {
     expect(m.rpc).toHaveBeenCalledWith('list_company_seller_leaderboard', expect.any(Object));
   });
 
-  it('ready: mapeia snake_case -> camelCase (sellerId/sellerLabel/saleCount/completedVisitCount/rank)', async () => {
+  it('ready: mapeia snake_case -> camelCase (sellerId/sellerLabel/saleCount/completedVisitCount/scheduledVisitCount/rank)', async () => {
     m.rpc.mockResolvedValue({
-      data: [rpcRow({ seller_id: 's9', seller_label: 'Bianca Alves', sale_count: 5, completed_visit_count: 2, rank: 2 })],
+      data: [rpcRow({ seller_id: 's9', seller_label: 'Bianca Alves', sale_count: 5, completed_visit_count: 2, scheduled_visit_count: 7, rank: 2 })],
       error: null,
     });
     const { wrapper } = createWrapper();
@@ -150,7 +151,7 @@ describe('useCompanySellerLeaderboard — sucesso', () => {
     );
     await waitFor(() => expect(result.current.status).toBe('ready'));
     expect(result.current.status === 'ready' && result.current.rows).toEqual([
-      { sellerId: 's9', sellerLabel: 'Bianca Alves', saleCount: 5, completedVisitCount: 2, rank: 2, movement: null },
+      { sellerId: 's9', sellerLabel: 'Bianca Alves', saleCount: 5, completedVisitCount: 2, scheduledVisitCount: 7, rank: 2, movement: null },
     ]);
   });
 

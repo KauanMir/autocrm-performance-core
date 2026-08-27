@@ -109,10 +109,13 @@ function Standee({ s, pl, first, active, anim }: { s: any; pl: any; first: boole
             </span>
             <span style={{ fontSize: 13, color: 'var(--txt-mid)', fontWeight: 600 }}>vendas</span>
           </div>
-          {(typeof s.leads === 'number' || typeof s.visits === 'number' || typeof s.conv === 'number') && (
+          {(typeof s.leads === 'number' || typeof s.visits === 'number' || typeof s.appointments === 'number' || typeof s.conv === 'number') && (
             <div style={{ marginTop: first ? 16 : 12, width: '100%', display: 'flex', gap: 6, paddingTop: first ? 14 : 11, borderTop: '1px solid var(--line-dark)' }}>
               {typeof s.leads === 'number' && <MiniStat label="Leads" value={s.leads} active={active} fs={first ? 24 : 20} lfs={10} />}
               {typeof s.visits === 'number' && <MiniStat label="Visitas" value={s.visits} active={active} fs={first ? 24 : 20} lfs={10} />}
+              {/* COMPETITION-V2-B2-EXEC §5/§6 — 3o critério, terciário na
+                  hierarquia (Vendas > Visitas > Agendamentos). */}
+              {typeof s.appointments === 'number' && <MiniStat label="Agendamentos" value={s.appointments} active={active} fs={first ? 24 : 20} lfs={10} />}
               {typeof s.conv === 'number' && <MiniStat label="Conv." value={s.conv} suf="%" active={active} accent={first ? '#E8CE72' : undefined} fs={first ? 24 : 20} lfs={10} />}
             </div>
           )}
@@ -203,6 +206,8 @@ function PodiumB({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
           {typeof leader.leads === 'number' && <MiniStat label="Leads" value={leader.leads} active={active} fs={28} lfs={11} />}
           {typeof leader.scheduled === 'number' && <MiniStat label="Agendadas" value={leader.scheduled} active={active} fs={28} lfs={11} />}
           {typeof leader.visits === 'number' && <MiniStat label="Visitas realizadas" value={leader.visits} active={active} fs={28} lfs={11} />}
+          {/* COMPETITION-V2-B2-EXEC §5/§6 — 3o critério (ramo remoto). */}
+          {typeof leader.appointments === 'number' && <MiniStat label="Agendamentos" value={leader.appointments} active={active} fs={28} lfs={11} />}
           {typeof leader.conv === 'number' && <MiniStat label="Conversão" value={leader.conv} suf="%" active={active} accent="#E8CE72" fs={28} lfs={11} />}
         </div>
         {anim && <GoldParticles count={9} />}
@@ -221,10 +226,11 @@ function PodiumB({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
               <Avatar name={s.name} size={68} ring={pl.ring} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="display" style={{ fontSize: 21, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
-                {(typeof s.leads === 'number' || typeof s.visits === 'number' || typeof s.conv === 'number') && (
-                  <div style={{ display: 'flex', gap: 14, marginTop: 8 }}>
+                {(typeof s.leads === 'number' || typeof s.visits === 'number' || typeof s.appointments === 'number' || typeof s.conv === 'number') && (
+                  <div style={{ display: 'flex', gap: 14, marginTop: 8, flexWrap: 'wrap' }}>
                     {typeof s.leads === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.leads}</b> leads</span>}
                     {typeof s.visits === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.visits}</b> visitas</span>}
+                    {typeof s.appointments === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.appointments}</b> agendamentos</span>}
                     {typeof s.conv === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.conv}%</b> conv.</span>}
                   </div>
                 )}
@@ -274,9 +280,10 @@ function PodiumC({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
                 <span className="display tnum" style={{ fontSize: first ? 64 : 46, fontWeight: 900, color: first ? '#E8CE72' : '#fff', lineHeight: 1, letterSpacing: '-.03em' }}>{active ? <CountUp value={s.sales} active={active} /> : s.sales}</span>
                 <span style={{ fontSize: 14, color: 'var(--txt-mid)' }}>vendas</span>
               </div>
-              {(typeof s.visits === 'number' || typeof s.conv === 'number') && (
-                <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line-dark)' }}>
+              {(typeof s.visits === 'number' || typeof s.appointments === 'number' || typeof s.conv === 'number') && (
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line-dark)', flexWrap: 'wrap' }}>
                   {typeof s.visits === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.visits}</b> visitas</span>}
+                  {typeof s.appointments === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: 'var(--txt-mid)' }}>{s.appointments}</b> agendamentos</span>}
                   {typeof s.conv === 'number' && <span style={{ fontSize: 12.5, color: 'var(--txt-lo)' }}><b className="tnum" style={{ color: first ? '#E8CE72' : 'var(--txt-mid)' }}>{s.conv}%</b> conv.</span>}
                 </div>
               )}
@@ -348,10 +355,11 @@ function PodiumD({ top3, anim, active }: { top3: any[]; anim?: boolean; active?:
                     </span>
                     <span style={{ fontSize: 13, color: 'var(--txt-mid)', fontWeight: 600 }}>vendas</span>
                   </div>
-                  {(typeof s.leads === 'number' || typeof s.visits === 'number' || typeof s.conv === 'number') && (
-                    <div style={{ display: 'flex', gap: 6, marginTop: first ? 14 : 11, paddingTop: first ? 12 : 10, borderTop: '1px solid var(--line-dark)' }}>
+                  {(typeof s.leads === 'number' || typeof s.visits === 'number' || typeof s.appointments === 'number' || typeof s.conv === 'number') && (
+                    <div style={{ display: 'flex', gap: 6, marginTop: first ? 14 : 11, paddingTop: first ? 12 : 10, borderTop: '1px solid var(--line-dark)', flexWrap: 'wrap' }}>
                       {typeof s.leads === 'number' && <MiniStat label="Leads" value={s.leads} active={active} fs={first ? 22 : 18} lfs={9.5} />}
                       {typeof s.visits === 'number' && <MiniStat label="Visitas" value={s.visits} active={active} fs={first ? 22 : 18} lfs={9.5} />}
+                      {typeof s.appointments === 'number' && <MiniStat label="Agendamentos" value={s.appointments} active={active} fs={first ? 22 : 18} lfs={9.5} />}
                       {typeof s.conv === 'number' && <MiniStat label="Conv." value={s.conv} suf="%" active={active} accent={first ? '#E8CE72' : undefined} fs={first ? 22 : 18} lfs={9.5} />}
                     </div>
                   )}

@@ -320,7 +320,7 @@ function getRankingListContainer() {
 // por padrão (PODIUM-MOVEMENT-R1-B1-EXEC) — mesmo shape que a RPC real
 // devolve quando não há evento elegível no mês oficial.
 function leaderboardRow(over: Partial<Record<string, unknown>> = {}) {
-  return { sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, completedVisitCount: 0, rank: 1, movement: null, ...over };
+  return { sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, completedVisitCount: 0, scheduledVisitCount: 0, rank: 1, movement: null, ...over };
 }
 
 // variant 'B' por simplicidade de asserção (não mais por ResizeObserver —
@@ -649,6 +649,60 @@ describe('Home — Ranking completo real (PODIUM-COMPETITION-R1-EXEC)', () => {
       });
       renderHome(seller());
       expect(screen.getByTitle('Subiu 2 posições no mês')).toBeInTheDocument();
+    });
+  });
+
+  // COMPETITION-V2-B2-EXEC §7/§8/§32/§33 — o 3º critério "Agendamentos"
+  // aparece no Ranking completo e na Minha Disputa, com o valor real de
+  // scheduledVisitCount; nunca reordena client-side (rank do backend).
+  describe('3º critério "Agendamentos" (COMPETITION-V2-B2)', () => {
+    it('Ranking completo: coluna "Agendamentos" com o valor real do scheduledVisitCount', () => {
+      m.useCompanySellerLeaderboard.mockReturnValue({
+        status: 'ready',
+        rows: [
+          leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, completedVisitCount: 2, scheduledVisitCount: 7, rank: 1 }),
+          leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 3, completedVisitCount: 2, scheduledVisitCount: 4, rank: 2 }),
+        ],
+      });
+      renderHome(manager());
+      const rankingList = within(getRankingListContainer());
+      expect(rankingList.getAllByText('Agendamentos').length).toBeGreaterThanOrEqual(1);
+      const lucasRow = rankingList.getByText('Lucas Martins').closest('div')!.parentElement!.parentElement!;
+      expect(lucasRow.textContent).toContain('7');
+      // nunca expõe o nome técnico da coluna
+      expect(document.body.textContent).not.toMatch(/scheduled_visit_count/);
+    });
+
+    it('Ranking completo: NÃO reordena client-side — mesmo com mais agendamentos, quem tem rank menor do backend vem primeiro', () => {
+      m.useCompanySellerLeaderboard.mockReturnValue({
+        status: 'ready',
+        rows: [
+          // rank 1 do backend, MENOS agendamentos; rank 2 tem mais.
+          leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 5, scheduledVisitCount: 1, rank: 1 }),
+          leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 5, scheduledVisitCount: 20, rank: 2 }),
+        ],
+      });
+      renderHome(manager());
+      const rows = within(getRankingListContainer()).getAllByText(/Lucas Martins|Ana Souza/);
+      expect(rows[0].textContent).toContain('Lucas Martins');
+    });
+
+    it('Minha Disputa (Seller): card mostra "Agendamentos" com o valor do próprio Seller', () => {
+      m.useCompanySellerLeaderboard.mockReturnValue({
+        status: 'ready',
+        rows: [
+          leaderboardRow({ sellerId: 's2', sellerLabel: 'Ana Souza', saleCount: 5, completedVisitCount: 3, scheduledVisitCount: 9, rank: 1 }),
+          leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 3, completedVisitCount: 2, scheduledVisitCount: 6, rank: 2 }),
+        ],
+      });
+      m.authGetCurrentUser.mockReturnValue(seller('s1'));
+      renderHome(seller('s1'));
+      expect(screen.getByText('Minha disputa')).toBeInTheDocument();
+      expect(screen.getAllByText('Agendamentos').length).toBeGreaterThanOrEqual(1);
+      // "Minhas vendas" e "Visitas realizadas" continuam presentes (§4 —
+      // não renomeia completedVisitCount).
+      expect(screen.getByText('Minhas vendas')).toBeInTheDocument();
+      expect(screen.getAllByText('Visitas realizadas').length).toBeGreaterThanOrEqual(1);
     });
   });
 

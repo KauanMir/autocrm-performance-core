@@ -24,6 +24,10 @@ export interface CompanySellerLeaderboardRow {
   sellerLabel: string;
   saleCount: number;
   completedVisitCount: number;
+  // COMPETITION-V2-B2-EXEC §2 — 3º critério de produto: agendamentos
+  // gerados no período (visits.created_at, sem filtro de status). Mapeado
+  // de scheduled_visit_count. Não renomeia completedVisitCount.
+  scheduledVisitCount: number;
   rank: number;
   movement: SellerMovement | null;
 }
@@ -58,6 +62,7 @@ export async function fetchCompanySellerLeaderboard(
     sellerLabel: row.seller_label,
     saleCount: row.sale_count,
     completedVisitCount: row.completed_visit_count,
+    scheduledVisitCount: row.scheduled_visit_count,
     rank: row.rank,
     movement: row.movement_positions_gained != null && row.movement_happened_at != null
       ? { positionsGained: row.movement_positions_gained, happenedAt: row.movement_happened_at }

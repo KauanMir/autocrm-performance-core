@@ -456,6 +456,9 @@ function RankingRow({ s, pos, active, leader, me, target }: any) {
       <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
         {typeof s.leads === 'number' && <Col label="Leads" v={s.leads} />}
         {typeof s.visits === 'number' && <Col label="Visitas" v={s.visits} />}
+        {/* COMPETITION-V2-B2-EXEC §7 — 3o critério do ranking, condicional
+            (só o ramo remoto seta s.appointments; fixture local nunca). */}
+        {typeof s.appointments === 'number' && <Col label="Agendamentos" v={s.appointments} />}
         {typeof s.conv === 'number' && <Col label="Conv." v={s.conv + '%'} />}
         <div style={{ textAlign: 'center', minWidth: 44 }}>
           <div className="display tnum" style={{ fontSize: 23, fontWeight: 900, color: pos === 1 ? '#E8CE72' : me ? '#5B9BFF' : '#fff', lineHeight: 1 }}>{s.sales}</div>
@@ -506,9 +509,13 @@ function RaceMsg({ icon, c, title, children }: any) {
 function MinhaDisputa({ active, comp, remote }: any) {
   if (remote) {
     const { me, lines } = remote;
+    // COMPETITION-V2-B2-EXEC §8 — os três critérios de produto, nesta
+    // hierarquia (Vendas > Visitas > Agendamentos). Labels user-facing,
+    // nunca sale_count/completed_visit_count/scheduled_visit_count.
     const stats = [
       { label: 'Minhas vendas', v: me.saleCount, icon: 'trophy', gold: true },
       { label: 'Visitas realizadas', v: me.completedVisitCount, icon: 'check' },
+      { label: 'Agendamentos', v: me.scheduledVisitCount, icon: 'calendar' },
     ];
     return (
       <div style={{ background: 'linear-gradient(135deg,#19191c,#111113)', border: '1px solid var(--line-dark)', borderRadius: 18, padding: 24, boxShadow: 'var(--shadow-md)' }}>
@@ -525,7 +532,7 @@ function MinhaDisputa({ active, comp, remote }: any) {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 18 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 10, alignContent: 'start' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, alignContent: 'start' }}>
             {stats.map((s: any) => (
               <div key={s.label} style={{ background: 'rgba(0,0,0,.3)', border: '1px solid var(--line-dark)', borderRadius: 13, padding: '14px 10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 9 }}>
@@ -1329,7 +1336,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   // oficial, nunca soma, nunca inferido) — `undefined` quando null, nunca
   // 0 fabricado (RankingRow já trata ausência como "sem seta").
   const remoteRankedSellers = leaderboard.status === 'ready'
-    ? leaderboard.rows.map((row) => ({ id: row.sellerId, name: row.sellerLabel, sales: row.saleCount, visits: row.completedVisitCount, move: row.movement?.positionsGained ?? undefined }))
+    ? leaderboard.rows.map((row) => ({ id: row.sellerId, name: row.sellerLabel, sales: row.saleCount, visits: row.completedVisitCount, appointments: row.scheduledVisitCount, move: row.movement?.positionsGained ?? undefined }))
     : [];
   // SEU ALVO / Rival direto (§30-§32) — 100% mecânico a partir do próprio
   // array já ranqueado, nenhum backend novo: a linha imediatamente ACIMA

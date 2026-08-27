@@ -106,6 +106,26 @@ describe('useSellerCompetitionEvents — sucesso', () => {
     }]);
   });
 
+  it('COMPETITION-V2 §14 — source_type=appointment mapeia para sourceType=appointment (sale/visit intactos)', async () => {
+    m.rpc.mockResolvedValue({
+      data: [
+        rpcRow({ id: 'evt-a', source_type: 'appointment', old_rank: 3, new_rank: 2 }),
+        rpcRow({ id: 'evt-s', source_type: 'sale' }),
+        rpcRow({ id: 'evt-v', source_type: 'visit' }),
+        rpcRow({ id: 'evt-x', source_type: 'something_novo_futuro' }),
+      ],
+      error: null,
+    });
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(
+      () => useSellerCompetitionEvents({ userId: 'u1', companyId: 'c1', membershipRole: 'seller', userIsActive: true }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    const events = result.current.status === 'ready' ? result.current.events : [];
+    expect(events.map((e) => e.sourceType)).toEqual(['appointment', 'sale', 'visit', 'sale']);
+  });
+
   it('nenhum evento unseen: ready com array vazio, nunca erro', async () => {
     m.rpc.mockResolvedValue({ data: [], error: null });
     const { wrapper } = createWrapper();

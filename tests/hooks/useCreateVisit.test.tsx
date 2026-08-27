@@ -11,6 +11,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCreateVisit, type UseCreateVisitOptions, type CreateVisitCallInput } from '@/lib/hooks/useCreateVisit';
 import { visitQueryKeys } from '@/lib/visits/visitQueryKeys';
 import { leadQueryKeys } from '@/lib/leads/queryKeys';
+import { companySellerLeaderboardQueryPrefix } from '@/lib/hooks/useCompanySellerLeaderboard';
+import { sellerCompetitionEventsQueryKey } from '@/lib/hooks/useSellerCompetitionEvents';
 import { isRemoteVisitsError } from '@/lib/visits/errors';
 import { bumpQueryCacheGeneration } from '@/lib/query/cacheIdentity';
 
@@ -178,22 +180,28 @@ describe('useCreateVisit — retry e invalidação de sucesso', () => {
     expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
-  it('sucesso com lead_id: invalida Visits E a timeline daquele Lead', async () => {
+  it('sucesso com lead_id: invalida Visits + timeline do Lead + leaderboard + eventos de competição (COMPETITION-V2 §18)', async () => {
     const { hook, invalidateSpy } = setup();
     const created = await hook.result.current.createVisit(managerInput);
     expect(created).toEqual(CREATED_WITH_LEAD);
-    expect(invalidateSpy).toHaveBeenCalledTimes(2);
+    expect(invalidateSpy).toHaveBeenCalledTimes(4);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: visitQueryKeys.active('company-a') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: companySellerLeaderboardQueryPrefix('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: sellerCompetitionEventsQueryKey('company-a', 'user-1') });
   });
 
-  it('sucesso sem lead_id: invalida SOMENTE Visits, nenhuma invalidação de timeline', async () => {
+  it('sucesso sem lead_id: invalida Visits + leaderboard + eventos (sem timeline)', async () => {
     mocks.rpc.mockResolvedValue({ data: CREATED_NO_LEAD, error: null });
     const { hook, invalidateSpy } = setup();
     await hook.result.current.createVisit({ ...managerInput, leadId: null, clientName: 'Cliente Avulso' });
-    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    // exatamente 3: Visits + leaderboard + sellerCompetitionEvents — nunca timeline (sem lead_id).
+    expect(invalidateSpy).toHaveBeenCalledTimes(3);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: visitQueryKeys.active('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: companySellerLeaderboardQueryPrefix('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: sellerCompetitionEventsQueryKey('company-a', 'user-1') });
   });
+
 
   it('erro do backend (seller_not_found) vira RemoteVisitsError mapeado, nenhuma invalidação', async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'seller_not_found' } });

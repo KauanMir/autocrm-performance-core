@@ -24,6 +24,15 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { resolveVisitRemoteMode } from '@/lib/visits/remoteVisitsMode';
 import { visitQueryKeys } from '@/lib/visits/visitQueryKeys';
 import { leadQueryKeys } from '@/lib/leads/queryKeys';
+// COMPETITION-V2-B2-EXEC §19/§20/§21 — update_visit NÃO gera evento
+// competitivo (nenhuma celebração fabricada), mas uma reatribuição muda o
+// ranking real (scheduled_visit_count segue o assigned_seller_id atual).
+// Sem uma forma barata de saber se houve reassignment, invalidamos o
+// leaderboard após QUALQUER update_visit bem-sucedido — um refetch extra
+// (reschedule/edição sem troca de responsável) é inofensivo e preferível a
+// cache incorreto. scheduled_visit_count não muda em reschedule (backend
+// usa created_at).
+import { companySellerLeaderboardQueryPrefix } from '@/lib/hooks/useCompanySellerLeaderboard';
 import { updateRemoteVisit } from '@/lib/visits/remoteMutationRepository';
 import type { RemoteVisitRow } from '@/lib/visits/adapter';
 import { isRemoteVisitsError, mapRemoteVisitsMutationError } from '@/lib/visits/errors';
@@ -122,6 +131,11 @@ export function useUpdateVisit(options: UseUpdateVisitOptions): UseUpdateVisitRe
       if (row.lead_id !== null) {
         queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, row.lead_id) });
       }
+      // §19 — reatribuição desloca scheduled_visit_count entre Sellers.
+      // Nenhum seller_competition_events é criado por update_visit (§19 —
+      // sem celebração por ação administrativa), então NÃO invalidamos
+      // sellerCompetitionEventsQueryKey aqui.
+      queryClient.invalidateQueries({ queryKey: companySellerLeaderboardQueryPrefix(capturedCompanyId) });
     },
   });
 

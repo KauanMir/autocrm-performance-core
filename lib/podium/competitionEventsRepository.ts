@@ -11,7 +11,9 @@ import { PodiumCompetitionEventsError } from '@/lib/podium/errors';
 // evento (Sale vs Visit completed) para a celebração nunca atribuir o
 // avanço à causa errada (§27 do EXEC — nunca dizer "com esta venda" para
 // um evento que na verdade veio de uma Visit).
-export type CompetitionEventSourceType = 'sale' | 'visit';
+// COMPETITION-V2-B2-EXEC §14 — terceira origem: 'appointment' (agendamento
+// gerado, evento produzido por create_visit). sale/visit intactos.
+export type CompetitionEventSourceType = 'sale' | 'visit' | 'appointment';
 
 export interface UnseenCompetitionEvent {
   id: string;
@@ -41,7 +43,11 @@ export async function fetchUnseenCompetitionEvents(): Promise<UnseenCompetitionE
   return (data ?? []).map((row) => ({
     id: row.id,
     eventType: row.event_type,
-    sourceType: row.source_type === 'visit' ? 'visit' : 'sale',
+    sourceType: row.source_type === 'visit'
+      ? 'visit'
+      : row.source_type === 'appointment'
+        ? 'appointment'
+        : 'sale',
     oldRank: row.old_rank,
     newRank: row.new_rank,
     saleCount: row.sale_count,

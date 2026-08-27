@@ -4,18 +4,22 @@
 // segunda fonte, nenhuma tabela nova, nenhum histórico. Puro: sem React,
 // sem chamada de rede, testável isoladamente (§30 do EXEC).
 //
-// Regra central (§8/§9/§11 do EXEC): a linha "acima" de mim no ranking
-// (rival, líder do Top 3, ou eu acima do meu perseguidor) sempre tem
-// saleCount >= a da linha "abaixo" — é assim que a RPC ordena. Quando os
-// dois lados empatam em saleCount, o desempate real da RPC (visitas, depois
-// MAX(sold_at)/nome/id) explica a ordem — nunca expomos esses critérios
-// técnicos, só o fato de "empatados em vendas" (e, quando aplicável,
-// "e visitas").
+// Regra central (§3/§8/§9/§11 do EXEC): a linha "acima" de mim no ranking
+// (rival, líder do Top 3, ou eu acima do meu perseguidor) sempre está
+// melhor-ou-igual pela ordem lexicográfica da RPC — Vendas, depois Visitas
+// realizadas, depois Agendamentos, depois first-to-reach/nome/id. A copy
+// expõe SÓ os três critérios de produto (nunca first-to-reach, que é
+// desempate técnico, não meta comercial — §9). `row.rank` do backend
+// continua a ÚNICA autoridade de posição; este helper só descreve a
+// distância.
 export interface CompetitionRow {
   sellerId: string;
   sellerLabel: string;
   saleCount: number;
   completedVisitCount: number;
+  // COMPETITION-V2-B2-EXEC §2 — 3º critério: agendamentos gerados no
+  // período.
+  scheduledVisitCount: number;
   rank: number;
 }
 
@@ -46,19 +50,36 @@ export function resolveMyCompetitionState(
   return { status: 'chasing', me, rival: sorted[myIndex - 1] };
 }
 
-type SalesComparison =
-  | { kind: 'gap'; gap: number }
-  | { kind: 'tie_by_visits' }
+// COMPETITION-V2-B2-EXEC §3 — cadeia de comparação alinhada à ordem do
+// backend: vendas -> visitas realizadas -> agendamentos -> empate total.
+// `gap` carrega a distância no critério que decidiu (para a copy dizer
+// "por N vendas/visitas/agendamentos"). first-to-reach NUNCA aparece aqui
+// (§9) — quando os três critérios de produto empatam, é `tie_full`.
+type CriterionComparison =
+  | { kind: 'by_sales'; gap: number }
+  | { kind: 'by_visits'; gap: number }
+  | { kind: 'by_appointments'; gap: number }
   | { kind: 'tie_full' };
 
 // `ahead` é sempre a linha melhor-ou-igual ranqueada (rival acima de mim,
 // eu acima do meu perseguidor, ou o 3º colocado em relação a mim quando
 // estou fora do Top 3) — nunca o contrário.
-function compareBySales(ahead: CompetitionRow, behind: CompetitionRow): SalesComparison {
-  const gap = ahead.saleCount - behind.saleCount;
-  if (gap > 0) return { kind: 'gap', gap };
-  if (ahead.completedVisitCount > behind.completedVisitCount) return { kind: 'tie_by_visits' };
+function compareByCriteria(ahead: CompetitionRow, behind: CompetitionRow): CriterionComparison {
+  const salesGap = ahead.saleCount - behind.saleCount;
+  if (salesGap > 0) return { kind: 'by_sales', gap: salesGap };
+  const visitsGap = ahead.completedVisitCount - behind.completedVisitCount;
+  if (visitsGap > 0) return { kind: 'by_visits', gap: visitsGap };
+  const apptGap = ahead.scheduledVisitCount - behind.scheduledVisitCount;
+  if (apptGap > 0) return { kind: 'by_appointments', gap: apptGap };
   return { kind: 'tie_full' };
+}
+
+// Palavras: singular/plural pt-BR, um lugar só.
+function visitaWord(n: number): string {
+  return n === 1 ? '1 visita' : `${n} visitas`;
+}
+function agendamentoWord(n: number): string {
+  return n === 1 ? '1 agendamento' : `${n} agendamentos`;
 }
 
 // Exportadas: reaproveitadas por lib/podium/competitionCelebration.ts
@@ -73,19 +94,25 @@ export function vendaWord(n: number): string {
   return n === 1 ? '1 venda' : `${n} vendas`;
 }
 
-// §8/§9 — copy do rival direto (linha imediatamente acima de mim).
+// §9/§10 — copy do rival direto (linha imediatamente acima de mim). A
+// frase sempre nomeia o critério REAL que decide a ordem: vendas, ou
+// (empatados em vendas) visitas, ou (empatados em vendas e visitas)
+// agendamentos, ou empate total nos três.
 function describeRival(me: CompetitionRow, rival: CompetitionRow): string {
-  const cmp = compareBySales(rival, me);
+  const cmp = compareByCriteria(rival, me);
   const name = firstName(rival.sellerLabel);
-  if (cmp.kind === 'gap') {
+  if (cmp.kind === 'by_sales') {
     return cmp.gap === 1
       ? `Falta 1 venda para alcançar ${name}.`
       : `Faltam ${cmp.gap} vendas para alcançar ${name}.`;
   }
-  if (cmp.kind === 'tie_by_visits') {
-    return `Vocês estão empatados em vendas. ${name} está na frente pelo número de visitas realizadas.`;
+  if (cmp.kind === 'by_visits') {
+    return `Vocês estão empatados em vendas. ${name} está na frente por ${visitaWord(cmp.gap)}.`;
   }
-  return `Vocês estão empatados em vendas e visitas. ${name} está à frente pelo critério de desempate.`;
+  if (cmp.kind === 'by_appointments') {
+    return `Vocês estão empatados em vendas e visitas. ${name} está na frente por ${agendamentoWord(cmp.gap)}.`;
+  }
+  return `Vocês estão empatados em vendas, visitas e agendamentos com ${name}.`;
 }
 
 // §10 — identifica o perseguidor mais próximo (2º colocado) quando eu lidero.
@@ -93,20 +120,26 @@ function describeChaser(chaser: CompetitionRow): string {
   return `${firstName(chaser.sellerLabel)} está logo atrás com ${vendaWord(chaser.saleCount)}.`;
 }
 
-// §10 — distância da minha liderança para o perseguidor (ou "pelo
-// desempate" quando empatados em vendas).
+// §10 — distância da minha liderança para o perseguidor, sempre pelo
+// critério real (nunca "pelo desempate"/first-to-reach — §9).
 function describeLeaderGap(me: CompetitionRow, chaser: CompetitionRow): string {
-  const cmp = compareBySales(me, chaser);
-  if (cmp.kind === 'gap') return `Você lidera por ${vendaWord(cmp.gap)}.`;
-  return 'Você está na liderança pelo desempate.';
+  const cmp = compareByCriteria(me, chaser);
+  if (cmp.kind === 'by_sales') return `Você lidera por ${vendaWord(cmp.gap)}.`;
+  if (cmp.kind === 'by_visits') {
+    return `Vocês estão empatados em vendas. Você está na frente por ${visitaWord(cmp.gap)}.`;
+  }
+  if (cmp.kind === 'by_appointments') {
+    return `Vocês estão empatados em vendas e visitas. Você está na frente por ${agendamentoWord(cmp.gap)}.`;
+  }
+  return 'Vocês estão empatados em vendas, visitas e agendamentos.';
 }
 
-// §11 — gap para o 3º colocado, SOMENTE quando o cálculo é direto (nunca
-// "Faltam 0 vendas" em caso de empate — nesse caso retorna null e o card
-// simplesmente não mostra esta linha).
+// §11 — gap para o 3º colocado, SOMENTE quando é uma distância direta de
+// VENDAS (o "Falta N venda para entrar no Top 3" só faz sentido como meta
+// de venda). Empate em vendas -> retorna null e o card não mostra a linha.
 function describeTop3Gap(me: CompetitionRow, top3Row: CompetitionRow): string | null {
-  const cmp = compareBySales(top3Row, me);
-  if (cmp.kind !== 'gap') return null;
+  const cmp = compareByCriteria(top3Row, me);
+  if (cmp.kind !== 'by_sales') return null;
   return cmp.gap === 1 ? 'Falta 1 venda para entrar no Top 3.' : `Faltam ${cmp.gap} vendas para entrar no Top 3.`;
 }
 
@@ -178,27 +211,44 @@ export function buildCompetitionTickerMessages(
     });
   }
 
-  const rivalCmp = compareBySales(state.rival, state.me);
-  if (rivalCmp.kind === 'gap') {
+  const rivalName = firstName(state.rival.sellerLabel);
+  const rivalCmp = compareByCriteria(state.rival, state.me);
+  if (rivalCmp.kind === 'by_sales') {
     messages.push({
       id: 'rival-target',
       icon: 'target',
       c: '#E23744',
-      text: `Seu alvo é ${firstName(state.rival.sellerLabel)}, com ${vendaWord(state.rival.saleCount)}.`,
+      text: `Seu alvo é ${rivalName}, com ${vendaWord(state.rival.saleCount)}.`,
+    });
+  } else if (rivalCmp.kind === 'by_visits') {
+    // §11 — nunca só "empatado em vendas" quando a decisão real já é por
+    // visitas.
+    messages.push({
+      id: 'rival-tie',
+      icon: 'target',
+      c: '#E8CE72',
+      text: `Você está empatado em vendas com ${rivalName}. ${rivalName} está na frente por ${visitaWord(rivalCmp.gap)}.`,
+    });
+  } else if (rivalCmp.kind === 'by_appointments') {
+    messages.push({
+      id: 'rival-tie',
+      icon: 'target',
+      c: '#E8CE72',
+      text: `Você está empatado em vendas e visitas com ${rivalName}. ${rivalName} está na frente por ${agendamentoWord(rivalCmp.gap)}.`,
     });
   } else {
     messages.push({
       id: 'rival-tie',
       icon: 'target',
       c: '#E8CE72',
-      text: `Você está empatado em vendas com ${firstName(state.rival.sellerLabel)}.`,
+      text: `Você está empatado em vendas, visitas e agendamentos com ${rivalName}.`,
     });
   }
 
   const top3Row = rows.find((r) => r.rank === 3) ?? null;
   if (top3Row && state.me.rank > 3) {
-    const top3Cmp = compareBySales(top3Row, state.me);
-    if (top3Cmp.kind === 'gap') {
+    const top3Cmp = compareByCriteria(top3Row, state.me);
+    if (top3Cmp.kind === 'by_sales') {
       messages.push({
         id: 'top3-gap',
         icon: 'flag',

@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useUpdateVisit, type UseUpdateVisitOptions, type UpdateVisitCallInput } from '@/lib/hooks/useUpdateVisit';
 import { visitQueryKeys } from '@/lib/visits/visitQueryKeys';
 import { leadQueryKeys } from '@/lib/leads/queryKeys';
+import { companySellerLeaderboardQueryPrefix } from '@/lib/hooks/useCompanySellerLeaderboard';
 import { bumpQueryCacheGeneration } from '@/lib/query/cacheIdentity';
 
 const mocks = vi.hoisted(() => ({
@@ -134,19 +135,29 @@ describe('useUpdateVisit — invalidação em conflito', () => {
 });
 
 describe('useUpdateVisit — invalidação de sucesso', () => {
-  it('com lead_id: invalida Visits E a timeline daquele Lead', async () => {
+  it('com lead_id: invalida Visits + timeline do Lead + leaderboard (reassignment desloca scheduled_visit_count — COMPETITION-V2 §19)', async () => {
     const { hook, invalidateSpy } = setup();
     await hook.result.current.updateVisit(input);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: visitQueryKeys.active('company-a') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: companySellerLeaderboardQueryPrefix('company-a') });
   });
 
-  it('sem lead_id: invalida SOMENTE Visits', async () => {
+  it('sem lead_id: invalida Visits + leaderboard', async () => {
     mocks.rpc.mockResolvedValue({ data: UPDATED_NO_LEAD, error: null });
     const { hook, invalidateSpy } = setup();
     await hook.result.current.updateVisit(input);
-    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: visitQueryKeys.active('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: companySellerLeaderboardQueryPrefix('company-a') });
+  });
+
+  it('§19 — update_visit NUNCA invalida sellerCompetitionEventsQueryKey (nenhuma celebração fabricada pelo frontend)', async () => {
+    mocks.rpc.mockResolvedValue({ data: UPDATED_NO_LEAD, error: null });
+    const { hook, invalidateSpy } = setup();
+    await hook.result.current.updateVisit(input);
+    const calls = invalidateSpy.mock.calls.map((c) => JSON.stringify(c[0]));
+    expect(calls.some((c) => c.includes('competition-events'))).toBe(false);
   });
 });
 

@@ -21,6 +21,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { resolveVisitRemoteMode } from '@/lib/visits/remoteVisitsMode';
 import { visitQueryKeys } from '@/lib/visits/visitQueryKeys';
 import { leadQueryKeys } from '@/lib/leads/queryKeys';
+// COMPETITION-V2-B2-EXEC §18 — create_visit agora participa da competição:
+// o novo Agendamento entra em scheduled_visit_count (3o critério) e a RPC
+// pode ter gravado um seller_competition_events source_type='appointment'
+// quando o Seller subiu. Refetch do leaderboard + eventos para o Pódio/
+// Ranking/celebração refletirem sem reload manual.
+import { companySellerLeaderboardQueryPrefix } from '@/lib/hooks/useCompanySellerLeaderboard';
+import { sellerCompetitionEventsQueryKey } from '@/lib/hooks/useSellerCompetitionEvents';
 import { createRemoteVisit } from '@/lib/visits/remoteMutationRepository';
 import type { RemoteVisitRow } from '@/lib/visits/adapter';
 import { mapRemoteVisitsMutationError } from '@/lib/visits/errors';
@@ -129,6 +136,14 @@ export function useCreateVisit(options: UseCreateVisitOptions): UseCreateVisitRe
       // client-side write.
       if (row.lead_id !== null) {
         queryClient.invalidateQueries({ queryKey: leadQueryKeys.timeline(capturedCompanyId, row.lead_id) });
+      }
+      // §18 — mesma lógica de useRegisterVisitResult: incondicional
+      // (inofensivo quando não há nada cacheado); sellerCompetitionEvents
+      // só é populada de fato quando a própria sessão é Seller. Nenhuma
+      // mutation competitiva no client — create_visit já fez tudo.
+      queryClient.invalidateQueries({ queryKey: companySellerLeaderboardQueryPrefix(capturedCompanyId) });
+      if (userId) {
+        queryClient.invalidateQueries({ queryKey: sellerCompetitionEventsQueryKey(capturedCompanyId, userId) });
       }
     },
   });

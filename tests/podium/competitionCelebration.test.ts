@@ -115,6 +115,78 @@ describe('buildCompetitionCelebration — origem Visit (nunca atribui a uma vend
   });
 });
 
+// COMPETITION-V2-B2-EXEC §15/§16 — eventos causados por um NOVO
+// AGENDAMENTO (source_type='appointment', produzido por create_visit).
+// Nunca atribui o avanço a uma venda nem a uma visita REALIZADA — a visita
+// foi só gerada. competitionStarted é sempre false (backend).
+describe('buildCompetitionCelebration — origem Agendamento', () => {
+  it('liderança via agendamento, sem rival: menciona o novo agendamento, nunca "vendas" nem "visita realizada"', () => {
+    const copy = buildCompetitionCelebration(event({ sourceType: 'appointment', newRank: 1, relatedSellerLabel: null, saleCount: 3 }));
+    expect(copy.headline).toBe('Parabéns!');
+    expect(copy.message).toBe('Seu novo agendamento levou você ao 1º lugar.');
+    expect(copy.message).not.toMatch(/vendas?|visita realizada/i);
+  });
+
+  it('liderança via agendamento, com rival: mesma copy de "ultrapassou" (não menciona mecanismo)', () => {
+    const copy = buildCompetitionCelebration(event({ sourceType: 'appointment', newRank: 1, relatedSellerLabel: 'Fernanda Dias' }));
+    expect(copy.message).toBe('Você ultrapassou Fernanda e assumiu o 1º lugar.');
+  });
+
+  it('Top 3 via agendamento: menciona o agendamento, nunca vendas/visita realizada', () => {
+    const copy = buildCompetitionCelebration(event({ sourceType: 'appointment', oldRank: 5, newRank: 3, saleCount: 4 }));
+    expect(copy.headline).toBe('Você entrou no Top 3!');
+    expect(copy.message).toBe('Seu novo agendamento levou você ao 3º lugar.');
+    expect(copy.message).not.toMatch(/vendas?|visita realizada/i);
+  });
+
+  it('rank up genérico via agendamento (1 posição): headline singular + causa correta', () => {
+    const copy = buildCompetitionCelebration(event({ sourceType: 'appointment', oldRank: 5, newRank: 4 }));
+    expect(copy.headline).toBe('Você ganhou 1 posição!');
+    expect(copy.message).toBe('Seu novo agendamento levou você ao 4º lugar.');
+  });
+
+  it('rank up genérico via agendamento (>1 posição): headline plural', () => {
+    const copy = buildCompetitionCelebration(event({ sourceType: 'appointment', oldRank: 6, newRank: 4 }));
+    expect(copy.headline).toBe('Você ganhou 2 posições!');
+    expect(copy.message).toBe('Seu novo agendamento levou você ao 4º lugar.');
+    expect(copy.message).not.toMatch(/vendas?|visita realizada/i);
+  });
+
+  it('§16 — os três motivos ficam claramente diferentes para o mesmo old/new rank', () => {
+    const base = { oldRank: 6, newRank: 4 } as const;
+    const sale = buildCompetitionCelebration(event({ ...base, sourceType: 'sale' })).message;
+    const visit = buildCompetitionCelebration(event({ ...base, sourceType: 'visit' })).message;
+    const appt = buildCompetitionCelebration(event({ ...base, sourceType: 'appointment' })).message;
+    expect(new Set([sale, visit, appt]).size).toBe(3);
+    expect(visit).toMatch(/visita realizada/);
+    expect(appt).toMatch(/agendamento/);
+    expect(sale).not.toMatch(/visita|agendamento/);
+  });
+
+  it('nenhuma copy de agendamento usa termos internos (source_type / scheduled visit / appointment)', () => {
+    for (const e of [
+      event({ sourceType: 'appointment', newRank: 1 }),
+      event({ sourceType: 'appointment', oldRank: 5, newRank: 3 }),
+      event({ sourceType: 'appointment', oldRank: 6, newRank: 4 }),
+    ]) {
+      const copy = buildCompetitionCelebration(e);
+      const all = `${copy.eyebrow} ${copy.headline} ${copy.message}`;
+      expect(all).not.toMatch(/source_type|scheduled_visit|scheduled visit|appointment/i);
+      expect(all).not.toContain('—');
+    }
+  });
+});
+
+describe('selectPrimaryCompetitionEvent — tolera source appointment', () => {
+  it('escolhe por prioridade de rank, independente de source (appointment não quebra a seleção)', () => {
+    const events: UnseenCompetitionEvent[] = [
+      event({ id: 'a', sourceType: 'appointment', oldRank: 5, newRank: 4, createdAt: '2026-08-10T10:00:00Z' }),
+      event({ id: 'b', sourceType: 'sale', oldRank: 4, newRank: 1, createdAt: '2026-08-10T09:00:00Z' }),
+    ];
+    expect(selectPrimaryCompetitionEvent(events)?.id).toBe('b'); // newRank === 1 vence
+  });
+});
+
 describe('buildCompetitionCelebration — regras gerais (§26/§27)', () => {
   it('nenhuma copy contem em dash', () => {
     const cases = [
