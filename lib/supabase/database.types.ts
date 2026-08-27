@@ -1919,6 +1919,14 @@ export type Database = {
           new_email_in_use: boolean
         }[]
       }
+      get_company_management_report: {
+        Args: {
+          p_company_id?: string
+          p_period_end: string
+          p_period_start: string
+        }
+        Returns: Json
+      }
       get_profile_email_update_state: {
         Args: { p_new_email: string; p_target_profile_id: string }
         Returns: {
