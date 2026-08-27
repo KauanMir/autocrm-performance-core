@@ -198,13 +198,21 @@ update public.sales set sold_at = (date_trunc('month', now() at time zone 'Ameri
    and company_id in ('ea100000-0000-0000-0000-000000000001','ea100000-0000-0000-0000-000000000002','ea100000-0000-0000-0000-000000000003');
 
 -- Visits OPEN (scheduled) — a Visit real completada por cada teste abaixo.
-insert into public.visits (id, company_id, lead_id, client_name, assigned_seller_id, vehicles, scheduled_at, status) values
-  ('ea600000-0000-0000-0000-000000000001', 'ea100000-0000-0000-0000-000000000001', (select id from public.leads where seller_id = 'vr1Target'), 'VR1 Target', 'vr1Target', array['Onix'], now() + interval '1 hour', 'scheduled'),
-  ('ea600000-0000-0000-0000-000000000002', 'ea100000-0000-0000-0000-000000000002', (select id from public.leads where seller_id = 'vr2Target'), 'VR2 Target', 'vr2Target', array['Onix'], now() + interval '1 hour', 'scheduled'),
-  ('ea600000-0000-0000-0000-000000000003', 'ea100000-0000-0000-0000-000000000003', (select id from public.leads where seller_id = 'vr3Target'), 'VR3 Target', 'vr3Target', array['Onix'], now() + interval '1 hour', 'scheduled'),
-  ('ea600000-0000-0000-0000-000000000004', 'ea100000-0000-0000-0000-000000000004', (select id from public.leads where seller_id = 'sameTarget'), 'Same Target', 'sameTarget', array['Onix'], now() + interval '1 hour', 'scheduled'),
-  ('ea600000-0000-0000-0000-000000000005', 'ea100000-0000-0000-0000-000000000005', (select id from public.leads where seller_id = 'zeroA'), 'Zero A', 'zeroA', array['Onix'], now() + interval '1 hour', 'scheduled'),
-  ('ea600000-0000-0000-0000-000000000006', 'ea100000-0000-0000-0000-000000000006', (select id from public.leads where seller_id = 'isoATarget'), 'IsoA Target', 'isoATarget', array['Onix'], now() + interval '1 hour', 'scheduled');
+-- COMPETITION-V2-B1: created_at explícito no MÊS OFICIAL ANTERIOR. A partir
+-- do V2, visits.created_at no mês oficial corrente conta como
+-- scheduled_visit_count (3o critério de _rank_company_sellers). Estes
+-- fixtures existem só para serem CONCLUÍDOS (2o critério, closed_at) —
+-- datá-los no mês anterior mantém o cenário de "a conclusão é o que move o
+-- rank", que é o que este arquivo (eventos de Visit concluída) testa.
+-- scheduled_visit_count tem cobertura própria em
+-- 70_podium_competition_scheduled_visits_v2.sql.
+insert into public.visits (id, company_id, lead_id, client_name, assigned_seller_id, vehicles, scheduled_at, status, created_at) values
+  ('ea600000-0000-0000-0000-000000000001', 'ea100000-0000-0000-0000-000000000001', (select id from public.leads where seller_id = 'vr1Target'), 'VR1 Target', 'vr1Target', array['Onix'], now() + interval '1 hour', 'scheduled', (date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo') - interval '5 days'),
+  ('ea600000-0000-0000-0000-000000000002', 'ea100000-0000-0000-0000-000000000002', (select id from public.leads where seller_id = 'vr2Target'), 'VR2 Target', 'vr2Target', array['Onix'], now() + interval '1 hour', 'scheduled', (date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo') - interval '5 days'),
+  ('ea600000-0000-0000-0000-000000000003', 'ea100000-0000-0000-0000-000000000003', (select id from public.leads where seller_id = 'vr3Target'), 'VR3 Target', 'vr3Target', array['Onix'], now() + interval '1 hour', 'scheduled', (date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo') - interval '5 days'),
+  ('ea600000-0000-0000-0000-000000000004', 'ea100000-0000-0000-0000-000000000004', (select id from public.leads where seller_id = 'sameTarget'), 'Same Target', 'sameTarget', array['Onix'], now() + interval '1 hour', 'scheduled', (date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo') - interval '5 days'),
+  ('ea600000-0000-0000-0000-000000000005', 'ea100000-0000-0000-0000-000000000005', (select id from public.leads where seller_id = 'zeroA'), 'Zero A', 'zeroA', array['Onix'], now() + interval '1 hour', 'scheduled', (date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo') - interval '5 days'),
+  ('ea600000-0000-0000-0000-000000000006', 'ea100000-0000-0000-0000-000000000006', (select id from public.leads where seller_id = 'isoATarget'), 'IsoA Target', 'isoATarget', array['Onix'], now() + interval '1 hour', 'scheduled', (date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo') - interval '5 days');
 
 -- ══════════════════════════════════════════════════════════════════════
 -- 1. CATÁLOGO / SCHEMA — source_type/source_visit_id/XOR/unique

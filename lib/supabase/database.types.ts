@@ -951,6 +951,7 @@ export type Database = {
           sale_count: number
           seen_at: string | null
           seller_id: string
+          source_appointment_visit_id: string | null
           source_sale_id: string | null
           source_type: string
           source_visit_id: string | null
@@ -970,6 +971,7 @@ export type Database = {
           sale_count: number
           seen_at?: string | null
           seller_id: string
+          source_appointment_visit_id?: string | null
           source_sale_id?: string | null
           source_type: string
           source_visit_id?: string | null
@@ -989,6 +991,7 @@ export type Database = {
           sale_count?: number
           seen_at?: string | null
           seller_id?: string
+          source_appointment_visit_id?: string | null
           source_sale_id?: string | null
           source_type?: string
           source_visit_id?: string | null
@@ -1021,6 +1024,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "sellers"
             referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "seller_competition_events_source_appointment_visit_id_fkey"
+            columns: ["source_appointment_visit_id"]
+            isOneToOne: true
+            referencedRelation: "visits"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "seller_competition_events_source_sale_fk"
@@ -2009,6 +2019,7 @@ export type Database = {
           movement_positions_gained: number
           rank: number
           sale_count: number
+          scheduled_visit_count: number
           seller_id: string
           seller_label: string
         }[]
@@ -3066,6 +3077,7 @@ export type Database = {
         seller_label: string | null
         sale_count: number | null
         completed_visit_count: number | null
+        scheduled_visit_count: number | null
         rank: number | null
       }
     }
