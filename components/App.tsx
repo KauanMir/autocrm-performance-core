@@ -1,8 +1,9 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Icon } from '@/components/ui/Icon';
 import { NAV, Avatar, PageHead, LCard, LBtn, LightScreen } from '@/components/ui/kit';
+import { useViewport } from '@/lib/hooks/useViewport';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle, TweakButton } from '@/components/ui/TweaksPanel';
 import { NAV_ROLES, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
@@ -171,36 +172,34 @@ function PlaceholderScreen({ title }: { title: string }) {
   return <LightScreen><Placeholder title={title} /></LightScreen>;
 }
 
-function Rail({ current, go, currentUser }: { current: string; go: (id: string) => void; currentUser: User }) {
-  const router = useRouter();
+// MOBILE-RESPONSIVENESS-V1-B1-EXEC §9 — modelo do Rail (dados + derivações)
+// extraído para ser reaproveitado IDÊNTICO por dois hosts: o <aside> de
+// 236px do desktop (>= lg) e o <MobileDrawer> off-canvas (< lg). Nenhuma
+// regra de permissão nova: mesma allowedNavIds / mesmo operational context /
+// mesmo useRemoteTasksScreenState de sempre. Só nunca roda os dois hosts ao
+// mesmo tempo (App() monta um OU o outro por viewport).
+interface RailModel {
+  operational: ReturnType<typeof useOperationalCompanyContext>;
+  allowedIds: string[];
+  isOperationalSuperAdmin: boolean;
+  seller: ReturnType<typeof SellerService.getById> | null;
+  displayTeam: string;
+  lateTasks: number | null;
+}
+
+function useRailModel(currentUser: User): RailModel {
   // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC — fonte ÚNICA de empresa
-  // operacional/identidade (§2/§17 do EXEC: nenhum fetch novo, o mesmo
-  // useActiveCompanyIdentity de sempre já roda dentro do Provider montado
-  // em App()). Manager/Seller: mode==='membership', comportamento 100%
-  // inalterado (§25/§50 do design original preservados). Super Admin sem
-  // /company/[id]: mode==='none', bloco de empresa some, exatamente como
-  // antes.
+  // operacional/identidade. Manager/Seller: mode==='membership',
+  // comportamento inalterado. Super Admin sem /company/[id]: mode==='none'.
   const operational = useOperationalCompanyContext();
   const allowedIds = allowedNavIds(currentUser, operational.mode);
   const isOperationalSuperAdmin = operational.mode === 'super_admin';
-  // M1-E E7-A1: SellerService (lib/services.ts) lê um catálogo LOCAL, sem
-  // company_id, sem namespace por empresa (achado do E7-A0) — fora do modo
-  // local ele nunca é consultado aqui, para não misturar Seller de
-  // demonstração fixo na UI de uma empresa remota real. Correção completa
-  // do catálogo de Sellers (para Podium/Ranking/FlowPerfilVendedor) fica
-  // para o E7-B1; aqui só se evita a consulta dentro do Rail.
+  // M1-E E7-A1: SellerService lê catálogo LOCAL — fora do modo local nunca
+  // é consultado aqui.
   const remoteMode = !isLocalCommercialDataAllowed();
-  // M1-F S8-D2-A: sellerId vem de activeMembership.sellerId (nunca
-  // User.sellerId legado, removido do tipo). 'Administrador' agora é
-  // platformRole==='super_admin' (o "admin" legado deixou de existir como
-  // conceito de papel — mesmo padrão já usado no restante do app).
   const seller = !remoteMode && currentUser.activeMembership?.sellerId
     ? SellerService.getById(currentUser.activeMembership.sellerId)
     : null;
-  // Sem o catálogo local em modo remoto, o texto secundário é omitido (não
-  // inventado) — só o papel real da identidade autenticada (já disponível,
-  // sem nenhuma consulta nova) decide entre "Vendedor"/"Administrador"/
-  // "Gerente", nunca "Gerente" para um Seller só por falta do team local.
   const displayTeam = seller?.team
     ? `Vendedor · ${seller.team}`
     : currentUser.platformRole === 'super_admin'
@@ -209,24 +208,13 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
         ? 'Vendedor'
         : 'Gerente';
   // COMMERCIAL-REMOTE-B1-B3-B: badge de Pendências usa a fonte de verdade
-  // PRÓPRIA de Tasks (useRemoteTasksScreenState → resolveTaskRemoteMode),
-  // nunca mais `remoteMode` (linha acima, modo de LEADS) como proxy — os
-  // dois são independentes (task_blocked existe exatamente para Leads já
-  // remoto + Tasks ainda local). Chamado INCONDICIONALMENTE (Rules of
-  // Hooks) — o hook decide sozinho, por dentro, se falta identidade ou se
-  // deve montar a query; nunca um `if` em volta dele aqui.
+  // PRÓPRIA de Tasks. Chamado INCONDICIONALMENTE (Rules of Hooks).
   const remoteTasksScreen = useRemoteTasksScreenState(currentUser);
   const tasksActiveReady =
     remoteTasksScreen.mode === 'task_remote_active'
     && !remoteTasksScreen.isLoading
     && !remoteTasksScreen.isError
     && remoteTasksScreen.configError === null;
-  // task_local: seam síncrono local intocado (TaskService.getAll(), mesmo
-  // comportamento de sempre). Qualquer outro estado fora de
-  // task_remote_active-e-pronto (blocked/misconfigured/unavailable-
-  // identity/loading/erro/configError): badge ausente — nunca Tasks
-  // locais, nunca contagem antiga (REMOTE != LOCAL FALLBACK, mesmo
-  // contrato já usado no resto do B1-B3).
   const lateTasks =
     remoteTasksScreen.mode === 'task_local'
       ? TaskService.getAll().filter((t: any) => t.state === TASK_STATE.LATE).length
@@ -234,8 +222,25 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
         ? remoteTasksScreen.tasks.filter((t) => t.state === TASK_STATE.LATE).length
         : null;
 
+  return { operational, allowedIds, isOperationalSuperAdmin, seller, displayTeam, lateTasks };
+}
+
+// Conteúdo interno compartilhado do Rail. `layout` só ajusta o alvo de
+// toque dos itens de nav (>= 48px no drawer, §12) e mostra o botão fechar
+// (drawer). Todo o resto é pixel-idêntico ao Rail original.
+function RailInner({ layout, model, currentUser, current, onNavigate, onClose }: {
+  layout: 'rail' | 'drawer';
+  model: RailModel;
+  currentUser: User;
+  current: string;
+  onNavigate: (id: string) => void;
+  onClose?: () => void;
+}) {
+  const router = useRouter();
+  const { operational, allowedIds, isOperationalSuperAdmin, seller, displayTeam, lateTasks } = model;
+  const navPad = layout === 'drawer' ? '14px 13px' : '11px 13px';
   return (
-    <aside style={{ width: 236, flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', background: 'linear-gradient(180deg,#0b0b0c,#070708)', borderRight: '1px solid rgba(255,255,255,.06)' }}>
+    <>
       <div className="carbon" style={{ position: 'absolute', inset: 0, opacity: .35, pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 1, background: 'linear-gradient(180deg, transparent, rgba(212,175,55,.18), transparent)', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 220, background: 'radial-gradient(120% 70% at 30% 100%, rgba(193,18,31,.10), transparent 70%)', pointerEvents: 'none' }} />
@@ -244,10 +249,15 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
         <div className="sheen" style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(150deg,#E8CE72,#C9A227)', display: 'grid', placeItems: 'center', boxShadow: '0 8px 20px -6px rgba(212,175,55,.6), inset 0 1px 0 rgba(255,255,255,.4)' }}>
           <Icon name="car" size={23} stroke={2.2} style={{ color: '#2a2104' }} />
         </div>
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div className="display" style={{ fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: '.05em', lineHeight: 1 }}>KAPA CRM</div>
           <div style={{ fontSize: 9.5, color: 'var(--gold-ink)', letterSpacing: '.22em', marginTop: 4, fontWeight: 700, opacity: .8 }}>PERFORMANCE</div>
         </div>
+        {layout === 'drawer' && onClose && (
+          <button onClick={onClose} aria-label="Fechar navegação" className="focus-ring" style={{ width: 40, height: 40, borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--txt-mid)', flexShrink: 0 }}>
+            <Icon name="x" size={19} stroke={2.2} />
+          </button>
+        )}
       </div>
 
       {operational.identity.status === 'ready' && (
@@ -272,7 +282,7 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
           )}
           {isOperationalSuperAdmin && (
             <button
-              onClick={() => router.push('/')}
+              onClick={() => { router.push('/'); onClose?.(); }}
               className="focus-ring"
               style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 7, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--line-dark, rgba(255,255,255,.08))', background: 'transparent', color: 'var(--txt-mid)', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
             >
@@ -285,13 +295,10 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
       <nav style={{ position: 'relative', flex: 1, overflowY: 'auto', padding: '6px 14px' }}>
         {(NAV as any[]).filter((item: any) => allowedIds.includes(item.id)).map((item: any) => {
           const on = current === item.id;
-          // lateTasks é null fora de task_local/task_remote_active-pronto
-          // (blocked/misconfigured/unavailable-identity/loading/erro/
-          // configError) — badge nunca vira "0" fictício, o span some.
           const badge = item.id === 'pendencias' ? lateTasks : 0;
           return (
-            <button key={item.id} onClick={() => go(item.id)} style={{
-              width: '100%', display: 'flex', alignItems: 'center', gap: 13, padding: '11px 13px', marginBottom: 4,
+            <button key={item.id} onClick={() => onNavigate(item.id)} style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 13, padding: navPad, marginBottom: 4,
               borderRadius: 12, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', border: '1px solid transparent', transition: 'all .2s cubic-bezier(.2,.7,.2,1)',
               background: on ? 'linear-gradient(90deg,rgba(212,175,55,.18),rgba(212,175,55,.02))' : 'transparent',
               color: on ? '#fff' : 'var(--txt-mid)',
@@ -311,18 +318,174 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
 
       <div style={{ position: 'relative', padding: '12px 14px 16px' }}>
         <div style={{ height: 1, background: 'linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent)', marginBottom: 10 }} />
-        <div className="lift" onClick={() => seller && (window as any).__openFlow && (window as any).__openFlow('perfil-vendedor', { seller })} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 10px', borderRadius: 12, cursor: 'pointer', border: '1px solid transparent' }}>
+        <div className="lift" onClick={() => { if (seller && (window as any).__openFlow) { (window as any).__openFlow('perfil-vendedor', { seller }); onClose?.(); } }} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 10px', borderRadius: 12, cursor: 'pointer', border: '1px solid transparent' }}>
           <Avatar name={currentUser.name} size={36} ring="#3B82F6" />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13.5, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentUser.name}</div>
             <div style={{ fontSize: 11, color: 'var(--txt-lo)' }}>{displayTeam}</div>
           </div>
-          <button onClick={(e: any) => { e.stopPropagation(); (window as any).__openFlow && (window as any).__openFlow('confirmar', { title: 'Sair do sistema?', message: 'Você precisará entrar novamente para acessar seu painel de performance.', confirmLabel: 'Sair', tone: 'danger', icon: 'logout', onConfirm: () => AuthService.logout() }); }} className="focus-ring" style={{ width: 30, height: 30, borderRadius: 8, border: 'none', background: 'transparent', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--txt-lo)' }} title="Sair">
+          <button onClick={(e: any) => { e.stopPropagation(); (window as any).__openFlow && (window as any).__openFlow('confirmar', { title: 'Sair do sistema?', message: 'Você precisará entrar novamente para acessar seu painel de performance.', confirmLabel: 'Sair', tone: 'danger', icon: 'logout', onConfirm: () => AuthService.logout() }); onClose?.(); }} className="focus-ring" style={{ width: 30, height: 30, borderRadius: 8, border: 'none', background: 'transparent', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--txt-lo)' }} title="Sair">
             <Icon name="logout" size={17} stroke={2} />
           </button>
         </div>
       </div>
+    </>
+  );
+}
+
+// Desktop (>= lg) — casca <aside> de 236px, inalterada.
+function Rail({ current, go, currentUser }: { current: string; go: (id: string) => void; currentUser: User }) {
+  const model = useRailModel(currentUser);
+  return (
+    <aside style={{ width: 236, flexShrink: 0, height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', background: 'linear-gradient(180deg,#0b0b0c,#070708)', borderRight: '1px solid rgba(255,255,255,.06)' }}>
+      <RailInner layout="rail" model={model} currentUser={currentUser} current={current} onNavigate={go} />
     </aside>
+  );
+}
+
+// MOBILE-RESPONSIVENESS-V1-B1-EXEC §6/§7/§11 — cabeçalho mobile (< lg).
+// Hambúrguer + título da área atual (vindo de NAV, §7 — sem mapa novo, sem
+// id técnico) + contexto Super Admin COMPACTO (§11 — nunca os blocos
+// grandes empilhados do Rail).
+function MobileHeader({ title, onOpenNav }: { title: string; onOpenNav: () => void }) {
+  const operational = useOperationalCompanyContext();
+  const ctx =
+    operational.mode === 'super_admin' && operational.identity.status === 'ready'
+      ? { name: operational.identity.company.name, readOnly: operational.isReadOnly }
+      : null;
+  return (
+    <header
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
+        paddingTop: 'calc(10px + env(safe-area-inset-top, 0px))',
+        paddingBottom: 10,
+        paddingLeft: 'max(14px, env(safe-area-inset-left, 0px))',
+        paddingRight: 'max(14px, env(safe-area-inset-right, 0px))',
+        borderBottom: '1px solid var(--border)',
+        background: 'rgba(10,10,11,.92)', backdropFilter: 'blur(10px)',
+        position: 'sticky', top: 0, zIndex: 20,
+      }}
+    >
+      <button
+        onClick={onOpenNav}
+        aria-label="Abrir navegação"
+        aria-haspopup="dialog"
+        className="focus-ring"
+        style={{ width: 40, height: 40, borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--t-700)', flexShrink: 0 }}
+      >
+        <Icon name="list" size={20} stroke={2.2} />
+      </button>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div className="display" style={{ fontSize: 16, fontWeight: 800, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</div>
+        {ctx && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 800, letterSpacing: '.02em', color: '#5B9BFF', overflow: 'hidden' }}>
+            <Icon name="eye" size={10} stroke={2.4} style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              SUPER ADMIN · {ctx.name}
+            </span>
+            {ctx.readOnly && <Icon name="lock" size={10} stroke={2.4} style={{ flexShrink: 0, color: '#E8CE72' }} />}
+          </div>
+        )}
+      </div>
+    </header>
+  );
+}
+
+// MOBILE-RESPONSIVENESS-V1-B1-EXEC §8-§15 — Drawer off-canvas pela esquerda.
+// Só montado quando < lg. Scrim + painel translúcido; não empurra a página.
+// Foco preso enquanto aberto, ESC/scrim/clique-em-nav/botão fecham, foco
+// restaurado ao elemento que abriu. Fundo não fica navegável (§14).
+function MobileDrawer({ currentUser, current, go, open, onClose }: {
+  currentUser: User;
+  current: string;
+  go: (id: string) => void;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const model = useRailModel(currentUser);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const restoreRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    restoreRef.current = (document.activeElement as HTMLElement) ?? null;
+    // O painel só está montado-e-visível quando `open` (guard acima), então
+    // não é preciso filtrar por visibilidade aqui — só por elementos que
+    // realmente aceitam foco.
+    const focusables = (): HTMLElement[] => {
+      const panel = panelRef.current;
+      if (!panel) return [];
+      return Array.from(
+        panel.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'),
+      );
+    };
+    // Foco inicial: primeiro focável do painel (botão fechar).
+    const initial = focusables()[0];
+    initial?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); return; }
+      if (e.key !== 'Tab') return;
+      const f = focusables();
+      if (f.length === 0) return;
+      const idx = f.indexOf(document.activeElement as HTMLElement);
+      if (e.shiftKey && idx <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && idx === f.length - 1) { e.preventDefault(); f[0].focus(); }
+      else if (idx === -1) { e.preventDefault(); f[0].focus(); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      const r = restoreRef.current;
+      if (r && typeof r.focus === 'function') r.focus();
+    };
+  }, [open, onClose]);
+
+  return (
+    <>
+      <div
+        data-testid="mobile-drawer-scrim"
+        onClick={onClose}
+        aria-hidden="true"
+        style={{
+          position: 'fixed', inset: 0, zIndex: 40,
+          background: 'rgba(0,0,0,.55)',
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? 'auto' : 'none',
+          transition: 'opacity .22s ease',
+        }}
+      />
+      <div
+        ref={panelRef}
+        data-testid="mobile-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navegação"
+        style={{
+          position: 'fixed', top: 0, bottom: 0, left: 0, zIndex: 41,
+          width: 'min(86vw, 320px)',
+          display: 'flex', flexDirection: 'column',
+          background: 'linear-gradient(180deg,#0b0b0c,#070708)',
+          borderRight: '1px solid rgba(255,255,255,.08)',
+          paddingTop: 'env(safe-area-inset-top, 0px)',
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          paddingLeft: 'env(safe-area-inset-left, 0px)',
+          transform: open ? 'translateX(0)' : 'translateX(-104%)',
+          transition: 'transform .26s cubic-bezier(.2,.7,.2,1)',
+          visibility: open ? 'visible' : 'hidden',
+          overscrollBehavior: 'contain',
+          boxShadow: open ? '0 0 60px -10px rgba(0,0,0,.8)' : 'none',
+        }}
+      >
+        <RailInner
+          layout="drawer"
+          model={model}
+          currentUser={currentUser}
+          current={current}
+          onNavigate={(id: string) => { go(id); onClose(); }}
+          onClose={onClose}
+        />
+      </div>
+    </>
   );
 }
 
@@ -333,7 +496,7 @@ function Rail({ current, go, currentUser }: { current: string; go: (id: string) 
 // nunca passam por aqui.
 function OperationalLoadingScreen() {
   return (
-    <div style={{ height: '100vh', display: 'grid', placeItems: 'center', background: '#0a0a0b', color: 'var(--t-500, #8b8b93)', fontSize: 14 }}>
+    <div style={{ height: 'var(--app-vh)', display: 'grid', placeItems: 'center', background: '#0a0a0b', color: 'var(--t-500, #8b8b93)', fontSize: 14 }}>
       Carregando empresa…
     </div>
   );
@@ -342,7 +505,7 @@ function OperationalLoadingScreen() {
 function OperationalAccessDeniedScreen({ isError, onRetry }: { isError: boolean; onRetry?: () => void }) {
   const router = useRouter();
   return (
-    <div style={{ height: '100vh', display: 'grid', placeItems: 'center', background: '#0a0a0b' }}>
+    <div style={{ height: 'var(--app-vh)', display: 'grid', placeItems: 'center', background: '#0a0a0b' }}>
       <div style={{ textAlign: 'center', maxWidth: 420, padding: 24 }}>
         <div style={{ width: 48, height: 48, borderRadius: 14, background: 'rgba(255,255,255,.05)', display: 'grid', placeItems: 'center', margin: '0 auto 16px', color: 'var(--t-500, #8b8b93)' }}>
           <Icon name="building" size={22} stroke={2} />
@@ -389,12 +552,20 @@ function AuthenticatedApp({
   hasOperationalCompanyId: boolean;
 }) {
   const operational = useOperationalCompanyContext();
+  // MOBILE-RESPONSIVENESS-V1-B1-EXEC §5/§8 — abaixo de `lg` o Rail vira
+  // Drawer. `isDesktop` (>= 1024) é a única chave que troca shell desktop x
+  // shell mobile.
+  const { isDesktop } = useViewport();
+  const [navOpen, setNavOpen] = useState(false);
+  // Drawer nunca sobrevive a uma troca de viewport para desktop.
+  useEffect(() => { if (isDesktop) setNavOpen(false); }, [isDesktop]);
 
   const go = (id: string, params: any = null) => {
     const allowed = allowedNavIds(currentUser, operational.mode);
     if (!allowed.includes(id)) return;
     setCurrent(id);
     setNavParams(params);
+    setNavOpen(false); // §13 — navegar fecha o Drawer
     document.querySelector('#scroll-host')?.scrollTo(0, 0);
   };
 
@@ -460,6 +631,10 @@ function AuthenticatedApp({
     operational.companyId ?? '',
   ].join(':');
 
+  const screenNode = effectiveCurrent === 'home'
+    ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />
+    : (Cur ? <Cur go={go} t={t} initialFilter={navParams?.filter ?? null} /> : <PlaceholderScreen title={navItem?.label} />);
+
   return (
     // M1-F S8-C2-B2: CommercialCompanyProvider montado UMA vez aqui, acima da
     // troca de tela — assim a seleção do Super Admin sobrevive à navegação
@@ -467,13 +642,37 @@ function AuthenticatedApp({
     // quando currentUser.id muda (login/logout/troca de usuário).
     <CommercialCompanyProvider identityKey={currentUser.id}>
       <AuthenticatedShellErrorBoundary key={shellErrorResetKey}>
-        <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
-          <Rail current={effectiveCurrent} go={go} currentUser={currentUser} />
-          <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
-            {effectiveCurrent === 'home'
-              ? <Home key={animKey} t={t} setTweak={setTweak} go={go} active={true} currentUser={currentUser} />
-              : (Cur ? <Cur go={go} t={t} initialFilter={navParams?.filter ?? null} /> : <PlaceholderScreen title={navItem?.label} />)}
-          </main>
+        {/* MOBILE-RESPONSIVENESS-V1-B1-EXEC §5/§16 — shell principal em
+            --app-vh (100dvh c/ fallback 100vh). >= lg: Rail inline de 236px,
+            estrutura idêntica ao original. < lg: sem Rail inline, o
+            conteúdo usa a largura real da viewport; MobileHeader no topo e
+            MobileDrawer off-canvas. */}
+        <div style={{ display: 'flex', height: 'var(--app-vh)', overflow: 'hidden' }}>
+          {isDesktop && <Rail current={effectiveCurrent} go={go} currentUser={currentUser} />}
+          {isDesktop ? (
+            <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%' }}>
+              {screenNode}
+            </main>
+          ) : (
+            <main id="scroll-host" style={{ flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <MobileHeader title={navItem?.label ?? ''} onOpenNav={() => setNavOpen(true)} />
+              <div
+                style={{ flex: 1, minWidth: 0, minHeight: 0, position: 'relative', pointerEvents: navOpen ? 'none' : undefined }}
+                aria-hidden={navOpen || undefined}
+              >
+                {screenNode}
+              </div>
+            </main>
+          )}
+          {!isDesktop && (
+            <MobileDrawer
+              currentUser={currentUser}
+              current={effectiveCurrent}
+              go={go}
+              open={navOpen}
+              onClose={() => setNavOpen(false)}
+            />
+          )}
 
           {isDevPreview && (
             <TweaksPanel>
@@ -610,7 +809,7 @@ export function App({ operationalCompanyId = null }: { operationalCompanyId?: st
     // the login screen while restoreSession() is still resolving. No new
     // visual system introduced for this (M1-B scope: auth only).
     return (
-      <div style={{ height: '100vh', display: 'grid', placeItems: 'center', background: '#0a0a0b', color: 'var(--t-500, #8b8b93)', fontSize: 14 }}>
+      <div style={{ height: 'var(--app-vh)', display: 'grid', placeItems: 'center', background: '#0a0a0b', color: 'var(--t-500, #8b8b93)', fontSize: 14 }}>
         Carregando…
       </div>
     );

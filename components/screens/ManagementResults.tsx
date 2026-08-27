@@ -23,6 +23,7 @@ import type { User } from '@/lib/data';
 import { AuthService } from '@/lib/services';
 import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
 import { useCurrentCompanyTimezone } from '@/lib/hooks/useCurrentCompanyTimezone';
+import { useViewport } from '@/lib/hooks/useViewport';
 import {
   resolvePresetRange,
   resolveCustomRange,
@@ -48,23 +49,19 @@ const PRESETS: PeriodPreset[] = ['Hoje', '7 dias', '15 dias', '30 dias'];
 const DEFAULT_PERIOD = '30 dias'; // §11 — nunca all-time, nunca mês civil implícito
 type PeriodChoice = PeriodPreset | 'Personalizado';
 
-// ── responsividade (sem lib; mesmo padrão de `narrow` de Home) ──────────
+// ── responsividade — MOBILE-RESPONSIVENESS-V1-B1-EXEC §4 ────────────────
+// Antes: listener de resize próprio (`useColumns`). Agora deriva do hook
+// compartilhado `useViewport`. Limiares 980/640 PRESERVADOS exatamente
+// (A1 §29 quer consolidar 980→lg — fica para o B4). Helper puro extraído
+// para teste isolado (§37).
+export function resultsColumnsForWidth(width: number): number {
+  if (width >= 980) return 3;
+  if (width >= 640) return 2;
+  return 1;
+}
 function useColumns(): number {
-  const read = () => {
-    if (typeof window === 'undefined') return 3;
-    const w = window.innerWidth;
-    if (w >= 980) return 3;
-    if (w >= 640) return 2;
-    return 1;
-  };
-  const [cols, setCols] = useState(read);
-  useEffect(() => {
-    const onResize = () => setCols(read());
-    onResize();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-  return cols;
+  const { width } = useViewport();
+  return resultsColumnsForWidth(width);
 }
 
 // ── mensagens centrais (loading skeleton usa outro componente) ──────────

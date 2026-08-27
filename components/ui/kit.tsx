@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Icon } from './Icon';
 import { initials, ringFor } from '@/lib/data';
+import { useViewport } from '@/lib/hooks/useViewport';
+import { gutterForWidth } from '@/lib/ui/breakpoints';
 
 // PODIUM-COMPETITION-R2B-B1-EXEC — movida de components/flows/Flows2.tsx
 // (onde nasceu, usada pelo passo "done" local de FlowRegistrarVenda) pra
@@ -271,6 +273,12 @@ export function TopBar() {
   // contrato de NODE_ENV do TweaksPanel — sem sistema de notificações novo,
   // sem migração, só deixa de expor o que hoje é fixture.
   const isDevPreview = process.env.NODE_ENV === 'development';
+  // MOBILE-RESPONSIVENESS-V1-B1-EXEC §6 — abaixo de `lg` quem ocupa o topo
+  // é o <MobileHeader> (hambúrguer + título). O TopBar (busca readonly +
+  // ⌘K + sino dev-only) sai de cena; um acesso à busca no header mobile
+  // fica para B2. Nenhuma tela autorizada é perdida — só a barra de busca.
+  const { isDesktop } = useViewport();
+  if (!isDesktop) return null;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '13px 28px', borderBottom: '1px solid var(--border)', background: 'rgba(10,10,11,.7)', backdropFilter: 'blur(10px)', position: 'sticky', top: 0, zIndex: 6 }}>
       <div onClick={() => (window as any).__openFlow && (window as any).__openFlow('busca')} className="lift" style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, maxWidth: 460, background: 'rgba(255,255,255,.04)', border: '1px solid var(--border)', borderRadius: 11, padding: '10px 14px', cursor: 'pointer' }}>
@@ -290,11 +298,16 @@ export function TopBar() {
 }
 
 export function LightScreen({ children }: { children: React.ReactNode }) {
+  // MOBILE-RESPONSIVENESS-V1-B1-EXEC §19 — gutter horizontal responsivo
+  // centralizado aqui (alimenta ~9 telas de uma vez). Vertical (26/60) e
+  // maxWidth 1360 preservados. Nenhuma tela editada individualmente.
+  const { width } = useViewport();
+  const gx = gutterForWidth(width);
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: 'var(--bg)', color: 'var(--t-900)', position: 'relative' }}>
       <div style={{ position: 'fixed', top: -160, right: '6%', width: 520, height: 360, background: 'radial-gradient(ellipse, rgba(193,18,31,.06), transparent 70%)', pointerEvents: 'none' }} />
       <TopBar />
-      <div style={{ padding: '26px 30px 60px', maxWidth: 1360, margin: '0 auto', position: 'relative' }}>{children}</div>
+      <div style={{ padding: `26px ${gx}px 60px`, maxWidth: 1360, margin: '0 auto', position: 'relative' }}>{children}</div>
     </div>
   );
 }

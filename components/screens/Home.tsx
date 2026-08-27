@@ -33,6 +33,8 @@ import { CompetitionCelebration } from '@/components/podiums/CompetitionCelebrat
 import { resolvePresetRange, resolveCustomRange, type PeriodPreset, type ResolvedPeriod } from '@/lib/date/companyPeriod';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
+import { useViewport } from '@/lib/hooks/useViewport';
+import { gutterForWidth } from '@/lib/ui/breakpoints';
 import { groupLateTasksBySeller, groupOpenDealsBySeller, type SellerAttentionRow } from '@/lib/home/managerAttention';
 import type { RemoteTaskModel } from '@/lib/tasks/taskAdapter';
 import type { RemoteDealModel } from '@/lib/deals/adapter';
@@ -1070,13 +1072,13 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
   const [customDraft, setCustomDraft] = useState<{ start: string; end: string }>({ start: '', end: '' });
   const [customOpen, setCustomOpen] = useState(false);
   const [customError, setCustomError] = useState<string | null>(null);
-  const [narrow, setNarrow] = useState(typeof window !== 'undefined' && window.innerWidth < 1240);
-
-  useEffect(() => {
-    const onR = () => setNarrow(window.innerWidth < 1240);
-    onR(); window.addEventListener('resize', onR);
-    return () => window.removeEventListener('resize', onR);
-  }, []);
+  // MOBILE-RESPONSIVENESS-V1-B1-EXEC §4 — antes um listener de resize
+  // próprio; agora deriva do hook compartilhado `useViewport`. Limiar 1240
+  // preservado EXATAMENTE (A1 §29 quer consolidar 1240→lg, mas isso fica
+  // para o B4 junto do redesign mobile da Home; B1 não redesenha a Home).
+  const { width: viewportWidth } = useViewport();
+  const narrow = viewportWidth < 1240;
+  const homeGutter = gutterForWidth(viewportWidth);
 
   useStore(); // subscribes to store changes for re-render — sellers read via SellerService below (Correção 9)
   // SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §24/§33 — movido para
@@ -1407,7 +1409,10 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
         <CompTicker messages={remoteTickerMessages} />
       )}
 
-      <div style={{ padding: '22px 26px 44px', position: 'relative' }}>
+      {/* MOBILE-RESPONSIVENESS-V1-B1-EXEC §20 — só o gutter horizontal do
+          container-base vira responsivo (16/24/30). Seções e Pódio mobile
+          ficam para o B4. */}
+      <div style={{ padding: `22px ${homeGutter}px 44px`, position: 'relative' }}>
         {isSellersLocal ? (
           narrow ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginBottom: 26 }}>

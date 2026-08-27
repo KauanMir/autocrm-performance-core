@@ -51,10 +51,35 @@
   --shadow-md: inset 0 1px 0 rgba(255,255,255,.05), 0 12px 30px -12px rgba(0,0,0,.75);
   --shadow-lg: inset 0 1px 0 rgba(255,255,255,.06), 0 30px 64px -26px rgba(0,0,0,.9);
   --grad-card: linear-gradient(180deg, #1a1a1d, #141416);
+
+  /* MOBILE-RESPONSIVENESS-V1-B1 §16 — altura do shell. `100dvh` quando
+     suportado (não conta a barra dinâmica do browser mobile), com fallback
+     `100vh`. Substituição pontual: html/body/#root + shell principal
+     (App.tsx). calc(100vh - ...) em telas específicas fica para B3/B4. */
+  --app-vh: 100vh;
+
+  /* §27 — tokens de tipografia PREPARADOS. Ainda SEM consumidores: as
+     telas migram para eles no B4, junto do redesign de Home/Pódio. Mantidos
+     aqui para dar um alvo único e evitar re-decidir a escala depois. */
+  --fs-h1: 30px;
+  --fs-h2: 21px;
+  --fs-metric: 34px;
+}
+
+@supports (height: 100dvh) {
+  :root { --app-vh: 100dvh; }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --fs-h1: 22px;
+    --fs-h2: 18px;
+    --fs-metric: 26px;
+  }
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; height: 100%; }
 body {
   font-family: 'Inter', system-ui, sans-serif;
   background: var(--ink-900);
@@ -63,7 +88,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
 }
-#root { height: 100vh; }
+#root { height: var(--app-vh); }
+
+/* MOBILE-RESPONSIVENESS-V1-B1 §25 — barra fina para <TableScroller>.
+   O fade de borda foi deferido (ver components/ui/primitives.tsx). */
+.tablescroller::-webkit-scrollbar { height: 6px; }
 .display { font-family: 'Archivo', sans-serif; }
 .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 
