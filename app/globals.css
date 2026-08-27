@@ -93,6 +93,38 @@ body {
 /* MOBILE-RESPONSIVENESS-V1-B1 §25 — barra fina para <TableScroller>.
    O fade de borda foi deferido (ver components/ui/primitives.tsx). */
 .tablescroller::-webkit-scrollbar { height: 6px; }
+
+/* MOBILE-RESPONSIVENESS-V1-B3 §9/§10/§14 — grids fixos de formulário dentro
+   de um FlowShell se adaptam em < md. Feito por CSS (não por JS) porque os
+   flows são inline-styled e são dezenas de sites — o override com
+   !important sobre style inline é o caminho seguro e sem regressão (>= md
+   permanece com o layout de sempre). Multi-coluna vira auto-fit (1 col
+   quando estreito, 2 quando cabe, nunca comprime/estoura); colunas fixas
+   de label (180px/110px/340px 1fr) empilham em 1 coluna (label em cima,
+   controle embaixo). */
+@media (max-width: 767px) {
+  .flowshell-body [style*="grid-template-columns: 1fr 1fr"],
+  .flowshell-body [style*="grid-template-columns:1fr 1fr"],
+  .flowshell-body [style*="grid-template-columns: 1fr 1fr 1fr"],
+  .flowshell-body [style*="grid-template-columns: repeat(2, 1fr)"],
+  .flowshell-body [style*="grid-template-columns: repeat(2,1fr)"],
+  .flowshell-body [style*="grid-template-columns: repeat(3, 1fr)"],
+  .flowshell-body [style*="grid-template-columns: repeat(3,1fr)"],
+  .flowshell-body [style*="grid-template-columns: repeat(4, 1fr)"],
+  .flowshell-body [style*="grid-template-columns: repeat(4,1fr)"],
+  .flowshell-body [style*="grid-template-columns: repeat(5, 1fr)"],
+  .flowshell-body [style*="grid-template-columns: repeat(5,1fr)"],
+  .flowshell-body [style*="grid-template-columns: 1.15fr 1fr"],
+  .flowshell-body [style*="grid-template-columns: 1.3fr 1fr"] {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
+  }
+  .flowshell-body [style*="grid-template-columns: 180px 1fr"],
+  .flowshell-body [style*="grid-template-columns: 110px 1fr"],
+  .flowshell-body [style*="grid-template-columns: 143px 1fr"],
+  .flowshell-body [style*="grid-template-columns: 340px 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+}
 .display { font-family: 'Archivo', sans-serif; }
 .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
 

@@ -12,6 +12,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { LBtn, LBadge, LCard } from '@/components/ui/kit';
 import { FlowShell, StepRail, SellerPicker, type SellerPickerItem } from '@/components/flows/FlowsShared';
+import { TableScroller } from '@/components/ui/primitives';
+import { useViewport } from '@/lib/hooks/useViewport';
 import { useCurrentCompanyAssignableSellers } from '@/lib/hooks/useCurrentCompanyAssignableSellers';
 import { usePlatformSellers } from '@/lib/hooks/usePlatformSellers';
 import { useBulkImportLeads } from '@/lib/hooks/useBulkImportLeads';
@@ -88,6 +90,11 @@ export function BulkImportLeadsWizard({ companyId, isSuperAdmin, userId, onClose
   const clientRequestIdRef = useRef<string>(
     typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
   );
+
+  // MOBILE-RESPONSIVENESS-V1-B3-EXEC §33 — footers com CTA longo
+  // ("Importar 1.234 clientes") viram full-width em < md.
+  const { isMd } = useViewport();
+  const footerBlock = !isMd;
 
   const [step, setStep] = useState<WizardStep>('file');
   const [file, setFile] = useState<File | null>(null);
@@ -495,9 +502,9 @@ export function BulkImportLeadsWizard({ companyId, isSuperAdmin, userId, onClose
     if (step === 'file') {
       return (
         <>
-          <LBtn kind="ghost" onClick={onClose}>Cancelar</LBtn>
-          <LBtn kind="gold" icon="arrowRight" onClick={() => setStep('mapping')}
-            style={{ marginLeft: 'auto', opacity: parsed && !fileError ? 1 : 0.5 }}>
+          <LBtn kind="ghost" block={footerBlock} onClick={onClose}>Cancelar</LBtn>
+          <LBtn kind="gold" icon="arrowRight" block={footerBlock} onClick={() => setStep('mapping')}
+            style={{ marginLeft: isMd ? 'auto' : undefined, opacity: parsed && !fileError ? 1 : 0.5 }}>
             Avançar
           </LBtn>
         </>
@@ -506,9 +513,9 @@ export function BulkImportLeadsWizard({ companyId, isSuperAdmin, userId, onClose
     if (step === 'mapping') {
       return (
         <>
-          <LBtn kind="ghost" onClick={() => setStep('file')}>Voltar</LBtn>
-          <LBtn kind="gold" icon={isPreviewPending ? 'refresh' : 'arrowRight'} onClick={goToPreview}
-            style={{ marginLeft: 'auto', opacity: mappingReady && !isPreviewPending ? 1 : 0.5, cursor: mappingReady ? 'pointer' : 'not-allowed' }}>
+          <LBtn kind="ghost" block={footerBlock} onClick={() => setStep('file')}>Voltar</LBtn>
+          <LBtn kind="gold" icon={isPreviewPending ? 'refresh' : 'arrowRight'} block={footerBlock} onClick={goToPreview}
+            style={{ marginLeft: isMd ? 'auto' : undefined, opacity: mappingReady && !isPreviewPending ? 1 : 0.5, cursor: mappingReady ? 'pointer' : 'not-allowed' }}>
             {isPreviewPending ? 'Validando…' : 'Avançar para Conferir'}
           </LBtn>
         </>
@@ -518,11 +525,12 @@ export function BulkImportLeadsWizard({ companyId, isSuperAdmin, userId, onClose
       const validCount = previewResponse?.validCount ?? 0;
       return (
         <>
-          <LBtn kind="ghost" onClick={() => setStep('mapping')}>Voltar</LBtn>
-          <span data-testid="bulk-import-confirm" style={{ marginLeft: 'auto' }}>
+          <LBtn kind="ghost" block={footerBlock} onClick={() => setStep('mapping')}>Voltar</LBtn>
+          <span data-testid="bulk-import-confirm" style={{ marginLeft: isMd ? 'auto' : undefined, display: isMd ? undefined : 'block' }}>
             <LBtn
               kind="gold"
               icon={isCommitPending ? 'refresh' : 'check'}
+              block={footerBlock}
               onClick={handleConfirmImport}
               style={{ opacity: validCount > 0 && !isCommitPending ? 1 : 0.5, cursor: validCount > 0 ? 'pointer' : 'not-allowed' }}
             >
@@ -533,7 +541,7 @@ export function BulkImportLeadsWizard({ companyId, isSuperAdmin, userId, onClose
       );
     }
     return (
-      <LBtn kind="gold" icon="check" onClick={onClose} style={{ marginLeft: 'auto' }}>Concluir</LBtn>
+      <LBtn kind="gold" icon="check" block={footerBlock} onClick={onClose} style={{ marginLeft: isMd ? 'auto' : undefined }}>Concluir</LBtn>
     );
   }
 }
@@ -579,8 +587,11 @@ function PreviewTable({ rows, sellersById }: {
   sellersById: Record<string, string>;
 }) {
   return (
-    <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 12 }}>
-      <table data-testid="bulk-import-preview-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+    // MOBILE-RESPONSIVENESS-V1-B3-EXEC §31 — 50 linhas continuam TABELA
+    // (nunca 50 cards); scroll horizontal só DENTRO do componente, nunca no
+    // host/página.
+    <TableScroller ariaLabel="Prévia da importação" style={{ border: '1px solid var(--border)', borderRadius: 12 }}>
+      <table data-testid="bulk-import-preview-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 520 }}>
         <thead>
           <tr style={{ background: 'rgba(255,255,255,.03)' }}>
             {['Linha', 'Nome', 'Telefone', 'Veículo', 'Vendedor', 'Status'].map((h) => (
@@ -612,6 +623,6 @@ function PreviewTable({ rows, sellersById }: {
           })}
         </tbody>
       </table>
-    </div>
+    </TableScroller>
   );
 }

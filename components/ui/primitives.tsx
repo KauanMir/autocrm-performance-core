@@ -102,6 +102,21 @@ export function AutoGrid({
   );
 }
 
+// MOBILE-RESPONSIVENESS-V1-B3-EXEC §9 — grid de formulário responsiva.
+//   < md  → 1 coluna (nunca comprime campos).
+//   >= md → `columns` colunas (default 2).
+export function FormGrid({ columns = 2, gap = 14, style, className, children }: DivProps & { columns?: number; gap?: number }) {
+  const { isMd } = useViewport();
+  return (
+    <div
+      className={className}
+      style={{ display: 'grid', gridTemplateColumns: isMd ? `repeat(${columns}, 1fr)` : '1fr', gap, ...style }}
+    >
+      {children}
+    </div>
+  );
+}
+
 // MOBILE-RESPONSIVENESS-V1-B2-EXEC §7/§11 — fileira de chips/filtros.
 //   >= md → quebra organizada (flex-wrap: wrap).
 //   < md  → scroller horizontal de uma linha (não esmaga o conteúdo);

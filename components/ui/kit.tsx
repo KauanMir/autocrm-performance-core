@@ -112,9 +112,12 @@ export function PageHead({ title, sub, actions }: { title: string; sub?: string;
   );
 }
 
-export function LBtn({ children, kind = 'primary', icon, size = 'md', onClick, style, 'aria-label': ariaLabel }: {
+export function LBtn({ children, kind = 'primary', icon, size = 'md', block = false, onClick, style, 'aria-label': ariaLabel }: {
   children?: React.ReactNode; kind?: 'primary' | 'gold' | 'danger' | 'ghost'; icon?: string;
-  size?: 'sm' | 'md' | 'lg'; onClick?: () => void; style?: React.CSSProperties; 'aria-label'?: string;
+  // MOBILE-RESPONSIVENESS-V1-B3-EXEC §39 — `block`: ocupa a largura toda e
+  // centraliza (footers de flow em mobile). Sem `block`, comportamento
+  // idêntico ao anterior.
+  size?: 'sm' | 'md' | 'lg'; block?: boolean; onClick?: () => void; style?: React.CSSProperties; 'aria-label'?: string;
 }) {
   const sizes: Record<string, { p: string; fs: number; ic: number }> = {
     sm: { p: '7px 12px',  fs: 13,   ic: 15 },
@@ -122,6 +125,7 @@ export function LBtn({ children, kind = 'primary', icon, size = 'md', onClick, s
     lg: { p: '14px 22px', fs: 15.5, ic: 19 },
   };
   const s = sizes[size];
+  const blockStyle: React.CSSProperties = block ? { display: 'flex', width: '100%', justifyContent: 'center' } : {};
   const kinds: Record<string, React.CSSProperties> = {
     primary: { background: 'linear-gradient(180deg,#33333a,#222226)', color: '#fff', border: '1px solid rgba(255,255,255,.14)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,.1), 0 6px 16px -8px rgba(0,0,0,.7)' },
     gold:    { background: 'linear-gradient(180deg,#E8CE72,#C9A227)', color: '#2a2104', border: '1px solid #C9A227', fontWeight: 700, boxShadow: 'inset 0 1px 0 rgba(255,255,255,.35), 0 8px 22px -8px rgba(212,175,55,.55)' },
@@ -133,7 +137,7 @@ export function LBtn({ children, kind = 'primary', icon, size = 'md', onClick, s
       display: 'inline-flex', alignItems: 'center', gap: 8, padding: s.p, fontSize: s.fs,
       fontWeight: 600, borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
       transition: 'transform .12s, filter .12s, box-shadow .12s', whiteSpace: 'nowrap',
-      ...kinds[kind], ...style,
+      ...kinds[kind], ...blockStyle, ...style,
     }}
       onMouseEnter={(e) => { e.currentTarget.style.filter = 'brightness(1.06)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
       onMouseLeave={(e) => { e.currentTarget.style.filter = 'none'; e.currentTarget.style.transform = 'none'; }}>

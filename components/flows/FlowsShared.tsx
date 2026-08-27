@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge } from '@/components/ui/kit';
+import { useViewport } from '@/lib/hooks/useViewport';
+import { gutterForWidth } from '@/lib/ui/breakpoints';
 import { LeadService, TaskService, SellerService, AuthService } from '@/lib/services';
 import type { LeadHealthEvent } from '@/lib/services';
 import { USERS, TASK_STATE } from '@/lib/data';
@@ -378,7 +380,36 @@ export function FPanel({ title, icon, children, accent = 'var(--t-500)', style }
   );
 }
 
+// MOBILE-RESPONSIVENESS-V1-B3-EXEC §7/§8 — StepRail responsivo.
+//  >= md : trilha completa (círculos + labels + conectores), como hoje.
+//  < md  : versão compacta — "Passo N de M · {label atual}" + barra de
+//          progresso. Progresso preservado; passos anteriores/atual/futuros
+//          continuam distinguíveis; aria-current no indicador ativo.
 export function StepRail({ steps, current }: { steps: string[]; current: number }) {
+  const { isMd } = useViewport();
+
+  if (!isMd) {
+    const total = steps.length;
+    const label = steps[Math.max(0, Math.min(current, total - 1))];
+    const pct = total <= 1 ? 100 : Math.round(((current + 1) / total) * 100);
+    return (
+      <div style={{ marginBottom: 22 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+          <span aria-current="step" style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--t-900)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {label}
+          </span>
+          <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--t-400)', flexShrink: 0 }}>
+            Passo {Math.min(current + 1, total)} de {total}
+          </span>
+        </div>
+        <div role="progressbar" aria-valuenow={current + 1} aria-valuemin={1} aria-valuemax={total}
+          style={{ height: 4, borderRadius: 999, background: 'rgba(255,255,255,.08)', overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg,#E8CE72,#C9A227)', transition: 'width .25s' }} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 26 }}>
       {steps.map((s, i) => {
@@ -386,7 +417,7 @@ export function StepRail({ steps, current }: { steps: string[]; current: number 
         return (
           <React.Fragment key={s}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', flexShrink: 0,
+              <div aria-current={on ? 'step' : undefined} style={{ width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', flexShrink: 0,
                 background: done ? 'linear-gradient(180deg,#E8CE72,#C9A227)' : on ? 'rgba(212,175,55,.16)' : 'rgba(255,255,255,.05)',
                 border: `1px solid ${done || on ? 'rgba(212,175,55,.5)' : 'var(--border)'}`,
                 color: done ? '#241c04' : on ? '#E8CE72' : 'var(--t-400)', fontWeight: 800, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}>
@@ -430,39 +461,51 @@ export function FlowShell({ eyebrow, title, sub, icon, accent = '#E8CE72', statu
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+  // MOBILE-RESPONSIVENESS-V1-B3-EXEC §2-§6/§37/§38 — FlowShell responsivo.
+  //  >= md : comportamento desktop atual, intacto.
+  //  < md  : quase full-screen (já era position:fixed), gutters menores,
+  //          UM só controle de fechar (o "X"), footer que empilha com a
+  //          ação principal em destaque. Altura em --app-vh (100dvh) para
+  //          sobreviver ao teclado virtual (nunca calc(100vh - X)).
+  const { width, isMd } = useViewport();
+  const gx = gutterForWidth(width);
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', flexDirection: 'column', background: 'radial-gradient(120% 80% at 50% -10%, #1a1a1e, #0a0a0b 60%)', animation: 'flowIn .34s cubic-bezier(.2,.7,.2,1)' }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 'var(--app-vh)', zIndex: 60, display: 'flex', flexDirection: 'column', background: 'radial-gradient(120% 80% at 50% -10%, #1a1a1e, #0a0a0b 60%)', animation: 'flowIn .34s cubic-bezier(.2,.7,.2,1)' }}>
       <div className="carbon" style={{ position: 'absolute', inset: 0, opacity: .3, pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', top: -60, left: '50%', transform: 'translateX(-50%)', width: 700, height: 320, background: `radial-gradient(ellipse, ${accent}1f, transparent 70%)`, pointerEvents: 'none' }} />
 
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 16, padding: '18px 28px', borderBottom: '1px solid var(--border)', background: 'rgba(8,8,9,.6)', backdropFilter: 'blur(10px)' }}>
-        <button onClick={onClose} className="focus-ring lift" style={{ width: 42, height: 42, borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--t-700)' }}>
-          <Icon name="arrowRight" size={19} stroke={2.2} style={{ transform: 'rotate(180deg)' }} />
-        </button>
-        <div style={{ width: 44, height: 44, borderRadius: 13, background: `linear-gradient(180deg, ${accent}, color-mix(in srgb, ${accent} 72%, #000))`, display: 'grid', placeItems: 'center', color: '#241c04', boxShadow: `0 8px 22px -8px ${accent}`, flexShrink: 0 }}>
-          <Icon name={icon} size={23} stroke={2.2} />
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: isMd ? 16 : 12, padding: isMd ? '18px 28px' : `calc(12px + env(safe-area-inset-top, 0px)) ${gx}px 12px`, borderBottom: '1px solid var(--border)', background: 'rgba(8,8,9,.6)', backdropFilter: 'blur(10px)', flexShrink: 0 }}>
+        {/* Seta "voltar" (que também só fecha) some < md — evita dois
+            controles de fechar competindo (§3/§41). O "X" no fim permanece. */}
+        {isMd && (
+          <button onClick={onClose} className="focus-ring lift" style={{ width: 42, height: 42, borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--t-700)' }}>
+            <Icon name="arrowRight" size={19} stroke={2.2} style={{ transform: 'rotate(180deg)' }} />
+          </button>
+        )}
+        <div style={{ width: isMd ? 44 : 38, height: isMd ? 44 : 38, borderRadius: 13, background: `linear-gradient(180deg, ${accent}, color-mix(in srgb, ${accent} 72%, #000))`, display: 'grid', placeItems: 'center', color: '#241c04', boxShadow: `0 8px 22px -8px ${accent}`, flexShrink: 0 }}>
+          <Icon name={icon} size={isMd ? 23 : 20} stroke={2.2} />
         </div>
-        <div style={{ minWidth: 0 }}>
-          {eyebrow && <div className="display" style={{ fontSize: 11, fontWeight: 800, color: accent, letterSpacing: '.18em' }}>{eyebrow}</div>}
-          <div className="display" style={{ fontSize: 21, fontWeight: 800, color: '#fff', letterSpacing: '-.01em', lineHeight: 1.1 }}>{title}</div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          {eyebrow && <div className="display" style={{ fontSize: 11, fontWeight: 800, color: accent, letterSpacing: '.18em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{eyebrow}</div>}
+          <div className="display" style={{ fontSize: isMd ? 21 : 18, fontWeight: 800, color: '#fff', letterSpacing: '-.01em', lineHeight: 1.1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: isMd ? 14 : 8, flexShrink: 0 }}>
           {status}
-          <button onClick={onClose} className="focus-ring" style={{ width: 42, height: 42, borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--t-500)' }}>
+          <button onClick={onClose} aria-label="Fechar" className="focus-ring" style={{ width: isMd ? 42 : 40, height: isMd ? 42 : 40, borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--t-500)', flexShrink: 0 }}>
             <Icon name="x" size={20} stroke={2.2} />
           </button>
         </div>
       </div>
 
-      <div style={{ position: 'relative', flex: 1, overflowY: 'auto' }}>
-        <div style={{ maxWidth: wide, margin: '0 auto', padding: '28px 28px 40px' }}>
+      <div className="flowshell-body" style={{ position: 'relative', flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <div style={{ maxWidth: wide, margin: '0 auto', padding: isMd ? '28px 28px 40px' : `20px ${gx}px 32px` }}>
           {sub && <p style={{ margin: '0 0 22px', color: 'var(--t-500)', fontSize: 14.5, maxWidth: 680 }}>{sub}</p>}
           {children}
         </div>
       </div>
 
-      {footer && <div style={{ position: 'relative', borderTop: '1px solid var(--border)', background: 'rgba(8,8,9,.7)', backdropFilter: 'blur(10px)', padding: '16px 28px' }}>
-        <div style={{ maxWidth: wide, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 16 }}>{footer}</div>
+      {footer && <div style={{ position: 'relative', borderTop: '1px solid var(--border)', background: 'rgba(8,8,9,.7)', backdropFilter: 'blur(10px)', padding: isMd ? '16px 28px' : `14px ${gx}px calc(14px + env(safe-area-inset-bottom, 0px))`, flexShrink: 0 }}>
+        <div style={{ maxWidth: wide, margin: '0 auto', display: 'flex', alignItems: isMd ? 'center' : 'stretch', flexDirection: isMd ? 'row' : 'column-reverse', gap: isMd ? 16 : 10 }}>{footer}</div>
       </div>}
     </div>
   );
