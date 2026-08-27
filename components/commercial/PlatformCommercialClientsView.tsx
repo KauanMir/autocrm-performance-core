@@ -190,7 +190,7 @@ export function PlatformCommercialClientsView({ userId, platformRole }: Platform
               <LCard style={{ textAlign: 'center', color: 'var(--t-500)' }}>Nenhum cliente encontrado.</LCard>
             </div>
           ) : (
-            <div data-testid="platform-clients-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
+            <div data-testid="platform-clients-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))', gap: 14 }}>
               {filteredLeads.map((lead) => (
                 <LeadListCard
                   key={lead.id}

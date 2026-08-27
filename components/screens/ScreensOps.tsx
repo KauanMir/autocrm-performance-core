@@ -19,6 +19,8 @@ import type { RemoteLeadsFlagMode } from '@/lib/leads/remoteLeadsMode';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
 import { canImportLeads } from '@/lib/capabilities';
 import { BulkImportLeadsWizard } from '@/components/leads/BulkImportLeadsWizard';
+import { ChipRow } from '@/components/ui/primitives';
+import { DataRow } from '@/components/ui/DataRow';
 
 // M1-E E5-B1: mensagens sanitizadas fixas do movimento remoto do Kanban —
 // mesmo modelo de remoteLeadErrorMessage (Flows2.tsx), próprio deste
@@ -161,8 +163,8 @@ function LeadCard({ lead, go, capabilities, canLigar }: {
           false até o picker de eventos existir) — as duas ações somem
           independentemente uma da outra; só a abertura do detalhe é
           garantida. */}
-      <div style={{ display: 'flex', gap: 8 }} onClick={(e: any) => e.stopPropagation()}>
-        {showLigar && <LBtn size="sm" kind={red ? 'danger' : green ? 'ghost' : 'primary'} icon="phone" style={{ flex: 1, justifyContent: 'center' }} onClick={() => (window as any).__openFlow('ligar', { lead })}>{green ? 'Ligar' : 'Ligar agora'}</LBtn>}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }} onClick={(e: any) => e.stopPropagation()}>
+        {showLigar && <LBtn size="sm" kind={red ? 'danger' : green ? 'ghost' : 'primary'} icon="phone" style={{ flex: 1, justifyContent: 'center', minWidth: 130 }} onClick={() => (window as any).__openFlow('ligar', { lead })}>{green ? 'Ligar' : 'Ligar agora'}</LBtn>}
         {showVisita && !green && <LBtn size="sm" kind="ghost" icon="calendar" onClick={() => (window as any).__openFlow('criar-visita', { lead })}>Visita</LBtn>}
         <LBtn size="sm" kind="ghost" icon="arrowRight" style={quickActionsHidden ? { flex: 1, justifyContent: 'center' } : undefined} onClick={() => (window as any).__openFlow('ver-cliente', { lead, capabilities: capabilities ?? null })} />
       </div>
@@ -187,7 +189,7 @@ function filterByStageOrDelay(leads: any[], filter: string): any[] {
 
 function ClientesGridSkeleton({ testId }: { testId: string }) {
   return (
-    <div data-testid={testId} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+    <div data-testid={testId} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap: 16 }}>
       {[0, 1, 2].map((i) => (
         <div key={i} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', minHeight: 180, opacity: 0.55 }} />
       ))}
@@ -374,7 +376,7 @@ function ScreenClientesLegacy({ go, initialFilter }: any) {
       gridBody = <KanbanStateCard testId="clientes-state-empty">Nenhum cliente cadastrado ainda.</KanbanStateCard>;
     } else {
       gridBody = (
-        <div data-testid="clientes-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, alignItems: 'start' }}>
+        <div data-testid="clientes-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap: 16, alignItems: 'start' }}>
           {sorted.map((l: any) => {
             const canLigar = canActorMutateLead({
               capability: capabilities.canLogCallOutcome,
@@ -394,7 +396,7 @@ function ScreenClientesLegacy({ go, initialFilter }: any) {
       <LightScreen>
         <PageHead title="Clientes" sub="Cada cliente mostra na cor o que precisa de você. Vermelho = aja agora."
           actions={(capabilities.canCreate || canImport) ? (
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {canImport && <LBtn kind="ghost" icon="upload" onClick={() => setImportOpen(true)}>Importar CSV</LBtn>}
               {capabilities.canCreate && <LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('novo-cliente')}>Novo Lead</LBtn>}
             </div>
@@ -420,15 +422,15 @@ function ScreenClientesLegacy({ go, initialFilter }: any) {
               <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles. São os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
             )}
             {showChrome && !isSeller && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <ChipRow style={{ marginBottom: 12 }}>
                 <Chip active={sellerFilter === 'Todos'} onClick={() => setSellerFilter('Todos')}>Todos</Chip>
                 {sellerLabels.sellerLabels.map((s) => <Chip key={s.seller_id} active={sellerFilter === s.seller_id} onClick={() => setSellerFilter(s.seller_id)}>{s.name}</Chip>)}
-              </div>
+              </ChipRow>
             )}
             {showChrome && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+              <ChipRow style={{ marginBottom: 18 }}>
                 {CLIENT_FILTERS.map(f => <Chip key={f} active={filter === f} onClick={() => setFilter(f)}>{f === 'Atrasados' ? `Atrasados (${delayed})` : f}</Chip>)}
-              </div>
+              </ChipRow>
             )}
             {gridBody}
           </>
@@ -458,15 +460,15 @@ function ScreenClientesLegacy({ go, initialFilter }: any) {
       <PageHead title="Clientes" sub="Cada cliente mostra na cor o que precisa de você. Vermelho = aja agora." actions={<LBtn kind="gold" icon="plus" size="lg" onClick={() => (window as any).__openFlow('novo-cliente')}>Novo cliente</LBtn>} />
       <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles. São os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
       {!isSeller && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+        <ChipRow style={{ marginBottom: 12 }}>
           <Chip active={sellerFilter === 'Todos'} onClick={() => setSellerFilter('Todos')}>Todos</Chip>
           {sellers.map((s: any) => <Chip key={s.id} active={sellerFilter === s.id} onClick={() => setSellerFilter(s.id)}>{s.first}</Chip>)}
-        </div>
+        </ChipRow>
       )}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 18 }}>
+      <ChipRow style={{ marginBottom: 18 }}>
         {CLIENT_FILTERS.map(f => <Chip key={f} active={filter === f} onClick={() => setFilter(f)}>{f === 'Atrasados' ? `Atrasados (${delayed})` : f}</Chip>)}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16, alignItems: 'start' }}>
+      </ChipRow>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap: 16, alignItems: 'start' }}>
         {sorted.map((l: any) => <LeadCard key={l.id} lead={l} go={go} />)}
       </div>
     </LightScreen>
@@ -955,57 +957,59 @@ function TaskRow({ task, go, remoteActive, currentUser, readOnly }: any) {
   };
 
   const completeDisabled = remoteActive && completeHook.isPending;
+  // MOBILE-RESPONSIVENESS-V1-B2-EXEC §9/§10 — TaskRow via <DataRow>:
+  // desktop = linha compacta (checkbox + prio + título + prazo/lead +
+  // Reagendar); mobile = card empilhado, todos os dados preservados.
+  // Nenhuma mudança de lógica de estado (Atrasada/Hoje/Próxima/Concluída).
+  const dueNode = (
+    <span style={{ fontSize: 12, fontWeight: 700, color: late ? 'var(--red)' : 'var(--t-500)', whiteSpace: 'nowrap' }}>{task.when}</span>
+  );
+  const leadNode = remoteActive ? (
+    <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', whiteSpace: 'nowrap' }}>
+      <Icon name="user" size={14} stroke={2} /> {task.lead.split(' ')[0]}
+    </span>
+  ) : (
+    <button onClick={() => {
+      const lead = LeadService.getAll().find((l: any) => l.name === task.lead);
+      (window as any).__openFlow('ver-cliente', { lead: lead ?? LeadService.getAll()[0] });
+    }} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+      <Icon name="user" size={14} stroke={2} /> {task.lead.split(' ')[0]}
+    </button>
+  );
   return (
     <>
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px',
-      background: late ? 'var(--red-bg)' : 'var(--surface)',
-      border: `1px solid ${late ? 'var(--red-line)' : 'var(--border)'}`,
-      borderRadius: 11, transition: 'all .2s',
-    }}>
-      {/* SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §18/§22 — "Concluir
-          pendência" é mutation entry point: HIDE (nunca só disabled) para
-          Super Admin contextual — nenhum flow escape possível por aqui. */}
-      {!readOnly && (
-        <button
-          onClick={remoteActive ? handleComplete : () => TaskService.update(task.id, { state: TASK_STATE.DONE })}
-          disabled={completeDisabled}
-          className="focus-ring" title="Concluir pendência" style={{
-          width: 24, height: 24, borderRadius: 7, flexShrink: 0, cursor: completeDisabled ? 'default' : 'pointer',
-          opacity: completeDisabled ? 0.5 : 1,
-          border: `2px solid ${late ? 'var(--red)' : 'var(--border)'}`,
-          background: 'transparent', display: 'grid', placeItems: 'center', color: '#fff',
-        }} />
-      )}
-      <div style={{ width: 4, height: 34, borderRadius: 3, background: p.c, flexShrink: 0 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: 14.5, color: 'var(--t-900)' }}>{task.title}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2 }}>{task.note}</div>
-      </div>
-      <span style={{ fontSize: 12, fontWeight: 700, color: late ? 'var(--red)' : 'var(--t-500)', whiteSpace: 'nowrap' }}>{task.when}</span>
-      {/* COMMERCIAL-REMOTE-B1-B3-E: sempre visível — por construção, este
-          ponto só é alcançado em task_local ou task_remote_active pronto.
-          FlowReagendarPendencia decide sozinho local/remoto (FlowLayer não
-          bloqueia mais 'reagendar-pendencia' fora do modo local). HIDE
-          para Super Admin contextual (§18/§22 do EXEC V2A). */}
-      {!readOnly && (
-        <button onClick={() => (window as any).__openFlow('reagendar-pendencia', { task })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+    <DataRow
+      testId="task-row"
+      style={{
+        background: late ? 'var(--red-bg)' : 'var(--surface)',
+        border: `1px solid ${late ? 'var(--red-line)' : 'var(--border)'}`,
+      }}
+      leading={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          {/* HIDE (nunca só disabled) para Super Admin contextual (§18/§22 V2A). */}
+          {!readOnly && (
+            <button
+              onClick={remoteActive ? handleComplete : () => TaskService.update(task.id, { state: TASK_STATE.DONE })}
+              disabled={completeDisabled}
+              className="focus-ring" title="Concluir pendência" style={{
+              width: 26, height: 26, borderRadius: 8, flexShrink: 0, cursor: completeDisabled ? 'default' : 'pointer',
+              opacity: completeDisabled ? 0.5 : 1,
+              border: `2px solid ${late ? 'var(--red)' : 'var(--border)'}`,
+              background: 'transparent', display: 'grid', placeItems: 'center', color: '#fff',
+            }} />
+          )}
+          <div style={{ width: 4, height: 34, borderRadius: 3, background: p.c, flexShrink: 0 }} />
+        </div>
+      }
+      title={task.title}
+      subtitle={task.note || undefined}
+      meta={<span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>{dueNode}{leadNode}</span>}
+      actions={!readOnly ? (
+        <button onClick={() => (window as any).__openFlow('reagendar-pendencia', { task })} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', padding: '8px 4px' }}>
           <Icon name="refresh" size={14} stroke={2} /> Reagendar
         </button>
-      )}
-      {remoteActive ? (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', whiteSpace: 'nowrap' }}>
-          <Icon name="user" size={14} stroke={2} /> {task.lead.split(' ')[0]}
-        </span>
-      ) : (
-        <button onClick={() => {
-          const lead = LeadService.getAll().find((l: any) => l.name === task.lead);
-          (window as any).__openFlow('ver-cliente', { lead: lead ?? LeadService.getAll()[0] });
-        }} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12.5, color: 'var(--t-500)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
-          <Icon name="user" size={14} stroke={2} /> {task.lead.split(' ')[0]}
-        </button>
-      )}
-    </div>
+      ) : undefined}
+    />
     {completeError && (
       <div data-testid="task-complete-error" style={{ fontSize: 12, color: 'var(--red)', padding: '0 4px' }}>{completeError}</div>
     )}
@@ -1107,11 +1111,11 @@ export function ScreenPendencias({ go }: any) {
           contextual (READ ONLY neste V2A), preservado para Manager/Seller. */}
       <PageHead title="Pendências" sub="O que você precisa fazer e o que já passou da hora." actions={!isOperationalSuperAdmin && <LBtn kind="primary" icon="plus" onClick={() => (window as any).__openFlow('nova-pendencia')}>Nova pendência</LBtn>} />
       <Guide tone="red" icon="alert" text={<span>Você tem <b>{late} pendências atrasadas</b>. Resolva primeiro as vermelhas. Cada dia parado é uma venda mais distante.</span>} action="Ver atrasadas" onAction={() => setTab('Atrasadas')} />
-      <div style={{ display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+      <ChipRow style={{ marginBottom: 18 }}>
         {['Atrasadas', 'Hoje', 'Próximas', 'Todas'].map(t => (
           <Chip key={t} active={tab === t} onClick={() => setTab(t)}>{t === 'Atrasadas' ? `Atrasadas (${late})` : t}</Chip>
         ))}
-      </div>
+      </ChipRow>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
         {(view as [string, any[]][]).map(([name, items]) => (
           <div key={name}>

@@ -5,9 +5,9 @@
 // testes isolados. Mesmo padrão inline-style do resto do app (sem Tailwind,
 // A1).
 //
-// §26 — DataRow/DataList NÃO entram neste lote (sem consumo imediato;
-// pertencem ao B2).
+// §26 (B1) — DataRow/DataList entraram no B2 (components/ui/DataRow.tsx).
 import React from 'react';
+import { useViewport } from '@/lib/hooks/useViewport';
 
 type DivProps = {
   style?: React.CSSProperties;
@@ -98,6 +98,36 @@ export function AutoGrid({
       }}
     >
       {children}
+    </div>
+  );
+}
+
+// MOBILE-RESPONSIVENESS-V1-B2-EXEC §7/§11 — fileira de chips/filtros.
+//   >= md → quebra organizada (flex-wrap: wrap).
+//   < md  → scroller horizontal de uma linha (não esmaga o conteúdo);
+//           cada filho não encolhe.
+export function ChipRow({ gap = 8, style, className, children }: DivProps & { gap?: number }) {
+  const { isMd } = useViewport();
+  return (
+    <div
+      className={className}
+      style={
+        isMd
+          ? { display: 'flex', flexWrap: 'wrap', gap, ...style }
+          : {
+              display: 'flex', flexWrap: 'nowrap', gap, overflowX: 'auto',
+              WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain',
+              paddingBottom: 2, ...style,
+            }
+      }
+    >
+      {isMd
+        ? children
+        : React.Children.map(children, (c) =>
+            React.isValidElement(c)
+              ? <div style={{ flexShrink: 0 }}>{c}</div>
+              : c,
+          )}
     </div>
   );
 }

@@ -426,6 +426,11 @@ function Col({ label, v }: { label: string; v: any }) {
 }
 
 function RankingRow({ s, pos, active, leader, me, target }: any) {
+  // MOBILE-RESPONSIVENESS-V1-B2-EXEC §19/§20 — < md: rank + vendedor na 1a
+  // linha, métricas (Vendas/Visitas/Agendamentos) como trio compacto que
+  // quebra na 2a linha. Nenhum critério removido; row.rank do backend
+  // continua a autoridade (sem reordenação client-side).
+  const { isMd } = useViewport();
   const pl = pos <= 3 ? (PLACE as any[])[pos - 1] : null;
   const moveIcon = s.move > 0 ? 'arrowUp' : s.move < 0 ? 'arrowDown' : null;
   const moveColor = s.move > 0 ? '#27C75F' : s.move < 0 ? '#E23744' : 'var(--txt-lo)';
@@ -435,11 +440,11 @@ function RankingRow({ s, pos, active, leader, me, target }: any) {
   const bd = leader ? 'rgba(212,175,55,.32)' : me ? 'rgba(59,130,246,.45)' : target ? 'rgba(212,175,55,.22)' : 'transparent';
   return (
     <div onClick={() => (window as any).__openFlow && (window as any).__openFlow('perfil-vendedor', { seller: s, pos })}
-      style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '11px 14px', borderRadius: 12, background: bg, border: `1px solid ${bd}`, transition: 'background .15s', position: 'relative', overflow: 'hidden', cursor: 'pointer' }}
+      style={{ display: 'flex', alignItems: 'center', gap: 11, rowGap: 8, flexWrap: isMd ? 'nowrap' : 'wrap', padding: '11px 14px', borderRadius: 12, background: bg, border: `1px solid ${bd}`, transition: 'background .15s', position: 'relative', overflow: 'hidden', cursor: 'pointer' }}
       onMouseEnter={(e: any) => { if (!leader && !me) e.currentTarget.style.background = 'rgba(255,255,255,.03)'; }}
       onMouseLeave={(e: any) => { if (!leader && !me) e.currentTarget.style.background = bg; }}>
       {leader && active && <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}><div style={{ position: 'absolute', top: 0, left: 0, width: '30%', height: '100%', background: 'linear-gradient(90deg,transparent,rgba(212,175,55,.14),transparent)', animation: 'sweep 6s ease-in-out 1s infinite' }} /></div>}
-      <div className="display tnum" style={{ width: 26, textAlign: 'center', fontSize: 19, fontWeight: 900, color: pl ? pl.ring : me ? '#5B9BFF' : 'var(--txt-lo)' }}>{pos}</div>
+      <div className="display tnum" style={{ width: 26, textAlign: 'center', fontSize: 19, fontWeight: 900, color: pl ? pl.ring : me ? '#5B9BFF' : 'var(--txt-lo)', flexShrink: 0 }}>{pos}</div>
       {/* PODIUM-MOVEMENT-R1-B1-EXEC §23/§24 — title torna a seta acessível
           (nunca só visual) e deixa explícito que o movimento é do mês
           oficial, mesmo quando o Pódio está filtrado em Hoje/7/15/30 dias
@@ -455,7 +460,7 @@ function RankingRow({ s, pos, active, leader, me, target }: any) {
         </div>
         {s.team && <div style={{ fontSize: 11, color: 'var(--txt-lo)' }}>{s.team}</div>}
       </div>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: isMd ? 16 : 14, alignItems: 'center', flexWrap: isMd ? undefined : 'wrap', width: isMd ? undefined : '100%', paddingLeft: isMd ? undefined : 37, justifyContent: isMd ? undefined : 'flex-start' }}>
         {typeof s.leads === 'number' && <Col label="Leads" v={s.leads} />}
         {typeof s.visits === 'number' && <Col label="Visitas" v={s.visits} />}
         {/* COMPETITION-V2-B2-EXEC §7 — 3o critério do ranking, condicional

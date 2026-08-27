@@ -2,6 +2,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard, Stat } from '@/components/ui/kit';
+import { DataRow, RowActionMenu } from '@/components/ui/DataRow';
+import { useViewport } from '@/lib/hooks/useViewport';
 import { VISIT_STATUS, DEAL_STATUS, SALE_STATUS, USERS } from '@/lib/data';
 import { useStore } from '@/lib/store';
 import { LeadService, VisitService, DealService, SaleService, SellerService, PipelineService, CompanyService, AuthService } from '@/lib/services';
@@ -107,22 +109,29 @@ function VisitRow({ v, go }: any) {
   const s = VST[v.status] || VST_FALLBACK;
   const pend = v.status === VISIT_STATUS.PENDING; const noRes = v.status === VISIT_STATUS.AWAITING_RESULT;
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderRadius: 11,
-      background: pend ? 'var(--red-bg)' : noRes ? 'var(--amber-bg)' : 'var(--surface)',
-      border: `1px solid ${pend ? 'var(--red-line)' : noRes ? 'var(--amber-line)' : 'var(--border)'}`,
-    }}>
-      <div className="display tnum" style={{ width: 62, textAlign: 'center', fontSize: 18, fontWeight: 800, color: 'var(--t-900)' }}>{v.time}</div>
-      <div style={{ width: 1, height: 34, background: 'var(--border)' }} />
-      <Avatar name={v.client} size={38} ring={pend ? 'var(--red)' : '#6B7280'} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{v.client}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', gap: 10, marginTop: 2 }}>
+    <DataRow
+      testId="visit-row"
+      gap={16}
+      style={{
+        background: pend ? 'var(--red-bg)' : noRes ? 'var(--amber-bg)' : 'var(--surface)',
+        border: `1px solid ${pend ? 'var(--red-line)' : noRes ? 'var(--amber-line)' : 'var(--border)'}`,
+      }}
+      leading={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+          <div className="display tnum" style={{ width: 62, textAlign: 'center', fontSize: 18, fontWeight: 800, color: 'var(--t-900)' }}>{v.time}</div>
+          <div style={{ width: 1, height: 34, background: 'var(--border)' }} />
+          <Avatar name={v.client} size={38} ring={pend ? 'var(--red)' : '#6B7280'} />
+        </div>
+      }
+      title={v.client}
+      subtitle={
+        <span style={{ display: 'flex', gap: 10 }}>
           <span><Icon name="car" size={12} stroke={2} style={{ verticalAlign: -2 }} /> {v.car}</span>
           <span>· {v.seller.split(' ')[0]}</span>
-        </div>
-      </div>
-      <LBadge tone={s.tone} solid={s.solid}>{pend && <Icon name="alert" size={12} stroke={2.4} />}{s.label}</LBadge>
+        </span>
+      }
+      status={<LBadge tone={s.tone} solid={s.solid}>{pend && <Icon name="alert" size={12} stroke={2.4} />}{s.label}</LBadge>}
+      actions={
       <LBtn size="sm" kind={pend ? 'danger' : noRes ? 'primary' : 'ghost'} icon={pend ? 'phone' : noRes ? 'edit' : 'arrowRight'}
         onClick={() => {
           if (pend) { (window as any).__openFlow('confirmar-visita', { visit: v }); return; }
@@ -134,7 +143,8 @@ function VisitRow({ v, go }: any) {
         }}>
         {pend ? 'Confirmar' : noRes ? 'Registrar' : 'Ver'}
       </LBtn>
-    </div>
+      }
+    />
   );
 }
 
@@ -215,6 +225,7 @@ function RemoteVisitRow({ visit, sellersById, showDate, isPendingResult, readOnl
   isPendingResult: boolean;
   readOnly?: boolean;
 }) {
+  const { isMd } = useViewport();
   const scheduledAtDate = new Date(visit.scheduledAt);
   const statusInfo = VISIT_REMOTE_STATUS_LABEL[visit.status];
   const sellerDisplay = resolveVisitSellerDisplayName(visit.assignedSellerId, sellersById);
@@ -271,65 +282,96 @@ function RemoteVisitRow({ visit, sellersById, showDate, isPendingResult, readOnl
     }
   };
 
+  // MOBILE-RESPONSIVENESS-V1-B2-EXEC §12/§13/§14 — RemoteVisitRow via
+  // <DataRow>. Desktop: linha compacta com os mesmos botões e ordem de
+  // sempre (Confirmar/Registrar → Remarcar → Cancelar). Mobile (< md):
+  // ação PRINCIPAL visível + menu ⋯ para as secundárias. Nenhuma ação
+  // perdida; ZERO mudança em confirm_visit/cancel_visit/register_visit_result
+  // (§15) — só a apresentação das ações existentes.
+  const primaryAction = readOnly ? null : (
+    canConfirm ? (
+      <LBtn size="sm" kind="primary" icon="checkCircle" onClick={handleConfirm} style={{ opacity: confirmHook.isPending ? 0.6 : 1 }}>
+        {confirmHook.isPending ? 'Confirmando…' : 'Confirmar'}
+      </LBtn>
+    ) : isPendingResult ? (
+      <LBtn size="sm" kind="primary" icon="clipboard" onClick={() => (window as any).__openFlow('registrar-resultado-remoto', { visit })}>Registrar resultado</LBtn>
+    ) : (
+      <LBtn size="sm" kind="ghost" icon="refresh" onClick={() => (window as any).__openFlow('reagendar-visita', { visit })}>Remarcar</LBtn>
+    )
+  );
+  const remarcarIsSecondary = canConfirm || isPendingResult;
+
+  let actionsNode: React.ReactNode = undefined;
+  if (!readOnly) {
+    if (cancelConfirming) {
+      actionsNode = (
+        <>
+          <span style={{ fontSize: 12.5, color: 'var(--t-500)', whiteSpace: 'nowrap' }}>Cancelar esta visita?</span>
+          <LBtn size="sm" kind="danger" onClick={handleCancelConfirm} style={{ opacity: cancelHook.isPending ? 0.6 : 1 }}>
+            {cancelHook.isPending ? 'Cancelando…' : 'Sim'}
+          </LBtn>
+          <LBtn size="sm" kind="ghost" onClick={() => { setCancelConfirming(false); setCancelError(null); }}>Voltar</LBtn>
+        </>
+      );
+    } else if (isMd) {
+      actionsNode = (
+        <>
+          {primaryAction}
+          {remarcarIsSecondary && (
+            <LBtn size="sm" kind="ghost" icon="refresh" onClick={() => (window as any).__openFlow('reagendar-visita', { visit })}>Remarcar</LBtn>
+          )}
+          <LBtn size="sm" kind="ghost" icon="xCircle" onClick={() => setCancelConfirming(true)}>Cancelar</LBtn>
+        </>
+      );
+    } else {
+      actionsNode = (
+        <>
+          {primaryAction}
+          <RowActionMenu
+            items={[
+              ...(remarcarIsSecondary
+                ? [{ label: 'Remarcar', icon: 'refresh', onSelect: () => (window as any).__openFlow('reagendar-visita', { visit }) }]
+                : []),
+              { label: 'Cancelar', icon: 'xCircle', tone: 'danger' as const, onSelect: () => setCancelConfirming(true) },
+            ]}
+          />
+        </>
+      );
+    }
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 16, padding: '14px 16px', borderRadius: 11,
-        background: 'var(--surface)', border: '1px solid var(--border)',
-      }}>
-        <div style={{ width: 62, textAlign: 'center' }}>
-          {showDate && <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--t-400)', marginBottom: 2 }}>{formatVisitShortDate(scheduledAtDate)}</div>}
-          <div className="display tnum" style={{ fontSize: 18, fontWeight: 800, color: 'var(--t-900)' }}>{formatVisitTime(scheduledAtDate)}</div>
-        </div>
-        <div style={{ width: 1, height: 34, background: 'var(--border)' }} />
-        <Avatar name={visit.clientName} size={38} ring="#6B7280" />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{visit.clientName}</div>
-          <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', gap: 10, marginTop: 2 }}>
+    <>
+      <DataRow
+        testId="visit-row"
+        gap={16}
+        leading={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            <div style={{ width: 62, textAlign: 'center' }}>
+              {showDate && <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--t-400)', marginBottom: 2 }}>{formatVisitShortDate(scheduledAtDate)}</div>}
+              <div className="display tnum" style={{ fontSize: 18, fontWeight: 800, color: 'var(--t-900)' }}>{formatVisitTime(scheduledAtDate)}</div>
+            </div>
+            <div style={{ width: 1, height: 34, background: 'var(--border)' }} />
+            <Avatar name={visit.clientName} size={38} ring="#6B7280" />
+          </div>
+        }
+        title={visit.clientName}
+        subtitle={
+          <span style={{ display: 'flex', gap: 10 }}>
             <span><Icon name="car" size={12} stroke={2} style={{ verticalAlign: -2 }} /> {vehicleDisplay}</span>
             <span>· {sellerDisplay}</span>
-          </div>
-        </div>
-        <LBadge tone={statusInfo.tone} solid={statusInfo.solid}>{statusInfo.label}</LBadge>
-        {/* SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §18/§22 — Confirmar/
-            Registrar resultado/Remarcar/Cancelar são mutation entry points:
-            HIDE (nunca só disabled) para Super Admin contextual. */}
-        {!readOnly && canConfirm && (
-          <LBtn size="sm" kind="primary" icon="checkCircle" onClick={handleConfirm} style={{ opacity: confirmHook.isPending ? 0.6 : 1 }}>
-            {confirmHook.isPending ? 'Confirmando…' : 'Confirmar'}
-          </LBtn>
-        )}
-        {/* COMMERCIAL-REMOTE-VISITS-B6-B: "Registrar resultado" aparece
-            SOMENTE em Pendentes de resultado (isPendingResult, já derivado
-            centralmente por groupVisitsForScreen — nunca recalculado aqui,
-            mesmo padrão de canConfirm/B6-A). Abre um flow dedicado
-            REMOTE-ONLY (registrar-resultado-remoto) — nunca o
-            'registrar-resultado' local. */}
-        {!readOnly && isPendingResult && (
-          <LBtn size="sm" kind="primary" icon="clipboard" onClick={() => (window as any).__openFlow('registrar-resultado-remoto', { visit })}>Registrar resultado</LBtn>
-        )}
-        {!readOnly && (
-          <LBtn size="sm" kind="ghost" icon="refresh" onClick={() => (window as any).__openFlow('reagendar-visita', { visit })}>Remarcar</LBtn>
-        )}
-        {!readOnly && (!cancelConfirming ? (
-          <LBtn size="sm" kind="ghost" icon="xCircle" onClick={() => setCancelConfirming(true)}>Cancelar</LBtn>
-        ) : (
-          <>
-            <span style={{ fontSize: 12.5, color: 'var(--t-500)', whiteSpace: 'nowrap' }}>Cancelar esta visita?</span>
-            <LBtn size="sm" kind="danger" onClick={handleCancelConfirm} style={{ opacity: cancelHook.isPending ? 0.6 : 1 }}>
-              {cancelHook.isPending ? 'Cancelando…' : 'Sim'}
-            </LBtn>
-            <LBtn size="sm" kind="ghost" onClick={() => { setCancelConfirming(false); setCancelError(null); }}>Voltar</LBtn>
-          </>
-        ))}
-      </div>
+          </span>
+        }
+        status={<LBadge tone={statusInfo.tone} solid={statusInfo.solid}>{statusInfo.label}</LBadge>}
+        actions={actionsNode}
+      />
       {confirmError && (
         <div data-testid="visit-confirm-error" style={{ fontSize: 12, color: 'var(--red)', padding: '0 4px' }}>{confirmError}</div>
       )}
       {cancelError && (
         <div data-testid="visit-cancel-error" style={{ fontSize: 12, color: 'var(--red)', padding: '0 4px' }}>{cancelError}</div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -523,24 +565,29 @@ function SubHead({ icon, tone, children }: any) {
 function DealRow({ d, go, approval, decided, canDecide }: any) {
   const decidedApproved = decided && d.status === DEAL_STATUS.APPROVED;
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 16, padding: '15px 18px', borderRadius: 11,
-      background: approval ? 'var(--amber-bg)' : 'var(--surface)', border: `1px solid ${approval ? 'var(--amber-line)' : 'var(--border)'}`,
-    }}>
-      <Avatar name={d.client} size={40} ring="#6B7280" />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{d.client}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Icon name="car" size={13} stroke={2} /> {d.car} · {d.seller.split(' ')[0]}
+    <DataRow
+      testId="deal-row"
+      gap={16}
+      pad="15px 18px"
+      style={{ background: approval ? 'var(--amber-bg)' : 'var(--surface)', border: `1px solid ${approval ? 'var(--amber-line)' : 'var(--border)'}` }}
+      leading={<Avatar name={d.client} size={40} ring="#6B7280" />}
+      title={d.client}
+      subtitle={
+        <>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Icon name="car" size={13} stroke={2} /> {d.car} · {d.seller.split(' ')[0]}
+          </span>
+          {approval && <span style={{ display: 'block', fontSize: 12, color: 'var(--amber)', fontWeight: 700, marginTop: 5 }}>{d.disc}</span>}
+        </>
+      }
+      meta={
+        <div style={{ textAlign: 'right' }}>
+          <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{d.value}</div>
+          <div style={{ fontSize: 11, color: 'var(--t-400)' }}>atualizada {d.last}</div>
         </div>
-        {approval && <div style={{ fontSize: 12, color: 'var(--amber)', fontWeight: 700, marginTop: 5 }}>{d.disc}</div>}
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{d.value}</div>
-        <div style={{ fontSize: 11, color: 'var(--t-400)' }}>atualizada {d.last}</div>
-      </div>
-      {decided && <LBadge tone={decidedApproved ? 'green' : 'red'} solid>{decidedApproved ? 'Aprovada' : 'Recusada'}</LBadge>}
-      {approval
+      }
+      status={decided ? <LBadge tone={decidedApproved ? 'green' : 'red'} solid>{decidedApproved ? 'Aprovada' : 'Recusada'}</LBadge> : undefined}
+      actions={approval
         // Seller cannot approve/reject — not even their own proposal (Correção 1,
         // M0-K4.1). Only a badge here; the real gate lives in FlowAprovarProposta
         // and DealService.approve/reject, so this is UI-only convenience.
@@ -553,7 +600,7 @@ function DealRow({ d, go, approval, decided, canDecide }: any) {
               : LeadService.getAll().find((l: any) => l.name === d.client);
             (window as any).__openFlow('ver-cliente', { lead: lead ?? LeadService.getAll()[0] });
           }}>Ver</LBtn>}
-    </div>
+    />
   );
 }
 
@@ -597,34 +644,33 @@ function RemoteDealRow({ deal, sellersById, showSeller, now, readOnly }: {
 }) {
   const sellerDisplay = resolveDealSellerDisplayName(deal.assignedSellerId, sellersById);
   const updatedDisplay = formatDealUpdatedAt(deal.updatedAt, now);
+  const { isMd } = useViewport();
+  // MOBILE-RESPONSIVENESS-V1-B2-EXEC §16/§17 — RemoteDealRow via <DataRow>:
+  // desktop = cliente/veículo + valor/atualizada + Abrir na mesma linha;
+  // mobile = empilhado (o valor nunca empurra o status/ação para fora).
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 16, padding: '15px 18px', borderRadius: 11,
-      background: 'var(--surface)', border: '1px solid var(--border)',
-    }}>
-      <Avatar name={deal.clientName} size={40} ring="#6B7280" />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{deal.clientName}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+    <DataRow
+      testId="deal-row"
+      gap={16}
+      pad="15px 18px"
+      leading={<Avatar name={deal.clientName} size={40} ring="#6B7280" />}
+      title={deal.clientName}
+      subtitle={
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Icon name="car" size={13} stroke={2} /> {deal.vehicle}{showSeller && <> · {sellerDisplay}</>}
+        </span>
+      }
+      meta={
+        <div style={{ textAlign: isMd ? 'right' : 'left' }}>
+          <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{formatCentsToBRL(deal.valueCents)}</div>
+          <div style={{ fontSize: 11, color: 'var(--t-400)' }}>atualizada {updatedDisplay}</div>
         </div>
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{formatCentsToBRL(deal.valueCents)}</div>
-        <div style={{ fontSize: 11, color: 'var(--t-400)' }}>atualizada {updatedDisplay}</div>
-      </div>
-      {/* SUPER-ADMIN-COMPANY-CONTEXT-V2A-READ-B1-EXEC §22/§29 — FlowVerNegociacao
-          mistura leitura com Registrar venda/Editar/Marcar como perdida
-          (write real, inclusive fora de escopo deste V2A — register_sale
-          nunca deve ficar alcançável). Auditar/reforçar esse flow por
-          dentro fica fora do orçamento deste lote: "Abrir" fica oculto
-          para Super Admin contextual — a lista já mostra cliente/veículo/
-          valor/vendedor/atualizado em, o detalhe fica para um lote de
-          acompanhamento. Nenhum flow escape possível por aqui. */}
-      {!readOnly && (
+      }
+      actions={!readOnly ? (
+        // "Abrir" HIDE para Super Admin contextual (§22/§29 V2A) — inalterado.
         <LBtn size="sm" kind="ghost" icon="arrowRight" onClick={() => (window as any).__openFlow('ver-negociacao', { deal })}>Abrir</LBtn>
-      )}
-    </div>
+      ) : undefined}
+    />
   );
 }
 
@@ -831,24 +877,31 @@ function RemoteSaleRow({ sale, deal, sellersById, showSeller, now }: {
   const soldDisplay = formatDealUpdatedAt(sale.soldAt, now);
   const clientName = deal?.clientName ?? 'Cliente indisponível';
   const vehicle = deal?.vehicle ?? 'Veículo indisponível';
+  const { isMd } = useViewport();
+  // MOBILE-RESPONSIVENESS-V1-B2-EXEC §18 — RemoteSaleRow via <DataRow>.
+  // Lista puramente de leitura (sem ações); autoridade de Sales inalterada.
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 16, padding: '15px 18px', borderRadius: 11,
-      background: 'var(--surface)', border: '1px solid var(--border)',
-    }}>
-      <Avatar name={clientName} size={40} ring="#15924B" />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--t-900)' }}>{clientName}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--t-500)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+    <DataRow
+      testId="sale-row"
+      gap={16}
+      pad="15px 18px"
+      leading={<Avatar name={clientName} size={40} ring="#15924B" />}
+      title={clientName}
+      subtitle={
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Icon name="car" size={13} stroke={2} /> {vehicle}{showSeller && <> · {sellerDisplay}</>}
+        </span>
+      }
+      meta={
+        <div style={{ display: 'flex', alignItems: isMd ? 'center' : 'flex-start', gap: isMd ? 16 : 4, flexDirection: isMd ? 'row' : 'column' }}>
+          <span style={{ fontSize: 12.5, color: 'var(--t-500)' }}>{DEAL_PAYMENT_METHOD_LABELS_PT[sale.paymentMethod]}</span>
+          <div style={{ textAlign: isMd ? 'right' : 'left' }}>
+            <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{formatCentsToBRL(sale.soldValueCents)}</div>
+            <div style={{ fontSize: 11, color: 'var(--t-400)' }}>vendida {soldDisplay}</div>
+          </div>
         </div>
-      </div>
-      <div style={{ fontSize: 12.5, color: 'var(--t-500)' }}>{DEAL_PAYMENT_METHOD_LABELS_PT[sale.paymentMethod]}</div>
-      <div style={{ textAlign: 'right' }}>
-        <div className="tnum" style={{ fontSize: 13, color: 'var(--t-400)', fontWeight: 600 }}>{formatCentsToBRL(sale.soldValueCents)}</div>
-        <div style={{ fontSize: 11, color: 'var(--t-400)' }}>vendida {soldDisplay}</div>
-      </div>
-    </div>
+      }
+    />
   );
 }
 

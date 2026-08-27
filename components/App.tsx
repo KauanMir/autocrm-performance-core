@@ -387,6 +387,17 @@ function MobileHeader({ title, onOpenNav }: { title: string; onOpenNav: () => vo
           </div>
         )}
       </div>
+      {/* MOBILE-RESPONSIVENESS-V1-B2-EXEC §26/§27 — acesso à busca global
+          (o TopBar/⌘K some < lg no B1). Reusa o MESMO FlowBusca via o
+          handler existente __openFlow; nenhuma segunda busca. */}
+      <button
+        onClick={() => (window as any).__openFlow && (window as any).__openFlow('busca')}
+        aria-label="Buscar"
+        className="focus-ring"
+        style={{ width: 40, height: 40, borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--t-700)', flexShrink: 0 }}
+      >
+        <Icon name="search" size={18} stroke={2.2} />
+      </button>
     </header>
   );
 }
