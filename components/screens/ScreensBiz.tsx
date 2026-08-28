@@ -11,9 +11,10 @@ import { LeadService, VisitService, DealService, SaleService, SellerService, Pip
 import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
-import { canManageCompanySettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites, canManageFollowUpTemplates } from '@/lib/capabilities';
+import { canManageCompanySettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites, canManageFollowUpTemplates, canManageCompetitionRewards } from '@/lib/capabilities';
 import { UsersTabSection } from '@/components/users/UsersTabSection';
 import { FollowUpsTabSection } from '@/components/followUpTemplates/FollowUpsTabSection';
+import { CompetitionRewardsTabSection } from '@/components/competitionRewards/CompetitionRewardsTabSection';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
 import { useCompanySettings } from '@/lib/hooks/useCompanySettings';
@@ -1491,11 +1492,19 @@ export function ScreenAjustes({ go }: any) {
   // reactivate_membership/offboard_seller/offboard_manager/
   // transfer_membership) ainda não foram aplicadas no banco remoto.
   const userLifecycleEnabled = activeUsersEnabled && isUserLifecycleEnabled();
+  // COMPETITION-REWARDS-V1-B2-EXEC §2/§45-§47 — aba "Competição" (config da
+  // premiação mensal): SOMENTE Manager com membership ATIVA. Super Admin
+  // (contextual ou global) e Seller nunca a veem — o backend V1 é
+  // Manager-only (get_competition_reward_campaign / upsert_competition_
+  // reward_campaign negam os demais com 42501); a UI reflete essa authority.
+  const competitionRewardsAccess = canManageCompetitionRewards(currentUser);
+  const competitionCompanyId = currentUser?.activeMembership?.companyId ?? null;
   const allowedTabs: string[] = [
     ...(companySettingsAccess ? ['Empresa'] : []),
     ...(invitesAccess ? ['Usuários'] : []),
     ...(stageTabVisible ? ['Etapas'] : []),
     ...(followUpReadAccess ? ['Follow-ups'] : []),
+    ...(competitionRewardsAccess ? ['Competição'] : []),
   ];
   // Derivação SÍNCRONA: aba proibida nunca renderiza, nem por um frame, e o
   // estado antigo de aba não atravessa troca de usuário.
@@ -1710,6 +1719,14 @@ export function ScreenAjustes({ go }: any) {
           isSuperAdminContext={isOperationalSuperAdmin}
           readAuthorized={followUpReadAccess}
           writeAuthorized={followUpWriteAccess}
+        />
+      )}
+      {activeTab === 'Competição' && currentUser && (
+        <CompetitionRewardsTabSection
+          userId={currentUser.id}
+          companyId={competitionCompanyId}
+          readAuthorized={competitionRewardsAccess}
+          writeAuthorized={competitionRewardsAccess}
         />
       )}
     </LightScreen>

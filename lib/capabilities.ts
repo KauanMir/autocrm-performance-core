@@ -323,3 +323,15 @@ export function canManageFollowUpTemplates(input: ManageFollowUpTemplatesCapabil
   }
   return input.actor?.activeMembership?.role === 'manager';
 }
+
+// COMPETITION-REWARDS-V1-B2-EXEC §2/§45/§46/§47 — aba "Competição" de
+// Ajustes (configuração da premiação mensal). SOMENTE Manager com
+// membership ATIVA na própria empresa. Diferente de canManageCompanySettings/
+// canManageFollowUpTemplates, NÃO há ramo de Super Admin: o backend V1
+// (get_competition_reward_campaign / upsert_competition_reward_campaign) é
+// Manager-only e nega Super Admin (global e contextual) com 42501 — a UI
+// reflete essa authority já congelada. Seller: sempre false. Read e write
+// usam esta mesma capability; o backend continua sendo a autoridade final.
+export function canManageCompetitionRewards(user: CapabilityUser): boolean {
+  return isActiveManager(user);
+}
