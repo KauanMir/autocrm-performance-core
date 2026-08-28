@@ -217,10 +217,14 @@ export function CompetitionRewardsTabSection({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [pendingMonth, setPendingMonth] = useState<string | null>(null);
+  // COMPETITION-REWARDS-V1-B2-R1-EXEC §4 — confirmação de "Retirar publicação"
+  // (published → draft). Nunca executa com um clique só.
+  const [pendingWithdraw, setPendingWithdraw] = useState(false);
   // Retenção otimista: entre o sucesso do upsert e o refetch invalidado
   // pousar, `state` ainda pode trazer campaign=null (stale). Isso mantém o
   // editor estável (sem piscar para o empty state, sem sumir o toast).
   const [savedCampaign, setSavedCampaign] = useState<{ id: string; status: RewardCampaignStatus } | null>(null);
+  const withdrawDialogRef = useRef<HTMLDivElement | null>(null);
 
   const state = useCompetitionRewardCampaign({
     userId,
@@ -249,6 +253,15 @@ export function CompetitionRewardsTabSection({
     setBaseline(snap);
   };
 
+  // §15 — o diálogo de confirmação: ESC fecha, foco entra no diálogo.
+  useEffect(() => {
+    if (!pendingWithdraw) return;
+    withdrawDialogRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPendingWithdraw(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pendingWithdraw]);
+
   // Chave estável (string) — o efeito só dispara quando o mês, a identidade
   // OU o updated_at da campanha mudam; NUNCA a cada render (o objeto `state`
   // é recriado a cada render).
@@ -265,6 +278,9 @@ export function CompetitionRewardsTabSection({
     const identityKey = `${selectedMonth}::${camp?.id ?? 'none'}`;
     if (loadedRef.current === identityKey) {
       if (!isDirtyRef.current && !isCreatingRef.current && camp) {
+        // O refetch invalidado pousou com a mesma identidade e um novo
+        // updated_at ⇒ o servidor é a verdade; solta a retenção otimista.
+        setSavedCampaign(null);
         applySnapshot(snapshotFromCampaign(camp));
       }
       return;
@@ -280,8 +296,11 @@ export function CompetitionRewardsTabSection({
   const validation = useMemo(() => validate(draftTitle, draftTiers), [draftTitle, draftTiers]);
   const totalCents = sumTierAmountCents(draftTiers);
 
-  // effectiveCampaign = campanha real (state) OU a retenção otimista pós-save.
-  const effectiveCampaign: { status: RewardCampaignStatus } | null = campaign ?? savedCampaign;
+  // effectiveCampaign = a retenção otimista pós-save (mais recente que o
+  // `state`, até o refetch invalidado pousar) OU a campanha real do state.
+  // savedCampaign vence: depois de publicar/retirar, `campaign` ainda pode
+  // trazer o status anterior por um instante.
+  const effectiveCampaign: { status: RewardCampaignStatus } | null = savedCampaign ?? campaign;
   const showEditor = isCreating || effectiveCampaign !== null;
   const showDraftAndPublish = isCreating || (effectiveCampaign !== null && effectiveCampaign.status === 'draft');
   const showSaveChanges = effectiveCampaign !== null && effectiveCampaign.status === 'published';
@@ -290,6 +309,7 @@ export function CompetitionRewardsTabSection({
   // ── handlers ───────────────────────────────────────────────────────────
   const commitMonth = (month: string) => {
     setPendingMonth(null);
+    setPendingWithdraw(false);
     setSuccessMsg(null);
     setSaveError(null);
     setIsCreating(false);
@@ -306,6 +326,7 @@ export function CompetitionRewardsTabSection({
   const startCreate = () => {
     setSuccessMsg(null);
     setSaveError(null);
+    setPendingWithdraw(false);
     setIsCreating(true);
     applySnapshot({ title: '', tiers: [{ amountCents: null, rewardText: '' }] });
   };
@@ -313,6 +334,7 @@ export function CompetitionRewardsTabSection({
   const handleCancel = () => {
     setSaveError(null);
     setSuccessMsg(null);
+    setPendingWithdraw(false);
     if (isCreating) {
       setIsCreating(false);
       setSavedCampaign(null);
@@ -373,6 +395,36 @@ export function CompetitionRewardsTabSection({
     }
   };
 
+  // COMPETITION-REWARDS-V1-B2-R1-EXEC §2/§5/§11 — "Retirar publicação":
+  // published → draft SEM apagar nada. Reusa useUpsertCompetitionRewardCampaign
+  // (§11) com o MESMO month_start / title / tiers PERSISTIDOS (baseline), só
+  // status='draft'. Nunca usa os campos possivelmente meio-editados na tela.
+  const doWithdraw = async () => {
+    if (!writeAuthorized) return;
+    setPendingWithdraw(false);
+    setSaveError(null);
+    setSuccessMsg(null);
+    try {
+      const result = await upsert.upsertCampaign({
+        monthStart: selectedMonth,
+        status: 'draft',
+        title: baseline.title.trim() === '' ? null : baseline.title.trim(),
+        tiers: baseline.tiers.map((t) => ({
+          amountCents: t.amountCents,
+          rewardText: t.rewardText.trim() === '' ? null : t.rewardText.trim(),
+        })),
+      });
+      loadedRef.current = `${selectedMonth}::${result.id}`;
+      setIsCreating(false);
+      setSavedCampaign({ id: result.id, status: result.status });
+      applySnapshot(baseline); // §13 — dirty=false, dados intactos
+      setSuccessMsg('Premiação retirada. A equipe não verá mais esses prêmios até uma nova publicação.');
+    } catch (err) {
+      // §14 — segue visualmente Publicado, nenhum estado otimista.
+      setSaveError(getCompetitionRewardErrorMessage(err));
+    }
+  };
+
   // ── render ─────────────────────────────────────────────────────────────
   if (!readAuthorized) {
     return (
@@ -422,6 +474,33 @@ export function CompetitionRewardsTabSection({
       <Cluster gap={8}>
         <LBtn kind="ghost" size="sm" onClick={() => setPendingMonth(null)}>Continuar editando</LBtn>
         <LBtn kind="danger" size="sm" onClick={() => commitMonth(pendingMonth)}>Descartar</LBtn>
+      </Cluster>
+    </div>
+  );
+
+  // §4/§15 — confirmação de "Retirar publicação".
+  const withdrawConfirm = pendingWithdraw && (
+    <div
+      ref={withdrawDialogRef}
+      tabIndex={-1}
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="withdraw-confirm-title"
+      data-testid="withdraw-confirm"
+      style={{ border: '1px solid var(--amber)', background: 'var(--amber-bg)', borderRadius: 12, padding: 16, marginBottom: 16, outline: 'none' }}
+    >
+      <div id="withdraw-confirm-title" style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-900)', marginBottom: 8 }}>
+        Retirar esta premiação?
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--t-700)', marginBottom: 12, maxWidth: 460 }}>
+        A equipe deixará de ver os prêmios imediatamente. A configuração continuará salva
+        como rascunho e poderá ser publicada novamente depois.
+      </div>
+      <Cluster gap={8}>
+        <LBtn kind="ghost" size="sm" onClick={() => setPendingWithdraw(false)}>Continuar publicada</LBtn>
+        <LBtn kind="danger" size="sm" onClick={doWithdraw}>
+          {upsert.isPending ? 'Retirando…' : 'Retirar publicação'}
+        </LBtn>
       </Cluster>
     </div>
   );
@@ -590,6 +669,11 @@ export function CompetitionRewardsTabSection({
                 {upsert.isPending ? 'Salvando…' : 'Salvar alterações'}
               </LBtn>
             )}
+            {showSaveChanges && (
+              <LBtn kind="ghost" onClick={() => setPendingWithdraw(true)} style={{ color: 'var(--amber)' }}>
+                Retirar publicação
+              </LBtn>
+            )}
             {showDraftAndPublish && (
               <>
                 <LBtn kind="gold" icon="rocket" onClick={() => doSave('published')} style={{ opacity: canSave ? 1 : 0.5 }}>
@@ -611,6 +695,11 @@ export function CompetitionRewardsTabSection({
             {showSaveChanges && (
               <LBtn kind="gold" icon="check" block onClick={() => doSave('published')} style={{ opacity: canSave ? 1 : 0.5 }}>
                 {upsert.isPending ? 'Salvando…' : 'Salvar alterações'}
+              </LBtn>
+            )}
+            {showSaveChanges && (
+              <LBtn kind="ghost" block onClick={() => setPendingWithdraw(true)} style={{ color: 'var(--amber)' }}>
+                Retirar publicação
               </LBtn>
             )}
             {showDraftAndPublish && (
@@ -658,6 +747,7 @@ export function CompetitionRewardsTabSection({
       {header}
       {monthSelector}
       {discardConfirm}
+      {withdrawConfirm}
       {body}
     </LCard>
   );

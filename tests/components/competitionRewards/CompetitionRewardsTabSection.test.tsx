@@ -368,3 +368,130 @@ describe('mobile (§41/§60)', () => {
     expect(screen.getByText('Publicar premiação')).toBeInTheDocument();
   });
 });
+
+// COMPETITION-REWARDS-V1-B2-R1-EXEC §1-§17 — "Retirar publicação"
+// (published → draft).
+describe('retirar publicação (B2-R1)', () => {
+  const publishedTiers = [
+    { position: 1, amountCents: 100, rewardText: 'Teste técnico, sem valor comercial' },
+    { position: 2, amountCents: 50, rewardText: 'Teste técnico, sem valor comercial' },
+    { position: 3, amountCents: null, rewardText: 'Teste técnico, sem valor comercial' },
+  ];
+  const publishedCampaign = (over = {}) => campaign({
+    status: 'published', publishedAt: '2026-07-20T10:00:00Z',
+    title: '[SMOKE CONTROLADO] Teste de premiação', tiers: publishedTiers, ...over,
+  });
+
+  it('published mostra "Retirar publicação"; draft NÃO mostra (§1/§9/§10)', () => {
+    setCampaignState(() => ready(publishedCampaign()));
+    const { unmount } = renderTab();
+    expect(screen.getByText('Retirar publicação')).toBeInTheDocument();
+    unmount();
+
+    setCampaignState(() => ready(campaign({ status: 'draft' })));
+    renderTab();
+    expect(screen.queryByText('Retirar publicação')).toBeNull();
+  });
+
+  it('empty state / creating NÃO mostra "Retirar publicação" (§10)', () => {
+    setCampaignState(() => ready(null));
+    renderTab();
+    fireEvent.click(screen.getByText('Criar premiação'));
+    expect(screen.queryByText('Retirar publicação')).toBeNull();
+  });
+
+  it('click abre a confirmação; "Continuar publicada" mantém published sem chamar upsert (§4)', () => {
+    setCampaignState(() => ready(publishedCampaign()));
+    renderTab();
+    fireEvent.click(screen.getByText('Retirar publicação'));
+    const dialog = screen.getByTestId('withdraw-confirm');
+    expect(dialog).toHaveTextContent('Retirar esta premiação?');
+    expect(dialog).toHaveTextContent('A equipe deixará de ver os prêmios imediatamente.');
+    fireEvent.click(within(dialog).getByText('Continuar publicada'));
+    expect(screen.queryByTestId('withdraw-confirm')).toBeNull();
+    expect(m.upsertCampaign).not.toHaveBeenCalled();
+    expect(screen.getByText('Salvar alterações')).toBeInTheDocument();
+    expect(screen.getByText('Publicado')).toBeInTheDocument();
+  });
+
+  it('ESC fecha o diálogo sem chamar upsert (§15)', () => {
+    setCampaignState(() => ready(publishedCampaign()));
+    renderTab();
+    fireEvent.click(screen.getByText('Retirar publicação'));
+    expect(screen.getByTestId('withdraw-confirm')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('withdraw-confirm')).toBeNull();
+    expect(m.upsertCampaign).not.toHaveBeenCalled();
+  });
+
+  it('confirmar chama upsert com status=draft, mesmo mês/título/tiers preservados (§2/§5/§11)', async () => {
+    setCampaignState(() => ready(publishedCampaign()));
+    m.upsertCampaign.mockResolvedValue({
+      id: 'camp-1', monthStart: '2026-08-01', status: 'draft',
+      title: '[SMOKE CONTROLADO] Teste de premiação', publishedAt: null, updatedAt: 'z',
+    });
+    renderTab();
+    fireEvent.click(screen.getByText('Retirar publicação'));
+    fireEvent.click(within(screen.getByTestId('withdraw-confirm')).getByText('Retirar publicação'));
+    await screen.findByTestId('save-success');
+    expect(m.upsertCampaign).toHaveBeenCalledWith({
+      monthStart: '2026-08-01',
+      status: 'draft',
+      title: '[SMOKE CONTROLADO] Teste de premiação',
+      tiers: [
+        { amountCents: 100, rewardText: 'Teste técnico, sem valor comercial' },
+        { amountCents: 50, rewardText: 'Teste técnico, sem valor comercial' },
+        { amountCents: null, rewardText: 'Teste técnico, sem valor comercial' },
+      ],
+    });
+  });
+
+  it('sucesso → badge Rascunho + copy de retirada; sem "Cancelar alterações" (dirty=false) (§13)', async () => {
+    setCampaignState(() => ready(publishedCampaign()));
+    m.upsertCampaign.mockResolvedValue({
+      id: 'camp-1', monthStart: '2026-08-01', status: 'draft',
+      title: '[SMOKE CONTROLADO] Teste de premiação', publishedAt: null, updatedAt: 'z',
+    });
+    renderTab();
+    fireEvent.click(screen.getByText('Retirar publicação'));
+    fireEvent.click(within(screen.getByTestId('withdraw-confirm')).getByText('Retirar publicação'));
+    await screen.findByTestId('save-success');
+    expect(screen.getByTestId('save-success')).toHaveTextContent('Premiação retirada.');
+    expect(screen.getByText('Rascunho')).toBeInTheDocument();
+    expect(screen.getByText('Salvar rascunho')).toBeInTheDocument();
+    expect(screen.getByText('Publicar premiação')).toBeInTheDocument();
+    expect(screen.queryByText('Cancelar alterações')).toBeNull();
+    expect(screen.queryByText('Retirar publicação')).toBeNull();
+  });
+
+  it('falha → segue Publicado + erro, sem estado otimista (§14)', async () => {
+    setCampaignState(() => ready(publishedCampaign()));
+    m.upsertCampaign.mockRejectedValue(new CompetitionRewardError('reward_campaign_mutation_failed'));
+    renderTab();
+    fireEvent.click(screen.getByText('Retirar publicação'));
+    fireEvent.click(within(screen.getByTestId('withdraw-confirm')).getByText('Retirar publicação'));
+    await screen.findByTestId('save-error');
+    expect(screen.getByText('Publicado')).toBeInTheDocument();
+    expect(screen.getByText('Salvar alterações')).toBeInTheDocument();
+  });
+
+  it('mês futuro já publicado também pode ser retirado (§7)', () => {
+    setCampaignState((month) =>
+      month === '2026-09-01'
+        ? ready(publishedCampaign({ monthStart: '2026-09-01' }), '2026-09-01')
+        : ready(null));
+    renderTab();
+    fireEvent.click(screen.getByText('Setembro 2026'));
+    expect(screen.getByText('Retirar publicação')).toBeInTheDocument();
+  });
+
+  it('mobile: confirmação e ações renderizam em < md (§16)', () => {
+    m.isMd = false;
+    setCampaignState(() => ready(publishedCampaign()));
+    renderTab();
+    fireEvent.click(screen.getByText('Retirar publicação'));
+    const dialog = screen.getByTestId('withdraw-confirm');
+    expect(within(dialog).getByText('Continuar publicada')).toBeInTheDocument();
+    expect(within(dialog).getByText('Retirar publicação')).toBeInTheDocument();
+  });
+});
