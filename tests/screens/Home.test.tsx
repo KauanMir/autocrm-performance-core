@@ -42,6 +42,7 @@ const m = vi.hoisted(() => ({
   useCompanySellerLeaderboard: vi.fn(),
   useSellerCompetitionEvents: vi.fn(),
   useMarkCompetitionEventsSeen: vi.fn(),
+  useCompetitionRewardsOverview: vi.fn(),
   isLocalCommercialDataAllowed: vi.fn(),
   useOperationalCompanyContext: vi.fn(),
   leadServiceGetAll: vi.fn(),
@@ -148,6 +149,15 @@ vi.mock('@/lib/hooks/useMarkCompetitionEventsSeen', () => ({
 // esta mock.
 vi.mock('@/lib/hooks/usePodiumViewPreference', () => ({
   usePodiumViewPreference: () => ['B', vi.fn()],
+}));
+
+// COMPETITION-REWARDS-V1-B3-EXEC — useQuery real exige QueryClientProvider,
+// ausente neste harness. Default 'local' ⇒ CompetitionRewardsHomeSection
+// renderiza null (§3/§41), zero interferência nos 147 testes existentes.
+// Comportamento próprio da seção fica em
+// tests/components/competitionRewards/CompetitionRewardsHomeSection.test.tsx.
+vi.mock('@/lib/hooks/useCompetitionRewardsOverview', () => ({
+  useCompetitionRewardsOverview: m.useCompetitionRewardsOverview,
 }));
 
 vi.mock('@/lib/leads/localCommercialAccess', () => ({
@@ -418,6 +428,7 @@ beforeEach(() => {
   // default de useCompanySellerLeaderboard acima.
   m.useSellerCompetitionEvents.mockReset().mockReturnValue({ status: 'local' });
   m.useMarkCompetitionEventsSeen.mockReset().mockReturnValue({ markSeen: vi.fn().mockResolvedValue(1), isPending: false });
+  m.useCompetitionRewardsOverview.mockReset().mockReturnValue({ status: 'local' });
 });
 
 // ── A. Home local ────────────────────────────────────────────────────────

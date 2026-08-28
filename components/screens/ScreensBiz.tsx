@@ -15,6 +15,7 @@ import { canManageCompanySettings, canAccessStageSettings, canReorderPipelineSta
 import { UsersTabSection } from '@/components/users/UsersTabSection';
 import { FollowUpsTabSection } from '@/components/followUpTemplates/FollowUpsTabSection';
 import { CompetitionRewardsTabSection } from '@/components/competitionRewards/CompetitionRewardsTabSection';
+import { CompetitionRewardHistorySection } from '@/components/competitionRewards/CompetitionRewardHistorySection';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
 import { useCompanySettings } from '@/lib/hooks/useCompanySettings';
@@ -1722,12 +1723,21 @@ export function ScreenAjustes({ go }: any) {
         />
       )}
       {activeTab === 'Competição' && currentUser && (
-        <CompetitionRewardsTabSection
-          userId={currentUser.id}
-          companyId={competitionCompanyId}
-          readAuthorized={competitionRewardsAccess}
-          writeAuthorized={competitionRewardsAccess}
-        />
+        <>
+          <CompetitionRewardsTabSection
+            userId={currentUser.id}
+            companyId={competitionCompanyId}
+            readAuthorized={competitionRewardsAccess}
+            writeAuthorized={competitionRewardsAccess}
+          />
+          {/* COMPETITION-REWARDS-V1-B3-EXEC §26 — histórico abaixo da
+              configuração atual. Manager only (mesma aba já gateada). */}
+          <CompetitionRewardHistorySection
+            userId={currentUser.id}
+            companyId={competitionCompanyId}
+            membershipRole="manager"
+          />
+        </>
       )}
     </LightScreen>
   );

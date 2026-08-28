@@ -33,6 +33,11 @@ vi.mock('@/components/competitionRewards/CompetitionRewardsTabSection', () => ({
     <div data-testid="competition-tab-stub" data-company={String(props.companyId)} data-read={String(props.readAuthorized)} />
   ),
 }));
+vi.mock('@/components/competitionRewards/CompetitionRewardHistorySection', () => ({
+  CompetitionRewardHistorySection: (props: Record<string, unknown>) => (
+    <div data-testid="competition-history-stub" data-company={String(props.companyId)} data-role={String(props.membershipRole)} />
+  ),
+}));
 
 vi.mock('@/lib/services', () => ({
   LeadService: { getAll: () => [] },

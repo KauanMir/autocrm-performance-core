@@ -20,10 +20,16 @@ export const competitionRewardQueryKeys = {
   // Prefixo estável (todos os meses) — invalidateQueries casa por prefixo.
   campaignPrefix: (companyId: string) =>
     ['company', requireCompanyId(companyId), 'competition-reward-campaign'] as const,
-  // §33 — a competição ATUAL (get_competition_rewards_overview). Nenhum
-  // consumidor nesta wave (Home Seller é B3), mas invalidamos por prefixo
-  // depois de save/publish para que a authority de B3 nasça fresca. NUNCA
-  // invalidar leaderboard — prêmio não altera rank.
+  // §33 (B2) / §37/§38 (B3) — a competição ATUAL
+  // (get_competition_rewards_overview). B2 invalida por PREFIXO depois de
+  // save/publish; B3 lê sob `overview` (mesmo prefixo, então a invalidação
+  // de B2 continua pegando) e o acknowledge invalida o prefixo de novo.
+  // NUNCA invalidar leaderboard — prêmio não altera rank.
   overviewPrefix: (companyId: string) =>
     ['company', requireCompanyId(companyId), 'competition-rewards-overview'] as const,
+  overview: (companyId: string, userId: string) =>
+    ['company', requireCompanyId(companyId), 'competition-rewards-overview', 'v1', userId] as const,
+  // Histórico de premiações (list_competition_reward_history) — lazy/on-demand.
+  history: (companyId: string, userId: string, limit: number) =>
+    ['company', requireCompanyId(companyId), 'competition-reward-history', 'v1', userId, limit] as const,
 };

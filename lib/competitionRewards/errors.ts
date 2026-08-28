@@ -14,6 +14,10 @@ export type CompetitionRewardErrorCode =
   // Rede/RPC (PostgREST devolveu error, ou a chamada rejeitou).
   | 'reward_campaign_fetch_failed'
   | 'reward_campaign_mutation_failed'
+  // B3 — leitura da experiência (Home/histórico) + acknowledge.
+  | 'reward_overview_fetch_failed'
+  | 'reward_history_fetch_failed'
+  | 'reward_ack_failed'
   // A RPC respondeu, mas o JSON não bate com o contrato — nunca inventamos
   // uma campanha para preencher o buraco.
   | 'reward_campaign_contract_invalid'
@@ -77,15 +81,28 @@ const BACKEND_MESSAGE_CODES: Readonly<Record<string, CompetitionRewardErrorCode>
   empty_tier: 'reward_campaign_empty_tier',
 };
 
+export type CompetitionRewardRpcOperation =
+  | 'get_competition_reward_campaign'
+  | 'upsert_competition_reward_campaign'
+  | 'get_competition_rewards_overview'
+  | 'list_competition_reward_history'
+  | 'acknowledge_competition_month_result';
+
+const OPERATION_FALLBACK: Readonly<Record<CompetitionRewardRpcOperation, CompetitionRewardErrorCode>> = {
+  get_competition_reward_campaign: 'reward_campaign_fetch_failed',
+  upsert_competition_reward_campaign: 'reward_campaign_mutation_failed',
+  get_competition_rewards_overview: 'reward_overview_fetch_failed',
+  list_competition_reward_history: 'reward_history_fetch_failed',
+  acknowledge_competition_month_result: 'reward_ack_failed',
+};
+
 export function mapCompetitionRewardRpcError(
   error: { code?: unknown; message?: unknown },
-  operation: 'get_competition_reward_campaign' | 'upsert_competition_reward_campaign',
+  operation: CompetitionRewardRpcOperation,
 ): CompetitionRewardError {
   const rawMessage = typeof error.message === 'string' ? error.message : undefined;
   const mapped = rawMessage ? BACKEND_MESSAGE_CODES[rawMessage] : undefined;
-  const fallback: CompetitionRewardErrorCode = operation === 'get_competition_reward_campaign'
-    ? 'reward_campaign_fetch_failed'
-    : 'reward_campaign_mutation_failed';
+  const fallback = OPERATION_FALLBACK[operation];
   return new CompetitionRewardError(mapped ?? fallback, {
     code: typeof error.code === 'string' ? error.code : undefined,
     message: rawMessage,
@@ -98,7 +115,12 @@ export function getCompetitionRewardErrorMessage(error: unknown): string {
   const code = isCompetitionRewardError(error) ? error.code : undefined;
   switch (code) {
     case 'reward_campaign_fetch_failed':
+    case 'reward_overview_fetch_failed':
       return 'Não foi possível carregar a premiação. Tente novamente.';
+    case 'reward_history_fetch_failed':
+      return 'Não foi possível carregar o histórico de premiações. Tente novamente.';
+    case 'reward_ack_failed':
+      return 'Não foi possível concluir. Tente novamente.';
     case 'reward_campaign_contract_invalid':
       return 'A premiação retornou em um formato inesperado. Tente novamente mais tarde.';
     case 'reward_campaign_unauthenticated':

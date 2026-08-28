@@ -31,6 +31,7 @@ import { useSellerCompetitionEvents } from '@/lib/hooks/useSellerCompetitionEven
 import { useMarkCompetitionEventsSeen } from '@/lib/hooks/useMarkCompetitionEventsSeen';
 import { selectPrimaryCompetitionEvent, buildCompetitionCelebration } from '@/lib/podium/competitionCelebration';
 import { CompetitionCelebration } from '@/components/podiums/CompetitionCelebration';
+import { CompetitionRewardsHomeSection } from '@/components/competitionRewards/CompetitionRewardsHomeSection';
 import { resolvePresetRange, resolveCustomRange, type PeriodPreset, type ResolvedPeriod } from '@/lib/date/companyPeriod';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
@@ -1503,6 +1504,20 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
               )
             )}
           </div>
+        )}
+
+        {/* COMPETITION-REWARDS-V1-B3-EXEC §5/§6 — premiação publicada logo
+            após o Pódio. Renderiza `null` quando não há campanha publicada
+            nem resultado pendente (§3/§41) — a Home fica idêntica a hoje.
+            Ausente no modo local/fixture (isSellersLocal). */}
+        {!isSellersLocal && currentUser && (
+          <CompetitionRewardsHomeSection
+            userId={currentUser.id}
+            companyId={podiumCompanyId}
+            membershipRole={isManager ? 'manager' : isSeller ? 'seller' : null}
+            isSuperAdminContext={isOperationalSuperAdmin}
+            onManageRewards={isManager ? () => go('ajustes') : undefined}
+          />
         )}
 
         {/* SUPER-ADMIN-COMPANY-CONTEXT-V2B-READ-B1-EXEC §20/§21 — agora
