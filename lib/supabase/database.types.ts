@@ -198,6 +198,212 @@ export type Database = {
           },
         ]
       }
+      competition_month_rows: {
+        Row: {
+          acknowledged_at: string | null
+          company_id: string
+          competition_month_id: string
+          completed_visit_count: number
+          id: string
+          rank: number
+          reward_amount_cents: number | null
+          reward_text: string | null
+          sale_count: number
+          scheduled_visit_count: number
+          seller_id: string
+          seller_name_snapshot: string
+        }
+        Insert: {
+          acknowledged_at?: string | null
+          company_id: string
+          competition_month_id: string
+          completed_visit_count: number
+          id?: string
+          rank: number
+          reward_amount_cents?: number | null
+          reward_text?: string | null
+          sale_count: number
+          scheduled_visit_count: number
+          seller_id: string
+          seller_name_snapshot: string
+        }
+        Update: {
+          acknowledged_at?: string | null
+          company_id?: string
+          competition_month_id?: string
+          completed_visit_count?: number
+          id?: string
+          rank?: number
+          reward_amount_cents?: number | null
+          reward_text?: string | null
+          sale_count?: number
+          scheduled_visit_count?: number
+          seller_id?: string
+          seller_name_snapshot?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competition_month_rows_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "competition_month_rows_competition_month_id_fkey"
+            columns: ["competition_month_id"]
+            isOneToOne: false
+            referencedRelation: "competition_months"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competition_months: {
+        Row: {
+          campaign_id: string
+          closed_at: string
+          company_id: string
+          had_competition: boolean
+          id: string
+          month_start: string
+          period_end: string
+          period_start: string
+          timezone: string
+        }
+        Insert: {
+          campaign_id: string
+          closed_at?: string
+          company_id: string
+          had_competition: boolean
+          id?: string
+          month_start: string
+          period_end: string
+          period_start: string
+          timezone: string
+        }
+        Update: {
+          campaign_id?: string
+          closed_at?: string
+          company_id?: string
+          had_competition?: boolean
+          id?: string
+          month_start?: string
+          period_end?: string
+          period_start?: string
+          timezone?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competition_months_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "competition_reward_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "competition_months_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competition_reward_campaigns: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by_profile_id: string
+          id: string
+          month_start: string
+          published_at: string | null
+          published_by_profile_id: string | null
+          status: string
+          timezone: string
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by_profile_id: string
+          id?: string
+          month_start: string
+          published_at?: string | null
+          published_by_profile_id?: string | null
+          status?: string
+          timezone: string
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by_profile_id?: string
+          id?: string
+          month_start?: string
+          published_at?: string | null
+          published_by_profile_id?: string | null
+          status?: string
+          timezone?: string
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competition_reward_campaigns_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "competition_reward_campaigns_creator_fk"
+            columns: ["company_id", "created_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "company_memberships"
+            referencedColumns: ["company_id", "profile_id"]
+          },
+        ]
+      }
+      competition_reward_tiers: {
+        Row: {
+          amount_cents: number | null
+          campaign_id: string
+          created_at: string
+          id: string
+          position: number
+          reward_text: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount_cents?: number | null
+          campaign_id: string
+          created_at?: string
+          id?: string
+          position: number
+          reward_text?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount_cents?: number | null
+          campaign_id?: string
+          created_at?: string
+          id?: string
+          position?: number
+          reward_text?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "competition_reward_tiers_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "competition_reward_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deals: {
         Row: {
           assigned_seller_id: string
@@ -1320,6 +1526,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      _finalize_due_competition_reward_months: {
+        Args: { p_company_id: string }
+        Returns: undefined
+      }
       _followup_template_active_count: {
         Args: { p_company_id: string }
         Returns: number
@@ -1333,6 +1543,20 @@ export type Database = {
         }[]
       }
       _rank_company_sellers: {
+        Args: {
+          p_company_id: string
+          p_period_end: string
+          p_period_start: string
+        }
+        Returns: Database["public"]["CompositeTypes"]["seller_rank_row"][]
+        SetofOptions: {
+          from: "*"
+          to: "seller_rank_row"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      _rank_company_sellers_snapshot: {
         Args: {
           p_company_id: string
           p_period_end: string
@@ -1360,6 +1584,10 @@ export type Database = {
           role_kind: Database["public"]["Enums"]["invite_role_kind"]
           success: boolean
         }[]
+      }
+      acknowledge_competition_month_result: {
+        Args: { p_competition_month_id: string }
+        Returns: number
       }
       activate_company: {
         Args: { p_company_id: string }
@@ -1937,6 +2165,10 @@ export type Database = {
         }
         Returns: Json
       }
+      get_competition_rewards_overview: {
+        Args: { p_company_id?: string }
+        Returns: Json
+      }
       get_profile_email_update_state: {
         Args: { p_new_email: string; p_target_profile_id: string }
         Returns: {
@@ -2043,6 +2275,10 @@ export type Database = {
           name: string
           profile_id: string
         }[]
+      }
+      list_competition_reward_history: {
+        Args: { p_company_id?: string; p_limit?: number }
+        Returns: Json
       }
       list_current_company_assignable_sellers: {
         Args: never
@@ -3007,6 +3243,33 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "visits"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      upsert_competition_reward_campaign: {
+        Args: {
+          p_month_start: string
+          p_status: string
+          p_tiers: Json
+          p_title: string
+        }
+        Returns: {
+          company_id: string
+          created_at: string
+          created_by_profile_id: string
+          id: string
+          month_start: string
+          published_at: string | null
+          published_by_profile_id: string | null
+          status: string
+          timezone: string
+          title: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "competition_reward_campaigns"
           isOneToOne: true
           isSetofReturn: false
         }
