@@ -33,9 +33,10 @@ $$ language sql;
 
 create or replace function pg_temp.apr(p_sel text)
 returns table (sc int, cvc int, svc int, rk int) as $$
+  -- Janela SEMI-ABERTA de abril: [2026-04-01 00:00, 2026-05-01 00:00).
   select l.sale_count, l.completed_visit_count, l.scheduled_visit_count, l.rank
     from public.list_company_seller_leaderboard('2026-04-01 00:00:00+00'::timestamptz,
-                                                '2026-04-30 23:59:59.999999+00'::timestamptz, null) l
+                                                '2026-05-01 00:00:00+00'::timestamptz, null) l
    where l.seller_id = p_sel;
 $$ language sql;
 -- Manager context: company derivada da membership do jwt -> p_company_id NULL.
@@ -170,7 +171,8 @@ select ('d7090000-0000-0000-0000-0000000000'||sfx)::uuid, 'd7010000-0000-0000-00
        'd7050000-0000-0000-0000-000000000001', 'd70sBd', array['Onix'], '2026-04-15 10:00:00+00', 'scheduled', '',
        'd7020000-0000-0000-0000-000000000001', 'd7020000-0000-0000-0000-000000000001', cat::timestamptz, null, null
 from (values ('b1','2026-04-01 00:00:00+00'),('b2','2026-04-30 23:59:59.999999+00'),
-             ('b3','2026-03-31 23:59:59.999999+00'),('b4','2026-05-01 00:00:00.000001+00')) as t(sfx, cat);
+             ('b3','2026-03-31 23:59:59.999999+00'),('b4','2026-05-01 00:00:00.000001+00'),
+             ('b5','2026-05-01 00:00:00+00')) as t(sfx, cat);
 
 insert into public.visits (id, company_id, lead_id, assigned_seller_id, vehicles, scheduled_at, status, note, created_by, updated_by, created_at, closed_at, closed_by) values
   ('d7090000-0000-0000-0000-00000000fa01', 'd7010000-0000-0000-0000-000000000002', 'd7050000-0000-0000-0000-000000000002', 'd70IsoSeller', array['Onix'], '2026-04-10 10:00:00+00', 'scheduled', '', 'd7020000-0000-0000-0000-000000000004', 'd7020000-0000-0000-0000-000000000004', '2026-04-05 09:00:00+00', null, null),
@@ -184,7 +186,8 @@ select is((select svc from pg_temp.apr('d70sE')), 4, 'E: 4 agendamentos (schedul
 select is((select svc from pg_temp.apr('d70sF')), 1, 'F: 1 agendamento');
 select is((select svc from pg_temp.apr('d70sG')), 1, 'G: 1 agendamento');
 select is((select svc from pg_temp.apr('d70sBd')), 2,
-  '(L)(M) boundary: created_at == start E == end contam (>=/<=, inclusivo); 1us fora não -> Bd=2');
+  '(L)(M) boundary [start,end): created_at == start conta; último us de abril conta; '
+  '1us após / o próprio period_end (2026-05-01 00:00) NÃO contam -> Bd=2');
 
 select ok((select rk from pg_temp.apr('d70sA')) < (select rk from pg_temp.apr('d70sC')), '(A) A (3 vendas) acima de C (2)');
 select ok((select rk from pg_temp.apr('d70sB')) < (select rk from pg_temp.apr('d70sC')), '(A) B (3 vendas) acima de C (2)');

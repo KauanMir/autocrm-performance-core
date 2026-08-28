@@ -48,7 +48,7 @@ describe('resolvePresetRange — Tokyo (timezone positivo, "hoje" diverge de SP 
   });
 });
 
-describe('boundaries — evento imediatamente antes/depois da meia-noite local (SP)', () => {
+describe('boundaries [start, end) — evento na fronteira (SP)', () => {
   const now = new Date('2026-08-24T15:00:00.000Z');
   const range = resolvePresetRange('Hoje', SP, now); // start=2026-08-24T03:00:00.000Z
 
@@ -56,12 +56,16 @@ describe('boundaries — evento imediatamente antes/depois da meia-noite local (
     expect(isWithinRange('2026-08-24T02:59:59.999Z', range)).toBe(false);
   });
 
-  it('evento exatamente no início (start inclusive): dentro do range', () => {
+  it('evento exatamente no início (start INCLUSIVO): dentro do range', () => {
     expect(isWithinRange('2026-08-24T03:00:00.000Z', range)).toBe(true);
   });
 
-  it('evento exatamente no fim (end inclusive): dentro do range', () => {
-    expect(isWithinRange('2026-08-24T15:00:00.000Z', range)).toBe(true);
+  it('evento 1ms antes do fim: dentro do range', () => {
+    expect(isWithinRange('2026-08-24T14:59:59.999Z', range)).toBe(true);
+  });
+
+  it('evento exatamente no fim (end EXCLUSIVO): FORA do range', () => {
+    expect(isWithinRange('2026-08-24T15:00:00.000Z', range)).toBe(false);
   });
 
   it('evento 1ms depois do fim: fora do range', () => {
@@ -69,26 +73,32 @@ describe('boundaries — evento imediatamente antes/depois da meia-noite local (
   });
 });
 
-describe('resolveCustomRange — start/end custom', () => {
-  it('start 00:00 local inclusive, end fim do dia local inclusive', () => {
+describe('resolveCustomRange — start/end custom, contrato [start, end)', () => {
+  it('start 00:00 local inclusive, end = próxima meia-noite local (exclusiva), sem -1ms', () => {
     const range = resolveCustomRange('2026-08-10', '2026-08-12', SP);
     expect(range).not.toBeNull();
     expect(range!.startMillis).toBe(Date.UTC(2026, 7, 10, 3, 0, 0, 0));
-    // Fim: 2026-08-13T00:00 SP (= 03:00 UTC) menos 1ms.
-    expect(range!.endMillis).toBe(Date.UTC(2026, 7, 13, 3, 0, 0, 0) - 1);
+    // Fim EXCLUSIVO: 2026-08-13T00:00 SP (= 03:00 UTC), início do dia seguinte a 08-12.
+    expect(range!.endMillis).toBe(Date.UTC(2026, 7, 13, 3, 0, 0, 0));
   });
 
-  it('inclusividade do fim: 23:59:59.999 local do último dia está dentro; 00:00:00.000 do dia seguinte está fora', () => {
+  it('o dia endYMD inteiro conta: 23:59:59.999 local do último dia dentro; a própria meia-noite seguinte fora', () => {
     const range = resolveCustomRange('2026-08-10', '2026-08-12', SP)!;
     expect(isWithinRange('2026-08-13T02:59:59.999Z', range)).toBe(true); // 2026-08-12 23:59:59.999 SP
-    expect(isWithinRange('2026-08-13T03:00:00.000Z', range)).toBe(false); // 2026-08-13 00:00:00.000 SP
+    expect(isWithinRange('2026-08-13T03:00:00.000Z', range)).toBe(false); // 2026-08-13 00:00:00.000 SP (= end, exclusivo)
   });
 
-  it('start === end (1 dia só): range válido de 00:00 a 23:59:59.999 local', () => {
+  it('nenhum dia desaparece: o mesmo instante (fim do dia) que era o último ms ainda está dentro', () => {
+    const range = resolveCustomRange('2026-08-10', '2026-08-12', SP)!;
+    // instante que antes era exatamente endMillis (nextMidnight - 1ms) segue dentro
+    expect(isWithinRange(new Date(Date.UTC(2026, 7, 13, 3, 0, 0, 0) - 1).toISOString(), range)).toBe(true);
+  });
+
+  it('start === end (1 dia só): range [00:00 do dia, 00:00 do dia seguinte)', () => {
     const range = resolveCustomRange('2026-08-10', '2026-08-10', SP);
     expect(range).not.toBeNull();
     expect(range!.startMillis).toBe(Date.UTC(2026, 7, 10, 3, 0, 0, 0));
-    expect(range!.endMillis).toBe(Date.UTC(2026, 7, 11, 3, 0, 0, 0) - 1);
+    expect(range!.endMillis).toBe(Date.UTC(2026, 7, 11, 3, 0, 0, 0));
   });
 
   it('range inválido: start depois de end retorna null', () => {

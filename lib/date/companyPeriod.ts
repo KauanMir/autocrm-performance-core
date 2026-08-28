@@ -12,6 +12,12 @@
 // fixo.
 export type PeriodPreset = 'Hoje' | '7 dias' | '15 dias' | '30 dias';
 
+// Contrato SEMI-ABERTO [startMillis, endMillis): startMillis INCLUSIVO,
+// endMillis EXCLUSIVO. Alinhado ao backend da competição
+// (_rank_company_sellers / leaderboard usam `>= start AND < end`) e ao KPI
+// Reports (get_company_management_report, que já era [start,end)). Um
+// instante exatamente em endMillis pertence ao período SEGUINTE, nunca a
+// dois.
 export interface MillisRange {
   startMillis: number;
   endMillis: number;
@@ -80,8 +86,8 @@ const PRESET_DAYS: Record<PeriodPreset, number> = {
 };
 
 // "N dias civis inclusivos": início do dia civil de hoje menos (N-1) dias
-// (no timezone da empresa) até `now` — "Hoje" é o caso N=1. Nunca
-// `new Date()` interno.
+// (no timezone da empresa) até `now` EXCLUSIVO — "Hoje" é o caso N=1.
+// Contrato [start, end). Nunca `new Date()` interno.
 export function resolvePresetRange(preset: PeriodPreset, timeZone: string, now: Date): MillisRange {
   const days = PRESET_DAYS[preset];
   const today = zonedYMD(now, timeZone);
@@ -93,10 +99,11 @@ export function resolvePresetRange(preset: PeriodPreset, timeZone: string, now: 
 }
 
 // start/end no formato 'YYYY-MM-DD' (o mesmo que <input type="date">
-// produz). start inclusive às 00:00 local; end inclusive até o fim do dia
-// civil local (a próxima meia-noite local menos 1ms). Retorna null se o
-// formato for inválido ou start > end — quem chama decide a copy de erro,
-// este helper não sabe de UI.
+// produz). start INCLUSIVO às 00:00 local; end EXCLUSIVO = a próxima
+// meia-noite local depois de `endYMD` (início do dia seguinte). Contrato
+// [start, end): o dia `endYMD` inteiro está dentro, sem artifício de
+// 23:59:59.999. Retorna null se o formato for inválido ou start > end —
+// quem chama decide a copy de erro, este helper não sabe de UI.
 export function resolveCustomRange(startYMD: string, endYMD: string, timeZone: string): MillisRange | null {
   const pattern = /^(\d{4})-(\d{2})-(\d{2})$/;
   const sm = pattern.exec(startYMD);
@@ -109,11 +116,12 @@ export function resolveCustomRange(startYMD: string, endYMD: string, timeZone: s
 
   const startMillis = zonedMidnightMillis(sy, smo, sd, timeZone);
   const nextDay = addCivilDays(ey, emo, ed, 1);
-  const endMillis = zonedMidnightMillis(nextDay.year, nextDay.month, nextDay.day, timeZone) - 1;
+  const endMillis = zonedMidnightMillis(nextDay.year, nextDay.month, nextDay.day, timeZone);
   return { startMillis, endMillis };
 }
 
+// Contrato [start, end): start inclusivo, end exclusivo.
 export function isWithinRange(iso: string, range: MillisRange): boolean {
   const t = new Date(iso).getTime();
-  return t >= range.startMillis && t <= range.endMillis;
+  return t >= range.startMillis && t < range.endMillis;
 }
