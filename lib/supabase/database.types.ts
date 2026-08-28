@@ -2165,6 +2165,10 @@ export type Database = {
         }
         Returns: Json
       }
+      get_competition_reward_campaign: {
+        Args: { p_company_id?: string; p_month_start: string }
+        Returns: Json
+      }
       get_competition_rewards_overview: {
         Args: { p_company_id?: string }
         Returns: Json
