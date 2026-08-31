@@ -12,6 +12,9 @@ import { useRegisterSale, type UseRegisterSaleOptions, type RegisterSaleCallInpu
 import { dealQueryKeys } from '@/lib/deals/dealQueryKeys';
 import { salesQueryKeys } from '@/lib/sales/salesQueryKeys';
 import { leadQueryKeys } from '@/lib/leads/queryKeys';
+import { companySellerLeaderboardQueryPrefix } from '@/lib/hooks/useCompanySellerLeaderboard';
+import { sellerCompetitionEventsQueryKey } from '@/lib/hooks/useSellerCompetitionEvents';
+import { competitionRewardQueryKeys } from '@/lib/competitionRewards/queryKeys';
 import { bumpQueryCacheGeneration } from '@/lib/query/cacheIdentity';
 
 const mocks = vi.hoisted(() => ({
@@ -134,6 +137,35 @@ describe('useRegisterSale — invalidação de sucesso', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: dealQueryKeys.active('company-a') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: salesQueryKeys.active('company-a') });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: leadQueryKeys.timeline('company-a', 'lead-1') });
+  });
+
+  // PODIUM-COMPETITION-R2B §33/§34 — Pódio/Ranking/Minha Disputa/CompTicker
+  // (leaderboard) + eventos de comemoração pessoal continuam invalidados.
+  it('preserva as invalidações de competição (leaderboard + eventos do Seller)', async () => {
+    const { hook, invalidateSpy } = setup();
+    await hook.result.current.registerSale(input);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: companySellerLeaderboardQueryPrefix('company-a') });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: sellerCompetitionEventsQueryKey('company-a', 'user-1') });
+  });
+
+  // COMPETITION-REWARDS-V1-B3-R1-EXEC §1/§8 — repro do achado do public
+  // smoke: Seller em 2º (my_reward=R$0,50) registra venda que o leva a 1º;
+  // sem esta invalidação o "Prêmio da sua posição" na Home ficava obsoleto
+  // até um reload. Invalida o PREFIXO do overview (pega a chave por-usuário).
+  it('invalida também o overview de premiação da competição (my_rank/my_reward)', async () => {
+    const { hook, invalidateSpy } = setup();
+    await hook.result.current.registerSale(input);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: competitionRewardQueryKeys.overviewPrefix('company-a') });
+  });
+
+  // §5 — nada de over-invalidation: o editor de campanha do Manager e o
+  // histórico de premiações NÃO são tocados por uma venda.
+  it('NÃO invalida o editor de campanha nem o histórico de premiações', async () => {
+    const { hook, invalidateSpy } = setup();
+    await hook.result.current.registerSale(input);
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey));
+    expect(invalidatedKeys.some((k) => k?.includes('competition-reward-campaign'))).toBe(false);
+    expect(invalidatedKeys.some((k) => k?.includes('competition-reward-history'))).toBe(false);
   });
 });
 

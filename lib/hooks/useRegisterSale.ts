@@ -40,6 +40,14 @@ import { runSaleMutationWithGenerationGuard } from '@/lib/sales/mutationGenerati
 // precisa buscar eventos pessoais do Seller na sessão Manager").
 import { companySellerLeaderboardQueryPrefix } from '@/lib/hooks/useCompanySellerLeaderboard';
 import { sellerCompetitionEventsQueryKey } from '@/lib/hooks/useSellerCompetitionEvents';
+// COMPETITION-REWARDS-V1-B3-R1-EXEC — get_competition_rewards_overview
+// carrega my_rank / my_reward / first_place_reward: quando a venda muda o
+// rank do Seller, o my_reward destacado no CompetitionRewardsHomeSection
+// ficava obsoleto até um reload/refocus (achado do public smoke do
+// RANKUP_FEEDBACK_V1). Invalidar o prefixo (mesmo padrão de
+// companySellerLeaderboardQueryPrefix) faz a Home convergir logo após a
+// celebração — sem tocar campaign/tiers (estáveis no mês) nem o histórico.
+import { competitionRewardQueryKeys } from '@/lib/competitionRewards/queryKeys';
 
 type RemoteDealRow = Database['public']['Tables']['deals']['Row'];
 type DealPaymentMethod = Database['public']['Enums']['deal_payment_method'];
@@ -137,6 +145,13 @@ export function useRegisterSale(options: UseRegisterSaleOptions): UseRegisterSal
       if (userId) {
         queryClient.invalidateQueries({ queryKey: sellerCompetitionEventsQueryKey(capturedCompanyId, userId) });
       }
+      // COMPETITION-REWARDS-V1-B3-R1-EXEC — my_rank/my_reward do overview de
+      // premiação mudam quando a venda melhora a posição; sem esta linha o
+      // "Prêmio da sua posição" na Home ficava um passo atrás da celebração
+      // até um reload. Prefixo (não a chave por-usuário) — cobre a sessão
+      // Seller que registrou a própria venda; inofensivo quando não havia
+      // overview cacheado. NUNCA invalida campaign/tiers nem histórico.
+      queryClient.invalidateQueries({ queryKey: competitionRewardQueryKeys.overviewPrefix(capturedCompanyId) });
     },
   });
 
