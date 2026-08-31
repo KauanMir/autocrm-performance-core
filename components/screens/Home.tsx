@@ -29,9 +29,10 @@ import {
 } from '@/lib/podium/competition';
 import { useSellerCompetitionEvents } from '@/lib/hooks/useSellerCompetitionEvents';
 import { useMarkCompetitionEventsSeen } from '@/lib/hooks/useMarkCompetitionEventsSeen';
-import { selectPrimaryCompetitionEvent, buildCompetitionCelebration } from '@/lib/podium/competitionCelebration';
+import { selectPrimaryCompetitionEvent, buildCompetitionCelebration, resolveCelebrationReward } from '@/lib/podium/competitionCelebration';
 import { CompetitionCelebration } from '@/components/podiums/CompetitionCelebration';
 import { CompetitionRewardsHomeSection } from '@/components/competitionRewards/CompetitionRewardsHomeSection';
+import { useCompetitionRewardsOverview } from '@/lib/hooks/useCompetitionRewardsOverview';
 import { resolvePresetRange, resolveCustomRange, type PeriodPreset, type ResolvedPeriod } from '@/lib/date/companyPeriod';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
@@ -1325,6 +1326,23 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
     : null;
   const showHomeCelebration = Boolean(primaryPendingCompetitionEvent) && !homeCelebrationDismissed;
 
+  // COMPETITION-RANKUP-FEEDBACK-V1 §9/§18/§19 — o prêmio da NOVA posição sai
+  // do MESMO overview de premiação já consumido pela Home
+  // (CompetitionRewardsHomeSection); a query key é idêntica, então não há
+  // segunda ida ao servidor. Chamado SEMPRE (Rules of Hooks); só produz
+  // prêmio para Seller com campanha publicada e tier para a posição.
+  const celebrationRewardsOverview = useCompetitionRewardsOverview({
+    userId: currentUser?.id ?? null,
+    companyId: currentUser?.activeMembership?.companyId ?? null,
+    membershipRole: isManager ? 'manager' : isSeller ? 'seller' : null,
+    userIsActive: Boolean(currentUser),
+    isSuperAdminContext: isOperationalSuperAdmin,
+  });
+  const homeCelebrationReward = resolveCelebrationReward(
+    celebrationRewardsOverview.status === 'ready' ? celebrationRewardsOverview.overview : null,
+    primaryPendingCompetitionEvent?.newRank ?? 0,
+  );
+
   const dismissHomeCelebration = async () => {
     setHomeCelebrationDismissed(true);
     try {
@@ -1559,6 +1577,8 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
           copy={buildCompetitionCelebration(primaryPendingCompetitionEvent)}
           newRank={primaryPendingCompetitionEvent.newRank}
           saleCount={primaryPendingCompetitionEvent.saleCount}
+          reward={homeCelebrationReward.positionReward}
+          firstPlaceReward={homeCelebrationReward.firstPlaceReward}
           onDismiss={dismissHomeCelebration}
           dismissLabel="Continuar"
         />

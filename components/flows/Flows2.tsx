@@ -49,8 +49,12 @@ import { isRemoteSalesError, REMOTE_SALES_MUTATION_ERROR_MESSAGES_PT } from '@/l
 // (só quando a própria venda melhorou o rank do Seller; nunca inventada).
 import { useSellerCompetitionEvents } from '@/lib/hooks/useSellerCompetitionEvents';
 import { useMarkCompetitionEventsSeen } from '@/lib/hooks/useMarkCompetitionEventsSeen';
-import { selectPrimaryCompetitionEvent, buildCompetitionCelebration } from '@/lib/podium/competitionCelebration';
+import { selectPrimaryCompetitionEvent, buildCompetitionCelebration, resolveCelebrationReward } from '@/lib/podium/competitionCelebration';
 import { CompetitionCelebration } from '@/components/podiums/CompetitionCelebration';
+// COMPETITION-RANKUP-FEEDBACK-V1 §9/§19 — prêmio da nova posição vem do
+// overview de premiação já existente (mesma query key da Home), nunca de
+// tabela nova nem de RPC adicional.
+import { useCompetitionRewardsOverview } from '@/lib/hooks/useCompetitionRewardsOverview';
 // FOLLOW-UP-TEMPLATES-A3-EXEC
 import { useActiveFollowUpTemplates } from '@/lib/hooks/useActiveFollowUpTemplates';
 import { resolveFollowUpTemplateDueAt, formatFollowUpDueAtPreview } from '@/lib/followupTemplates/dueAt';
@@ -2687,6 +2691,14 @@ export function FlowRegistrarVenda({ payload, close }: any) {
   const markCompetitionEventsSeenHook = useMarkCompetitionEventsSeen({
     companyId: remoteIdentityCompanyId, userId: remoteIdentityUserId,
   });
+  // COMPETITION-RANKUP-FEEDBACK-V1 §9/§18/§19 — overview de premiação da
+  // competição ATUAL; a query key é a mesma da Home, então se já estiver em
+  // cache não há nova ida ao servidor. Chamado SEMPRE (Rules of Hooks); só
+  // rende prêmio quando há campanha publicada com tier para a nova posição.
+  const celebrationRewardsOverview = useCompetitionRewardsOverview({
+    userId: remoteIdentityUserId, companyId: remoteIdentityCompanyId,
+    membershipRole: remoteIdentityMembershipRole, userIsActive: remoteIdentityUserIsActive,
+  });
   const [celebrationDismissed, setCelebrationDismissed] = useState(false);
 
   // Prefill de conveniência visual (SALES-A1-PRECHECK §13) — o payload
@@ -2748,6 +2760,10 @@ export function FlowRegistrarVenda({ payload, close }: any) {
 
       if (primaryEvent && !celebrationDismissed) {
         const copy = buildCompetitionCelebration(primaryEvent);
+        const celebrationReward = resolveCelebrationReward(
+          celebrationRewardsOverview.status === 'ready' ? celebrationRewardsOverview.overview : null,
+          primaryEvent.newRank,
+        );
         const handleDismissCelebration = async () => {
           setCelebrationDismissed(true);
           try {
@@ -2769,6 +2785,8 @@ export function FlowRegistrarVenda({ payload, close }: any) {
             copy={copy}
             newRank={primaryEvent.newRank}
             saleCount={primaryEvent.saleCount}
+            reward={celebrationReward.positionReward}
+            firstPlaceReward={celebrationReward.firstPlaceReward}
             onDismiss={handleDismissCelebration}
             dismissLabel="Concluir"
           />

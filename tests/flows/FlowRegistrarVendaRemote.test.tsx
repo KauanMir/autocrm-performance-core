@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   useRegisterSale: vi.fn(),
   useSellerCompetitionEvents: vi.fn(),
   useMarkCompetitionEventsSeen: vi.fn(),
+  useCompetitionRewardsOverview: vi.fn(),
   saleServiceCreate: vi.fn(() => true),
   saleServiceGetAll: vi.fn(() => [] as any[]),
   dealServiceGetAll: vi.fn(() => [] as any[]),
@@ -38,6 +39,13 @@ vi.mock('@/lib/hooks/useSellerCompetitionEvents', () => ({
 }));
 vi.mock('@/lib/hooks/useMarkCompetitionEventsSeen', () => ({
   useMarkCompetitionEventsSeen: m.useMarkCompetitionEventsSeen,
+}));
+// COMPETITION-RANKUP-FEEDBACK-V1 — overview de premiação: mesmo motivo dos
+// hooks acima (useQuery real exige QueryClientProvider). Default 'local' ⇒
+// a comemoração aparece sem bloco de prêmio; os testes de prêmio abaixo
+// injetam um overview 'ready'.
+vi.mock('@/lib/hooks/useCompetitionRewardsOverview', () => ({
+  useCompetitionRewardsOverview: m.useCompetitionRewardsOverview,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -99,6 +107,7 @@ beforeEach(() => {
   m.useRegisterSale.mockReset().mockImplementation(() => registerHookResult(registerSaleSpy));
   m.useSellerCompetitionEvents.mockReset().mockReturnValue({ status: 'local' });
   m.useMarkCompetitionEventsSeen.mockReset().mockReturnValue({ markSeen: vi.fn().mockResolvedValue(0), isPending: false });
+  m.useCompetitionRewardsOverview.mockReset().mockReturnValue({ status: 'local' });
   m.user.current = manager();
 });
 
@@ -206,6 +215,66 @@ describe('FlowRegistrarVenda — remoto: comemoração real (PODIUM-COMPETITION-
     fireEvent.click(screen.getByText('Registrar venda'));
     await waitFor(() => expect(screen.getByText('Primeira venda do mês!')).toBeInTheDocument());
     expect(screen.queryByText('Venda registrada.')).toBeNull();
+  });
+
+  it('COMPETITION-RANKUP-FEEDBACK-V1 §7 — venda leva ao 2º: headline por posição, nunca "ganhou N posições"', async () => {
+    m.user.current = seller();
+    m.useSellerCompetitionEvents.mockReturnValue({
+      status: 'ready',
+      events: [unseenEvent({ competitionStarted: false, oldRank: 4, newRank: 2, saleCount: 6 })],
+    });
+    renderFlow({ deal: remoteDeal({ assignedSellerId: 'seller-self' }) });
+    fireEvent.click(screen.getByText('Registrar venda'));
+    await waitFor(() => expect(screen.getByText('Você assumiu o 2º lugar!')).toBeInTheDocument());
+    expect(screen.getByText('Você subiu 2 posições. A liderança está logo ali.')).toBeInTheDocument();
+    expect(screen.queryByText(/ganhou \d+ posiç/i)).toBeNull();
+  });
+
+  it('COMPETITION-RANKUP-FEEDBACK-V1 §9/§12 — campanha publicada com tier para a nova posição: mostra "Prêmio da sua posição", nunca "você ganhou R$"', async () => {
+    m.user.current = seller();
+    m.useSellerCompetitionEvents.mockReturnValue({
+      status: 'ready',
+      events: [unseenEvent({ competitionStarted: false, oldRank: 4, newRank: 2, saleCount: 6 })],
+    });
+    m.useCompetitionRewardsOverview.mockReturnValue({
+      status: 'ready',
+      overview: {
+        monthStart: '2026-08-01',
+        campaign: {
+          id: 'camp-1', status: 'published', title: null, totalAmountCents: 150000,
+          tiers: [
+            { position: 1, amountCents: 100000, rewardText: null },
+            { position: 2, amountCents: 50000, rewardText: '1 dia de folga' },
+          ],
+        },
+        myRank: 2,
+        myReward: { amountCents: 50000, rewardText: '1 dia de folga' },
+        firstPlaceReward: { amountCents: 100000, rewardText: null },
+        lastResult: null,
+      },
+    });
+    renderFlow({ deal: remoteDeal({ assignedSellerId: 'seller-self' }) });
+    fireEvent.click(screen.getByText('Registrar venda'));
+    const block = await screen.findByTestId('celebration-position-reward');
+    expect(block).toHaveTextContent('Prêmio da sua posição');
+    expect(block).toHaveTextContent('R$ 500,00');
+    expect(block).toHaveTextContent('1 dia de folga');
+    expect(block).toHaveTextContent('Se o mês terminasse agora, essa seria sua premiação.');
+    expect(screen.queryByText(/você ganhou r\$/i)).toBeNull();
+  });
+
+  it('COMPETITION-RANKUP-FEEDBACK-V1 §10 — venda com avanço mas sem campanha publicada: comemoração sem bloco de prêmio, nunca "R$ 0"', async () => {
+    m.user.current = seller();
+    m.useSellerCompetitionEvents.mockReturnValue({
+      status: 'ready',
+      events: [unseenEvent({ competitionStarted: false, oldRank: 5, newRank: 4 })],
+    });
+    m.useCompetitionRewardsOverview.mockReturnValue({ status: 'local' });
+    renderFlow({ deal: remoteDeal({ assignedSellerId: 'seller-self' }) });
+    fireEvent.click(screen.getByText('Registrar venda'));
+    await waitFor(() => expect(screen.getByText('Você subiu no ranking! 🚀')).toBeInTheDocument());
+    expect(screen.queryByTestId('celebration-position-reward')).toBeNull();
+    expect(screen.queryByText(/R\$\s*0(,00)?\b/)).toBeNull();
   });
 
   it('venda NÃO melhora o rank (nenhum evento unseen): segue o sucesso normal, nenhuma comemoração inventada', async () => {

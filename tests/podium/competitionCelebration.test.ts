@@ -1,11 +1,14 @@
 // Testes de lib/podium/competitionCelebration.ts
-// (PODIUM-COMPETITION-R2B-B1-EXEC §44). Puro: sem React, sem rede.
+// (PODIUM-COMPETITION-R2B-B1-EXEC §44 + COMPETITION-RANKUP-FEEDBACK-V1-EXEC
+// §29-§32). Puro: sem React, sem rede.
 import { describe, expect, it } from 'vitest';
 import {
   buildCompetitionCelebration,
   selectPrimaryCompetitionEvent,
+  resolveCelebrationReward,
 } from '@/lib/podium/competitionCelebration';
 import type { UnseenCompetitionEvent } from '@/lib/podium/competitionEventsRepository';
+import type { RewardsOverview } from '@/lib/competitionRewards/homeTypes';
 
 function event(over: Partial<UnseenCompetitionEvent> = {}): UnseenCompetitionEvent {
   return {
@@ -34,47 +37,78 @@ describe('buildCompetitionCelebration — competition_started', () => {
   });
 });
 
-describe('buildCompetitionCelebration — assumiu 1o lugar (took lead)', () => {
-  it('sem related seller: copy generica com saleCount real', () => {
-    const copy = buildCompetitionCelebration(event({ newRank: 1, saleCount: 5, relatedSellerLabel: null }));
-    expect(copy.headline).toBe('Parabéns!');
-    expect(copy.message).toBe('Você assumiu o 1º lugar com 5 vendas.');
+// COMPETITION-RANKUP-FEEDBACK-V1-EXEC §7 — a copy de uma VENDA que melhorou
+// a posição é escolhida pela NOVA colocação. §8 — "Você subiu N posições"
+// só quando N > 1.
+describe('buildCompetitionCelebration — venda: copy por nova posição (§7)', () => {
+  it('§30 — 2→1: assumiu a liderança', () => {
+    const copy = buildCompetitionCelebration(event({ oldRank: 2, newRank: 1 }));
+    expect(copy.headline).toBe('Você assumiu a liderança! 🏆');
+    expect(copy.message).toBe('Agora você é o 1º colocado.');
   });
 
-  it('saleCount singular: "1 venda", nunca "1 vendas"', () => {
-    const copy = buildCompetitionCelebration(event({ newRank: 1, saleCount: 1, relatedSellerLabel: null }));
-    expect(copy.message).toBe('Você assumiu o 1º lugar com 1 venda.');
+  it('2→1 com rival nomeado: menciona o primeiro nome, ainda "assumiu a liderança"', () => {
+    const copy = buildCompetitionCelebration(event({ oldRank: 2, newRank: 1, relatedSellerLabel: 'João Ferreira' }));
+    expect(copy.message).toBe('Você ultrapassou João e assumiu a liderança.');
   });
 
-  it('com related seller: menciona o nome real (primeiro nome)', () => {
-    const copy = buildCompetitionCelebration(event({ newRank: 1, relatedSellerLabel: 'João Ferreira' }));
-    expect(copy.message).toBe('Você ultrapassou João e assumiu o 1º lugar.');
-  });
-});
-
-describe('buildCompetitionCelebration — entrou no Top 3', () => {
-  it('oldRank > 3 e newRank <= 3: copy com posicao e saleCount reais', () => {
-    const copy = buildCompetitionCelebration(event({ oldRank: 5, newRank: 3, saleCount: 4 }));
-    expect(copy.headline).toBe('Você entrou no Top 3!');
-    expect(copy.message).toBe('Agora você está em 3º lugar com 4 vendas.');
+  it('§30 — 3→2: assumiu o 2º lugar', () => {
+    const copy = buildCompetitionCelebration(event({ oldRank: 3, newRank: 2 }));
+    expect(copy.headline).toBe('Você assumiu o 2º lugar!');
+    expect(copy.message).toBe('A liderança está logo ali.');
   });
 
-  it('newRank = 2 dentro do Top 3: usa a posicao real (2o), nao sempre "3o"', () => {
-    const copy = buildCompetitionCelebration(event({ oldRank: 5, newRank: 2, saleCount: 6 }));
-    expect(copy.message).toBe('Agora você está em 2º lugar com 6 vendas.');
+  it('§30 — 4→3: chegou ao pódio', () => {
+    const copy = buildCompetitionCelebration(event({ oldRank: 4, newRank: 3 }));
+    expect(copy.headline).toBe('Você chegou ao pódio! 🏆');
+    expect(copy.message).toBe('Agora você está em 3º lugar.');
   });
-});
 
-describe('buildCompetitionCelebration — rank up generico', () => {
-  it('ganhou N posicoes (plural)', () => {
-    const copy = buildCompetitionCelebration(event({ oldRank: 6, newRank: 4 }));
-    expect(copy.headline).toBe('Você ganhou 2 posições!');
+  it('§29 — 5→4: subiu no ranking, posição real', () => {
+    const copy = buildCompetitionCelebration(event({ oldRank: 5, newRank: 4 }));
+    expect(copy.headline).toBe('Você subiu no ranking! 🚀');
     expect(copy.message).toBe('Agora você está em 4º lugar.');
   });
 
-  it('ganhou 1 posicao (singular)', () => {
-    const copy = buildCompetitionCelebration(event({ oldRank: 5, newRank: 4 }));
-    expect(copy.headline).toBe('Você ganhou 1 posição!');
+  it('nenhuma copy de venda menciona saleCount / "N vendas" (§7 não pede isso)', () => {
+    for (const e of [
+      event({ oldRank: 2, newRank: 1, saleCount: 9 }),
+      event({ oldRank: 3, newRank: 2, saleCount: 9 }),
+      event({ oldRank: 4, newRank: 3, saleCount: 9 }),
+      event({ oldRank: 5, newRank: 4, saleCount: 9 }),
+    ]) {
+      const copy = buildCompetitionCelebration(e);
+      expect(copy.headline + ' ' + copy.message).not.toMatch(/\d+\s+vendas?/);
+    }
+  });
+});
+
+describe('buildCompetitionCelebration — venda: salto de várias posições (§8/§31)', () => {
+  it('§31 — 6→3: "Você subiu 3 posições e agora está em 3º lugar."', () => {
+    const copy = buildCompetitionCelebration(event({ oldRank: 6, newRank: 3 }));
+    expect(copy.headline).toBe('Você chegou ao pódio! 🏆');
+    expect(copy.message).toBe('Você subiu 3 posições e agora está em 3º lugar.');
+  });
+
+  it('6→4 (genérico, multi): prefixo de salto + posição', () => {
+    const copy = buildCompetitionCelebration(event({ oldRank: 6, newRank: 4 }));
+    expect(copy.headline).toBe('Você subiu no ranking! 🚀');
+    expect(copy.message).toBe('Você subiu 2 posições e agora está em 4º lugar.');
+  });
+
+  it('5→1 (multi, sem rival): assumiu a liderança com contagem de salto', () => {
+    const copy = buildCompetitionCelebration(event({ oldRank: 5, newRank: 1, relatedSellerLabel: null }));
+    expect(copy.message).toBe('Você subiu 4 posições e assumiu a liderança.');
+  });
+
+  it('5→2 (multi): assumiu o 2º lugar com contagem de salto', () => {
+    const copy = buildCompetitionCelebration(event({ oldRank: 5, newRank: 2 }));
+    expect(copy.message).toBe('Você subiu 3 posições. A liderança está logo ali.');
+  });
+
+  it('§8 — avanço de 1 posição NÃO adiciona "Você subiu 1 posição"', () => {
+    const copy = buildCompetitionCelebration(event({ oldRank: 4, newRank: 3 }));
+    expect(copy.message).not.toMatch(/subiu 1 posiç/);
   });
 });
 
@@ -109,9 +143,11 @@ describe('buildCompetitionCelebration — origem Visit (nunca atribui a uma vend
     expect(copy.message).not.toMatch(/vendas?/);
   });
 
-  it('mesmo evento (old/new rank iguais) com source diferente: copy Sale continua igual a antes do R2C', () => {
-    const copy = buildCompetitionCelebration(event({ sourceType: 'sale', oldRank: 6, newRank: 4 }));
-    expect(copy.message).toBe('Agora você está em 4º lugar.');
+  it('mesmo old/new rank, source diferente: Sale usa a copy por posição (§7), Visit a copy da visita', () => {
+    const sale = buildCompetitionCelebration(event({ sourceType: 'sale', oldRank: 6, newRank: 4 }));
+    const visit = buildCompetitionCelebration(event({ sourceType: 'visit', oldRank: 6, newRank: 4 }));
+    expect(sale.message).toBe('Você subiu 2 posições e agora está em 4º lugar.');
+    expect(visit.message).toBe('Sua visita realizada levou você ao 4º lugar.');
   });
 });
 
@@ -254,5 +290,93 @@ describe('selectPrimaryCompetitionEvent — prioridade com multiplos unseen', ()
     const older = event({ id: 'a', oldRank: 6, newRank: 4, createdAt: '2026-08-10T10:00:00Z' });
     const newer = event({ id: 'b', oldRank: 6, newRank: 4, createdAt: '2026-08-10T12:00:00Z' });
     expect(selectPrimaryCompetitionEvent([older, newer])).toBe(newer);
+  });
+
+  // COMPETITION-RANKUP-FEEDBACK-V1-EXEC §3/§23/§31 — defensivo: eventos que
+  // não são melhora real nunca viram comemoração (o backend já filtra, mas
+  // a UI não confia nisso cegamente).
+  it('§31 — evento sem avanço (4→4) é ignorado', () => {
+    expect(selectPrimaryCompetitionEvent([event({ oldRank: 4, newRank: 4 })])).toBeNull();
+  });
+
+  it('§23 — evento de QUEDA (3→4) é ignorado, nunca vira celebração negativa', () => {
+    expect(selectPrimaryCompetitionEvent([event({ oldRank: 3, newRank: 4 })])).toBeNull();
+  });
+
+  it('§31 — mistura: só o avanço real é considerado', () => {
+    const flat = event({ id: 'flat', oldRank: 4, newRank: 4 });
+    const up = event({ id: 'up', oldRank: 5, newRank: 2 });
+    expect(selectPrimaryCompetitionEvent([flat, up])?.id).toBe('up');
+  });
+
+  it('competition_started sem avanço numérico (0→1 conceitual) continua válido', () => {
+    const started = event({ competitionStarted: true, oldRank: 1, newRank: 1 });
+    expect(selectPrimaryCompetitionEvent([started])).toBe(started);
+  });
+});
+
+// COMPETITION-RANKUP-FEEDBACK-V1-EXEC §9-§12/§32 — prêmio da nova posição
+// derivado do overview de premiação já existente.
+function overview(over: Partial<RewardsOverview> = {}): RewardsOverview {
+  return {
+    monthStart: '2026-08-01',
+    campaign: {
+      id: 'camp-1', status: 'published', title: null, totalAmountCents: 175000,
+      tiers: [
+        { position: 1, amountCents: 100000, rewardText: null },
+        { position: 2, amountCents: 50000, rewardText: '1 dia de folga' },
+        { position: 3, amountCents: null, rewardText: 'Vale-combustível' },
+      ],
+    },
+    myRank: null,
+    myReward: null,
+    firstPlaceReward: { amountCents: 100000, rewardText: null },
+    lastResult: null,
+    ...over,
+  };
+}
+
+describe('resolveCelebrationReward (§9-§12/§32)', () => {
+  it('sem overview: nada', () => {
+    expect(resolveCelebrationReward(null, 2)).toEqual({ positionReward: null, firstPlaceReward: null });
+  });
+
+  it('§10 — campanha DRAFT nunca vira prêmio', () => {
+    const r = resolveCelebrationReward(overview({ campaign: { id: 'c', status: 'draft', title: null, totalAmountCents: 0, tiers: [{ position: 2, amountCents: 50000, rewardText: null }] } }), 2);
+    expect(r.positionReward).toBeNull();
+  });
+
+  it('§9 — money only: tier da nova posição', () => {
+    const r = resolveCelebrationReward(overview(), 1);
+    expect(r.positionReward).toEqual({ amountCents: 100000, rewardText: null });
+  });
+
+  it('§9 — money + text', () => {
+    const r = resolveCelebrationReward(overview(), 2);
+    expect(r.positionReward).toEqual({ amountCents: 50000, rewardText: '1 dia de folga' });
+  });
+
+  it('§9 — text only (amountCents null)', () => {
+    const r = resolveCelebrationReward(overview(), 3);
+    expect(r.positionReward).toEqual({ amountCents: null, rewardText: 'Vale-combustível' });
+  });
+
+  it('§10 — sem tier para a nova posição: positionReward null (nunca R$ 0)', () => {
+    const r = resolveCelebrationReward(overview(), 5);
+    expect(r.positionReward).toBeNull();
+  });
+
+  it('§10 — tier existe mas vazio (0 e sem texto): tratado como sem prêmio', () => {
+    const r = resolveCelebrationReward(overview({ campaign: { id: 'c', status: 'published', title: null, totalAmountCents: 0, tiers: [{ position: 2, amountCents: 0, rewardText: '  ' }] } }), 2);
+    expect(r.positionReward).toBeNull();
+  });
+
+  it('§11 — nova posição 2..N: expõe o prêmio do 1º lugar', () => {
+    expect(resolveCelebrationReward(overview(), 2).firstPlaceReward).toEqual({ amountCents: 100000, rewardText: null });
+    expect(resolveCelebrationReward(overview(), 4).firstPlaceReward).toEqual({ amountCents: 100000, rewardText: null });
+  });
+
+  it('§11 — nova posição 1: não repete o prêmio do 1º como "first place"', () => {
+    expect(resolveCelebrationReward(overview(), 1).firstPlaceReward).toBeNull();
   });
 });
