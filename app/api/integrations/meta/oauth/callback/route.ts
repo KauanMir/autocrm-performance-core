@@ -1,34 +1,42 @@
 // app/api/integrations/meta/oauth/callback/route.ts — callback do fluxo
-// OAuth "Login do Facebook para Empresas" (FASE FUNDAÇÃO).
+// OAuth "Login do Facebook para Empresas".
 //
 // URL final:
 //   https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback
 //
-// ESCOPO DESTA FASE (proposital):
-//   - valida o parâmetro `state` (stateless, assinado por HMAC, TTL curto);
-//   - trata os parâmetros de erro da Meta (error/error_reason/
-//     error_description) de forma sanitizada;
-//   - responde de forma segura sem expor o `code`.
+// ESCOPO ATUAL (proposital):
+//   - EXIGE e valida o `state` (assinado por HMAC, TTL curto) e o binding
+//     anti-CSRF (cookie HttpOnly setado por POST .../oauth/start) ANTES de
+//     qualquer tratamento — inclusive quando a Meta devolve `error`
+//     (usuário cancelou/negou). Não há caminho que responda sem provar que
+//     o retorno pertence a um fluxo iniciado pelo KAPA CRM.
+//   - confirma o contexto assinado (propósito/versão; uid/cid quando
+//     presentes);
+//   - só depois de state+binding válidos: trata `code` (sucesso) OU o
+//     erro do provider de forma sanitizada;
+//   - responde de forma segura sem expor o `code`;
+//   - limpa o cookie de binding depois de consumido (sucesso ou erro).
 //
 // NÃO FAZ NESTA FASE:
 //   - NÃO troca `code` por access token;
 //   - NÃO chama a Graph API;
 //   - NÃO persiste nada (sem banco, sem tabela, sem token);
 //   - NÃO cria lead / automação / notificação;
-//   - NÃO tem UI, botão ou endpoint público de "start OAuth";
+//   - NÃO tem UI;
 //   - NÃO vincula page_id -> company_id.
 //
 // ISOLAMENTO: esta rota e lib/server/meta-oauth/ são infraestrutura
-// isolada, importada por nada além daqui. Não há middleware no projeto;
-// nenhuma rota existente é afetada. Rota pública por necessidade (a Meta
-// redireciona o browser sem o Bearer do SPA) — a proteção é a assinatura
-// do `state`.
+// isolada, importada por nada além do fluxo Meta OAuth. Não há middleware
+// no projeto; nenhuma rota existente é afetada. Rota pública por
+// necessidade (a Meta redireciona o browser sem o Bearer do SPA) — a
+// proteção é a assinatura do `state` + o binding do cookie.
 import { randomUUID } from 'node:crypto';
 import {
   getMetaOAuthStateSecret,
   InvalidMetaOAuthStateSecretError,
 } from '@/lib/server/meta-oauth/env';
 import { verifyOAuthState } from '@/lib/server/meta-oauth/state';
+import { readBindingCookie, clearBindingCookie } from '@/lib/server/meta-oauth/cookie';
 import { logMetaOAuthEvent, logMetaOAuthError } from '@/lib/server/meta-oauth/logger';
 
 export const runtime = 'nodejs';
@@ -44,20 +52,28 @@ type CallbackErrorCode =
   | 'state_missing'
   | 'state_invalid'
   | 'state_expired'
+  | 'binding_missing'
+  | 'binding_invalid'
   | 'provider_error';
 
-function jsonResponse(status: number, body: unknown): Response {
+function isSecureEnv(): boolean {
+  return process.env.NODE_ENV === 'production';
+}
+
+function jsonResponse(status: number, body: unknown, extraHeaders?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-store',
+      ...extraHeaders,
     },
   });
 }
 
-function errorResponse(status: number, code: CallbackErrorCode): Response {
-  return jsonResponse(status, { ok: false, error: code });
+function errorResponse(status: number, code: CallbackErrorCode, opts?: { clearCookie?: boolean }): Response {
+  const headers = opts?.clearCookie ? { 'Set-Cookie': clearBindingCookie(isSecureEnv()) } : undefined;
+  return jsonResponse(status, { ok: false, error: code }, headers);
 }
 
 // Sanitização defensiva de qualquer string vinda da Meta antes de ir para
@@ -73,7 +89,7 @@ export async function GET(request: Request): Promise<Response> {
   const requestId = randomUUID();
   const startedAt = Date.now();
 
-  // (7) segredo obrigatório — fail closed se ausente/inválido.
+  // segredo obrigatório — fail closed se ausente/inválido.
   let secret: Buffer;
   try {
     secret = getMetaOAuthStateSecret();
@@ -90,29 +106,17 @@ export async function GET(request: Request): Promise<Response> {
   const state = url.searchParams.get('state');
   const providerError = url.searchParams.get('error');
   const providerErrorReason = url.searchParams.get('error_reason');
-  // Lido só para registro sanitizado; NUNCA refletido na resposta.
+  // Lido só para registro sanitizado; NUNCA refletido na resposta, NUNCA
+  // logado em bruto.
   const providerErrorDescription = url.searchParams.get('error_description');
 
-  // ── Caso de erro da Meta ────────────────────────────────────────────
-  if (providerError !== null) {
-    logMetaOAuthEvent({
-      requestId,
-      operation: 'oauth_callback',
-      result: 'provider_error',
-      providerErrorCode:
-        sanitizeForLog(providerError) ?? 'unknown',
-      reason:
-        sanitizeForLog(providerErrorReason) ??
-        (providerErrorDescription ? 'has_description' : undefined),
-      statePresent: state !== null,
-      durationMs: Date.now() - startedAt,
-    });
-    // Resposta genérica — não reflete error_description externo.
-    return errorResponse(400, 'provider_error');
-  }
+  const hasProviderError = providerError !== null;
+  const hasCode = code !== null;
+  // Metadado técnico sanitizado, seguro para log em qualquer ramo.
+  const providerErrorCodeSafe = sanitizeForLog(providerError) ?? (hasProviderError ? 'unknown' : undefined);
 
-  // ── Callback sem `code` e sem `error` ───────────────────────────────
-  if (code === null) {
+  // ── (1) Nada acionável: sem `code` e sem `error` ──────────────────────
+  if (!hasCode && !hasProviderError) {
     logMetaOAuthEvent({
       requestId,
       operation: 'oauth_callback',
@@ -123,51 +127,126 @@ export async function GET(request: Request): Promise<Response> {
     return errorResponse(400, 'invalid_request');
   }
 
-  // ── `state` ausente ────────────────────────────────────────────────
+  // ── (2) `state` ausente ──────────────────────────────────────────────
+  // Vale para `code` OU `error`: sem `state` não há prova de que o retorno
+  // pertence a um fluxo OAuth iniciado pelo KAPA CRM. Erro seguro, sem
+  // refletir nada da Meta, sem efeito colateral.
   if (state === null || state === '') {
     logMetaOAuthEvent({
       requestId,
       operation: 'oauth_callback',
       result: 'state_missing',
-      codePresent: true,
+      codePresent: hasCode,
+      providerErrorCode: providerErrorCodeSafe,
+      statePresent: false,
       durationMs: Date.now() - startedAt,
     });
     return errorResponse(400, 'state_missing');
   }
 
-  // ── `state` inválido / expirado ────────────────────────────────────
-  const stateResult = verifyOAuthState(state, { secret });
-  if (!stateResult.ok) {
-    const reason = 'reason' in stateResult ? stateResult.reason : 'invalid';
-    const expired = reason === 'expired';
+  // ── (3) binding anti-CSRF: cookie obrigatório ───────────────────────
+  const bindingCookie = readBindingCookie(request.headers.get('cookie'));
+  if (!bindingCookie) {
     logMetaOAuthEvent({
       requestId,
       operation: 'oauth_callback',
-      result: expired ? 'state_expired' : 'state_invalid',
-      reason,
-      codePresent: true,
+      result: 'binding_missing',
+      codePresent: hasCode,
+      providerErrorCode: providerErrorCodeSafe,
+      bindingCookiePresent: false,
       durationMs: Date.now() - startedAt,
     });
-    return errorResponse(400, expired ? 'state_expired' : 'state_invalid');
+    return errorResponse(400, 'binding_missing');
   }
 
-  // ── Sucesso estrutural: state válido + code presente ───────────────
-  // (6) NÃO troca o code por access token. (7) NÃO persiste nada.
+  // ── (4) `state`: assinatura + expiração + binding + contexto ────────
+  const stateResult = verifyOAuthState(state, { secret, expectedBinding: bindingCookie });
+  if (!stateResult.ok) {
+    const reason = 'reason' in stateResult ? stateResult.reason : 'invalid';
+    let failCode: CallbackErrorCode;
+    if (reason === 'expired') {
+      failCode = 'state_expired';
+    } else if (reason === 'context_mismatch') {
+      // assinatura já bateu -> a divergência é do binding (ou do
+      // propósito, só possível com o segredo). Tratado como binding.
+      failCode = 'binding_invalid';
+    } else {
+      failCode = 'state_invalid';
+    }
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: failCode,
+      reason,
+      codePresent: hasCode,
+      providerErrorCode: providerErrorCodeSafe,
+      bindingCookiePresent: true,
+      durationMs: Date.now() - startedAt,
+    });
+    return errorResponse(400, failCode, { clearCookie: true });
+  }
+
+  // ═══ A PARTIR DAQUI: state assinado + não expirado + binding conferido.
+  //     O cookie é consumido (limpo) em todos os ramos abaixo. ═══════════
+
+  // ── (5) Erro do provider (usuário cancelou/negou etc.) ─────────────
+  if (hasProviderError) {
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'provider_error',
+      providerErrorCode: providerErrorCodeSafe,
+      reason:
+        sanitizeForLog(providerErrorReason) ??
+        (providerErrorDescription ? 'has_description' : undefined),
+      codePresent: hasCode,
+      bindingCookiePresent: true,
+      durationMs: Date.now() - startedAt,
+    });
+    // Resposta genérica — nunca reflete error_description externo.
+    return errorResponse(400, 'provider_error', { clearCookie: true });
+  }
+
+  // ── (6) Defensivo: sem provider error e sem code (não deveria ocorrer
+  //        após o gate (1)). Fail closed. ────────────────────────────────
+  if (!hasCode) {
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'invalid_request',
+      bindingCookiePresent: true,
+      durationMs: Date.now() - startedAt,
+    });
+    return errorResponse(400, 'invalid_request', { clearCookie: true });
+  }
+
+  // ── (7) Sucesso: state válido + binding conferido + code presente ──
+  // NÃO troca o code por access token. NÃO persiste nada.
+  const { uid, cid } = stateResult.payload;
   logMetaOAuthEvent({
     requestId,
     operation: 'oauth_callback',
     result: 'validated_no_exchange',
     codePresent: true,
-    codeLength: code.length, // só o comprimento, nunca o valor
+    codeLength: (code as string).length, // só o comprimento, nunca o valor
+    bindingCookiePresent: true,
     durationMs: Date.now() - startedAt,
   });
 
-  return jsonResponse(200, {
-    ok: true,
-    stage: 'callback_received',
-    // Mensagem de desenvolvimento — sem `code`, sem token, sem segredo.
-    message:
-      'OAuth callback recebido e state validado (fundacao/desenvolvimento). ' +
-      'A troca de code por access token nao esta implementada nesta fase.',
-  });
+  return jsonResponse(
+    200,
+    {
+      ok: true,
+      stage: 'callback_received',
+      // Contexto: só flags de presença, nunca os valores.
+      context: {
+        userIdPresent: typeof uid === 'string',
+        companyIdPresent: typeof cid === 'string',
+      },
+      message:
+        'OAuth callback recebido, state e binding validados (fundacao/desenvolvimento). ' +
+        'A troca de code por access token nao esta implementada nesta fase.',
+    },
+    { 'Set-Cookie': clearBindingCookie(isSecureEnv()) },
+  );
 }

@@ -3,16 +3,19 @@
 //
 // FORMATO:  <base64url(payloadJSON)>.<base64url(HMAC_SHA256(secret, body))>
 //
-// payload = { v, p, n, iat, exp, b? }
+// payload = { v, p, n, iat, exp, b?, uid?, cid? }
 //   v   versão do formato (1)
 //   p   propósito fixo ("meta_oauth") — coerência de contexto
 //   n   nonce aleatório (18 bytes) — imprevisibilidade / anti-replay futuro
 //   iat epoch (segundos) de emissão
 //   exp epoch (segundos) de expiração — validade curta (default 10 min)
-//   b   OPCIONAL: sha256 hex de um "binding" (ex.: nonce de cookie
-//       HttpOnly setado no futuro endpoint de "start OAuth", double-submit
-//       anti-CSRF). Nesta fase não é emitido nem exigido; o gancho já
-//       existe para a próxima fase.
+//   b   OPCIONAL: sha256 hex de um "binding" — o valor bruto (aleatório)
+//       fica num cookie HttpOnly setado pelo endpoint de "start OAuth"
+//       (double-submit anti-CSRF); só o hash entra no state.
+//   uid OPCIONAL: id do usuário autenticado que iniciou o fluxo (UUID
+//       interno — não é PII sensível nem segredo; vai assinado).
+//   cid OPCIONAL: id da company alvo, já autorizada no /start (UUID
+//       interno). Nunca access token, App Secret, senha ou PII.
 //
 // Propriedades de segurança:
 //   - imprevisível: nonce de CSPRNG (randomBytes);
@@ -43,7 +46,11 @@ export interface OAuthStatePayload {
   iat: number;
   exp: number;
   b?: string;
+  uid?: string;
+  cid?: string;
 }
+
+const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 // ── helpers ───────────────────────────────────────────────────────────
 function sign(body: string, secret: Buffer): string {
@@ -82,9 +89,13 @@ export interface CreateOAuthStateOptions {
   // epoch em MILISSEGUNDOS (default Date.now()). Parametrizável p/ teste.
   nowMs?: number;
   ttlSeconds?: number;
-  // Futuro (fase "start OAuth"): valor bruto do cookie anti-CSRF. Guardado
-  // como sha256 hex, nunca em claro.
+  // Valor bruto do cookie anti-CSRF setado pelo /start. Guardado no state
+  // só como sha256 hex, nunca em claro.
   binding?: string;
+  // Contexto mínimo assinado da tentativa (UUIDs internos). Opcionais para
+  // manter compatibilidade com states já emitidos sem eles.
+  userId?: string;
+  companyId?: string;
 }
 
 export function createOAuthState(opts: CreateOAuthStateOptions): string {
@@ -101,6 +112,12 @@ export function createOAuthState(opts: CreateOAuthStateOptions): string {
   if (opts.binding) {
     payload.b = sha256Hex(opts.binding);
   }
+  if (opts.userId) {
+    payload.uid = opts.userId;
+  }
+  if (opts.companyId) {
+    payload.cid = opts.companyId;
+  }
 
   const body = encodePayload(payload);
   return `${body}.${sign(body, opts.secret)}`;
@@ -114,8 +131,12 @@ export type VerifyOAuthStateResult =
 export interface VerifyOAuthStateOptions {
   secret: Buffer;
   nowMs?: number;
-  // Futuro: valor bruto do cookie anti-CSRF a conferir contra payload.b.
+  // Valor bruto do cookie anti-CSRF a conferir (timing-safe) contra
+  // payload.b. Se `payload.b` existir e este não for passado -> rejeita.
   expectedBinding?: string;
+  // Se passados, precisam bater EXATAMENTE com payload.uid / payload.cid.
+  expectedUserId?: string;
+  expectedCompanyId?: string;
 }
 
 export function verifyOAuthState(raw: unknown, opts: VerifyOAuthStateOptions): VerifyOAuthStateResult {
@@ -164,13 +185,24 @@ export function verifyOAuthState(raw: unknown, opts: VerifyOAuthStateOptions): V
     typeof payload.exp !== 'number' ||
     !Number.isFinite(payload.iat) ||
     !Number.isFinite(payload.exp) ||
-    (payload.b !== undefined && typeof payload.b !== 'string')
+    (payload.b !== undefined && typeof payload.b !== 'string') ||
+    (payload.uid !== undefined && (typeof payload.uid !== 'string' || !UUID_PATTERN.test(payload.uid))) ||
+    (payload.cid !== undefined && (typeof payload.cid !== 'string' || !UUID_PATTERN.test(payload.cid)))
   ) {
     return { ok: false, reason: 'malformed' };
   }
 
   // Coerência de contexto: propósito tem que ser exatamente o desta fase.
   if (payload.p !== PURPOSE) {
+    return { ok: false, reason: 'context_mismatch' };
+  }
+
+  // Contexto assinado, se o chamador quiser amarrar a uma tentativa
+  // específica (comparação simples de UUID já validado por formato).
+  if (
+    (typeof opts.expectedUserId === 'string' && opts.expectedUserId !== '' && payload.uid !== opts.expectedUserId) ||
+    (typeof opts.expectedCompanyId === 'string' && opts.expectedCompanyId !== '' && payload.cid !== opts.expectedCompanyId)
+  ) {
     return { ok: false, reason: 'context_mismatch' };
   }
 
@@ -213,6 +245,8 @@ export function verifyOAuthState(raw: unknown, opts: VerifyOAuthStateOptions): V
       iat: payload.iat as number,
       exp: payload.exp as number,
       ...(hasBinding ? { b: payload.b as string } : {}),
+      ...(typeof payload.uid === 'string' ? { uid: payload.uid } : {}),
+      ...(typeof payload.cid === 'string' ? { cid: payload.cid } : {}),
     },
   };
 }

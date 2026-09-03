@@ -3,12 +3,13 @@
 // lib/server/meta-webhook/logger.ts). Só campos numa allowlist explícita
 // chegam ao console.
 //
-// NUNCA registrar: o `code` OAuth (nem parcial), access token, refresh
-// token, App Secret, verify token, o `state` completo, cookies, sessão,
+// NUNCA registrar: o header Authorization / JWT, o `code` OAuth (nem
+// parcial), access token, refresh token, App Secret, verify token, o
+// `state` completo, o binding (bruto ou hash), cookies, sessão,
 // `error_description` bruto da Meta ou qualquer PII.
 export interface MetaOAuthLogFields {
   requestId: string;
-  operation: 'oauth_callback';
+  operation: 'oauth_callback' | 'oauth_start';
   result: string;
   // Metadados técnicos mínimos — todos opcionais.
   reason?: string; // motivo sanitizado de rejeição (enum interno)
@@ -16,6 +17,12 @@ export interface MetaOAuthLogFields {
   codePresent?: boolean;
   codeLength?: number; // só o comprimento, nunca o valor
   statePresent?: boolean;
+  bindingCookiePresent?: boolean;
+  // /start — resultado de autenticação/autorização, sem dados sensíveis.
+  authenticatedUserPresent?: boolean;
+  companyResolved?: boolean;
+  permissionGranted?: boolean;
+  bindingSet?: boolean;
   durationMs?: number;
 }
 

@@ -28,3 +28,62 @@ export function getMetaOAuthStateSecret(): Buffer {
   }
   return Buffer.from(raw, 'hex');
 }
+
+// META_APP_ID — identificador PÚBLICO do app Meta (aparece na URL de
+// autorização OAuth e no client-side de qualquer SDK da Meta). NÃO é
+// segredo como META_APP_SECRET, mas fica server-side nesta fase para
+// manter a configuração organizada e o /start fail-closed sem ele.
+// Formato: sequência de dígitos (o App ID numérico da Meta).
+export class MissingMetaAppIdError extends Error {
+  constructor() {
+    super('meta_app_id_missing');
+    this.name = 'MissingMetaAppIdError';
+  }
+}
+
+const APP_ID_PATTERN = /^[0-9]{1,32}$/;
+
+export function getMetaAppId(): string {
+  const raw = process.env.META_APP_ID;
+  if (!raw || !APP_ID_PATTERN.test(raw.trim())) {
+    throw new MissingMetaAppIdError();
+  }
+  return raw.trim();
+}
+
+// META_LOGIN_CONFIG_ID — ID da Configuration do "Login do Facebook para
+// Empresas" (Facebook Login for Business), criada manualmente no painel
+// Meta (App Dashboard > Facebook Login for Business > Configurations).
+// No fluxo ATUAL da Meta, `config_id` SUBSTITUI `scope` na URL de
+// autorização: as permissões são definidas DENTRO da Configuration, não
+// na URL. Identificador numérico PÚBLICO (aparece na URL de autorização)
+// — NÃO é segredo, mas fica server-side. /start falha fechado sem ele.
+export class MissingMetaLoginConfigIdError extends Error {
+  constructor() {
+    super('meta_login_config_id_missing');
+    this.name = 'MissingMetaLoginConfigIdError';
+  }
+}
+
+const CONFIG_ID_PATTERN = /^[0-9]{1,32}$/;
+
+export function getMetaLoginConfigId(): string {
+  const raw = process.env.META_LOGIN_CONFIG_ID;
+  if (!raw || !CONFIG_ID_PATTERN.test(raw.trim())) {
+    throw new MissingMetaLoginConfigIdError();
+  }
+  return raw.trim();
+}
+
+// META_GRAPH_API_VERSION — OPCIONAL. A Meta versiona a Graph API
+// trimestralmente; deixar como env permite acompanhar sem mudar código.
+// Se ausente/mal formada, cai no default de lib/server/meta-oauth/config.ts
+// (DEFAULT_GRAPH_API_VERSION). Formato: "v<major>.<minor>", ex.: v21.0.
+const GRAPH_VERSION_PATTERN = /^v[0-9]{1,3}\.[0-9]{1,3}$/;
+
+export function getMetaGraphApiVersionOverride(): string | null {
+  const raw = process.env.META_GRAPH_API_VERSION;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return GRAPH_VERSION_PATTERN.test(trimmed) ? trimmed : null;
+}
