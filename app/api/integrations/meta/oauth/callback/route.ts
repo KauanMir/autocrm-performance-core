@@ -12,15 +12,21 @@
 //     o retorno pertence a um fluxo iniciado pelo KAPA CRM.
 //   - confirma o contexto assinado (propósito/versão; uid/cid quando
 //     presentes);
-//   - só depois de state+binding válidos: trata `code` (sucesso) OU o
-//     erro do provider de forma sanitizada;
-//   - responde de forma segura sem expor o `code`;
+//   - SÓ DEPOIS de state+binding válidos: OU trata o erro do provider de
+//     forma sanitizada, OU troca o `code` por access token SERVER-SIDE.
+//   - a troca do `code` roda exclusivamente no servidor (GET direto à
+//     Meta — conforme a doc oficial —, com META_APP_SECRET); o access
+//     token NUNCA é devolvido ao browser, NUNCA é logado, NUNCA é
+//     persistido, NUNCA vai a cookie/URL — só existe em memória durante a
+//     request e é descartado.
+//   - responde de forma segura sem expor o `code` nem o token;
 //   - limpa o cookie de binding depois de consumido (sucesso ou erro).
 //
 // NÃO FAZ NESTA FASE:
-//   - NÃO troca `code` por access token;
-//   - NÃO chama a Graph API;
-//   - NÃO persiste nada (sem banco, sem tabela, sem token);
+//   - NÃO usa o token para NENHUMA chamada de negócio (GET /me, Pages,
+//     businesses, forms, lead retrieval, subscribe_apps, debug_token…);
+//   - NÃO persiste nada (sem banco, sem tabela, sem token, sem page_id,
+//     sem portfolio/business id);
 //   - NÃO cria lead / automação / notificação;
 //   - NÃO tem UI;
 //   - NÃO vincula page_id -> company_id.
@@ -31,12 +37,19 @@
 // necessidade (a Meta redireciona o browser sem o Bearer do SPA) — a
 // proteção é a assinatura do `state` + o binding do cookie.
 import { randomUUID } from 'node:crypto';
+import { getAppUrl, InvalidAppUrlError } from '@/lib/server/env';
 import {
   getMetaOAuthStateSecret,
   InvalidMetaOAuthStateSecretError,
+  getMetaAppId,
+  MissingMetaAppIdError,
+  getMetaAppSecret,
+  MissingMetaAppSecretError,
 } from '@/lib/server/meta-oauth/env';
+import { resolveGraphApiVersion } from '@/lib/server/meta-oauth/config';
 import { verifyOAuthState } from '@/lib/server/meta-oauth/state';
 import { readBindingCookie, clearBindingCookie } from '@/lib/server/meta-oauth/cookie';
+import { exchangeCodeForToken } from '@/lib/server/meta-oauth/token-exchange';
 import { logMetaOAuthEvent, logMetaOAuthError } from '@/lib/server/meta-oauth/logger';
 
 export const runtime = 'nodejs';
@@ -54,7 +67,8 @@ type CallbackErrorCode =
   | 'state_expired'
   | 'binding_missing'
   | 'binding_invalid'
-  | 'provider_error';
+  | 'provider_error'
+  | 'token_exchange_failed';
 
 function isSecureEnv(): boolean {
   return process.env.NODE_ENV === 'production';
@@ -220,32 +234,92 @@ export async function GET(request: Request): Promise<Response> {
     return errorResponse(400, 'invalid_request', { clearCookie: true });
   }
 
-  // ── (7) Sucesso: state válido + binding conferido + code presente ──
-  // NÃO troca o code por access token. NÃO persiste nada.
+  // ═══ (7) state válido + binding conferido + code presente ═══════════
+  // SÓ AGORA (depois de TODO o gate) troca o `code` por access token,
+  // exclusivamente server-side. O cookie é consumido (limpo) em todos os
+  // ramos abaixo — o binding não pode ser reutilizado (anti-replay).
   const { uid, cid } = stateResult.payload;
+  const contextFlags = {
+    userIdPresent: typeof uid === 'string',
+    companyIdPresent: typeof cid === 'string',
+  };
+
+  // Envs da troca — fail closed. META_APP_SECRET é a MESMA credencial já
+  // usada em Production pelo webhook; server-only, nunca devolvida/logada.
+  let appId: string;
+  let appSecret: string;
+  let appOrigin: string;
+  try {
+    appId = getMetaAppId();
+    appSecret = getMetaAppSecret();
+    appOrigin = getAppUrl().origin;
+  } catch (envError) {
+    const which =
+      envError instanceof MissingMetaAppIdError
+        ? 'app_id'
+        : envError instanceof MissingMetaAppSecretError
+          ? 'app_secret'
+          : envError instanceof InvalidAppUrlError
+            ? 'app_url'
+            : 'unknown';
+    if (which === 'unknown') throw envError;
+    logMetaOAuthError('token_exchange_env_missing', { requestId, which });
+    return errorResponse(500, 'server_misconfigured', { clearCookie: true });
+  }
+
+  const exchange = await exchangeCodeForToken({
+    code: code as string,
+    appId,
+    appSecret,
+    appOrigin,
+    graphApiVersion: resolveGraphApiVersion(),
+  });
+  // A partir daqui `code` e o token da Meta não são mais referenciados —
+  // o token nunca saiu de dentro de exchangeCodeForToken().
+
+  if (!exchange.ok) {
+    // `in` em vez de narrowing pelo discriminante: o tsconfig do projeto
+    // roda com strict:false.
+    const reason = 'reason' in exchange ? exchange.reason : 'unknown';
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'token_exchange_failed',
+      reason, // enum interno sanitizado
+      metaHttpStatus: 'httpStatus' in exchange ? exchange.httpStatus : undefined,
+      codePresent: true,
+      bindingCookiePresent: true,
+      durationMs: Date.now() - startedAt,
+    });
+    // Erro genérico — nunca o corpo bruto da Meta, nunca code/secret/token.
+    return errorResponse(502, 'token_exchange_failed', { clearCookie: true });
+  }
+
   logMetaOAuthEvent({
     requestId,
     operation: 'oauth_callback',
-    result: 'validated_no_exchange',
+    result: 'token_exchange_verified',
     codePresent: true,
     codeLength: (code as string).length, // só o comprimento, nunca o valor
     bindingCookiePresent: true,
+    metaHttpStatus: exchange.httpStatus,
+    tokenType: exchange.tokenType, // ex.: "bearer" — não sensível
+    tokenExpiresInSeconds: exchange.expiresInSeconds, // não sensível
     durationMs: Date.now() - startedAt,
   });
 
+  // Resposta: só metadados seguros. NUNCA o access token (nem parcial, nem
+  // hash), nunca o `code`, nunca o App Secret.
   return jsonResponse(
     200,
     {
       ok: true,
-      stage: 'callback_received',
-      // Contexto: só flags de presença, nunca os valores.
-      context: {
-        userIdPresent: typeof uid === 'string',
-        companyIdPresent: typeof cid === 'string',
-      },
+      stage: 'token_exchange_verified',
+      context: contextFlags,
+      token: { received: true },
       message:
-        'OAuth callback recebido, state e binding validados (fundacao/desenvolvimento). ' +
-        'A troca de code por access token nao esta implementada nesta fase.',
+        'Token da Meta obtido e validado server-side (etapa de validacao tecnica). ' +
+        'O token nao e persistido nem exposto; foi descartado ao final da request.',
     },
     { 'Set-Cookie': clearBindingCookie(isSecureEnv()) },
   );

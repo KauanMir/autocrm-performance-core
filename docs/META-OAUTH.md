@@ -24,16 +24,16 @@ Implementação: `app/api/integrations/meta/oauth/{start,callback}/route.ts`
 
 | Item | Status |
 |---|---|
-| `POST /start` (autenticado) | **Existe** — autentica, resolve company, autoriza, seta cookie de binding, devolve `authorizationUrl`. **Não redireciona, não chama Graph API, não troca code, não persiste.** |
-| `GET /callback` | **Existe** — valida assinatura + expiração + **binding do cookie** + contexto; trata erro da Meta; nunca expõe o `code`; limpa o cookie ao consumir. |
-| `state` assinado (HMAC-SHA256) | **Existe** — stateless, TTL curto, agora com `uid`/`cid`/`b` opcionais. |
-| Cookie anti-CSRF `kapa_meta_oauth_binding` | **Existe** — HttpOnly, SameSite=Lax, Path do fluxo, Max-Age 600s, Secure em produção. |
+| `POST /start` (autenticado) | ✅ **Existe** — autentica, resolve company, autoriza, seta cookie de binding, devolve `authorizationUrl`. Não redireciona, não chama Graph API, não persiste. |
+| `GET /callback` | ✅ **Existe** — valida assinatura + expiração + **binding do cookie** + contexto; trata erro da Meta; **e (nova etapa) troca o `code` por access token server-side**; nunca expõe `code` nem token; limpa o cookie ao consumir. |
+| Facebook Login for Business Configuration | ✅ **Criada** no painel Meta; `META_LOGIN_CONFIG_ID` **configurada** em Production. Testada no fluxo real (ambiente controlado — ver "Primeiro teste real"). |
+| Redirect URI | ✅ **Cadastrada** na Meta e validada no fluxo real: `https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback`. |
+| `state` / binding anti-CSRF | ✅ **Existe e testado** — `state` HMAC-SHA256 stateless (`uid`/`cid`/`b`), cookie `kapa_meta_oauth_binding` HttpOnly/SameSite=Lax/Max-Age 600s/Secure em produção. |
+| `authorization code` recebido | ✅ **Testado** — `{ ok: true, stage: "callback_received"|"token_exchange_verified", context: {...} }`. |
+| **`code` → access token** | ✅ **Esta etapa** — troca SERVER-ONLY via **`GET graph.facebook.com/v26.0/oauth/access_token`** (método da doc oficial), `META_APP_SECRET` como `client_secret`, timeout 8 s, **sem retries**. **Token nunca devolvido/logado/persistido/em cookie; nunca aparece em log/Error mesmo estando na query da request.** |
 | Authorization URL | **Fluxo FLB** — `config_id` + `response_type=code` + `override_default_response_type=true`; **sem `scope`**. |
-| Envs `META_OAUTH_STATE_SECRET`, `META_APP_ID`, `META_LOGIN_CONFIG_ID`, `META_GRAPH_API_VERSION` (opcional) | Placeholders vazios em `.env.local.example`. **Não configuradas** na Vercel. |
-| Configuration do FLB criada na Meta | **Não** — `META_LOGIN_CONFIG_ID` ainda sem valor; `/start` falha fechado sem ela. |
-| Redirect URI cadastrada na Meta | **Não.** |
-| Troca `code` -> access token | **Não implementada.** |
-| Persistência de integração / token | **Não existe** (sem tabela, sem migration). |
+| Envs de Production | ✅ **Configuradas na Vercel**: `APP_URL`, `META_OAUTH_STATE_SECRET`, `META_APP_ID`, `META_LOGIN_CONFIG_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`, `META_GRAPH_API_VERSION=v26.0`. `.env.local.example` mantém placeholders só para dev local. |
+| Persistência de token / integração | **Não existe** (sem tabela, sem migration) — e **não é feita nesta etapa**. |
 | UI / botão "Conectar Meta" | **Não existe.** |
 | App Review / Advanced Access | **Não solicitado.** |
 | Conexão de qualquer company | **Nenhuma.** |
@@ -121,30 +121,82 @@ iniciado por `POST .../oauth/start`.
 | 4 | assinatura HMAC do `state` | `400 state_invalid` |
 | 4 | `state` não expirado | `400 state_expired` |
 | 4 | `sha256(cookie)` == `payload.b` (timing-safe) | `400 binding_invalid` (+ limpa cookie) |
-| 5 | **só então**: `error` presente → `400 provider_error` (sanitizado, sem `error_description`), limpa cookie |
-| 6 | `code` presente → `200 { ok:true, stage:"callback_received", context:{ userIdPresent, companyIdPresent } }`, limpa cookie |
+| 5 | **só então**: `error` presente → `400 provider_error` (sanitizado, sem `error_description`), limpa cookie, **não chama o endpoint de token** |
+| 6 | `code` presente → lê `META_APP_ID`/`META_APP_SECRET`/`APP_URL` (faltando → `500 server_misconfigured`, limpa cookie) → **troca `code` por access token** (ver abaixo) |
+| 7 | troca OK → `200 { ok:true, stage:"token_exchange_verified", context:{ userIdPresent, companyIdPresent }, token:{ received:true } }`, limpa cookie |
+| 7 | troca falha (4xx/5xx/timeout/rede/JSON inválido/sem `access_token`) → `502 token_exchange_failed`, limpa cookie |
 
 O cookie de binding é **consumido (limpo, `Max-Age=0`)** em todos os ramos
-a partir do passo 4 — sucesso ou erro.
+a partir do passo 4 — sucesso ou erro (anti-replay do binding).
 
-Continua: **não** troca `code` por token, **não** persiste, **não** chama
-Graph API; `code` nunca na resposta nem em log (só `codeLength`); `state`
-integral, binding, cookies, JWT e `error_description` bruto **nunca**
-logados (só um marcador sanitizado do `error` da Meta, `[A-Za-z0-9._-]`,
-cortado curto).
+`code` nunca na resposta nem em log (só `codeLength`); `state` integral,
+binding, cookies, JWT, `error_description` bruto e **corpo bruto de
+resposta da Meta** **nunca** logados (só marcadores sanitizados: `error`
+da Meta em `[A-Za-z0-9._-]` cortado; `reason` interno da troca; status
+HTTP da Meta; `token_type`/`expires_in`, que **não** são sensíveis).
+
+### Troca `code` → access token (`lib/server/meta-oauth/token-exchange.ts`)
+
+- **Método: `GET`, EXATAMENTE como a documentação oficial atual da Meta.**
+  Confirmado em 3 páginas oficiais — nenhuma documenta `POST` /
+  `x-www-form-urlencoded` para `/oauth/access_token`:
+  - [*Manually Build a Login Flow*](https://developers.facebook.com/docs/facebook-login/guides/advanced/manual-flow/)
+    — "*make an HTTP **GET** request to the following OAuth endpoint*"
+    `GET https://graph.facebook.com/<version>/oauth/access_token?client_id=…&redirect_uri=…&client_secret=…&code=…`
+  - [*Facebook Login for Business*](https://developers.facebook.com/docs/facebook-login/facebook-login-for-business/)
+    — mesmo endpoint, `GET …?client_id=…&client_secret=…&code=…`
+  - [*Access Token Guide*](https://developers.facebook.com/docs/facebook-login/guides/access-tokens/)
+    — `curl -X GET` para `/oauth/access_token`
+- **Endpoint**: `https://graph.facebook.com/<version>/oauth/access_token`
+  (`<version>` = `META_GRAPH_API_VERSION`, `v26.0` em Production).
+- **Query params**: `client_id` (`META_APP_ID`), `client_secret`
+  (`META_APP_SECRET`), `redirect_uri` (idêntica à do `/start`, derivada de
+  `APP_URL` + `CALLBACK_PATH`), `code`.
+- **`redirect_uri`**: obrigatória e idêntica à do login dialog no fluxo de
+  token de usuário; inofensiva no fluxo *System User Access Token* (SUAT).
+  Enviada sempre. Em Production resolve para
+  `https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback`.
+- **Segurança do `GET`** (a query da request server-to-server carrega
+  `client_secret` + `code`): a URL é construída **só em memória**
+  server-side e passada ao `fetch`; **nunca** é logada (o módulo não faz
+  `console.*`), **nunca** entra em `Error`/exceção (o `catch` do `fetch`
+  só classifica `timeout`/`network_error`, sem tocar `err.message`/a URL),
+  **nunca** aparece na resposta.
+- **SUAT / Business Integration System User**: o **mesmo** endpoint
+  devolve o token de usuário OU o SUAT conforme a Configuration — sem
+  passo extra. `token_type`/`expires_in` podem faltar (SUAT) → parse
+  tolerante; exige apenas `access_token` string não-vazia.
+- **Timeout** explícito (8 s, `AbortController`), **sem retries** (o `code`
+  é descartável). `redirect: 'error'` (não segue 3xx com o segredo no
+  corpo).
+- **Não lê o corpo de erro da Meta** (`!response.ok` → só a faixa do
+  status). Nunca propaga a exceção do `fetch` (poderia carregar
+  URL/inputs) — só classifica em `timeout`/`network_error`.
+- **O access token** existe apenas num `const` local dentro de
+  `exchangeCodeForToken()` e é **descartado no `return`** — o módulo
+  devolve só `{ ok, tokenType?, expiresInSeconds?, httpStatus }` ou
+  `{ ok:false, reason, httpStatus? }`. **Nunca** devolve, loga, persiste
+  ou coloca em erro o token, o `code` ou o `client_secret`.
+- **NÃO** usa o token para nenhuma chamada de negócio (`GET /me`, Pages,
+  businesses, forms, `leads_retrieval`, `subscribe_apps`, `debug_token`…).
 
 ## Env vars
 
 | Var | Papel | Regras |
 |---|---|---|
 | `META_OAUTH_STATE_SECRET` | Chave HMAC INTERNA do `state` (64 hex / 32 bytes) | server-only, sem `NEXT_PUBLIC_`, **não** reutilizar `META_APP_SECRET`. Ausente → `/start` e `/callback` 500. |
-| `META_APP_ID` | App ID **público** da Meta (só dígitos) → `client_id` na URL | server-only nesta fase. Ausente → `/start` 500. |
-| `META_LOGIN_CONFIG_ID` | ID da **Configuration** do FLB (só dígitos) → `config_id` na URL. Define as permissões (no painel Meta), **substitui `scope`**. | server-only, sem `NEXT_PUBLIC_`, público (não é segredo). **Ainda não criado** na Meta. Ausente → `/start` 500. |
-| `META_GRAPH_API_VERSION` | **Opcional.** Versão da Graph API (`v<major>.<minor>`) | ausente/inválida → default de `config.ts`. |
-| `APP_URL` (já existente) | Origem confiável; deriva `redirect_uri` e valida Origin | precisa ser exatamente `https://crm.assessoriakapa.com.br` em produção. |
+| `META_APP_ID` | App ID **público** da Meta (só dígitos) → `client_id` (URL de autorização **e** troca de token) | server-only. Ausente → `/start` **e** a troca no `/callback` falham com 500. |
+| `META_APP_SECRET` | App Secret da Meta → `client_secret` na troca `code` → token. **A MESMA** variável já em Production para o webhook (`X-Hub-Signature-256`) — reutilizada aqui (é autenticação com a Meta); **não** se cria outro segredo. | **EXTREMAMENTE SENSÍVEL.** server-only, **nunca** `NEXT_PUBLIC_`, nunca client-side, nunca devolvida/logada, nunca em cookie/URL. Ausente → troca no `/callback` 500 (fail closed). Não entra na URL de autorização. |
+| `META_LOGIN_CONFIG_ID` | ID da **Configuration** do FLB (só dígitos) → `config_id` na URL. Define as permissões (no painel Meta), **substitui `scope`**. | server-only, sem `NEXT_PUBLIC_`, público (não é segredo). Ausente → `/start` 500. |
+| `META_GRAPH_API_VERSION` | **Opcional.** Versão da Graph API (`v<major>.<minor>`) → path do diálogo **e** do endpoint de token | ausente/inválida → default de `config.ts` (`v26.0`, igual ao valor de Production). |
+| `APP_URL` (já existente) | Origem confiável; deriva `redirect_uri` (URL de autorização **e** troca de token) e valida Origin | Production: `https://crm.assessoriakapa.com.br` (já configurada). |
 
-`META_APP_SECRET` **não** entra na construção da URL de autorização (só é
-usado, futuramente, na troca server-to-server de `code` por token).
+**Estado em Production (confirmado):** `APP_URL=https://crm.assessoriakapa.com.br`,
+`META_OAUTH_STATE_SECRET`, `META_APP_ID`, `META_LOGIN_CONFIG_ID`,
+`META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` **configurados**;
+`META_GRAPH_API_VERSION=v26.0`. A **Configuration do FLB já foi criada** e
+a **Redirect URI já foi cadastrada**. O `.env.local.example` mantém os
+placeholders só para o dev local.
 
 ## Fluxo oficial da Meta (Facebook Login for Business)
 
@@ -207,36 +259,35 @@ FLB quando ela for criada no painel.
 **`scope` NÃO é enviado.** Nenhum segredo na URL (`META_APP_SECRET` nunca
 entra aqui).
 
-### ⚠️ A confirmar no Meta for Developers antes de produção / App Review
+### Estado / pendências
 
-1. **Criar a Configuration** do FLB no painel e copiar o `config_id` para
-   `META_LOGIN_CONFIG_ID` (ver "O que configurar manualmente" no fim).
-2. **Permissões da Configuration** — marcar o conjunto acima; confirmar
-   com App Review se `leads_retrieval` (e Advanced Access) cobrem o caso,
-   e se `business_management`/`ads_management` são necessários conforme a
-   propriedade do formulário/negócio da concessionária.
-3. **`override_default_response_type`** — alinhar com o "response type"
-   default escolhido ao criar a Configuration (mandamos `true` +
-   `response_type=code` para garantir o fluxo code de qualquer forma).
-4. **Versão da Graph API** — `DEFAULT_GRAPH_API_VERSION` em `config.ts` é
-   `v21.0` como ponto de partida explícito; confirmar a versão do app "KAPA
-   CRM" e ajustar (ou definir `META_GRAPH_API_VERSION`).
-5. **Redirect URI** — cadastrar em *Valid OAuth Redirect URIs* **idêntica**
-   a `https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback`
-   (ver abaixo).
+- ✅ **Configuration do FLB criada**; `config_id` em `META_LOGIN_CONFIG_ID`
+  (Production).
+- ✅ **Versão da Graph API**: `META_GRAPH_API_VERSION=v26.0` em Production;
+  `DEFAULT_GRAPH_API_VERSION` em `config.ts` igualado a `v26.0`.
+- ✅ **Redirect URI** cadastrada em *Valid OAuth Redirect URIs*, idêntica a
+  `https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback`.
+- ⚠️ **Permissões da Configuration** — `pages_show_list`,
+  `pages_read_engagement`, `pages_manage_metadata`, `leads_retrieval`
+  precisam passar por **App Review / Advanced Access** antes de qualquer
+  rollout para clientes. Reavaliar então se `business_management` /
+  `ads_management` são necessários conforme a propriedade do
+  formulário/negócio da concessionária.
+- ℹ️ **`override_default_response_type`** — enviamos `true` +
+  `response_type=code` de qualquer forma, independente do "response type"
+  default da Configuration.
 
 ## APP_URL / redirect URI
 
 O `redirect_uri` é montado como `new URL('/api/integrations/meta/oauth/callback', APP_URL.origin)`
 — a **única** fonte é a env **`APP_URL`** (nunca Host/Origin da
-requisição). Em Production o `redirect_uri` resultante precisa ser
-**exatamente**:
+requisição), tanto na URL de autorização quanto na troca `code` → token.
 
-`https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback`
-
-**Antes do deploy**: confirmar na Vercel que `APP_URL` em Production é
-exatamente `https://crm.assessoriakapa.com.br` — sem barra final, sem path
-adicional, sem `www.`. `APP_URL` **não** foi alterado nesta etapa.
+Em Production `APP_URL=https://crm.assessoriakapa.com.br` (já configurada),
+então o `redirect_uri` resultante é **exatamente**
+`https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback` —
+idêntico ao cadastrado em *Valid OAuth Redirect URIs*. `APP_URL` **não**
+foi alterado nesta etapa.
 
 ## Logging (`lib/server/meta-oauth/logger.ts`)
 
@@ -262,25 +313,50 @@ hash), cookies, sessão, `error_description` bruto, PII.
 - Primeira ativação real: **tenant controlado pela Assessoria KAPA**.
 - Pilotos só recebem depois de **autorização explícita**, gradualmente.
 
+## Primeiro teste real (ambiente controlado — NÃO piloto)
+
+O fluxo completo `start → Facebook Login for Business → Configuration →
+seleção Portfolio + Página → callback → state/binding validados → contexto
+user/company → code recebido` foi executado com sucesso usando **apenas**:
+
+- CRM company: `[SMOKE-SA-S1] Empresa Teste`
+- Meta Business Portfolio: `KAPA CRM Teste`
+- Facebook Page: `KAPA CRM Teste`
+
+Resposta observada: `{ "ok": true, "stage": "callback_received",
+"context": { "userIdPresent": true, "companyIdPresent": true } }`. A Meta
+exibiu "KAPA CRM Teste foi conectada ao KAPA CRM".
+
+**Nenhum cliente piloto foi envolvido.** O `code` daquele teste apareceu
+na URL do navegador e é **descartável** — não deve ser reutilizado; um
+novo fluxo OAuth será feito para validar a troca `code` → token.
+
 ## Sem persistência (nesta fase)
 
 Nenhuma tabela, migration, RLS. Nada é salvo: nem `state`, nem `code`, nem
-token, nem `page_id`/`form_id`, nem registro de integração.
+**access token**, nem `page_id`/`form_id`, nem portfolio/business id, nem
+registro de integração. O token obtido na troca existe só em memória
+durante a request e é descartado.
 
 ## O que ainda NÃO existe (fases separadas, futuras)
 
-- Troca `code` -> access token (short-lived) e -> long-lived / system user
-  / Page token.
-- Criptografia e **persistência** de token em banco (**migration + RLS por
-  company** — fase própria).
-- Seleção de Página / conta de anúncios / formulário.
+- **Persistência** do access token em banco, com **encryption at rest**
+  (**migration + RLS por company** — fase própria).
+- Troca por token de longa duração / *long-lived* / Page token (a partir
+  do token já obtido).
+- Seleção de Página / conta de anúncios / formulário (**Page mapping**,
+  **Form mapping**).
 - Vínculo `page_id` -> `company_id`.
 - Lead retrieval, criação de lead, App Review, Advanced Access.
+- Lead retrieval, criação de lead.
+- Assinatura automática de Página nos webhooks (`subscribe_apps`).
+- `debug_token` / qualquer chamada de negócio com o token.
 - Instagram / WhatsApp / Messenger.
 - Desautorização e Data Deletion Callback técnico.
 - Rate limiting dedicado das rotas OAuth (o projeto tem o padrão
   `reserve_*_rate_limit` via RPC, reaproveitável).
 - UI (tela/botão "Conectar Meta"), atrás de flag default OFF.
+- Rollout para clientes pilotos.
 
 ## Dívidas técnicas
 
@@ -299,33 +375,30 @@ token, nem `page_id`/`form_id`, nem registro de integração.
    em voo (janela de 10 min, aceitável). Documentar procedimento.
 5. **Rate limiting** das rotas `/start` e `/callback`.
 
-## O que teremos que configurar manualmente no painel Meta (depois)
+## Configuração no painel Meta / Vercel — ✅ CONCLUÍDA
 
-1. **Criar a Configuration** em *Facebook Login for Business →
-   Configurations*, marcando as permissões da tabela "Permissões
-   necessárias ao produto" (`pages_show_list`, `pages_read_engagement`,
-   `pages_manage_metadata`, `leads_retrieval`) — **sem** Instagram /
-   WhatsApp / Messenger.
-2. Definir o **"response type" default** da Configuration (mandamos
-   `response_type=code` + `override_default_response_type=true` de todo
-   modo).
-3. Copiar o **Configuration ID** gerado → env **`META_LOGIN_CONFIG_ID`**
-   na Vercel (server-only).
-4. Em *Facebook Login → Settings → Valid OAuth Redirect URIs*: adicionar
-   **exatamente**
-   `https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback`.
-5. Confirmar a **versão da Graph API** do app (ajustar
-   `DEFAULT_GRAPH_API_VERSION` ou `META_GRAPH_API_VERSION`).
+- ✅ Configuration do FLB criada; `META_LOGIN_CONFIG_ID` em Production.
+- ✅ `Valid OAuth Redirect URIs` inclui
+  `https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback`
+  (a **mesma** `redirect_uri` é enviada na troca `code` → token).
+- ✅ Envs de Production configuradas na Vercel (ver "Estado em Production").
+- ✅ `META_GRAPH_API_VERSION=v26.0` (default do código igualado a esse valor).
+- ✅ Fluxo real testado com sucesso (ambiente controlado — ver abaixo).
+
+**Ainda pendente:** permissões da Configuration precisam de **App Review /
+Advanced Access** antes de qualquer rollout para clientes.
 
 ## Próximos passos (depois da aprovação desta fase)
 
 1. commit/push controlado.
-2. Vercel (server-only): `META_OAUTH_STATE_SECRET` (`openssl rand -hex 32`),
-   `META_APP_ID`, `META_LOGIN_CONFIG_ID` (após criar a Configuration).
-   Opcional: `META_GRAPH_API_VERSION`. Confirmar `APP_URL` =
-   `https://crm.assessoriakapa.com.br`.
-3. Redeploy.
-4. Configuração manual no painel Meta (bloco acima).
-5. Fase seguinte: troca `code` -> token + persistência (migration + RLS).
+2. Redeploy (as envs já estão na Vercel).
+3. Novo fluxo OAuth real (o `code` do teste anterior é descartável) para
+   confirmar `stage: "token_exchange_verified"`.
+4. Fase seguinte: **persistência do token** — migration nova
+   (`company_meta_integrations` com token **cifrado**, `page_id`, escopos,
+   status `default OFF`) + **RLS por company**. Fase própria: PARAR e
+   planejar antes de implementar.
+5. Depois: Page/Form mapping, `page_id → company_id`, lead retrieval,
+   `subscribe_apps`, App Review / Advanced Access.
 6. Só então: UI atrás de flag default OFF, ativação por company começando
    pelo tenant da Assessoria KAPA.

@@ -41,6 +41,30 @@ export class MissingMetaAppIdError extends Error {
   }
 }
 
+// META_APP_SECRET — App Secret do app Meta. EXTREMAMENTE SENSÍVEL:
+// credencial de autenticação com a Meta. É a MESMA variável já usada em
+// Production pelo webhook (lib/server/meta-webhook) — aqui serve como
+// `client_secret` da troca OAuth `code` -> access token; reutilizá-la é
+// correto (é exatamente uma operação de autenticação com a Meta), NÃO se
+// cria outro segredo. server-only, NUNCA NEXT_PUBLIC_, NUNCA devolvida
+// pela API, NUNCA logada. Fail closed se ausente/vazia. Mantida aqui (e
+// não importada de meta-webhook) para preservar o isolamento entre os
+// dois módulos — cada um lê seu próprio env.
+export class MissingMetaAppSecretError extends Error {
+  constructor() {
+    super('meta_app_secret_missing');
+    this.name = 'MissingMetaAppSecretError';
+  }
+}
+
+export function getMetaAppSecret(): string {
+  const raw = process.env.META_APP_SECRET;
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    throw new MissingMetaAppSecretError();
+  }
+  return raw;
+}
+
 const APP_ID_PATTERN = /^[0-9]{1,32}$/;
 
 export function getMetaAppId(): string {

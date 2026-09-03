@@ -14,25 +14,26 @@
 //   - As PERMISSÕES são definidas DENTRO da Configuration no painel Meta,
 //     não na URL.
 //
-// ⚠️  A CONFIRMAR NO META FOR DEVELOPERS ANTES DE PRODUÇÃO / APP REVIEW
-//     (ver docs/META-OAUTH.md):
-//   1. VERSÃO DA GRAPH API — DEFAULT_GRAPH_API_VERSION é um ponto de
-//      partida explícito; confirme a versão configurada no app "KAPA CRM"
-//      (ou defina META_GRAPH_API_VERSION).
-//   2. PERMISSÕES DA CONFIGURATION — a Configuration criada no painel
-//      deverá contemplar o conjunto mínimo necessário ao nosso caso
-//      (Lead Ads), abaixo em PRODUCT_PERMISSIONS_UNDER_REVIEW, conforme a
-//      confirmação final de App Review. NÃO solicitar Instagram / WhatsApp
-//      / Messenger.
-//   3. `override_default_response_type` — confirmar/alinhar com o
-//      "response type" default escolhido ao criar a Configuration.
+// ESTADO EM PRODUCTION (confirmado): a Configuration do FLB já foi criada,
+// a Redirect URI já foi cadastrada e META_GRAPH_API_VERSION=v26.0. O
+// fluxo real já foi testado com sucesso (ambiente controlado KAPA CRM
+// Teste — nunca com cliente piloto).
+//
+// ⚠️  Ainda A CONFIRMAR (App Review / Advanced Access) — ver docs/META-OAUTH.md:
+//   - PERMISSÕES DA CONFIGURATION — o conjunto necessário ao caso Lead Ads
+//     (abaixo em PRODUCT_PERMISSIONS_UNDER_REVIEW) precisa passar por App
+//     Review / Advanced Access antes do rollout para clientes. NÃO
+//     solicitar Instagram / WhatsApp / Messenger.
 import { getMetaGraphApiVersionOverride } from '@/lib/server/meta-oauth/env';
 
 // Host fixo do diálogo OAuth da Meta (a versão entra no path).
 export const OAUTH_DIALOG_HOST = 'https://www.facebook.com';
 
-// Ver item (1). Ponto de partida explícito — NÃO é definitivo.
-export const DEFAULT_GRAPH_API_VERSION = 'v21.0';
+// Default defensivo. Em Production a env META_GRAPH_API_VERSION está
+// definida como v26.0 (valor efetivo); este default só é usado se a env
+// estiver ausente/mal formada. Mantido igual ao valor de Production para
+// não haver divergência silenciosa.
+export const DEFAULT_GRAPH_API_VERSION = 'v26.0';
 
 // Path (relativo a APP_URL) do callback já publicado.
 export const CALLBACK_PATH = '/api/integrations/meta/oauth/callback';

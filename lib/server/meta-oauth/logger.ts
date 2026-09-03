@@ -4,9 +4,10 @@
 // chegam ao console.
 //
 // NUNCA registrar: o header Authorization / JWT, o `code` OAuth (nem
-// parcial), access token, refresh token, App Secret, verify token, o
-// `state` completo, o binding (bruto ou hash), cookies, sessão,
-// `error_description` bruto da Meta ou qualquer PII.
+// parcial), access token / refresh token (nem parcial, nem hash), App
+// Secret, verify token, o `state` completo, o binding (bruto ou hash),
+// cookies, sessão, `error_description` bruto da Meta, corpo bruto de
+// resposta da Meta ou qualquer PII.
 export interface MetaOAuthLogFields {
   requestId: string;
   operation: 'oauth_callback' | 'oauth_start';
@@ -18,6 +19,10 @@ export interface MetaOAuthLogFields {
   codeLength?: number; // só o comprimento, nunca o valor
   statePresent?: boolean;
   bindingCookiePresent?: boolean;
+  // Troca code -> token: só metadados NÃO sensíveis devolvidos pela Meta.
+  tokenType?: string; // ex.: "bearer" — nunca o token
+  tokenExpiresInSeconds?: number; // validade declarada — nunca o token
+  metaHttpStatus?: number; // status HTTP da resposta da Meta
   // /start — resultado de autenticação/autorização, sem dados sensíveis.
   authenticatedUserPresent?: boolean;
   companyResolved?: boolean;
