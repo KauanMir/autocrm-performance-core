@@ -26,8 +26,11 @@
 //     (timeout / network_error), nunca lê `err.message`/`err.cause`/a URL;
 //   - `!response.ok` -> só a faixa do status; o corpo de erro da Meta NÃO
 //     é lido;
-//   - o access_token existe só num `const` local e é descartado no
-//     return; o módulo devolve apenas metadados não sensíveis.
+//   - o access_token é devolvido ao caller (necessário para a etapa de
+//     teste controlado que deriva o Page Access Token via /me/accounts —
+//     ver lib/server/meta-oauth/page-token.ts) SÓ como valor em memória;
+//     este módulo nunca o loga, nunca o coloca em Error/exceção. O caller
+//     (route.ts) tem a mesma obrigação: nunca logar/devolver/persistir.
 //   - `redirect: 'error'` — nunca segue um 3xx (levaria a query com o
 //     segredo para outro host).
 import { CALLBACK_PATH } from '@/lib/server/meta-oauth/config';
@@ -43,8 +46,12 @@ export type TokenExchangeFailureReason =
   | 'no_access_token';
 
 export type TokenExchangeResult =
-  // Sucesso: SÓ metadados não sensíveis. Nunca o token.
-  | { ok: true; tokenType?: string; expiresInSeconds?: number; httpStatus: number }
+  // Sucesso: metadados não sensíveis + `accessToken` (SUAT ou User Access
+  // Token). `accessToken` existe SÓ para uso em memória pelo caller na
+  // etapa de teste controlado (derivar o Page Access Token via
+  // /me/accounts) — nunca deve ser logado, devolvido ao cliente ou
+  // persistido por nenhum consumidor deste resultado.
+  | { ok: true; accessToken: string; tokenType?: string; expiresInSeconds?: number; httpStatus: number }
   // Falha: `reason` sanitizado + status HTTP da Meta (não sensível), quando houve.
   | { ok: false; reason: TokenExchangeFailureReason; httpStatus?: number };
 
@@ -116,8 +123,9 @@ export async function exchangeCodeForToken(input: ExchangeCodeInput): Promise<To
   }
   const obj = parsed as Record<string, unknown>;
 
-  // O access_token existe SÓ neste escopo local e é descartado no return —
-  // nunca atribuído a escopo externo, nunca logado, nunca devolvido.
+  // O access_token nunca é logado nem entra em Error/exceção. É devolvido
+  // ao caller só como valor em memória — ver comentário em
+  // `TokenExchangeResult` acima.
   const accessToken = obj.access_token;
   if (typeof accessToken !== 'string' || accessToken.length === 0) {
     return { ok: false, reason: 'no_access_token', httpStatus };
@@ -126,6 +134,7 @@ export async function exchangeCodeForToken(input: ExchangeCodeInput): Promise<To
   return {
     ok: true,
     httpStatus,
+    accessToken,
     tokenType: typeof obj.token_type === 'string' ? obj.token_type : undefined,
     expiresInSeconds:
       typeof obj.expires_in === 'number' && Number.isFinite(obj.expires_in)

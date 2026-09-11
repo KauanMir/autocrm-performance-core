@@ -52,3 +52,21 @@ export const PRODUCT_PERMISSIONS_UNDER_REVIEW: readonly string[] = [
 export function resolveGraphApiVersion(): string {
   return getMetaGraphApiVersionOverride() ?? DEFAULT_GRAPH_API_VERSION;
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// HARD GATE — teste técnico controlado de elegibilidade para Advanced
+// Access de `pages_manage_metadata` (ver docs/META-OAUTH.md). Só esta
+// company + esta Page podem disparar a inscrição em /subscribed_apps.
+// NENHUM piloto atinge este caminho. Constantes fixas de propósito — não
+// generalizar para lookup dinâmico nesta fase.
+// ═══════════════════════════════════════════════════════════════════════
+export const META_TEST_COMPANY_ID = '0dfc73ee-bca9-4fdf-aa50-b227940b2869'; // [SMOKE-SA-S1] Empresa Teste
+export const META_TEST_PAGE_ID = '1381033925087695'; // Facebook Page "KAPA CRM Teste"
+
+// Task exigida pela doc oficial de webhooks de leadgen para o Page Access
+// Token usado em /subscribed_apps: "requested from a person who can
+// perform the ADVERTISE task on the Page being queried".
+export const REQUIRED_LEADGEN_PAGE_TASK = 'ADVERTISE';
+
+// Único campo assinado nesta etapa — não generalizar para outros campos.
+export const LEADGEN_SUBSCRIBED_FIELD = 'leadgen';

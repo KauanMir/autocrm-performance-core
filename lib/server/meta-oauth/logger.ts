@@ -4,10 +4,12 @@
 // chegam ao console.
 //
 // NUNCA registrar: o header Authorization / JWT, o `code` OAuth (nem
-// parcial), access token / refresh token (nem parcial, nem hash), App
-// Secret, verify token, o `state` completo, o binding (bruto ou hash),
-// cookies, sessão, `error_description` bruto da Meta, corpo bruto de
-// resposta da Meta ou qualquer PII.
+// parcial), access token / refresh token (nem parcial, nem hash) — inclui
+// o SUAT/User Access Token do OAuth E o Page Access Token derivado via
+// /me/accounts —, App Secret, verify token, o `state` completo, o binding
+// (bruto ou hash), cookies, sessão, `error_description` bruto da Meta,
+// corpo bruto de resposta da Meta (inclusive outras Pages devolvidas por
+// /me/accounts) ou qualquer PII.
 export interface MetaOAuthLogFields {
   requestId: string;
   operation: 'oauth_callback' | 'oauth_start';
@@ -29,6 +31,12 @@ export interface MetaOAuthLogFields {
   permissionGranted?: boolean;
   bindingSet?: boolean;
   durationMs?: number;
+  // Teste técnico controlado (subscribed_apps) — só metadados não
+  // sensíveis: a Page ID é fixa/pública para este teste, nunca o token.
+  testPageId?: string;
+  pageFound?: boolean;
+  advertiseTaskPresent?: boolean;
+  subscribedField?: string;
 }
 
 export function logMetaOAuthEvent(fields: MetaOAuthLogFields): void {

@@ -22,14 +22,29 @@
 //   - responde de forma segura sem expor o `code` nem o token;
 //   - limpa o cookie de binding depois de consumido (sucesso ou erro).
 //
-// NÃO FAZ NESTA FASE:
-//   - NÃO usa o token para NENHUMA chamada de negócio (GET /me, Pages,
-//     businesses, forms, lead retrieval, subscribe_apps, debug_token…);
+// HARD GATE (etapa atual): SOMENTE quando `state.cid === META_TEST_COMPANY_ID`
+// (lib/server/meta-oauth/config.ts), o token é usado para DUAS chamadas de
+// negócio, nesta ordem, exclusivamente server-side e em memória:
+//   1. GET /me/accounts (lib/server/meta-oauth/page-token.ts) — deriva o
+//      Page Access Token da Page fixa META_TEST_PAGE_ID (nunca de outra
+//      Page) e confirma a task `ADVERTISE`.
+//   2. POST /{META_TEST_PAGE_ID}/subscribed_apps?subscribed_fields=leadgen
+//      (lib/server/meta-oauth/page-subscription.ts), usando o Page Access
+//      Token (nunca o SUAT/user token).
+// Qualquer outra company recebe a MESMA resposta de sempre
+// (`token_exchange_verified`) e nenhuma dessas chamadas é feita. Ver
+// docs/META-OAUTH.md para o propósito (elegibilidade de Advanced Access
+// de `pages_manage_metadata`).
+//
+// NÃO FAZ NESTA FASE (nem para a company de teste):
+//   - NÃO usa o token para NENHUMA outra chamada de negócio (GET /me,
+//     businesses, forms, lead retrieval, debug_token…);
 //   - NÃO persiste nada (sem banco, sem tabela, sem token, sem page_id,
-//     sem portfolio/business id);
+//     sem portfolio/business id, sem registro da assinatura);
 //   - NÃO cria lead / automação / notificação;
 //   - NÃO tem UI;
-//   - NÃO vincula page_id -> company_id.
+//   - NÃO vincula page_id -> company_id;
+//   - NÃO generaliza para nenhuma outra company/Page.
 //
 // ISOLAMENTO: esta rota e lib/server/meta-oauth/ são infraestrutura
 // isolada, importada por nada além do fluxo Meta OAuth. Não há middleware
@@ -46,10 +61,18 @@ import {
   getMetaAppSecret,
   MissingMetaAppSecretError,
 } from '@/lib/server/meta-oauth/env';
-import { resolveGraphApiVersion } from '@/lib/server/meta-oauth/config';
+import {
+  resolveGraphApiVersion,
+  META_TEST_COMPANY_ID,
+  META_TEST_PAGE_ID,
+  REQUIRED_LEADGEN_PAGE_TASK,
+  LEADGEN_SUBSCRIBED_FIELD,
+} from '@/lib/server/meta-oauth/config';
 import { verifyOAuthState } from '@/lib/server/meta-oauth/state';
 import { readBindingCookie, clearBindingCookie } from '@/lib/server/meta-oauth/cookie';
 import { exchangeCodeForToken } from '@/lib/server/meta-oauth/token-exchange';
+import { fetchPageAccessToken } from '@/lib/server/meta-oauth/page-token';
+import { subscribePageToWebhookField } from '@/lib/server/meta-oauth/page-subscription';
 import { logMetaOAuthEvent, logMetaOAuthError } from '@/lib/server/meta-oauth/logger';
 
 export const runtime = 'nodejs';
@@ -68,7 +91,14 @@ type CallbackErrorCode =
   | 'binding_missing'
   | 'binding_invalid'
   | 'provider_error'
-  | 'token_exchange_failed';
+  | 'token_exchange_failed'
+  // Teste técnico controlado (subscribed_apps) — só atingível quando
+  // `cid === META_TEST_COMPANY_ID` (ver hard gate abaixo).
+  | 'page_token_lookup_failed'
+  | 'test_page_not_found'
+  | 'test_page_access_token_missing'
+  | 'test_page_missing_advertise_task'
+  | 'test_page_subscription_failed';
 
 function isSecureEnv(): boolean {
   return process.env.NODE_ENV === 'production';
@@ -295,31 +325,164 @@ export async function GET(request: Request): Promise<Response> {
     return errorResponse(502, 'token_exchange_failed', { clearCookie: true });
   }
 
+  // ═══ (8) HARD GATE — teste técnico controlado de subscribed_apps ═════
+  // SÓ prossegue para /me/accounts + /subscribed_apps quando a company do
+  // `state` é EXATAMENTE a company de teste. Qualquer outra company (todo
+  // piloto, hoje) recebe a MESMA resposta de sempre (`token_exchange_verified`)
+  // e NENHUMA chamada Graph API adicional é feita — nem /me/accounts, nem
+  // /subscribed_apps.
+  if (cid !== META_TEST_COMPANY_ID) {
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'token_exchange_verified',
+      codePresent: true,
+      codeLength: (code as string).length, // só o comprimento, nunca o valor
+      bindingCookiePresent: true,
+      metaHttpStatus: exchange.httpStatus,
+      tokenType: exchange.tokenType, // ex.: "bearer" — não sensível
+      tokenExpiresInSeconds: exchange.expiresInSeconds, // não sensível
+      durationMs: Date.now() - startedAt,
+    });
+
+    // Resposta: só metadados seguros. NUNCA o access token (nem parcial,
+    // nem hash), nunca o `code`, nunca o App Secret.
+    return jsonResponse(
+      200,
+      {
+        ok: true,
+        stage: 'token_exchange_verified',
+        context: contextFlags,
+        token: { received: true },
+        message:
+          'Token da Meta obtido e validado server-side (etapa de validacao tecnica). ' +
+          'O token nao e persistido nem exposto; foi descartado ao final da request.',
+      },
+      { 'Set-Cookie': clearBindingCookie(isSecureEnv()) },
+    );
+  }
+
+  // ═══ (9) SOMENTE company de teste: deriva o Page Access Token via
+  // /me/accounts e, se elegível, inscreve a Page de teste no webhook
+  // `leadgen`. `exchange.accessToken` (SUAT/User Access Token) e o
+  // `pageAccessToken` derivado abaixo existem SÓ em memória nesta request
+  // — nunca logados, nunca devolvidos, nunca persistidos. ═══════════════
+  const graphApiVersion = resolveGraphApiVersion();
+
+  const pageLookup = await fetchPageAccessToken({
+    accessToken: exchange.accessToken,
+    targetPageId: META_TEST_PAGE_ID,
+    graphApiVersion,
+  });
+  // A partir daqui `exchange.accessToken` (SUAT/user token) não é mais
+  // referenciado.
+
+  if (!pageLookup.ok) {
+    // `in` em vez de narrowing pelo discriminante: o tsconfig do projeto
+    // roda com strict:false.
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'page_token_lookup_failed',
+      reason: 'reason' in pageLookup ? pageLookup.reason : 'unknown',
+      metaHttpStatus: 'httpStatus' in pageLookup ? pageLookup.httpStatus : undefined,
+      testPageId: META_TEST_PAGE_ID,
+      durationMs: Date.now() - startedAt,
+    });
+    return errorResponse(502, 'page_token_lookup_failed', { clearCookie: true });
+  }
+
+  if (!pageLookup.found) {
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'test_page_not_found',
+      metaHttpStatus: pageLookup.httpStatus,
+      testPageId: META_TEST_PAGE_ID,
+      pageFound: false,
+      durationMs: Date.now() - startedAt,
+    });
+    return errorResponse(502, 'test_page_not_found', { clearCookie: true });
+  }
+
+  if (pageLookup.pageAccessToken === '') {
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'test_page_access_token_missing',
+      metaHttpStatus: pageLookup.httpStatus,
+      testPageId: META_TEST_PAGE_ID,
+      pageFound: true,
+      durationMs: Date.now() - startedAt,
+    });
+    return errorResponse(502, 'test_page_access_token_missing', { clearCookie: true });
+  }
+
+  const advertiseTaskPresent = pageLookup.tasks.includes(REQUIRED_LEADGEN_PAGE_TASK);
+  if (!advertiseTaskPresent) {
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'test_page_missing_advertise_task',
+      metaHttpStatus: pageLookup.httpStatus,
+      testPageId: META_TEST_PAGE_ID,
+      pageFound: true,
+      advertiseTaskPresent: false,
+      durationMs: Date.now() - startedAt,
+    });
+    return errorResponse(502, 'test_page_missing_advertise_task', { clearCookie: true });
+  }
+
+  const subscription = await subscribePageToWebhookField({
+    pageId: META_TEST_PAGE_ID,
+    pageAccessToken: pageLookup.pageAccessToken,
+    subscribedField: LEADGEN_SUBSCRIBED_FIELD,
+    graphApiVersion,
+  });
+  // A partir daqui `pageLookup.pageAccessToken` (Page Access Token) não é
+  // mais referenciado.
+
+  if (!subscription.ok) {
+    // `in` em vez de narrowing pelo discriminante: o tsconfig do projeto
+    // roda com strict:false.
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'test_page_subscription_failed',
+      reason: 'reason' in subscription ? subscription.reason : 'unknown',
+      metaHttpStatus: 'httpStatus' in subscription ? subscription.httpStatus : undefined,
+      testPageId: META_TEST_PAGE_ID,
+      pageFound: true,
+      advertiseTaskPresent: true,
+      subscribedField: LEADGEN_SUBSCRIBED_FIELD,
+      durationMs: Date.now() - startedAt,
+    });
+    return errorResponse(502, 'test_page_subscription_failed', { clearCookie: true });
+  }
+
   logMetaOAuthEvent({
     requestId,
     operation: 'oauth_callback',
-    result: 'token_exchange_verified',
-    codePresent: true,
-    codeLength: (code as string).length, // só o comprimento, nunca o valor
-    bindingCookiePresent: true,
-    metaHttpStatus: exchange.httpStatus,
-    tokenType: exchange.tokenType, // ex.: "bearer" — não sensível
-    tokenExpiresInSeconds: exchange.expiresInSeconds, // não sensível
+    result: 'test_page_subscription_verified',
+    metaHttpStatus: subscription.httpStatus,
+    testPageId: META_TEST_PAGE_ID,
+    pageFound: true,
+    advertiseTaskPresent: true,
+    subscribedField: LEADGEN_SUBSCRIBED_FIELD,
     durationMs: Date.now() - startedAt,
   });
 
-  // Resposta: só metadados seguros. NUNCA o access token (nem parcial, nem
-  // hash), nunca o `code`, nunca o App Secret.
+  // Resposta: só metadados seguros. NUNCA o SUAT, NUNCA o Page Access
+  // Token, nunca o `code`, nunca o App Secret, nunca outras Pages.
   return jsonResponse(
     200,
     {
       ok: true,
-      stage: 'token_exchange_verified',
+      stage: 'test_page_subscription_verified',
       context: contextFlags,
       token: { received: true },
-      message:
-        'Token da Meta obtido e validado server-side (etapa de validacao tecnica). ' +
-        'O token nao e persistido nem exposto; foi descartado ao final da request.',
+      page: { matched: true, advertiseTaskPresent: true },
+      pageSubscription: { verified: true, field: LEADGEN_SUBSCRIBED_FIELD },
     },
     { 'Set-Cookie': clearBindingCookie(isSecureEnv()) },
   );

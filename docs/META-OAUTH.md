@@ -30,7 +30,8 @@ Implementação: `app/api/integrations/meta/oauth/{start,callback}/route.ts`
 | Redirect URI | ✅ **Cadastrada** na Meta e validada no fluxo real: `https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback`. |
 | `state` / binding anti-CSRF | ✅ **Existe e testado** — `state` HMAC-SHA256 stateless (`uid`/`cid`/`b`), cookie `kapa_meta_oauth_binding` HttpOnly/SameSite=Lax/Max-Age 600s/Secure em produção. |
 | `authorization code` recebido | ✅ **Testado** — `{ ok: true, stage: "callback_received"|"token_exchange_verified", context: {...} }`. |
-| **`code` → access token** | ✅ **Esta etapa** — troca SERVER-ONLY via **`GET graph.facebook.com/v26.0/oauth/access_token`** (método da doc oficial), `META_APP_SECRET` como `client_secret`, timeout 8 s, **sem retries**. **Token nunca devolvido/logado/persistido/em cookie; nunca aparece em log/Error mesmo estando na query da request.** |
+| **`code` → access token** | ✅ — troca SERVER-ONLY via **`GET graph.facebook.com/v26.0/oauth/access_token`** (método da doc oficial), `META_APP_SECRET` como `client_secret`, timeout 8 s, **sem retries**. **Token nunca devolvido/logado/persistido/em cookie; nunca aparece em log/Error mesmo estando na query da request.** |
+| **Teste `pages_manage_metadata` (subscribed_apps)** | ✅ **Esta etapa** — SOMENTE para a company de teste `[SMOKE-SA-S1] Empresa Teste`: `GET /me/accounts` deriva o Page Access Token da Page **KAPA CRM Teste** (`1381033925087695`) e confirma a task `ADVERTISE`; então `POST /{page-id}/subscribed_apps?subscribed_fields=leadgen` com esse Page Access Token. Finalidade: gerar uma chamada de API bem-sucedida para liberar o botão de solicitar Advanced Access de `pages_manage_metadata`. Ver seção ["Teste técnico controlado: elegibilidade de Advanced Access (`pages_manage_metadata`)"](#teste-técnico-controlado-elegibilidade-de-advanced-access-pages_manage_metadata). |
 | Authorization URL | **Fluxo FLB** — `config_id` + `response_type=code` + `override_default_response_type=true`; **sem `scope`**. |
 | Envs de Production | ✅ **Configuradas na Vercel**: `APP_URL`, `META_OAUTH_STATE_SECRET`, `META_APP_ID`, `META_LOGIN_CONFIG_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`, `META_GRAPH_API_VERSION=v26.0`. `.env.local.example` mantém placeholders só para dev local. |
 | Persistência de token / integração | **Não existe** (sem tabela, sem migration) — e **não é feita nesta etapa**. |
@@ -179,6 +180,65 @@ HTTP da Meta; `token_type`/`expires_in`, que **não** são sensíveis).
   ou coloca em erro o token, o `code` ou o `client_secret`.
 - **NÃO** usa o token para nenhuma chamada de negócio (`GET /me`, Pages,
   businesses, forms, `leads_retrieval`, `subscribe_apps`, `debug_token`…).
+
+## Teste técnico controlado: elegibilidade de Advanced Access (`pages_manage_metadata`)
+
+**Objetivo:** a Meta só libera o botão de solicitar Advanced Access de
+`pages_manage_metadata` depois de uma chamada de API bem-sucedida usando
+essa permissão (até 24h de latência para o botão ativar). Esta etapa
+existe SÓ para gerar essa chamada, de forma isolada e reversível — **não**
+é rollout, **não** é persistência, **não** afeta nenhum piloto.
+
+**Ambiente controlado (únicos valores aceitos — hard gate no código):**
+- CRM company: `[SMOKE-SA-S1] Empresa Teste` (`company_id = 0dfc73ee-bca9-4fdf-aa50-b227940b2869`, `META_TEST_COMPANY_ID` em `config.ts`).
+- Meta Business Portfolio: `KAPA CRM Teste`.
+- Facebook Page: `KAPA CRM Teste` (`page_id = 1381033925087695`, `META_TEST_PAGE_ID` em `config.ts`).
+
+### Por que o token do OAuth não é usado diretamente
+
+Nenhuma documentação oficial da Meta confirma o uso direto, em edges
+Page-scoped (`/{page-id}/subscribed_apps`), do token devolvido pelo
+"Facebook Login for Business" (User Access Token OU Business Integration
+System User Access Token / SUAT). A doc oficial de webhooks de leadgen
+exige explicitamente **"a Page access token requested from a person who
+can perform the ADVERTISE task on the Page being queried"**
+([Leads — Webhooks from Meta](https://developers.facebook.com/docs/graph-api/webhooks/getting-started/webhooks-for-leadgen/)).
+O mecanismo oficial documentado para obter esse Page Access Token é
+`GET /me/accounts`, que devolve — por Page — `id`, `name`, `access_token`
+(o Page Access Token) e `tasks`
+([Pages API — Overview](https://developers.facebook.com/docs/pages/overview)).
+
+### Fluxo implementado (`GET /callback`)
+
+1. `code` → SUAT/User Access Token (etapa já existente, inalterada).
+2. **SÓ SE** `state.cid === META_TEST_COMPANY_ID`:
+   `GET https://graph.facebook.com/v26.0/me/accounts?fields=id,name,access_token,tasks&access_token=<SUAT>`
+   (`lib/server/meta-oauth/page-token.ts`) — localiza EXATAMENTE
+   `id === "1381033925087695"` na lista devolvida (nunca a primeira Page,
+   nunca outra Page); se ausente → `test_page_not_found`.
+3. Confirma `access_token` não vazio para essa Page (senão →
+   `test_page_access_token_missing`) e que `tasks` contém `ADVERTISE`
+   (senão → `test_page_missing_advertise_task`, sem tentar atribuir
+   permissões).
+4. `POST https://graph.facebook.com/v26.0/1381033925087695/subscribed_apps?subscribed_fields=leadgen&access_token=<PAGE_ACCESS_TOKEN>`
+   (`lib/server/meta-oauth/page-subscription.ts`) — só o campo `leadgen`.
+5. Resposta segura:
+   `{ ok:true, stage:"test_page_subscription_verified", context:{...}, token:{received:true}, page:{matched:true, advertiseTaskPresent:true}, pageSubscription:{verified:true, field:"leadgen"} }`.
+
+**Hard gate:** qualquer `company_id` diferente de `META_TEST_COMPANY_ID`
+recebe a resposta padrão `token_exchange_verified` de sempre — `/me/accounts`
+e `/subscribed_apps` **nunca** são chamados. Nenhum piloto atinge este
+caminho.
+
+**Sem persistência:** o SUAT/User Access Token e o Page Access Token
+derivado existem SÓ em memória durante a request; nenhum dos dois é
+logado, devolvido, colocado em cookie/URL ou salvo em banco. A única
+consequência externa desta etapa é a assinatura criada na Meta para a Page
+de teste (reversível pelo painel da Meta).
+
+**Erros sanitizados possíveis:** `page_token_lookup_failed`,
+`test_page_not_found`, `test_page_access_token_missing`,
+`test_page_missing_advertise_task`, `test_page_subscription_failed`.
 
 ## Env vars
 
@@ -349,8 +409,10 @@ durante a request e é descartado.
 - Vínculo `page_id` -> `company_id`.
 - Lead retrieval, criação de lead, App Review, Advanced Access.
 - Lead retrieval, criação de lead.
-- Assinatura automática de Página nos webhooks (`subscribe_apps`).
-- `debug_token` / qualquer chamada de negócio com o token.
+- Assinatura automática de Página nos webhooks (`subscribe_apps`) —
+  **exceção controlada**: feita SÓ para a Page de teste `1381033925087695`,
+  ver ["Teste técnico controlado"](#teste-técnico-controlado-elegibilidade-de-advanced-access-pages_manage_metadata) acima.
+- `debug_token` / qualquer outra chamada de negócio com o token.
 - Instagram / WhatsApp / Messenger.
 - Desautorização e Data Deletion Callback técnico.
 - Rate limiting dedicado das rotas OAuth (o projeto tem o padrão
