@@ -23,18 +23,23 @@
 //   - limpa o cookie de binding depois de consumido (sucesso ou erro).
 //
 // HARD GATE (etapa atual): SOMENTE quando `state.cid === META_TEST_COMPANY_ID`
-// (lib/server/meta-oauth/config.ts), o token é usado para DUAS chamadas de
+// (lib/server/meta-oauth/config.ts), o token é usado para TRÊS chamadas de
 // negócio, nesta ordem, exclusivamente server-side e em memória:
 //   1. GET /me/accounts (lib/server/meta-oauth/page-token.ts) — deriva o
 //      Page Access Token da Page fixa META_TEST_PAGE_ID (nunca de outra
 //      Page) e confirma a task `ADVERTISE`.
-//   2. POST /{META_TEST_PAGE_ID}/subscribed_apps?subscribed_fields=leadgen
+//   2. GET /{META_TEST_PAGE_ID}/posts?fields=id&limit=1
+//      (lib/server/meta-oauth/page-read-engagement.ts), usando o Page
+//      Access Token — leitura mínima e read-only de conteúdo publicado
+//      pela própria Page (só `id`, no máximo 1 post) para gerar uso real
+//      de `pages_read_engagement`.
+//   3. POST /{META_TEST_PAGE_ID}/subscribed_apps?subscribed_fields=leadgen
 //      (lib/server/meta-oauth/page-subscription.ts), usando o Page Access
 //      Token (nunca o SUAT/user token).
 // Qualquer outra company recebe a MESMA resposta de sempre
 // (`token_exchange_verified`) e nenhuma dessas chamadas é feita. Ver
 // docs/META-OAUTH.md para o propósito (elegibilidade de Advanced Access
-// de `pages_manage_metadata`).
+// de `pages_manage_metadata` e `pages_read_engagement`).
 //
 // NÃO FAZ NESTA FASE (nem para a company de teste):
 //   - NÃO usa o token para NENHUMA outra chamada de negócio (GET /me,
@@ -72,6 +77,7 @@ import { verifyOAuthState } from '@/lib/server/meta-oauth/state';
 import { readBindingCookie, clearBindingCookie } from '@/lib/server/meta-oauth/cookie';
 import { exchangeCodeForToken } from '@/lib/server/meta-oauth/token-exchange';
 import { fetchPageAccessToken } from '@/lib/server/meta-oauth/page-token';
+import { fetchPageReadEngagement } from '@/lib/server/meta-oauth/page-read-engagement';
 import { subscribePageToWebhookField } from '@/lib/server/meta-oauth/page-subscription';
 import { logMetaOAuthEvent, logMetaOAuthError } from '@/lib/server/meta-oauth/logger';
 
@@ -98,6 +104,7 @@ type CallbackErrorCode =
   | 'test_page_not_found'
   | 'test_page_access_token_missing'
   | 'test_page_missing_advertise_task'
+  | 'test_page_read_engagement_failed'
   | 'test_page_subscription_failed';
 
 function isSecureEnv(): boolean {
@@ -363,8 +370,9 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   // ═══ (9) SOMENTE company de teste: deriva o Page Access Token via
-  // /me/accounts e, se elegível, inscreve a Page de teste no webhook
-  // `leadgen`. `exchange.accessToken` (SUAT/User Access Token) e o
+  // /me/accounts, faz UMA leitura mínima da própria Page
+  // (pages_read_engagement) e, se elegível, inscreve a Page de teste no
+  // webhook `leadgen`. `exchange.accessToken` (SUAT/User Access Token) e o
   // `pageAccessToken` derivado abaixo existem SÓ em memória nesta request
   // — nunca logados, nunca devolvidos, nunca persistidos. ═══════════════
   const graphApiVersion = resolveGraphApiVersion();
@@ -433,6 +441,35 @@ export async function GET(request: Request): Promise<Response> {
     return errorResponse(502, 'test_page_missing_advertise_task', { clearCookie: true });
   }
 
+  // ═══ (9a) leitura mínima e read-only de conteúdo publicado pela própria
+  // Page — gera uso de `pages_read_engagement`. GET /{page-id}/posts com
+  // fields=id&limit=1, exclusivamente com o Page Access Token (nunca o
+  // SUAT). Só o `id` de no máximo 1 post — nenhum `message`, comentário,
+  // reaction, dado de usuário ou insight. `data: []` (Page sem posts)
+  // também é sucesso. ═══════════════════════════════════════════════════
+  const readEngagement = await fetchPageReadEngagement({
+    pageId: META_TEST_PAGE_ID,
+    pageAccessToken: pageLookup.pageAccessToken,
+    graphApiVersion,
+  });
+
+  if (!readEngagement.ok) {
+    // `in` em vez de narrowing pelo discriminante: o tsconfig do projeto
+    // roda com strict:false.
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'test_page_read_engagement_failed',
+      reason: 'reason' in readEngagement ? readEngagement.reason : 'unknown',
+      metaHttpStatus: 'httpStatus' in readEngagement ? readEngagement.httpStatus : undefined,
+      testPageId: META_TEST_PAGE_ID,
+      pageFound: true,
+      advertiseTaskPresent: true,
+      durationMs: Date.now() - startedAt,
+    });
+    return errorResponse(502, 'test_page_read_engagement_failed', { clearCookie: true });
+  }
+
   const subscription = await subscribePageToWebhookField({
     pageId: META_TEST_PAGE_ID,
     pageAccessToken: pageLookup.pageAccessToken,
@@ -463,25 +500,27 @@ export async function GET(request: Request): Promise<Response> {
   logMetaOAuthEvent({
     requestId,
     operation: 'oauth_callback',
-    result: 'test_page_subscription_verified',
+    result: 'test_page_permissions_verified',
     metaHttpStatus: subscription.httpStatus,
     testPageId: META_TEST_PAGE_ID,
     pageFound: true,
     advertiseTaskPresent: true,
+    readEngagementVerified: true,
     subscribedField: LEADGEN_SUBSCRIBED_FIELD,
     durationMs: Date.now() - startedAt,
   });
 
   // Resposta: só metadados seguros. NUNCA o SUAT, NUNCA o Page Access
-  // Token, nunca o `code`, nunca o App Secret, nunca outras Pages.
+  // Token, nunca o `code`, nunca o App Secret, nunca outras Pages, nunca o
+  // corpo bruto (id/name) devolvido pela Meta na leitura de engajamento.
   return jsonResponse(
     200,
     {
       ok: true,
-      stage: 'test_page_subscription_verified',
+      stage: 'test_page_permissions_verified',
       context: contextFlags,
       token: { received: true },
-      page: { matched: true, advertiseTaskPresent: true },
+      page: { matched: true, advertiseTaskPresent: true, readEngagementVerified: true },
       pageSubscription: { verified: true, field: LEADGEN_SUBSCRIBED_FIELD },
     },
     { 'Set-Cookie': clearBindingCookie(isSecureEnv()) },

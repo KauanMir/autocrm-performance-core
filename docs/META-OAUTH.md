@@ -31,7 +31,7 @@ Implementação: `app/api/integrations/meta/oauth/{start,callback}/route.ts`
 | `state` / binding anti-CSRF | ✅ **Existe e testado** — `state` HMAC-SHA256 stateless (`uid`/`cid`/`b`), cookie `kapa_meta_oauth_binding` HttpOnly/SameSite=Lax/Max-Age 600s/Secure em produção. |
 | `authorization code` recebido | ✅ **Testado** — `{ ok: true, stage: "callback_received"|"token_exchange_verified", context: {...} }`. |
 | **`code` → access token** | ✅ — troca SERVER-ONLY via **`GET graph.facebook.com/v26.0/oauth/access_token`** (método da doc oficial), `META_APP_SECRET` como `client_secret`, timeout 8 s, **sem retries**. **Token nunca devolvido/logado/persistido/em cookie; nunca aparece em log/Error mesmo estando na query da request.** |
-| **Teste `pages_manage_metadata` (subscribed_apps)** | ✅ **Esta etapa** — SOMENTE para a company de teste `[SMOKE-SA-S1] Empresa Teste`: `GET /me/accounts` deriva o Page Access Token da Page **KAPA CRM Teste** (`1381033925087695`) e confirma a task `ADVERTISE`; então `POST /{page-id}/subscribed_apps?subscribed_fields=leadgen` com esse Page Access Token. Finalidade: gerar uma chamada de API bem-sucedida para liberar o botão de solicitar Advanced Access de `pages_manage_metadata`. Ver seção ["Teste técnico controlado: elegibilidade de Advanced Access (`pages_manage_metadata`)"](#teste-técnico-controlado-elegibilidade-de-advanced-access-pages_manage_metadata). |
+| **Teste `pages_manage_metadata` + `pages_read_engagement`** | ✅ **Esta etapa** — SOMENTE para a company de teste `[SMOKE-SA-S1] Empresa Teste`: `GET /me/accounts` deriva o Page Access Token da Page **KAPA CRM Teste** (`1381033925087695`) e confirma a task `ADVERTISE`; então `GET /{page-id}/posts?fields=id&limit=1` (leitura mínima e read-only de conteúdo publicado, `pages_read_engagement`) e, se OK, `POST /{page-id}/subscribed_apps?subscribed_fields=leadgen` (`pages_manage_metadata`) com esse Page Access Token. Finalidade: gerar chamadas de API bem-sucedidas para liberar o botão de solicitar Advanced Access de ambas as permissões. Ver seção ["Teste técnico controlado: elegibilidade de Advanced Access"](#teste-técnico-controlado-elegibilidade-de-advanced-access-pages_manage_metadata-e-pages_read_engagement). |
 | Authorization URL | **Fluxo FLB** — `config_id` + `response_type=code` + `override_default_response_type=true`; **sem `scope`**. |
 | Envs de Production | ✅ **Configuradas na Vercel**: `APP_URL`, `META_OAUTH_STATE_SECRET`, `META_APP_ID`, `META_LOGIN_CONFIG_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`, `META_GRAPH_API_VERSION=v26.0`. `.env.local.example` mantém placeholders só para dev local. |
 | Persistência de token / integração | **Não existe** (sem tabela, sem migration) — e **não é feita nesta etapa**. |
@@ -181,13 +181,15 @@ HTTP da Meta; `token_type`/`expires_in`, que **não** são sensíveis).
 - **NÃO** usa o token para nenhuma chamada de negócio (`GET /me`, Pages,
   businesses, forms, `leads_retrieval`, `subscribe_apps`, `debug_token`…).
 
-## Teste técnico controlado: elegibilidade de Advanced Access (`pages_manage_metadata`)
+## Teste técnico controlado: elegibilidade de Advanced Access (`pages_manage_metadata` e `pages_read_engagement`)
 
-**Objetivo:** a Meta só libera o botão de solicitar Advanced Access de
-`pages_manage_metadata` depois de uma chamada de API bem-sucedida usando
-essa permissão (até 24h de latência para o botão ativar). Esta etapa
-existe SÓ para gerar essa chamada, de forma isolada e reversível — **não**
-é rollout, **não** é persistência, **não** afeta nenhum piloto.
+**Objetivo:** a Meta só libera o botão de solicitar Advanced Access de uma
+permissão depois de uma chamada de API bem-sucedida usando essa permissão
+(até 24h de latência para o botão ativar). Esta etapa existe SÓ para gerar
+essas chamadas (`pages_manage_metadata` via `subscribed_apps`;
+`pages_read_engagement` via leitura mínima da própria Page), de forma
+isolada e reversível — **não** é rollout, **não** é persistência, **não**
+afeta nenhum piloto.
 
 **Ambiente controlado (únicos valores aceitos — hard gate no código):**
 - CRM company: `[SMOKE-SA-S1] Empresa Teste` (`company_id = 0dfc73ee-bca9-4fdf-aa50-b227940b2869`, `META_TEST_COMPANY_ID` em `config.ts`).
@@ -208,6 +210,19 @@ O mecanismo oficial documentado para obter esse Page Access Token é
 (o Page Access Token) e `tasks`
 ([Pages API — Overview](https://developers.facebook.com/docs/pages/overview)).
 
+### Por que `GET /{page-id}/posts?fields=id&limit=1` para `pages_read_engagement`
+
+A [referência oficial da permissão `pages_read_engagement`](https://developers.facebook.com/docs/permissions/reference/pages_read_engagement)
+confirma, entre os usos permitidos, **"ler conteúdo (publicações, fotos,
+vídeos e eventos) publicado pela Página"**. O edge `/{page-id}/posts` é o
+mecanismo padrão documentado para listar publicações da Página
+([Graph API Reference — Page](https://developers.facebook.com/docs/graph-api/reference/page/)).
+`fields=id&limit=1` são os únicos parâmetros enviados — só o `id` de NO
+MÁXIMO 1 post é lido, usando o Page Access Token (nunca o SUAT); nenhum
+`message`, comentário, reaction, dado de usuário ou insight é solicitado.
+Uma Page sem posts (`data: []`) também conta como chamada bem-sucedida —
+não é tratada como erro.
+
 ### Fluxo implementado (`GET /callback`)
 
 1. `code` → SUAT/User Access Token (etapa já existente, inalterada).
@@ -220,25 +235,35 @@ O mecanismo oficial documentado para obter esse Page Access Token é
    `test_page_access_token_missing`) e que `tasks` contém `ADVERTISE`
    (senão → `test_page_missing_advertise_task`, sem tentar atribuir
    permissões).
-4. `POST https://graph.facebook.com/v26.0/1381033925087695/subscribed_apps?subscribed_fields=leadgen&access_token=<PAGE_ACCESS_TOKEN>`
+4. `GET https://graph.facebook.com/v26.0/1381033925087695/posts?fields=id&limit=1&access_token=<PAGE_ACCESS_TOKEN>`
+   (`lib/server/meta-oauth/page-read-engagement.ts`) — leitura mínima e
+   read-only de conteúdo publicado pela própria Page, só `id` de no máximo
+   1 post, para gerar uso de `pages_read_engagement`. Sucesso = HTTP 2xx +
+   corpo com `data` como array (mesmo vazio — Page sem posts também é
+   sucesso). Falha (4xx/5xx/timeout/rede/corpo sem `data`) →
+   `test_page_read_engagement_failed`, **`/subscribed_apps` nunca é
+   chamado**.
+5. `POST https://graph.facebook.com/v26.0/1381033925087695/subscribed_apps?subscribed_fields=leadgen&access_token=<PAGE_ACCESS_TOKEN>`
    (`lib/server/meta-oauth/page-subscription.ts`) — só o campo `leadgen`.
-5. Resposta segura:
-   `{ ok:true, stage:"test_page_subscription_verified", context:{...}, token:{received:true}, page:{matched:true, advertiseTaskPresent:true}, pageSubscription:{verified:true, field:"leadgen"} }`.
+6. Resposta segura:
+   `{ ok:true, stage:"test_page_permissions_verified", context:{...}, token:{received:true}, page:{matched:true, advertiseTaskPresent:true, readEngagementVerified:true}, pageSubscription:{verified:true, field:"leadgen"} }`.
 
 **Hard gate:** qualquer `company_id` diferente de `META_TEST_COMPANY_ID`
-recebe a resposta padrão `token_exchange_verified` de sempre — `/me/accounts`
-e `/subscribed_apps` **nunca** são chamados. Nenhum piloto atinge este
-caminho.
+recebe a resposta padrão `token_exchange_verified` de sempre — `/me/accounts`,
+`GET /{page-id}` e `/subscribed_apps` **nunca** são chamados. Nenhum
+piloto atinge este caminho.
 
 **Sem persistência:** o SUAT/User Access Token e o Page Access Token
 derivado existem SÓ em memória durante a request; nenhum dos dois é
 logado, devolvido, colocado em cookie/URL ou salvo em banco. A única
 consequência externa desta etapa é a assinatura criada na Meta para a Page
-de teste (reversível pelo painel da Meta).
+de teste (reversível pelo painel da Meta) — a leitura `GET /{page-id}` não
+tem efeito colateral (read-only).
 
 **Erros sanitizados possíveis:** `page_token_lookup_failed`,
 `test_page_not_found`, `test_page_access_token_missing`,
-`test_page_missing_advertise_task`, `test_page_subscription_failed`.
+`test_page_missing_advertise_task`, `test_page_read_engagement_failed`,
+`test_page_subscription_failed`.
 
 ## Env vars
 

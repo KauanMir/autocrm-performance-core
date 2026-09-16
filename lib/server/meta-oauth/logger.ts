@@ -37,6 +37,9 @@ export interface MetaOAuthLogFields {
   pageFound?: boolean;
   advertiseTaskPresent?: boolean;
   subscribedField?: string;
+  // Leitura mínima da Page (pages_read_engagement) — só o booleano de
+  // resultado, nunca o corpo (id/name) devolvido pela Meta.
+  readEngagementVerified?: boolean;
 }
 
 export function logMetaOAuthEvent(fields: MetaOAuthLogFields): void {
