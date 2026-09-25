@@ -25,6 +25,10 @@ function AuthHero({ note }: { note?: React.ReactNode }) {
     <div style={{ position: 'relative', flex: '1 1 0', minWidth: 0, padding: '56px 64px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div className="ambient" style={{ position: 'absolute', inset: 0, background: 'radial-gradient(60% 50% at 30% 18%, rgba(212,175,55,.16), transparent 70%), radial-gradient(50% 45% at 80% 92%, rgba(193,18,31,.12), transparent 70%)', pointerEvents: 'none' }} />
       <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 30 }}>
+          <Icon name="podium" size={22} stroke={1.6} style={{ color: '#E8CE72' }} />
+          <span className="display" style={{ fontSize: 15, fontWeight: 700, color: '#fff', letterSpacing: '.18em' }}>KAPA CRM</span>
+        </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 9, padding: '7px 14px', borderRadius: 999, background: 'rgba(212,175,55,.1)', border: '1px solid rgba(212,175,55,.3)', marginBottom: 26 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#27C75F', animation: 'livePulse 2s infinite' }} />
           <span style={{ fontSize: 12, fontWeight: 700, color: '#E8CE72', letterSpacing: '.04em' }}>O CRM que transforma vendedores em campeões</span>

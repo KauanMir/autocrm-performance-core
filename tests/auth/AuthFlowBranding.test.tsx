@@ -1,6 +1,7 @@
 // Testes de branding da tela pública de login (components/auth/AuthFlow.tsx,
-// LoginView/AuthHero) — KAPA-CRM-BRANDING-R1 / LOGIN_BRAND_REMOVAL_A1. Mesmo
-// padrão de render de tests/auth/AuthFlowOnboardingSellerGuard.test.tsx.
+// LoginView/AuthHero) — KAPA-CRM-BRANDING-R1 / LOGIN_BRAND_REMOVAL_A1 /
+// LOGIN_BRAND_REFINEMENT_A4. Mesmo padrão de render de
+// tests/auth/AuthFlowOnboardingSellerGuard.test.tsx.
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
@@ -17,12 +18,12 @@ describe('AuthFlow — branding do login', () => {
     expect(screen.queryByText(/AutoCRM/)).toBeNull();
   });
 
-  // LOGIN_BRAND_REMOVAL_A1 — o bloco visual (ícone do carro + "KAPA CRM" +
-  // "PERFORMANCE") foi removido da tela de login; nenhuma logo o substitui
-  // por enquanto.
-  it('não mostra mais o bloco "KAPA CRM" / "PERFORMANCE"', () => {
+  // LOGIN_BRAND_REFINEMENT_A4 — a assinatura "KAPA CRM" volta ao topo da
+  // Hero, agora como uma linha discreta (ícone de pódio + wordmark), sem o
+  // chip/ícone de carro nem o subtítulo "PERFORMANCE" da versão antiga.
+  it('mostra "KAPA CRM" uma única vez, sem o subtítulo "PERFORMANCE"', () => {
     renderLogin();
-    expect(screen.queryByText('KAPA CRM')).toBeNull();
+    expect(screen.getAllByText('KAPA CRM')).toHaveLength(1);
     expect(screen.queryByText('PERFORMANCE')).toBeNull();
   });
 
