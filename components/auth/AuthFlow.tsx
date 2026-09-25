@@ -24,16 +24,6 @@ function AuthHero({ note }: { note?: React.ReactNode }) {
   return (
     <div style={{ position: 'relative', flex: '1 1 0', minWidth: 0, padding: '56px 60px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
       <div className="ambient" style={{ position: 'absolute', inset: 0, background: 'radial-gradient(60% 50% at 30% 18%, rgba(212,175,55,.16), transparent 70%), radial-gradient(50% 45% at 80% 92%, rgba(193,18,31,.12), transparent 70%)', pointerEvents: 'none' }} />
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14 }}>
-        <div className="sheen" style={{ width: 50, height: 50, borderRadius: 15, background: 'linear-gradient(150deg,#E8CE72,#C9A227)', display: 'grid', placeItems: 'center', boxShadow: '0 10px 26px -8px rgba(212,175,55,.6), inset 0 1px 0 rgba(255,255,255,.4)' }}>
-          <Icon name="car" size={28} stroke={2.2} style={{ color: '#2a2104' }} />
-        </div>
-        <div>
-          <div className="display" style={{ fontSize: 24, fontWeight: 800, color: '#fff', letterSpacing: '.05em', lineHeight: 1 }}>KAPA CRM</div>
-          <div style={{ fontSize: 10.5, color: 'var(--gold-ink)', letterSpacing: '.24em', marginTop: 4, fontWeight: 700, opacity: .85 }}>PERFORMANCE</div>
-        </div>
-      </div>
-
       <div style={{ position: 'relative' }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 9, padding: '7px 14px', borderRadius: 999, background: 'rgba(212,175,55,.1)', border: '1px solid rgba(212,175,55,.3)', marginBottom: 22 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#27C75F', animation: 'livePulse 2s infinite' }} />

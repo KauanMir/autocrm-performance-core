@@ -39,3 +39,24 @@ describe('app/favicon.ico — regressão do 404', () => {
     expect(bytes.readUInt16LE(2)).toBe(1);
   });
 });
+
+// LOGIN_BRAND_REMOVAL_A1 — app/icon.svg é a convenção nativa do Next.js
+// (App Router) para o favicon: mantém o quadrado de fundo amarelo já usado
+// na aba do navegador, agora com o ícone vetorial de carro (mesmo path de
+// components/ui/Icon.tsx, nunca emoji/caractere Unicode) desenhado dentro.
+describe('app/icon.svg — favicon com ícone de carro', () => {
+  it('existe, mantém o fundo amarelo e reaproveita o path do ícone "car"', () => {
+    const svg = readFileSync(join(process.cwd(), 'app', 'icon.svg'), 'utf8');
+    expect(svg).toContain('<svg');
+    expect(svg).toContain('#E8CE72');
+    expect(svg).toContain('#C9A227');
+    expect(svg).toContain('M5 13l1.5-4.5A2 2 0 0 1 8.4 7h7.2a2 2 0 0 1 1.9 1.5L19 13');
+  });
+
+  it('não contém texto nem emoji — só forma vetorial', () => {
+    const svg = readFileSync(join(process.cwd(), 'app', 'icon.svg'), 'utf8');
+    expect(svg).not.toMatch(/<text/);
+    // nenhum caractere fora do plano básico multilíngue (emoji ficam acima de U+FFFF)
+    expect(/[\u{10000}-\u{10FFFF}]/u.test(svg)).toBe(false);
+  });
+});
