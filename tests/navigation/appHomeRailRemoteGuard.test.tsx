@@ -334,12 +334,22 @@ describe('App (shell) — Rail no caminho local (REMOTE_LEADS=false)', () => {
     m.restoredUser.current = manager();
     m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
     m.useRemoteTasksScreenState.mockReturnValue(taskScreenState('task_local'));
-    m.taskServiceGetAll.mockReturnValue([{ id: 't1', state: 'late' }, { id: 't2', state: 'late' }]);
+    // PODIUM_VARIANTS_A_ONLY-EXEC — corrigido junto: os objetos usavam
+    // state: 'late' (string solta, nunca bate com TASK_STATE.LATE =
+    // 'atrasada'), então o badge real já vinha 0 antes desta mudança — o
+    // antigo getByText('2') sem escopo só passava por coincidência,
+    // batendo num "2" qualquer do Pódio (variante não travada). Usar a
+    // constante real corrige o dado E o assert escopado abaixo passa a
+    // testar o que o teste sempre disse testar.
+    m.taskServiceGetAll.mockReturnValue([{ id: 't1', state: TASK_STATE.LATE }, { id: 't2', state: TASK_STATE.LATE }]);
 
     renderApp();
     await waitFor(() => expect(screen.getByText('Início')).toBeInTheDocument());
     expect(m.taskServiceGetAll).toHaveBeenCalled();
-    expect(screen.getByText('2')).toBeInTheDocument();
+    // Badge de Pendências escopado ao próprio botão de nav (mesmo helper
+    // de linha 30-36) — evita colidir com qualquer "2" renderizado pelo
+    // Pódio (agora sempre variante A, PODIUM_VARIANTS_A_ONLY-EXEC).
+    expect(pendenciasBadge()?.textContent).toBe('2');
   });
 });
 

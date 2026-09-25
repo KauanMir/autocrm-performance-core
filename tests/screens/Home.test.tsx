@@ -717,16 +717,25 @@ describe('Home — Ranking completo real (PODIUM-COMPETITION-R1-EXEC)', () => {
     });
   });
 
-  it('seletor A/B/C/D altera SOMENTE a variante — remoto nunca chama setTweak (preferência remota é própria, localStorage)', () => {
+  // PODIUM_VARIANTS_A_ONLY-EXEC — o seletor A/B/C/D fica oculto enquanto a
+  // trava está ativa; a interação real de troca de variante (setTweak
+  // nunca chamado no modo remoto) volta a ser testável quando a flag for
+  // desligada. Cobertura equivalente da própria trava logo abaixo.
+  it('seletor A/B/C/D fica oculto (PODIUM_VARIANTS_A_ONLY) — Pódio força a variante A mesmo com preferência salva em B', () => {
     m.useCompanySellerLeaderboard.mockReturnValue({
       status: 'ready',
       rows: [leaderboardRow({ sellerId: 's1', sellerLabel: 'Lucas Martins', saleCount: 1, rank: 1 })],
     });
     const setTweak = vi.fn();
     render(<Home t={{ podium: 'B' }} setTweak={setTweak} go={vi.fn()} active={false} currentUser={manager() as any} />);
-    // Clica no próprio chip 'B' (já ativo) — já prova que o clique nunca
-    // chama setTweak no modo remoto.
-    fireEvent.click(screen.getByTitle('Líder'));
+    expect(screen.queryByLabelText('Visual do pódio')).toBeNull();
+    expect(screen.queryByTitle('Líder')).toBeNull();
+    expect(screen.queryByTitle('Galeria')).toBeNull();
+    expect(screen.queryByTitle('Campeão')).toBeNull();
+    // PodiumB renderiza "PRIMEIRO LUGAR" (card do líder) — nunca deve
+    // aparecer enquanto a trava força a variante A, mesmo com t.podium='B'
+    // e a preferência remota mockada em 'B' (linha 151 acima).
+    expect(screen.queryByText('PRIMEIRO LUGAR')).toBeNull();
     expect(setTweak).not.toHaveBeenCalled();
   });
 
@@ -979,11 +988,17 @@ describe('Home — Minha Disputa + CompTicker reais (PODIUM-COMPETITION-R2A-EXEC
     expect(screen.queryByText('Minha disputa')).toBeNull();
   });
 
-  it('trocar A/B/C/D não altera rival/posição/mensagens da Minha Disputa (independência §18)', () => {
+  // PODIUM_VARIANTS_A_ONLY-EXEC — o seletor de variante está oculto (teste
+  // acima), então a independência §18 não pode mais ser provada clicando
+  // no chip; troca-se a preferência via prop (t.podium) — que a trava
+  // ignora para efeito de renderização do Pódio, mas que continua
+  // passando por Home normalmente — e confirma que a Minha Disputa (dado
+  // vindo só do leaderboard, nunca do valor de variante) não se move.
+  it('t.podium diferente não altera rival/posição/mensagens da Minha Disputa (independência §18)', () => {
     m.useCompanySellerLeaderboard.mockReturnValue({ status: 'ready', rows: THREE_ROWS });
-    renderHome(seller('s1'));
+    const { rerender } = render(<Home t={{ podium: 'A' }} setTweak={vi.fn()} go={vi.fn()} active={false} currentUser={seller('s1') as any} />);
     const posBefore = within(getMinhaDisputaContainer()).getByText('Minha posição').nextElementSibling?.textContent;
-    fireEvent.click(screen.getByTitle('Líder'));
+    rerender(<Home t={{ podium: 'B' }} setTweak={vi.fn()} go={vi.fn()} active={false} currentUser={seller('s1') as any} />);
     const posAfter = within(getMinhaDisputaContainer()).getByText('Minha posição').nextElementSibling?.textContent;
     expect(posAfter).toBe(posBefore);
   });
@@ -1403,6 +1418,23 @@ describe('Home — Super Admin operacional (contextual): Atenção imediata real
     renderHome(superAdmin());
     expect(screen.getByText('Atenção imediata')).toBeInTheDocument();
     expect(m.taskServiceGetAll).not.toHaveBeenCalled();
+  });
+
+  // PODIUM_VARIANTS_A_ONLY-EXEC — SA contextual usa o mesmo podiumStage
+  // compartilhado; confirma que a trava também vale aqui, não só pra
+  // Seller/Manager (cobertos nos dois testes dedicados logo acima na
+  // suíte de Pódio/Ranking).
+  it('SA contextual: seletor A/B/C/D oculto, Pódio A força mesmo com t.podium="B"', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({
+      status: 'ready',
+      rows: [
+        leaderboardRow({ sellerId: 's1', sellerLabel: 'Ana Souza', saleCount: 5, rank: 1 }),
+        leaderboardRow({ sellerId: 's2', sellerLabel: 'Lucas Martins', saleCount: 3, rank: 2 }),
+      ],
+    });
+    render(<Home t={{ podium: 'B' }} setTweak={vi.fn()} go={vi.fn()} active={false} currentUser={superAdmin() as any} />);
+    expect(screen.queryByLabelText('Visual do pódio')).toBeNull();
+    expect(screen.queryByText('PRIMEIRO LUGAR')).toBeNull();
   });
 
   it('sem Tasks atrasadas (lateCount=0): "Atenção imediata" continua ausente, nenhum card falso', () => {

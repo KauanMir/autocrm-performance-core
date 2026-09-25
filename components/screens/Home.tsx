@@ -47,6 +47,16 @@ const PERIODS = ['Hoje', '7 dias', '15 dias', '30 dias', 'Personalizado'];
 // (tratado à parte pelo popover de range custom do Pódio real).
 const PODIUM_PRESETS: PeriodPreset[] = ['Hoje', '7 dias', '15 dias', '30 dias'];
 
+// PODIUM_VARIANTS_A_ONLY-EXEC — trava temporária para testes visuais do
+// Pódio A com o PODIUM_RESPONSIVE_SCALE_FIX_V1. NÃO remove B/C/D: o código
+// das 4 variantes (Podiums.tsx), o seletor da ControlBar, `t.podium`/
+// `usePodiumViewPreference` (incluindo preferências já salvas em
+// localStorage) continuam 100% intactos — só a leitura de qual variante
+// renderizar é forçada para 'A' aqui, e o seletor visual é escondido
+// enquanto a flag for true. Reativar B/C/D é só voltar esta flag pra
+// false — nenhuma reconstrução de código necessária.
+const PODIUM_VARIANTS_A_ONLY = true;
+
 const DEFAULT_SELLER = {
   id: '', name: 'Equipe', first: 'Equipe', team: '',
   leads: 0, scheduled: 0, visits: 0, sales: 0, conv: 0, move: 0,
@@ -355,7 +365,7 @@ function getCompetition(sellers: any[]) {
 // (§18) — nenhuma mudança de comportamento, só a mesma condicional
 // `isSellersLocal` já usada pelo resto da Home para decidir o que
 // renderizar.
-function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam, isSellersLocal }: any) {
+function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam, isSellersLocal, hideVariantSelector }: any) {
   // MOBILE-RESPONSIVENESS-V1-B4-EXEC §8/§16 — < md: gutter menor; o
   // seletor de variante do pódio fica compacto (sem o rótulo "Pódio",
   // pills A/B/C/D só). Período e filtros preservados; A/B/C/D e a
@@ -379,14 +389,20 @@ function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam, isS
         </div>
       )}
       <div style={{ flex: isMd ? 1 : undefined }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {isMd && <span style={{ fontSize: 11, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 700 }}>Pódio</span>}
-        <div aria-label="Visual do pódio" style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
-          {[['A', 'Pódio'], ['B', 'Líder'], ['C', 'Galeria'], ['D', 'Campeão']].map(([v, name]) => (
-            <button key={v} onClick={() => setVariant(v)} title={name} style={{ padding: '8px 12px', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: 'none', fontFamily: 'Archivo, sans-serif', background: variant === v ? 'rgba(212,175,55,.16)' : 'transparent', color: variant === v ? '#E8CE72' : 'var(--txt-lo)', boxShadow: variant === v ? 'inset 0 0 0 1px rgba(212,175,55,.4)' : 'none', transition: 'all .15s' }}>{v}</button>
-          ))}
+      {/* PODIUM_VARIANTS_A_ONLY-EXEC — seletor A/B/C/D escondido enquanto a
+          trava está ativa: não faz sentido oferecer variantes desativadas.
+          setVariant/variant continuam existindo e funcionando por baixo —
+          só este bloco visual some. */}
+      {!hideVariantSelector && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {isMd && <span style={{ fontSize: 11, color: 'var(--txt-lo)', textTransform: 'uppercase', letterSpacing: '.1em', fontWeight: 700 }}>Pódio</span>}
+          <div aria-label="Visual do pódio" style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
+            {[['A', 'Pódio'], ['B', 'Líder'], ['C', 'Galeria'], ['D', 'Campeão']].map(([v, name]) => (
+              <button key={v} onClick={() => setVariant(v)} title={name} style={{ padding: '8px 12px', borderRadius: 9, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: 'none', fontFamily: 'Archivo, sans-serif', background: variant === v ? 'rgba(212,175,55,.16)' : 'transparent', color: variant === v ? '#E8CE72' : 'var(--txt-lo)', boxShadow: variant === v ? 'inset 0 0 0 1px rgba(212,175,55,.4)' : 'none', transition: 'all .15s' }}>{v}</button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -1407,7 +1423,12 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
     && leaderboard.status === 'ready'
     && (remoteCompetitionState.status === 'leading' || remoteCompetitionState.status === 'chasing');
 
-  const variant = isSellersLocal ? t.podium : remoteVariant;
+  // PODIUM_VARIANTS_A_ONLY-EXEC — quando a flag está ligada, ignora
+  // t.podium/remoteVariant (preferência antiga do TweaksPanel ou do
+  // localStorage por usuário) sem apagá-los: ambos continuam sendo lidos/
+  // gravados normalmente por trás da trava, só não chegam a decidir o que
+  // renderiza enquanto o teste visual A-only estiver ativo.
+  const variant = PODIUM_VARIANTS_A_ONLY ? 'A' : (isSellersLocal ? t.podium : remoteVariant);
   const sellers = isSellersLocal ? localSellers : remoteRankedSellers;
   const top3 = sellers.slice(0, 3);
   const comp = isSellersLocal ? localComp : remoteComp;
@@ -1467,6 +1488,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
         variant={variant}
         setVariant={(v: string) => { if (isSellersLocal) setTweak('podium', v); else setRemoteVariant(v as any); }}
         team={team} setTeam={setTeam} isSellersLocal={isSellersLocal}
+        hideVariantSelector={PODIUM_VARIANTS_A_ONLY}
       />
       {isSellersLocal && <CompTicker comp={comp} />}
       {!isSellersLocal && isSeller && leaderboard.status === 'ready' && remoteTickerMessages.length > 0 && (
