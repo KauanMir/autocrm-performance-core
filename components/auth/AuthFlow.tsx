@@ -22,24 +22,24 @@ function AuthStage({ children }: { children: React.ReactNode }) {
 
 function AuthHero({ note }: { note?: React.ReactNode }) {
   return (
-    <div style={{ position: 'relative', flex: '1 1 0', minWidth: 0, padding: '56px 60px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
+    <div style={{ position: 'relative', flex: '1 1 0', minWidth: 0, padding: '56px 64px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div className="ambient" style={{ position: 'absolute', inset: 0, background: 'radial-gradient(60% 50% at 30% 18%, rgba(212,175,55,.16), transparent 70%), radial-gradient(50% 45% at 80% 92%, rgba(193,18,31,.12), transparent 70%)', pointerEvents: 'none' }} />
-      <div style={{ position: 'relative' }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 9, padding: '7px 14px', borderRadius: 999, background: 'rgba(212,175,55,.1)', border: '1px solid rgba(212,175,55,.3)', marginBottom: 22 }}>
+      <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 9, padding: '7px 14px', borderRadius: 999, background: 'rgba(212,175,55,.1)', border: '1px solid rgba(212,175,55,.3)', marginBottom: 26 }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#27C75F', animation: 'livePulse 2s infinite' }} />
           <span style={{ fontSize: 12, fontWeight: 700, color: '#E8CE72', letterSpacing: '.04em' }}>O CRM que transforma vendedores em campeões</span>
         </div>
-        <h1 className="display" style={{ margin: 0, fontSize: 50, fontWeight: 900, color: '#fff', letterSpacing: '-.025em', lineHeight: 1.02 }}>
+        <h1 className="display" style={{ margin: 0, fontSize: 58, fontWeight: 900, color: '#fff', letterSpacing: '-.025em', lineHeight: 1.03 }}>
           Cada venda é<br />uma <span style={{ color: '#E8CE72' }}>posição no pódio.</span>
         </h1>
-        <p style={{ margin: '20px 0 0', fontSize: 16.5, color: 'var(--txt-mid)', maxWidth: 460, lineHeight: 1.6 }}>
+        <p style={{ margin: '22px 0 0', fontSize: 17.5, color: 'var(--txt-mid)', maxWidth: 480, lineHeight: 1.6 }}>
           Ranking ao vivo, metas claras e cada cliente na cor certa. Seu time sabe exatamente o que fazer e quer vencer.
         </p>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginTop: 36 }}>
-          {[['2º', 54, '#C9CDD4'], ['1º', 78, '#E8CE72'], ['3º', 40, '#C1121F']].map(([t, h, c], i) => (
-            <div key={i} style={{ width: 64, textAlign: 'center' }}>
-              <div className="display" style={{ fontSize: 13, fontWeight: 800, color: c as string, marginBottom: 6 }}>{t}</div>
-              <div style={{ height: h as number, borderRadius: '8px 8px 0 0', background: i === 1 ? 'linear-gradient(180deg,#3a2f10,#1a1407)' : 'linear-gradient(180deg,#1d1d20,#121214)', border: `1px solid ${i === 1 ? 'rgba(212,175,55,.4)' : 'var(--line-dark)'}`, boxShadow: i === 1 ? '0 14px 30px -14px rgba(212,175,55,.6)' : 'none' }} />
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, marginTop: 46 }}>
+          {[['2º', 64, '#C9CDD4'], ['1º', 92, '#E8CE72'], ['3º', 48, '#C1121F']].map(([t, h, c], i) => (
+            <div key={i} style={{ width: 72, textAlign: 'center' }}>
+              <div className="display" style={{ fontSize: 14, fontWeight: 800, color: c as string, marginBottom: 7 }}>{t}</div>
+              <div style={{ height: h as number, borderRadius: '9px 9px 0 0', background: i === 1 ? 'linear-gradient(180deg,#3a2f10,#1a1407)' : 'linear-gradient(180deg,#1d1d20,#121214)', border: `1px solid ${i === 1 ? 'rgba(212,175,55,.4)' : 'var(--line-dark)'}`, boxShadow: i === 1 ? '0 16px 34px -14px rgba(212,175,55,.6)' : 'none' }} />
             </div>
           ))}
         </div>
