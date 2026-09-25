@@ -231,3 +231,50 @@ describe('§35 — Super Admin no mobile', () => {
     expect(within(dialog).queryByText('Voltar para Empresas')).toBeNull();
   });
 });
+
+// CRM-SHELL-REMOVE-KAPA-BRAND-EXEC — bloco "KAPA CRM / PERFORMANCE" removido
+// do topo da sidebar/Drawer; empresa ativa passa a ser a primeira
+// identidade visual, sem alterar lógica/dados de empresa.
+describe('§36 — remoção da marca KAPA CRM PERFORMANCE do shell', () => {
+  it('desktop Rail: sem "KAPA CRM"/"PERFORMANCE"; nav segue intacta', async () => {
+    await renderApp(manager(), 1280);
+    expect(screen.queryByText('KAPA CRM')).toBeNull();
+    expect(screen.queryByText('PERFORMANCE')).toBeNull();
+    expect(screen.getByText('Início')).toBeInTheDocument();
+  });
+
+  it('mobile Drawer: sem "KAPA CRM"/"PERFORMANCE"; empresa ativa continua no topo do menu', async () => {
+    opContext.current = {
+      mode: 'none',
+      companyId: null,
+      identity: { status: 'ready', company: { name: 'Revenda Premium Veículos', logoPath: null } },
+      isReadOnly: false,
+    };
+    await renderApp(manager(), 390);
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir navegação' }));
+    const dialog = screen.getByRole('dialog', { name: 'Navegação' });
+    expect(within(dialog).queryByText('KAPA CRM')).toBeNull();
+    expect(within(dialog).queryByText('PERFORMANCE')).toBeNull();
+    expect(within(dialog).getByText('Revenda Premium Veículos')).toBeInTheDocument();
+  });
+
+  it('seller: sem "KAPA CRM"/"PERFORMANCE" no Rail desktop', async () => {
+    await renderApp(seller(), 1280);
+    expect(screen.queryByText('KAPA CRM')).toBeNull();
+    expect(screen.queryByText('PERFORMANCE')).toBeNull();
+  });
+
+  it('Super Admin contextual: sem "KAPA CRM"/"PERFORMANCE" no Drawer', async () => {
+    opContext.current = {
+      mode: 'super_admin',
+      companyId: 'c1',
+      identity: { status: 'ready', company: { name: 'Rcar Seminovos Gama', logoPath: null } },
+      isReadOnly: false,
+    };
+    await renderApp(superAdmin(), 390, 'c1');
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir navegação' }));
+    const dialog = screen.getByRole('dialog', { name: 'Navegação' });
+    expect(within(dialog).queryByText('KAPA CRM')).toBeNull();
+    expect(within(dialog).queryByText('PERFORMANCE')).toBeNull();
+  });
+});

@@ -182,7 +182,7 @@ describe('App — AuthenticatedShellErrorBoundary integrado ao shell real', () =
 
     renderApp();
 
-    await waitFor(() => expect(screen.getByText('KAPA CRM')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Início')).toBeInTheDocument());
     expect(screen.getByText('home real (mock controlado)')).toBeInTheDocument();
     expect(screen.queryByText('Não foi possível carregar esta área')).toBeNull();
     expect(m.logout).not.toHaveBeenCalled();

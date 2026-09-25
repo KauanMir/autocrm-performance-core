@@ -245,14 +245,7 @@ function RailInner({ layout, model, currentUser, current, onNavigate, onClose }:
       <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 1, background: 'linear-gradient(180deg, transparent, rgba(212,175,55,.18), transparent)', pointerEvents: 'none' }} />
       <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 220, background: 'radial-gradient(120% 70% at 30% 100%, rgba(193,18,31,.10), transparent 70%)', pointerEvents: 'none' }} />
 
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, padding: '22px 22px 20px' }}>
-        <div className="sheen" style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(150deg,#E8CE72,#C9A227)', display: 'grid', placeItems: 'center', boxShadow: '0 8px 20px -6px rgba(212,175,55,.6), inset 0 1px 0 rgba(255,255,255,.4)' }}>
-          <Icon name="car" size={23} stroke={2.2} style={{ color: '#2a2104' }} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="display" style={{ fontSize: 18, fontWeight: 800, color: '#fff', letterSpacing: '.05em', lineHeight: 1 }}>KAPA CRM</div>
-          <div style={{ fontSize: 9.5, color: 'var(--gold-ink)', letterSpacing: '.22em', marginTop: 4, fontWeight: 700, opacity: .8 }}>PERFORMANCE</div>
-        </div>
+      <div style={{ position: 'relative', display: 'flex', justifyContent: 'flex-end', padding: layout === 'drawer' ? '14px 14px 0' : '24px 22px 0' }}>
         {layout === 'drawer' && onClose && (
           <button onClick={onClose} aria-label="Fechar navegação" className="focus-ring" style={{ width: 40, height: 40, borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,.04)', display: 'grid', placeItems: 'center', cursor: 'pointer', color: 'var(--txt-mid)', flexShrink: 0 }}>
             <Icon name="x" size={19} stroke={2.2} />
@@ -261,7 +254,7 @@ function RailInner({ layout, model, currentUser, current, onNavigate, onClose }:
       </div>
 
       {operational.identity.status === 'ready' && (
-        <div style={{ position: 'relative', padding: '0 22px 18px' }}>
+        <div style={{ position: 'relative', padding: layout === 'drawer' ? '10px 22px 18px' : '6px 22px 18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <CompanyLogo name={operational.identity.company.name} logoPath={operational.identity.company.logoPath} size={30} />
             <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--txt-mid)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
