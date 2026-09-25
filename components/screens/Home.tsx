@@ -373,7 +373,7 @@ function ControlBar({ period, setPeriod, variant, setVariant, team, setTeam, isS
   const { isMd, width } = useViewport();
   const gx = gutterForWidth(width);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: isMd ? 14 : 8, rowGap: 8, flexWrap: 'wrap', padding: isMd ? '14px 26px' : `10px ${gx}px`, borderBottom: '1px solid var(--line-dark)', background: 'rgba(8,8,9,.78)', backdropFilter: 'blur(10px)', position: 'sticky', top: 0, zIndex: 8 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: isMd ? 14 : 8, rowGap: 8, flexWrap: 'wrap', padding: isMd ? '14px 26px' : `10px ${gx}px`, borderBottom: '1px solid var(--line-dark)', background: 'rgba(8,8,9,.78)', backdropFilter: 'blur(10px)' }}>
       {isSellersLocal && (
         <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,.03)', border: '1px solid var(--line-dark)', borderRadius: 12, padding: 3 }}>
           {PERIODS.map(p => (
@@ -432,8 +432,18 @@ function CompTicker({ comp, messages }: any) {
       ))}
     </div>
   );
+  // HOME_COMPETITION_TICKER_STICKY_FIX_V1 — `position:'sticky', top:57`
+  // saiu daqui: o offset era um número fixo tentando adivinhar a altura
+  // real da ControlBar acima (o header não tem altura fixa — varia com
+  // isMd/gutter/quantos filtros renderizam, e ainda menos previsível
+  // depois do PODIUM_VARIANTS_A_ONLY-EXEC esconder o seletor A/B/C/D). A
+  // correção estrutural agora vive no wrapper que envolve ControlBar+
+  // CompTicker (ver render principal do Home) — um único `position:sticky
+  // top:0` para os dois juntos, então o ticker sempre cai exatamente
+  // abaixo da ControlBar, qualquer que seja a altura real dela, sem
+  // precisar saber esse número.
   return (
-    <div style={{ borderBottom: '1px solid var(--line-dark)', background: 'linear-gradient(180deg,#0d0d0e,#0a0a0b)', overflow: 'hidden', position: 'sticky', top: 57, zIndex: 7, height: 42, display: 'flex', alignItems: 'center' }}>
+    <div style={{ borderBottom: '1px solid var(--line-dark)', background: 'linear-gradient(180deg,#0d0d0e,#0a0a0b)', overflow: 'hidden', height: 42, display: 'flex', alignItems: 'center' }}>
       <div style={{ display: 'flex', width: 'max-content', animation: 'tickerScroll 42s linear infinite' }}>
         {row('a')}{row('b')}
       </div>
@@ -1483,17 +1493,31 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ink-900)', position: 'relative' }}>
-      <ControlBar
-        period={period} setPeriod={setPeriod}
-        variant={variant}
-        setVariant={(v: string) => { if (isSellersLocal) setTweak('podium', v); else setRemoteVariant(v as any); }}
-        team={team} setTeam={setTeam} isSellersLocal={isSellersLocal}
-        hideVariantSelector={PODIUM_VARIANTS_A_ONLY}
-      />
-      {isSellersLocal && <CompTicker comp={comp} />}
-      {!isSellersLocal && isSeller && leaderboard.status === 'ready' && remoteTickerMessages.length > 0 && (
-        <CompTicker messages={remoteTickerMessages} />
-      )}
+      {/* HOME_COMPETITION_TICKER_STICKY_FIX_V1 — root cause: ControlBar e
+          CompTicker tinham CADA UM seu próprio `position:sticky`
+          (top:0 e top:57), com 57 tentando adivinhar a altura real da
+          ControlBar. Essa altura nunca foi fixa (varia com isMd/gutter/
+          quantos filtros renderizam — e mudou de novo com o
+          PODIUM_VARIANTS_A_ONLY-EXEC escondendo o seletor A/B/C/D), então
+          o offset ficava desatualizado e o ticker "descolava" do topo
+          durante o scroll. Fix estrutural: um ÚNICO wrapper sticky
+          (top:0) envolvendo os dois — o ticker cai em fluxo normal
+          exatamente abaixo da ControlBar, sem precisar saber a altura
+          dela. Compartilhado por Seller/Manager/SA contextual (mesmo
+          componente Home), sem duplicar nada. */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 8 }}>
+        <ControlBar
+          period={period} setPeriod={setPeriod}
+          variant={variant}
+          setVariant={(v: string) => { if (isSellersLocal) setTweak('podium', v); else setRemoteVariant(v as any); }}
+          team={team} setTeam={setTeam} isSellersLocal={isSellersLocal}
+          hideVariantSelector={PODIUM_VARIANTS_A_ONLY}
+        />
+        {isSellersLocal && <CompTicker comp={comp} />}
+        {!isSellersLocal && isSeller && leaderboard.status === 'ready' && remoteTickerMessages.length > 0 && (
+          <CompTicker messages={remoteTickerMessages} />
+        )}
+      </div>
 
       {/* MOBILE-RESPONSIVENESS-V1-B1-EXEC §20 — só o gutter horizontal do
           container-base vira responsivo (16/24/30). Seções e Pódio mobile

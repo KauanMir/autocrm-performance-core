@@ -1015,6 +1015,38 @@ describe('Home — Minha Disputa + CompTicker reais (PODIUM-COMPETITION-R2A-EXEC
     expect(screen.queryByText(/subiu|ultrapass|caiu|Meta da semana|AO VIVO/i)).toBeNull();
   });
 
+  // HOME_COMPETITION_TICKER_STICKY_FIX_V1 — regressão estrutural: antes,
+  // ControlBar e CompTicker tinham CADA UM seu próprio position:sticky
+  // (top:0 e top:57 respectivamente), com 57 tentando adivinhar a altura
+  // real da ControlBar — offset que ficava desatualizado sempre que essa
+  // altura mudava (ex.: PODIUM_VARIANTS_A_ONLY escondendo o seletor
+  // A/B/C/D), fazendo o ticker "descolar" do topo durante o scroll.
+  // Confirma que agora existe um ÚNICO ancestral sticky (top:0) compartilhado
+  // por ambos, e que o CompTicker não carrega mais seu próprio offset.
+  it('ControlBar + CompTicker compartilham um único wrapper sticky, sem offset de top no ticker (HOME_COMPETITION_TICKER_STICKY_FIX_V1)', () => {
+    m.useCompanySellerLeaderboard.mockReturnValue({ status: 'ready', rows: THREE_ROWS });
+    renderHome(seller('s1'));
+    const [tickerText] = screen.getAllByText('Ana lidera com 5 vendas.');
+    const tickerRoot = tickerText.closest('div[style*="tickerScroll"]')?.parentElement as HTMLElement;
+    expect(tickerRoot).toBeTruthy();
+    // O próprio CompTicker não deve mais posicionar a si mesmo — a
+    // stickiness agora vive só no wrapper compartilhado.
+    expect(tickerRoot.style.position).not.toBe('sticky');
+
+    let node: HTMLElement | null = tickerRoot.parentElement;
+    let stickyAncestor: HTMLElement | null = null;
+    while (node) {
+      if (node.style.position === 'sticky') { stickyAncestor = node; break; }
+      node = node.parentElement;
+    }
+    expect(stickyAncestor).toBeTruthy();
+    expect(stickyAncestor!.style.top).toBe('0px');
+    // O mesmo wrapper precisa conter a ControlBar também (um único bloco
+    // sticky para os dois, nunca dois wrappers/offsets separados).
+    expect(stickyAncestor!.contains(tickerRoot)).toBe(true);
+    expect(stickyAncestor!.children.length).toBeGreaterThanOrEqual(2);
+  });
+
   it('CompTicker real: mostra a mensagem de liderança quando estou em 1º, mesmo sozinho na empresa', () => {
     // Único seller: leading, sem chaser -> ainda assim gera a mensagem
     // "Você está na liderança." (nunca ticker vazio quando há disputa real).
