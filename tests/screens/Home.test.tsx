@@ -2660,3 +2660,81 @@ describe('Home — layout mobile (< md)', () => {
     expect(within(getRankingListContainer()).getAllByText('Lucas Martins').length).toBeGreaterThanOrEqual(1);
   });
 });
+
+// ── PODIUM_A_FIXED_STAGE_STANDARD_V2 — stage de geometria fixa, nunca
+// reduzido por FitBox/scale/clamp; o espaço ao redor se adapta ao Pódio,
+// nunca o contrário (§1/§2/§9/§14/§21 do EXEC). ──────────────────────────
+describe('Home — Pódio A com stage de geometria fixa (PODIUM_A_FIXED_STAGE_STANDARD_V2)', () => {
+  const ORIGINAL_WIDTH = window.innerWidth;
+  const setWidth = (px: number) =>
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: px });
+  afterEach(() => setWidth(ORIGINAL_WIDTH));
+  beforeEach(() => {
+    m.useRemoteLeadsScreenState.mockReturnValue(screenState('local'));
+  });
+
+  // borderRadius:22 é único no stage do Pódio (verificado byte a byte em
+  // components/screens/Home.tsx) — âncora estável independente de quantos
+  // ancestrais existem entre o texto e o container real.
+  function getPodiumStageContainer(): HTMLElement {
+    return screen.getByText('PÓDIO DE CAMPEÕES').closest('[style*="border-radius: 22px"]') as HTMLElement;
+  }
+
+  it('Pódio A continua ativo por padrão (coroa + título reais no stage)', () => {
+    setWidth(1440);
+    renderHome(manager());
+    expect(screen.getByText('PÓDIO DE CAMPEÕES')).toBeInTheDocument();
+    expect(getPodiumStageContainer()).toBeTruthy();
+  });
+
+  it('stage nunca usa overflow:hidden destrutivo (Pódio A) — base nunca é mascarada por corte', () => {
+    setWidth(1440);
+    renderHome(manager());
+    const stage = getPodiumStageContainer();
+    expect(stage.style.overflow).not.toBe('hidden');
+  });
+
+  it('stage tem minHeight estrutural suficiente (nunca menor que a geometria natural do Pódio)', () => {
+    setWidth(1440);
+    renderHome(manager());
+    const stage = getPodiumStageContainer();
+    expect(stage.style.minHeight).toBe('820px');
+    // Nunca uma altura FIXA/teto (height:100% ou clamp) que force redução —
+    // o stage do Pódio A não declara `height` nenhuma, só minHeight.
+    expect(stage.style.height).toBe('');
+  });
+
+  it('nenhum elemento do stage usa transform:scale — Pódio A não passa mais por FitBox (largo ou estreito)', () => {
+    for (const width of [1920, 1600, 1440, 1366, 1200]) {
+      setWidth(width);
+      const { unmount } = renderHome(manager());
+      const stage = getPodiumStageContainer();
+      for (const el of Array.from(stage.querySelectorAll<HTMLElement>('*'))) {
+        expect(el.style.transform || '').not.toMatch(/scale\(/);
+      }
+      unmount();
+    }
+  });
+
+  it('Ranking completo continua renderizando ao lado/abaixo do stage fixo', () => {
+    setWidth(1440);
+    renderHome(manager());
+    expect(within(getRankingListContainer()).getByText('Ranking completo')).toBeInTheDocument();
+  });
+
+  it('Funil continua depois do Pódio no fluxo do documento, nunca sobreposto', () => {
+    setWidth(1440);
+    renderHome(manager());
+    const stage = getPodiumStageContainer();
+    const funil = screen.getByText(/Funil (de conversão|comercial)/);
+    // DOCUMENT_POSITION_FOLLOWING (4): funil vem DEPOIS do stage no DOM.
+    expect(stage.compareDocumentPosition(funil) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('B/C/D continuam existindo no código (Podium/Podiums.tsx) — só inacessíveis enquanto a trava A-only está ligada', () => {
+    setWidth(1440);
+    renderHome(manager());
+    // Trava A-only ligada: nenhum marcador exclusivo de B/C/D chega ao DOM.
+    expect(screen.queryByText('PRIMEIRO LUGAR')).toBeNull();
+  });
+});

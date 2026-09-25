@@ -57,6 +57,18 @@ const PODIUM_PRESETS: PeriodPreset[] = ['Hoje', '7 dias', '15 dias', '30 dias'];
 // false — nenhuma reconstrução de código necessária.
 const PODIUM_VARIANTS_A_ONLY = true;
 
+// PODIUM_A_FIXED_STAGE_STANDARD_V2 — geometria-base fixa do stage do Pódio
+// A, nunca reduzida por FitBox/scale/clamp (o Pódio define a própria
+// altura; o espaço ao redor é quem se adapta — ver §1/§2 do EXEC). Medida
+// a partir do tamanho NATURAL real de PodiumA (components/podiums/
+// Podiums.tsx): coluna do 1º lugar (a mais alta, por causa da coroa) soma
+// crown(~58) + card completo (avatar 110 + nome + vendas + mini-stats,
+// padding incluído, ~346) + plinth(232+20 do topo cromado) + glow(31) +
+// padding vertical do stage (54+30) ≈ 785px no estado comum — o valor
+// abaixo já inclui folga para nomes longos que quebram linha (2ª linha no
+// nome ≈ +29px) sem precisar de uma segunda medição/heurística.
+const PODIUM_A_STAGE_MIN_HEIGHT = 820;
+
 const DEFAULT_SELLER = {
   id: '', name: 'Equipe', first: 'Equipe', team: '',
   leads: 0, scheduled: 0, visits: 0, sales: 0, conv: 0, move: 0,
@@ -1460,8 +1472,16 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
     </div>
   );
 
+  // PODIUM_A_FIXED_STAGE_STANDARD_V2 §2/§3 — o Pódio A não passa mais por
+  // FitBox: nunca escala pra baixo pra caber no espaço disponível (nem por
+  // largura, nem por altura). O stage ganha `minHeight` estrutural
+  // (PODIUM_A_STAGE_MIN_HEIGHT) em vez de `height:'100%'`, e `overflow`
+  // visível em vez de `hidden` — nada acima do Pódio pode cortar sua base.
+  // B/C/D preservadas 100% como estavam (FitBox + height:100% + overflow
+  // hidden) — só alcançáveis se PODIUM_VARIANTS_A_ONLY voltar a false.
+  const isFixedStage = variant === 'A';
   const podiumStage = (
-    <div style={{ position: 'relative', background: 'radial-gradient(120% 80% at 50% 6%, #1d1d21 0%, #131315 48%, #0b0b0c 100%)', border: '1px solid var(--line-dark)', borderRadius: 22, padding: '0 16px 14px', height: '100%', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
+    <div style={{ position: 'relative', background: 'radial-gradient(120% 80% at 50% 6%, #1d1d21 0%, #131315 48%, #0b0b0c 100%)', border: '1px solid var(--line-dark)', borderRadius: 22, padding: '0 16px 14px', height: isFixedStage ? undefined : '100%', minHeight: isFixedStage ? PODIUM_A_STAGE_MIN_HEIGHT : undefined, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: isFixedStage ? 'visible' : 'hidden', boxShadow: 'var(--shadow-lg)' }}>
       <div className="ambient" style={{ position: 'absolute', inset: 0, background: 'radial-gradient(60% 50% at 50% 0%, rgba(212,175,55,.14), transparent 70%), radial-gradient(40% 40% at 12% 92%, rgba(193,18,31,.07), transparent 70%)', pointerEvents: 'none' }} />
       <div className="carbon" style={{ position: 'absolute', inset: 0, opacity: .25, pointerEvents: 'none' }} />
       <div style={{ position: 'relative', textAlign: 'center', padding: '20px 0 6px' }}>
@@ -1476,18 +1496,24 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
           <span style={{ height: 1, width: 60, background: 'linear-gradient(90deg, rgba(212,175,55,.6), transparent)' }} />
         </div>
       </div>
-      <div style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative' }}>
-        {/* PODIUM-VIEWPORT-FIT-R1-EXEC — variante B passou a usar o mesmo
-            FitBox das demais (antes tinha um wrapper próprio sem nenhum
-            mecanismo de escala, então também podia ultrapassar o
-            container em viewports mais curtos, só nunca tinha sido
-            notado). FitBox agora escala por largura E altura (ver
-            components/ui/kit.tsx) — nunca corta, nunca amplia além do
-            tamanho natural do design. */}
-        <FitBox naturalWidth={variant === 'A' ? 840 : variant === 'D' ? 900 : 866} align={(variant === 'A' || variant === 'D') ? 'bottom' : 'center'}>
-          <Podium variant={variant} top3={top3} anim={t.anim} active={active} />
-        </FitBox>
-      </div>
+      {isFixedStage ? (
+        <div style={{ position: 'relative', minWidth: 0 }}>
+          <Podium variant="A" top3={top3} anim={t.anim} active={active} />
+        </div>
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative' }}>
+          {/* PODIUM-VIEWPORT-FIT-R1-EXEC — variante B passou a usar o mesmo
+              FitBox das demais (antes tinha um wrapper próprio sem nenhum
+              mecanismo de escala, então também podia ultrapassar o
+              container em viewports mais curtos, só nunca tinha sido
+              notado). FitBox agora escala por largura E altura (ver
+              components/ui/kit.tsx) — nunca corta, nunca amplia além do
+              tamanho natural do design. */}
+          <FitBox naturalWidth={variant === 'D' ? 900 : 866} align={variant === 'D' ? 'bottom' : 'center'}>
+            <Podium variant={variant} top3={top3} anim={t.anim} active={active} />
+          </FitBox>
+        </div>
+      )}
     </div>
   );
 
@@ -1526,7 +1552,12 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
         {isSellersLocal ? (
           isMobileHome ? mobilePodiumBlock : narrow ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginBottom: 26 }}>
-              <div style={{ height: variant === 'A' ? 620 : variant === 'B' ? 540 : variant === 'D' ? 700 : 560 }}>{podiumStage}</div>
+              {/* PODIUM_A_FIXED_STAGE_STANDARD_V2 §5/§21 — Pódio A não leva
+                  mais altura fixa aqui: fixa (620) cortava a geometria-base
+                  (~820px naturais); `undefined` deixa o stage assumir seu
+                  próprio minHeight (PODIUM_A_STAGE_MIN_HEIGHT) e a Home
+                  rola por baixo dele. B/C/D preservadas com altura fixa. */}
+              <div style={isFixedStage ? undefined : { height: variant === 'B' ? 540 : variant === 'D' ? 700 : 560 }}>{podiumStage}</div>
               <div style={{ height: 520 }}><RankingList sellers={sellers} active={active} comp={comp} /></div>
             </div>
           ) : (
@@ -1537,9 +1568,20 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
             // natural). 760px é a folga acima da variante mais alta
             // (D=700, ver alturas fixas do modo "narrow" logo acima) —
             // dá presença sem deixar a área crescer indefinidamente.
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: 'stretch', height: 'clamp(600px, calc(100vh - 168px), 760px)', marginBottom: 26 }}>
+            // PODIUM_A_FIXED_STAGE_STANDARD_V2 §1/§9/§14 — essa lógica de
+            // teto/stretch só se aplica a B/C/D agora. Pódio A usa
+            // `alignItems:'start'` (nunca estica pra bater a altura do
+            // Ranking) e a própria linha do grid sem `height` (auto,
+            // dimensionada pelo maior filho — o stage com seu minHeight) —
+            // o Ranking ganha altura própria (PODIUM_A_STAGE_MIN_HEIGHT)
+            // dentro de um wrapper só dele, com scroll interno.
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: isFixedStage ? 'start' : 'stretch', height: isFixedStage ? undefined : 'clamp(600px, calc(100vh - 168px), 760px)', marginBottom: 26 }}>
               {podiumStage}
-              <RankingList sellers={sellers} active={active} comp={comp} />
+              {isFixedStage ? (
+                <div style={{ height: PODIUM_A_STAGE_MIN_HEIGHT }}><RankingList sellers={sellers} active={active} comp={comp} /></div>
+              ) : (
+                <RankingList sellers={sellers} active={active} comp={comp} />
+              )}
             </div>
           )
         ) : (
@@ -1564,7 +1606,7 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
             {leaderboard.status === 'ready' && (
               isMobileHome ? mobilePodiumBlock : narrow ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                  <div style={{ height: variant === 'A' ? 620 : variant === 'B' ? 540 : variant === 'D' ? 700 : 560 }}>{podiumStage}</div>
+                  <div style={isFixedStage ? undefined : { height: variant === 'B' ? 540 : variant === 'D' ? 700 : 560 }}>{podiumStage}</div>
                   <div style={{ height: 520 }}><RankingList sellers={sellers} active={active} comp={comp} /></div>
                 </div>
               ) : (
@@ -1572,9 +1614,15 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
                 // local acima; -260px (vs. -168px) porque o modo remoto
                 // ainda soma o CompTicker/premiação publicada antes desta
                 // grid, mas o raciocínio do clamp é idêntico.
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: 'stretch', height: 'clamp(600px, calc(100vh - 260px), 760px)' }}>
+                // PODIUM_A_FIXED_STAGE_STANDARD_V2 §1/§9/§14 — mesmo
+                // raciocínio do ramo local: só B/C/D usam teto/stretch.
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: isFixedStage ? 'start' : 'stretch', height: isFixedStage ? undefined : 'clamp(600px, calc(100vh - 260px), 760px)' }}>
                   {podiumStage}
-                  <RankingList sellers={sellers} active={active} comp={comp} />
+                  {isFixedStage ? (
+                    <div style={{ height: PODIUM_A_STAGE_MIN_HEIGHT }}><RankingList sellers={sellers} active={active} comp={comp} /></div>
+                  ) : (
+                    <RankingList sellers={sellers} active={active} comp={comp} />
+                  )}
                 </div>
               )
             )}
