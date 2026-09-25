@@ -259,9 +259,21 @@ export function FitBox({ naturalWidth, align = 'center', children }: {
     ro.observe(inner);
     return () => ro.disconnect();
   }, [naturalWidth]);
+  // PODIUM_RESPONSIVE_SCALE_FIX_V1 — o antigo limiar `scale >= 0.96` fazia
+  // qualquer escala "quase 1" (ex.: 0.97, quando o conteúdo só precisava
+  // encolher ~3% para caber) renderizar no tamanho natural (`none`) em vez
+  // do valor calculado. Isso deixava o conteúdo LEVEMENTE MAIOR que o
+  // container em qualquer viewport/zoom que caísse nessa faixa, cortado
+  // pelo overflow:hidden do outer — sem nenhuma detecção de zoom, é a
+  // matemática de arredondamento/medição de layout normal (clientHeight,
+  // 100vh, etc.) caindo nessa janela. `scale` nunca passa de 1 (capado por
+  // Math.min(1, ...)), então comparar com `1` fecha a janela por completo
+  // sem alterar nenhum caso já coberto pelos testes (scale exatamente 1
+  // continua virando `none`; scale(1) seria visualmente idêntico de
+  // qualquer forma).
   return (
     <div ref={outerRef} style={{ width: '100%', height: '100%', display: 'grid', placeItems: align === 'bottom' ? 'end center' : 'center', overflow: 'hidden' }}>
-      <div ref={innerRef} style={{ width: naturalWidth, transform: scale >= 0.96 ? 'none' : `scale(${scale})`, transformOrigin: align === 'bottom' ? 'center bottom' : 'center center' }}>{children}</div>
+      <div ref={innerRef} style={{ width: naturalWidth, transform: scale >= 1 ? 'none' : `scale(${scale})`, transformOrigin: align === 'bottom' ? 'center bottom' : 'center center' }}>{children}</div>
     </div>
   );
 }

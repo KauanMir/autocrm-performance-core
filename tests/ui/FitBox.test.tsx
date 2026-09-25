@@ -94,4 +94,22 @@ describe('FitBox — escala considera altura, não só largura (regressão do bu
     stubDimensions(outer, inner, { w: 500, h: 900, naturalH: 300 });
     expect(inner.style.transform).toBe('scale(0.5)');
   });
+
+  // PODIUM_RESPONSIVE_SCALE_FIX_V1 — regressão do bug real: o limiar antigo
+  // (`scale >= 0.96 ? 'none' : ...`) tratava qualquer escala entre 0.96 e 1
+  // como "close enough" e renderizava no tamanho NATURAL mesmo faltando
+  // espaço — o conteúdo ficava maior que o container (cortado pelo
+  // overflow:hidden do outer) sempre que a altura disponível exigia uma
+  // redução pequena (ex.: 97% do natural), que é exatamente a faixa que
+  // zoom de navegador/resolução comuns produzem sem nenhum código de
+  // detecção de zoom envolvido.
+  it('escala PEQUENA (dentro da antiga zona-morta 0.96–1) precisa continuar sendo aplicada, nunca virar "none"', () => {
+    const { outer, inner } = renderFitBox(1000);
+    // scaleH = 970/1000 = 0.97 — precisa de leve redução, mas o limiar
+    // antigo (>= 0.96) descartava essa escala e renderizava sem
+    // transform, deixando o conteúdo ~3% maior que o container.
+    stubDimensions(outer, inner, { w: 1000, h: 970, naturalH: 1000 });
+    expect(inner.style.transform).toBe('scale(0.97)');
+    expect(inner.style.transform).not.toBe('none');
+  });
 });

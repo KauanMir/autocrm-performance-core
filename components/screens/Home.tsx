@@ -1484,7 +1484,14 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
               <div style={{ height: 520 }}><RankingList sellers={sellers} active={active} comp={comp} /></div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: 'stretch', height: 'calc(100vh - 168px)', minHeight: 600, marginBottom: 26 }}>
+            // PODIUM_RESPONSIVE_SCALE_FIX_V1 — clamp() em vez de um `calc`
+            // com só piso (minHeight): sem teto, essa linha crescia sem
+            // limite em viewports altos/zoom baixo, sobrando espaço vazio
+            // em volta do Pódio (que nunca escala acima do tamanho
+            // natural). 760px é a folga acima da variante mais alta
+            // (D=700, ver alturas fixas do modo "narrow" logo acima) —
+            // dá presença sem deixar a área crescer indefinidamente.
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: 'stretch', height: 'clamp(600px, calc(100vh - 168px), 760px)', marginBottom: 26 }}>
               {podiumStage}
               <RankingList sellers={sellers} active={active} comp={comp} />
             </div>
@@ -1515,7 +1522,11 @@ export function Home({ t, setTweak, go, active, currentUser }: { currentUser?: U
                   <div style={{ height: 520 }}><RankingList sellers={sellers} active={active} comp={comp} /></div>
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: 'stretch', height: 'calc(100vh - 260px)', minHeight: 600 }}>
+                // PODIUM_RESPONSIVE_SCALE_FIX_V1 — mesmo teto/piso do ramo
+                // local acima; -260px (vs. -168px) porque o modo remoto
+                // ainda soma o CompTicker/premiação publicada antes desta
+                // grid, mas o raciocínio do clamp é idêntico.
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.9fr) minmax(360px, .92fr)', gap: 20, alignItems: 'stretch', height: 'clamp(600px, calc(100vh - 260px), 760px)' }}>
                   {podiumStage}
                   <RankingList sellers={sellers} active={active} comp={comp} />
                 </div>
