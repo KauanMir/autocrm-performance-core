@@ -59,6 +59,16 @@ function urlOf(arg: unknown): URL {
 
 let accountsResponse: () => Response = () => accountsOkResponse();
 
+const REQUIRED_GRANTED_PERMISSIONS = ['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'];
+function permissionsOkResponse(permissions: Array<{ permission: string; status: string }> = REQUIRED_GRANTED_PERMISSIONS.map((permission) => ({ permission, status: 'granted' }))): Response {
+  return new Response(JSON.stringify({ data: permissions }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+let permissionsResponse: () => Response = () => permissionsOkResponse();
+
+
 function stateFor(opts: { flow?: 'review_ui'; companyId?: string; binding?: string }): string {
   return createOAuthState({
     secret: SECRET_BUF,
@@ -90,9 +100,14 @@ beforeEach(() => {
 
   accountsResponse = () => accountsOkResponse();
 
+
+  permissionsResponse = () => permissionsOkResponse();
+
   fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown) => {
     const u = urlOf(input);
     if (u.pathname.endsWith('/oauth/access_token')) return tokenOkResponse();
+
+    if (u.pathname.endsWith('/me/permissions')) return permissionsResponse();
     if (u.pathname.endsWith('/me/accounts')) return accountsResponse();
     if (u.pathname.endsWith('/subscribed_apps')) return subscribeOkResponse();
     if (u.pathname === `/${GRAPH_VERSION}/${META_TEST_PAGE_ID}/posts`) return readEngagementOkResponse();
@@ -221,5 +236,97 @@ describe('GET /api/integrations/meta/oauth/callback — redirect da UI de review
     expect(logged).not.toContain(STATE_SECRET_HEX);
     expect(logged).not.toContain(token);
     expect(logged).toContain('test_page_permissions_verified');
+  });
+});
+
+describe('GET /api/integrations/meta/oauth/callback — permissões obrigatórias (leads_retrieval e demais)', () => {
+  beforeEach(() => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
+  });
+
+  function callsFor(suffix: string): URL[] {
+    return fetchMock.mock.calls.map((c) => urlOf(c[0])).filter((u) => u.pathname.endsWith(suffix));
+  }
+
+  function grantedExcept(missing: string): Array<{ permission: string; status: string }> {
+    return REQUIRED_GRANTED_PERMISSIONS.filter((p) => p !== missing).map((permission) => ({ permission, status: 'granted' }));
+  }
+
+  it('leads_retrieval ausente -> 403 missing_required_permission com o nome; nenhuma chamada à Page; sem redirect', async () => {
+    permissionsResponse = () => permissionsOkResponse(grantedExcept('leads_retrieval'));
+    const res = await GET(callbackRequest({ code: FAKE_CODE, state: stateFor({ flow: 'review_ui' }) }, bindingCookie()));
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body).toEqual({ ok: false, error: 'missing_required_permission', permission: 'leads_retrieval' });
+    expect(res.headers.get('location')).toBeNull();
+    expect(callsFor('/me/accounts')).toHaveLength(0);
+    expect(callsFor('/subscribed_apps')).toHaveLength(0);
+    expect(JSON.stringify(body)).not.toContain(FAKE_SUAT);
+  });
+
+  it.each(['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata'])(
+    '%s ausente -> 403 missing_required_permission com essa permissão, antes de qualquer chamada à Page',
+    async (missing) => {
+      permissionsResponse = () => permissionsOkResponse(grantedExcept(missing));
+      const res = await GET(callbackRequest({ code: FAKE_CODE, state: stateFor({ flow: 'review_ui' }) }, bindingCookie()));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ ok: false, error: 'missing_required_permission', permission: missing });
+      expect(callsFor('/me/accounts')).toHaveLength(0);
+      expect(callsFor('/subscribed_apps')).toHaveLength(0);
+    },
+  );
+
+  it('permissão com status declined conta como ausente', async () => {
+    permissionsResponse = () =>
+      permissionsOkResponse([
+        ...grantedExcept('leads_retrieval'),
+        { permission: 'leads_retrieval', status: 'declined' },
+      ]);
+    const res = await GET(callbackRequest({ code: FAKE_CODE, state: stateFor({ flow: 'review_ui' }) }, bindingCookie()));
+    expect(res.status).toBe(403);
+    expect((await res.json()).permission).toBe('leads_retrieval');
+  });
+
+  it('permissões extras concedidas não causam falha (302 de review)', async () => {
+    permissionsResponse = () =>
+      permissionsOkResponse([
+        ...REQUIRED_GRANTED_PERMISSIONS.map((permission) => ({ permission, status: 'granted' })),
+        { permission: 'ads_management', status: 'granted' },
+      ]);
+    const res = await GET(callbackRequest({ code: FAKE_CODE, state: stateFor({ flow: 'review_ui' }) }, bindingCookie()));
+    expect(res.status).toBe(302);
+  });
+
+  it('falha HTTP em /me/permissions -> 502 user_permissions_lookup_failed, sem /me/accounts, sem vazar corpo ou token', async () => {
+    permissionsResponse = () =>
+      new Response(JSON.stringify({ error: { message: `boom ${FAKE_SUAT}` } }), { status: 500 });
+    const res = await GET(callbackRequest({ code: FAKE_CODE, state: stateFor({ flow: 'review_ui' }) }, bindingCookie()));
+    expect(res.status).toBe(502);
+    const text = await res.text();
+    expect(text).toContain('user_permissions_lookup_failed');
+    expect(text).not.toContain(FAKE_SUAT);
+    expect(callsFor('/me/accounts')).toHaveLength(0);
+  });
+
+  it('paginação de /me/permissions excedida -> 502 user_permissions_lookup_incomplete (não missing), 5 chamadas, sem /me/accounts', async () => {
+    permissionsResponse = () =>
+      new Response(
+        JSON.stringify({ data: [{ permission: 'pages_show_list', status: 'granted' }], paging: { next: 'https://evil.example.test/n', cursors: { after: 'FAKE-CURSOR' } } }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    const res = await GET(callbackRequest({ code: FAKE_CODE, state: stateFor({ flow: 'review_ui' }) }, bindingCookie()));
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toBe('user_permissions_lookup_incomplete');
+    expect(callsFor('/me/permissions')).toHaveLength(5);
+    expect(callsFor('/me/accounts')).toHaveLength(0);
+  });
+
+  it('empresa comum (piloto, sem gate de teste): nenhuma chamada a /me/permissions nem à Page', async () => {
+    const res = await GET(
+      callbackRequest({ code: FAKE_CODE, state: stateFor({ companyId: '22222222-2222-4222-8222-222222222222' }) }, bindingCookie()),
+    );
+    expect(res.status).toBe(200);
+    expect(callsFor('/me/permissions')).toHaveLength(0);
+    expect(callsFor('/me/accounts')).toHaveLength(0);
   });
 });

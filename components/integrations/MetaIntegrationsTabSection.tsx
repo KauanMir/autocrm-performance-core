@@ -117,6 +117,7 @@ export function MetaIntegrationsTabSection({ companyId }: MetaIntegrationsTabSec
             <span>pages_show_list: Validado</span>
             <span>pages_read_engagement: Validado</span>
             <span>pages_manage_metadata: Validado</span>
+            <span>leads_retrieval: Validado</span>
             <span>leadgen webhook: Assinado</span>
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 18 }}>

@@ -89,6 +89,10 @@ import { readBindingCookie, clearBindingCookie } from '@/lib/server/meta-oauth/c
 import { exchangeCodeForToken } from '@/lib/server/meta-oauth/token-exchange';
 import { fetchPageAccessToken } from '@/lib/server/meta-oauth/page-token';
 import { fetchPageReadEngagement } from '@/lib/server/meta-oauth/page-read-engagement';
+import {
+  fetchGrantedUserPermissions,
+  findMissingRequiredPermission,
+} from '@/lib/server/meta-oauth/user-permissions';
 import { subscribePageToWebhookField } from '@/lib/server/meta-oauth/page-subscription';
 import { logMetaOAuthEvent, logMetaOAuthError } from '@/lib/server/meta-oauth/logger';
 
@@ -111,6 +115,8 @@ type CallbackErrorCode =
   | 'token_exchange_failed'
   // Teste técnico controlado (subscribed_apps) — só atingível quando
   // `cid === META_TEST_COMPANY_ID` (ver hard gate abaixo).
+  | 'user_permissions_lookup_failed'
+  | 'user_permissions_lookup_incomplete'
   | 'page_token_lookup_failed'
   | 'test_page_not_found'
   | 'test_page_access_token_missing'
@@ -408,6 +414,45 @@ export async function GET(request: Request): Promise<Response> {
   // `pageAccessToken` derivado abaixo existem SÓ em memória nesta request
   // — nunca logados, nunca devolvidos, nunca persistidos. ═══════════════
   const graphApiVersion = resolveGraphApiVersion();
+
+  // Antes de QUALQUER operação sobre a Page: as quatro permissões de Lead
+  // Ads precisam estar concedidas ao usuário. Falha = nada é feito adiante.
+  const userPermissions = await fetchGrantedUserPermissions({
+    userAccessToken: exchange.accessToken,
+    graphApiVersion,
+  });
+  if (!userPermissions.ok) {
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'user_permissions_lookup_failed',
+      reason: 'reason' in userPermissions ? userPermissions.reason : 'unknown',
+      metaHttpStatus: 'httpStatus' in userPermissions ? userPermissions.httpStatus : undefined,
+      durationMs: Date.now() - startedAt,
+    });
+    // Limite de paginação excedido não é "permissão ausente": não sabemos se está.
+    const incomplete = 'reason' in userPermissions && userPermissions.reason === 'pagination_limit_exceeded';
+    return errorResponse(
+      502,
+      incomplete ? 'user_permissions_lookup_incomplete' : 'user_permissions_lookup_failed',
+      { clearCookie: true },
+    );
+  }
+  const missingPermission = findMissingRequiredPermission(userPermissions.grantedPermissions);
+  if (missingPermission) {
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'missing_required_permission',
+      reason: missingPermission,
+      durationMs: Date.now() - startedAt,
+    });
+    return jsonResponse(
+      403,
+      { ok: false, error: 'missing_required_permission', permission: missingPermission },
+      { 'Set-Cookie': clearBindingCookie(isSecureEnv()) },
+    );
+  }
 
   const pageLookup = await fetchPageAccessToken({
     accessToken: exchange.accessToken,

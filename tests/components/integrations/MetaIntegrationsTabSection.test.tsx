@@ -103,6 +103,7 @@ describe('MetaIntegrationsTabSection — retorno do callback (meta_review na URL
     expect(screen.getByText('pages_show_list: Validado')).toBeInTheDocument();
     expect(screen.getByText('pages_read_engagement: Validado')).toBeInTheDocument();
     expect(screen.getByText('pages_manage_metadata: Validado')).toBeInTheDocument();
+    expect(screen.getByText('leads_retrieval: Validado')).toBeInTheDocument();
     expect(screen.getByText('leadgen webhook: Assinado')).toBeInTheDocument();
   });
 

@@ -106,7 +106,7 @@ set local role service_role;
 select is(
   (select status from public.meta_connection_upsert(
      'f3eeeeee-1111-1111-1111-111111111111', '600000000000001', 'Pagina F3 A', 'fake-ct-f3-0001', 1::smallint,
-     array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata'], now(),
+     array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(),
      'f3000000-0000-0000-0000-000000000001', null)),
   'connected',
   'upsert cria conexão em status connected');
@@ -114,7 +114,7 @@ select is(
 select is(
   (select count(*)::int from public.meta_connection_upsert(
      'f3eeeeee-1111-1111-1111-111111111111', '600000000000001', 'Pagina F3 A', 'fake-ct-f3-0002', 1::smallint,
-     array['pages_show_list'], now(), 'f3000000-0000-0000-0000-000000000001', null) r
+     array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), 'f3000000-0000-0000-0000-000000000001', null) r
    where r::text like '%fake-ct-f3%'),
   0,
   'retorno do upsert nunca contém ciphertext');
@@ -123,7 +123,7 @@ select is(
   (select id from public.meta_connection_status('f3eeeeee-1111-1111-1111-111111111111') where page_id = '600000000000001'),
   (select id from public.meta_connection_upsert(
      'f3eeeeee-1111-1111-1111-111111111111', '600000000000001', 'Pagina F3 A', 'fake-ct-f3-0003', 1::smallint,
-     array['pages_show_list', 'pages_read_engagement'], now(), 'f3000000-0000-0000-0000-000000000001', null)),
+     array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), 'f3000000-0000-0000-0000-000000000001', null)),
   'reconexão atualiza a mesma linha (mesmo id)');
 
 select is(
@@ -140,7 +140,7 @@ select is(
 select throws_ok(
   $$ select * from public.meta_connection_upsert(
        'f3eeeeee-2222-2222-2222-222222222222', '600000000000001', 'Pagina F3 B', 'fake-ct-f3-0005', 1::smallint,
-       array['pages_show_list'], now(), null, null) $$,
+       array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), null, null) $$,
   'P0001', 'page_already_connected',
   'mesma page conectada em outra company falha com erro controlado');
 
@@ -157,37 +157,37 @@ select is(
 select throws_ok(
   $$ select * from public.meta_connection_upsert(
        'f3eeeeee-1111-1111-1111-111111111111', '12a', 'x', 'fake-ct-f3-0006', 1::smallint,
-       array['pages_show_list'], now(), null, null) $$,
+       array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), null, null) $$,
   'P0001', 'invalid_input', 'page_id inválido falha cedo');
 
 select throws_ok(
   $$ select * from public.meta_connection_upsert(
        'f3eeeeee-1111-1111-1111-111111111111', '600000000000009', 'x', '', 1::smallint,
-       array['pages_show_list'], now(), null, null) $$,
+       array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), null, null) $$,
   'P0001', 'invalid_input', 'ciphertext vazio falha');
 
 select throws_ok(
   $$ select * from public.meta_connection_upsert(
        'f3eeeeee-1111-1111-1111-111111111111', '600000000000009', 'x', repeat('x', 4097), 1::smallint,
-       array['pages_show_list'], now(), null, null) $$,
+       array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), null, null) $$,
   'P0001', 'invalid_input', 'ciphertext acima de 4096 falha');
 
 select throws_ok(
   $$ select * from public.meta_connection_upsert(
        'f3eeeeee-1111-1111-1111-111111111111', '600000000000009', 'x', 'fake-ct-f3-0007', 0::smallint,
-       array['pages_show_list'], now(), null, null) $$,
+       array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), null, null) $$,
   'P0001', 'invalid_input', 'token_key_version inválido falha');
 
 select throws_ok(
   $$ select * from public.meta_connection_upsert(
        'f3eeeeee-1111-1111-1111-111111111111', '600000000000009', 'x', 'fake-ct-f3-0008', 1::smallint,
-       array['pages_show_list'], null, null, null) $$,
+       array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], null, null, null) $$,
   'P0001', 'invalid_input', 'connected_at ausente falha');
 
 select throws_ok(
   $$ select * from public.meta_connection_upsert(
        'f3eeeeee-1111-1111-1111-111111111111', '600000000000009', 'x', 'fake-ct-f3-0009', 1::smallint,
-       array['leads_retrieval'], now(), null, null) $$,
+       array['ads_management'], now(), null, null) $$,
   'P0001', 'invalid_input', 'scope fora da allowlist validada falha');
 
 select throws_ok(
@@ -227,7 +227,7 @@ select is(
 select is(
   (select count(*)::int from public.meta_connection_upsert(
      'f3eeeeee-1111-1111-1111-111111111111', '600000000000001', 'Pagina F3 A', 'fake-ct-f3-0011', 1::smallint,
-     array['pages_show_list'], now(), 'f3000000-0000-0000-0000-000000000001', now()) r
+     array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), 'f3000000-0000-0000-0000-000000000001', now()) r
    where r.status = 'connected'),
   1,
   'reconexão após erro/desconexão volta a connected');
@@ -250,7 +250,7 @@ set local role service_role;
 select is(
   (select count(*)::int from public.meta_connection_upsert(
      'f3eeeeee-1111-1111-1111-111111111111', '600000000000002', 'Pagina F3 C', 'fake-ct-f3-0012', 1::smallint,
-     array['pages_show_list'], now(), null, null) r where r.status = 'connected'),
+     array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), null, null) r where r.status = 'connected'),
   1, 'cenário: segunda page conectada');
 reset role;
 
@@ -279,7 +279,7 @@ select throws_ok(
 select throws_ok(
   $$ select * from public.meta_connection_upsert(
        'f3eeeeee-1111-1111-1111-111111111111', '600000000000003', 'x', 'fake-ct-f3-0013', 1::smallint,
-       array['pages_show_list'], now(), null, null) $$,
+       array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), null, null) $$,
   '42501', null, 'authenticated não consegue chamar upsert');
 
 select throws_ok(
@@ -318,14 +318,14 @@ set local role service_role;
 select is(
   (select status from public.meta_connection_upsert(
      'f3eeeeee-1111-1111-1111-111111111111', '700000000000001', 'dup-f3-tmp', 'fake-ct-f3-0020', 1::smallint,
-     array['pages_show_list'], now(), null, null)),
+     array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), null, null)),
   'connected',
   'cenário: primeira page com nome dup-f3-tmp');
 
 select throws_ok(
   $$ select * from public.meta_connection_upsert(
        'f3eeeeee-2222-2222-2222-222222222222', '700000000000002', 'dup-f3-tmp', 'fake-ct-f3-0021', 1::smallint,
-       array['pages_show_list'], now(), null, null) $$,
+       array['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'], now(), null, null) $$,
   '23505',
   'duplicate key value violates unique constraint "company_meta_integrations_tmp_name_uniq"',
   'unique_violation de outro índice é re-raised com erro original (não vira page_already_connected)');

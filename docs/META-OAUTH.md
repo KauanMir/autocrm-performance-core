@@ -489,3 +489,17 @@ Advanced Access** antes de qualquer rollout para clientes.
    `subscribe_apps`, App Review / Advanced Access.
 6. Só então: UI atrás de flag default OFF, ativação por company começando
    pelo tenant da Assessoria KAPA.
+
+## leads_retrieval (META-P3.5)
+
+- A autorização só é válida com as quatro permissões concedidas:
+  `pages_show_list`, `pages_read_engagement`, `pages_manage_metadata` e
+  `leads_retrieval`. A verificação usa `GET /me/permissions` com o SUAT,
+  paginado por cursor (máximo 5 páginas). Excedido = falha fechada
+  (`user_permissions_lookup_incomplete`).
+- A RPC `meta_connection_upsert` aceita somente o conjunto completo das quatro
+  (exatamente quatro entradas, todas da allowlist, sem duplicatas que mascarem falta).
+- Nenhuma mudança na Meta foi feita nesta etapa. A Login Configuration não foi
+  alterada. O próximo OAuth real confirmará se `leads_retrieval` está
+  efetivamente concedida ao usuário atual; se não estiver, o callback responde
+  `missing_required_permission` sem persistir nada.

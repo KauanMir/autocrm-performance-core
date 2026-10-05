@@ -43,6 +43,16 @@ let fetchMock: ReturnType<typeof vi.spyOn>;
 // ── respostas fake, sobrescrevíveis por teste ───────────────────────────
 let tokenResponse: () => Response = () => tokenOkResponse();
 let accountsResponse: () => Response = () => accountsOkResponse();
+
+const REQUIRED_GRANTED_PERMISSIONS = ['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'];
+function permissionsOkResponse(permissions: Array<{ permission: string; status: string }> = REQUIRED_GRANTED_PERMISSIONS.map((permission) => ({ permission, status: 'granted' }))): Response {
+  return new Response(JSON.stringify({ data: permissions }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+let permissionsResponse: () => Response = () => permissionsOkResponse();
+
 let readEngagementResponse: () => Response = () => readEngagementOkResponse();
 let subscribeResponse: () => Response = () => subscribeOkResponse();
 
@@ -130,12 +140,14 @@ beforeEach(() => {
 
   tokenResponse = () => tokenOkResponse();
   accountsResponse = () => accountsOkResponse();
+  permissionsResponse = () => permissionsOkResponse();
   readEngagementResponse = () => readEngagementOkResponse();
   subscribeResponse = () => subscribeOkResponse();
 
   fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown) => {
     const u = urlOf(input);
     if (u.pathname.endsWith('/oauth/access_token')) return tokenResponse();
+    if (u.pathname.endsWith('/me/permissions')) return permissionsResponse();
     if (u.pathname.endsWith('/me/accounts')) return accountsResponse();
     if (u.pathname.endsWith('/subscribed_apps')) return subscribeResponse();
     if (u.pathname === `/${GRAPH_VERSION}/${META_TEST_PAGE_ID}/posts`) return readEngagementResponse();
@@ -360,6 +372,7 @@ describe('GET /api/integrations/meta/oauth/callback — teste técnico controlad
     fetchMock.mockImplementation(async (input: unknown) => {
       const u = urlOf(input);
       if (u.pathname.endsWith('/oauth/access_token')) return tokenResponse();
+      if (u.pathname.endsWith('/me/permissions')) return permissionsResponse();
       if (u.pathname.endsWith('/me/accounts')) return accountsResponse();
       if (u.pathname === `/${GRAPH_VERSION}/${META_TEST_PAGE_ID}/posts`) {
         const err = Object.assign(new Error('aborted'), { name: 'AbortError' });
@@ -426,6 +439,7 @@ describe('GET /api/integrations/meta/oauth/callback — teste técnico controlad
     fetchMock.mockImplementation(async (input: unknown) => {
       const u = urlOf(input);
       if (u.pathname.endsWith('/oauth/access_token')) return tokenResponse();
+      if (u.pathname.endsWith('/me/permissions')) return permissionsResponse();
       if (u.pathname.endsWith('/me/accounts')) {
         const err = Object.assign(new Error('aborted'), { name: 'AbortError' });
         throw err;
@@ -458,6 +472,7 @@ describe('GET /api/integrations/meta/oauth/callback — teste técnico controlad
     fetchMock.mockImplementation(async (input: unknown) => {
       const u = urlOf(input);
       if (u.pathname.endsWith('/oauth/access_token')) return tokenResponse();
+      if (u.pathname.endsWith('/me/permissions')) return permissionsResponse();
       if (u.pathname.endsWith('/me/accounts')) return accountsResponse();
       if (u.pathname === `/${GRAPH_VERSION}/${META_TEST_PAGE_ID}/posts`) return readEngagementResponse();
       if (u.pathname.endsWith('/subscribed_apps')) {
@@ -532,7 +547,7 @@ describe('GET /api/integrations/meta/oauth/callback — teste técnico controlad
     expect(callsTo('/me/accounts')).toHaveLength(1);
     expect(callsTo('/posts')).toHaveLength(1);
     expect(callsTo('/subscribed_apps')).toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledTimes(4); // token + accounts + read engagement (posts) + subscribe
+    expect(fetchMock).toHaveBeenCalledTimes(5); // token + me/permissions + accounts + read engagement (posts) + subscribe
   });
 
   it('resposta de sucesso do caminho de teste nunca inclui SUAT, Page token, code ou outras Pages', async () => {
