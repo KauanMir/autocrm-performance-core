@@ -198,6 +198,78 @@ export type Database = {
           },
         ]
       }
+      company_meta_integrations: {
+        Row: {
+          access_token_ciphertext: string | null
+          company_id: string
+          connected_at: string | null
+          connected_by: string | null
+          created_at: string
+          disconnected_at: string | null
+          granted_scopes: string[]
+          id: string
+          last_error_at: string | null
+          last_error_code: string | null
+          leadgen_subscribed_at: string | null
+          page_id: string
+          page_name: string | null
+          status: string
+          token_key_version: number
+          updated_at: string
+        }
+        Insert: {
+          access_token_ciphertext?: string | null
+          company_id: string
+          connected_at?: string | null
+          connected_by?: string | null
+          created_at?: string
+          disconnected_at?: string | null
+          granted_scopes?: string[]
+          id?: string
+          last_error_at?: string | null
+          last_error_code?: string | null
+          leadgen_subscribed_at?: string | null
+          page_id: string
+          page_name?: string | null
+          status: string
+          token_key_version?: number
+          updated_at?: string
+        }
+        Update: {
+          access_token_ciphertext?: string | null
+          company_id?: string
+          connected_at?: string | null
+          connected_by?: string | null
+          created_at?: string
+          disconnected_at?: string | null
+          granted_scopes?: string[]
+          id?: string
+          last_error_at?: string | null
+          last_error_code?: string | null
+          leadgen_subscribed_at?: string | null
+          page_id?: string
+          page_name?: string | null
+          status?: string
+          token_key_version?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_meta_integrations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_meta_integrations_connected_by_fkey"
+            columns: ["connected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       competition_month_rows: {
         Row: {
           acknowledged_at: string | null
@@ -2587,6 +2659,65 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      meta_connection_lookup_by_page: {
+        Args: { p_page_id: string }
+        Returns: {
+          access_token_ciphertext: string
+          company_id: string
+          integration_id: string
+          page_id: string
+          status: string
+          token_key_version: number
+        }[]
+      }
+      meta_connection_owner_by_page: {
+        Args: { p_page_id: string }
+        Returns: {
+          company_id: string
+          integration_id: string
+          page_id: string
+          status: string
+        }[]
+      }
+      meta_connection_status: {
+        Args: { p_company_id: string }
+        Returns: {
+          company_id: string
+          connected_at: string
+          disconnected_at: string
+          granted_scopes: string[]
+          id: string
+          last_error_at: string
+          last_error_code: string
+          leadgen_subscribed_at: string
+          page_id: string
+          page_name: string
+          status: string
+          updated_at: string
+        }[]
+      }
+      meta_connection_upsert: {
+        Args: {
+          p_access_token_ciphertext: string
+          p_company_id: string
+          p_connected_at: string
+          p_connected_by: string
+          p_granted_scopes: string[]
+          p_leadgen_subscribed_at: string
+          p_page_id: string
+          p_page_name: string
+          p_token_key_version: number
+        }
+        Returns: {
+          company_id: string
+          connected_at: string
+          id: string
+          leadgen_subscribed_at: string
+          page_id: string
+          page_name: string
+          status: string
+        }[]
       }
       move_lead_to_stage: {
         Args: {
