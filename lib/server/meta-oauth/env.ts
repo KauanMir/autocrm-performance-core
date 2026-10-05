@@ -99,6 +99,27 @@ export function getMetaLoginConfigId(): string {
   return raw.trim();
 }
 
+// META_TOKEN_ENCRYPTION_KEY_V1 — chave AES-256-GCM (32 bytes em hex
+// minúsculo, 64 caracteres) que cifra Page Access Tokens em repouso. Versão
+// 1 explícita no nome para permitir rotação sem migrar o formato. NUNCA
+// reutilizar META_APP_SECRET, META_OAUTH_STATE_SECRET nem
+// INVITE_RATE_LIMIT_PEPPER. Server-only, sem NEXT_PUBLIC_, sem default: ausente
+// ou inválida = falha fechada. Mensagem de erro contém só o nome.
+export class InvalidMetaTokenEncryptionKeyError extends Error {
+  constructor() {
+    super('meta_token_encryption_key_v1_invalid');
+    this.name = 'InvalidMetaTokenEncryptionKeyError';
+  }
+}
+
+export function getMetaTokenEncryptionKeyV1(): Buffer {
+  const raw = process.env.META_TOKEN_ENCRYPTION_KEY_V1;
+  if (!raw || !SECRET_PATTERN.test(raw)) {
+    throw new InvalidMetaTokenEncryptionKeyError();
+  }
+  return Buffer.from(raw, 'hex');
+}
+
 // META_GRAPH_API_VERSION — OPCIONAL. A Meta versiona a Graph API
 // trimestralmente; deixar como env permite acompanhar sem mudar código.
 // Se ausente/mal formada, cai no default de lib/server/meta-oauth/config.ts
