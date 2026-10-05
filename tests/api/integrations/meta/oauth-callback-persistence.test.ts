@@ -366,4 +366,13 @@ describe('segurança do token de review, cookie e logs', () => {
     expect(logged).not.toContain(ENCRYPTION_KEY_HEX);
     expect(logged).not.toContain('v1.');
   });
+
+  it('nenhum log contém o Page ID real da Página de teste, em sucesso ou em falha', async () => {
+    await GET(callbackRequest(stateFor({ flow: 'review_ui' })));
+    mocks.port.upsert.mockResolvedValue({ data: null, error: { code: 'P0001', message: 'page_already_connected' } });
+    await GET(callbackRequest(stateFor({ flow: 'review_ui' })));
+    const logged = consoleSpies.flatMap((spy) => spy.mock.calls).map((a) => JSON.stringify(a)).join('\n');
+    expect(logged).not.toContain(META_TEST_PAGE_ID);
+    expect(logged).toContain('persistence_failed');
+  });
 });

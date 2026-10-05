@@ -13,7 +13,6 @@ export interface MetaWebhookLogFields {
   // Metadados técnicos mínimos de diagnóstico — todos opcionais.
   object?: string;
   field?: string;
-  pageId?: string;
   formId?: string;
   leadgenId?: string;
   createdTime?: number | string;

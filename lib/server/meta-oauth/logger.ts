@@ -32,8 +32,7 @@ export interface MetaOAuthLogFields {
   bindingSet?: boolean;
   durationMs?: number;
   // Teste técnico controlado (subscribed_apps) — só metadados não
-  // sensíveis: a Page ID é fixa/pública para este teste, nunca o token.
-  testPageId?: string;
+  // sensíveis: nunca o Page ID real, o token ou corpo da Graph.
   pageFound?: boolean;
   advertiseTaskPresent?: boolean;
   subscribedField?: string;

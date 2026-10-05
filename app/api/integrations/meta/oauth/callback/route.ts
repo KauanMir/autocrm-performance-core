@@ -497,7 +497,6 @@ export async function GET(request: Request): Promise<Response> {
       result: 'page_token_lookup_failed',
       reason: 'reason' in pageLookup ? pageLookup.reason : 'unknown',
       metaHttpStatus: 'httpStatus' in pageLookup ? pageLookup.httpStatus : undefined,
-      testPageId: META_TEST_PAGE_ID,
       durationMs: Date.now() - startedAt,
     });
     return errorResponse(502, 'page_token_lookup_failed', { clearCookie: true });
@@ -509,7 +508,6 @@ export async function GET(request: Request): Promise<Response> {
       operation: 'oauth_callback',
       result: 'test_page_not_found',
       metaHttpStatus: pageLookup.httpStatus,
-      testPageId: META_TEST_PAGE_ID,
       pageFound: false,
       durationMs: Date.now() - startedAt,
     });
@@ -522,7 +520,6 @@ export async function GET(request: Request): Promise<Response> {
       operation: 'oauth_callback',
       result: 'test_page_access_token_missing',
       metaHttpStatus: pageLookup.httpStatus,
-      testPageId: META_TEST_PAGE_ID,
       pageFound: true,
       durationMs: Date.now() - startedAt,
     });
@@ -539,7 +536,6 @@ export async function GET(request: Request): Promise<Response> {
       operation: 'oauth_callback',
       result: 'persistence_failed',
       reason: code,
-      testPageId: META_TEST_PAGE_ID,
       durationMs: Date.now() - startedAt,
     });
     const failureToken = createReviewResultToken({
@@ -573,7 +569,6 @@ export async function GET(request: Request): Promise<Response> {
       operation: 'oauth_callback',
       result: 'test_page_missing_advertise_task',
       metaHttpStatus: pageLookup.httpStatus,
-      testPageId: META_TEST_PAGE_ID,
       pageFound: true,
       advertiseTaskPresent: false,
       durationMs: Date.now() - startedAt,
@@ -602,7 +597,6 @@ export async function GET(request: Request): Promise<Response> {
       result: 'test_page_read_engagement_failed',
       reason: 'reason' in readEngagement ? readEngagement.reason : 'unknown',
       metaHttpStatus: 'httpStatus' in readEngagement ? readEngagement.httpStatus : undefined,
-      testPageId: META_TEST_PAGE_ID,
       pageFound: true,
       advertiseTaskPresent: true,
       durationMs: Date.now() - startedAt,
@@ -627,7 +621,6 @@ export async function GET(request: Request): Promise<Response> {
       result: 'test_page_subscription_failed',
       reason: 'reason' in subscription ? subscription.reason : 'unknown',
       metaHttpStatus: 'httpStatus' in subscription ? subscription.httpStatus : undefined,
-      testPageId: META_TEST_PAGE_ID,
       pageFound: true,
       advertiseTaskPresent: true,
       subscribedField: LEADGEN_SUBSCRIBED_FIELD,
@@ -658,7 +651,6 @@ export async function GET(request: Request): Promise<Response> {
       requestId,
       operation: 'oauth_callback',
       result: 'persistence_completed',
-      testPageId: META_TEST_PAGE_ID,
       durationMs: Date.now() - startedAt,
     });
   }
@@ -669,7 +661,6 @@ export async function GET(request: Request): Promise<Response> {
     result: 'test_page_permissions_verified',
     reviewUiRedirect: isReviewUiFlow,
     metaHttpStatus: subscription.httpStatus,
-    testPageId: META_TEST_PAGE_ID,
     pageFound: true,
     advertiseTaskPresent: true,
     readEngagementVerified: true,

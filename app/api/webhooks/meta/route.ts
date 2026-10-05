@@ -159,7 +159,6 @@ export async function POST(request: Request): Promise<Response> {
       result: 'leadgen_received',
       object: 'page',
       field: 'leadgen',
-      pageId: change.pageId,
       formId: change.formId,
       leadgenId: change.leadgenId,
       createdTime: change.createdTime,
