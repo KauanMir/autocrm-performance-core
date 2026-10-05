@@ -24,6 +24,7 @@ import {
 import { verifyReviewResultToken } from '@/lib/server/meta-oauth/review-result';
 import { META_TEST_COMPANY_ID, LEADGEN_SUBSCRIBED_FIELD } from '@/lib/server/meta-oauth/config';
 import { logMetaOAuthEvent, logMetaOAuthError } from '@/lib/server/meta-oauth/logger';
+import { isMetaIntegrationsReviewEnabled } from '@/lib/flags';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,6 +50,10 @@ function errorResponse(status: number, code: ReviewStatusErrorCode): Response {
 export async function GET(request: Request): Promise<Response> {
   const requestId = randomUUID();
   const startedAt = Date.now();
+
+  if (!isMetaIntegrationsReviewEnabled()) {
+    return errorResponse(403, 'forbidden');
+  }
 
   let secret: Buffer;
   try {

@@ -6,7 +6,7 @@
 // o comportamento dela tem cobertura própria em
 // tests/components/integrations/MetaIntegrationsTabSection.test.tsx.
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
 import { META_OAUTH_REVIEW_TEST_COMPANY_ID } from '@/lib/capabilities';
@@ -83,13 +83,59 @@ function operationalSuperAdmin(companyId: string) {
   return { mode: 'super_admin', companyId, identity: { status: 'ready', company: { status: 'implantacao' } }, isReadOnly: false };
 }
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 beforeEach(() => {
+  vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
   m.user.current = null;
   m.operational.current = { mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false };
   m.usePipelineStages.mockReturnValue(pipelineResult());
   m.useReorderStages.mockReturnValue({
     reorderStages: vi.fn().mockResolvedValue({ ok: true }),
     isPending: false, isError: false, isSuccess: false, error: null, reset: vi.fn(),
+  });
+});
+
+describe('aba Integrações — feature flag dedicada (META-OAUTH-REVIEW-UI)', () => {
+  it('flag ausente + Super Admin na company de teste -> NÃO vê a aba', () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', undefined as unknown as string);
+    m.user.current = superAdminGlobal();
+    m.operational.current = operationalSuperAdmin(META_OAUTH_REVIEW_TEST_COMPANY_ID);
+    render(<ScreenAjustes go={() => {}} />);
+    expect(screen.queryByText('Integrações')).toBeNull();
+  });
+
+  it("flag 'false' + Super Admin na company de teste -> NÃO vê a aba", () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'false');
+    m.user.current = superAdminGlobal();
+    m.operational.current = operationalSuperAdmin(META_OAUTH_REVIEW_TEST_COMPANY_ID);
+    render(<ScreenAjustes go={() => {}} />);
+    expect(screen.queryByText('Integrações')).toBeNull();
+  });
+
+  it("flag 'true' + Super Admin na company de teste -> VÊ a aba", () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
+    m.user.current = superAdminGlobal();
+    m.operational.current = operationalSuperAdmin(META_OAUTH_REVIEW_TEST_COMPANY_ID);
+    render(<ScreenAjustes go={() => {}} />);
+    expect(screen.getByText('Integrações')).toBeInTheDocument();
+  });
+
+  it("flag 'true' + Super Admin em OUTRA company -> NÃO vê a aba", () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
+    m.user.current = superAdminGlobal();
+    m.operational.current = operationalSuperAdmin(OTHER_COMPANY_ID);
+    render(<ScreenAjustes go={() => {}} />);
+    expect(screen.queryByText('Integrações')).toBeNull();
+  });
+
+  it("flag 'true' + Manager na company de teste -> NÃO vê a aba", () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
+    m.user.current = manager(META_OAUTH_REVIEW_TEST_COMPANY_ID);
+    render(<ScreenAjustes go={() => {}} />);
+    expect(screen.queryByText('Integrações')).toBeNull();
   });
 });
 

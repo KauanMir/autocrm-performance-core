@@ -18,7 +18,7 @@ import { CompetitionRewardsTabSection } from '@/components/competitionRewards/Co
 import { CompetitionRewardHistorySection } from '@/components/competitionRewards/CompetitionRewardHistorySection';
 import { MetaIntegrationsTabSection } from '@/components/integrations/MetaIntegrationsTabSection';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
-import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
+import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled, isMetaIntegrationsReviewEnabled } from '@/lib/flags';
 import { useCompanySettings } from '@/lib/hooks/useCompanySettings';
 import { useUpdateCompanySettings, getUpdateCompanySettingsErrorMessage } from '@/lib/hooks/useUpdateCompanySettings';
 import { useUpdateCompanyLogo, getUpdateCompanyLogoErrorMessage } from '@/lib/hooks/useUpdateCompanyLogo';
@@ -1519,6 +1519,7 @@ export function ScreenAjustes({ go }: any) {
   const metaIntegrationsReviewAccess = canAccessMetaIntegrationsReviewTab({
     platformRole: currentUser?.platformRole ?? null,
     companyId,
+    reviewFlagEnabled: isMetaIntegrationsReviewEnabled(),
   });
   const allowedTabs: string[] = [
     ...(companySettingsAccess ? ['Empresa'] : []),

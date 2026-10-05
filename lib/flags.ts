@@ -215,3 +215,13 @@ export function isSuperAdminCommercialWriteEnabled(): boolean {
     SUPER_ADMIN_COMMERCIAL_WRITE_DEV_OVERRIDE_KEY,
   );
 }
+
+// META-OAUTH-REVIEW-UI — flag EXCLUSIVA da fase de review da integração Meta.
+// Default OFF: ausente, inválida ou 'false' = fluxo e aba inexistentes.
+// Sem override de localStorage de propósito: o gate server-side
+// (/oauth/start, /oauth/review-status, callback) precisa enxergar
+// exatamente o mesmo valor que o client, e o servidor não lê localStorage.
+// Nunca reutilizar NEXT_PUBLIC_FF_PLATFORM_ADMIN para isto.
+export function isMetaIntegrationsReviewEnabled(): boolean {
+  return parseFlagValue(process.env.NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW) === true;
+}

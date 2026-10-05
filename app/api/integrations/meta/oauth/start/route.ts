@@ -49,6 +49,7 @@ import {
 import { createOAuthState, OAUTH_STATE_FLOW_REVIEW_UI } from '@/lib/server/meta-oauth/state';
 import { buildMetaAuthorizationUrl } from '@/lib/server/meta-oauth/authorize-url';
 import { META_TEST_COMPANY_ID } from '@/lib/server/meta-oauth/config';
+import { isMetaIntegrationsReviewEnabled } from '@/lib/flags';
 import {
   generateBinding,
   serializeBindingCookie,
@@ -249,7 +250,7 @@ export async function POST(request: Request): Promise<Response> {
   // — só perde o indicador de redirect da UI de review). ──────────────────
   let reviewUiAuthorized = false;
   if (requestedReviewUiFlow) {
-    if (targetCompanyId !== META_TEST_COMPANY_ID) {
+    if (!isMetaIntegrationsReviewEnabled() || targetCompanyId !== META_TEST_COMPANY_ID) {
       logMetaOAuthEvent({
         requestId,
         operation: 'oauth_start',

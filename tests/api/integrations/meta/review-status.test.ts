@@ -50,6 +50,7 @@ function validToken(companyId = META_TEST_COMPANY_ID): string {
 
 beforeEach(() => {
   vi.stubEnv('META_OAUTH_STATE_SECRET', STATE_SECRET_HEX);
+  vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
   mocks.requireAuthenticatedActor.mockResolvedValue(authorizedActor());
 });
 
@@ -60,6 +61,22 @@ afterEach(() => {
 });
 
 describe('GET /api/integrations/meta/oauth/review-status', () => {
+  it('flag ausente -> 403 forbidden, sem nem consultar auth/RPC', async () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', undefined as unknown as string);
+    const res = await GET(statusRequest({ token: validToken() }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe('forbidden');
+    expect(mocks.requireAuthenticatedActor).not.toHaveBeenCalled();
+  });
+
+  it("flag 'false' + Super Admin + token válido -> 403 forbidden", async () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'false');
+    mocks.requireAuthenticatedActor.mockResolvedValue(authorizedActor(fakeUserClient()));
+    const res = await GET(statusRequest({ token: validToken() }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).ok).toBe(false);
+  });
+
   it('sem Authorization -> 401 unauthenticated', async () => {
     mocks.requireAuthenticatedActor.mockResolvedValue({ ok: false });
     const res = await GET(statusRequest({ token: validToken() }));

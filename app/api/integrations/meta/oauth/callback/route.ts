@@ -84,6 +84,7 @@ import {
 } from '@/lib/server/meta-oauth/config';
 import { verifyOAuthState, OAUTH_STATE_FLOW_REVIEW_UI } from '@/lib/server/meta-oauth/state';
 import { createReviewResultToken } from '@/lib/server/meta-oauth/review-result';
+import { isMetaIntegrationsReviewEnabled } from '@/lib/flags';
 import { readBindingCookie, clearBindingCookie } from '@/lib/server/meta-oauth/cookie';
 import { exchangeCodeForToken } from '@/lib/server/meta-oauth/token-exchange';
 import { fetchPageAccessToken } from '@/lib/server/meta-oauth/page-token';
@@ -310,7 +311,7 @@ export async function GET(request: Request): Promise<Response> {
   // META-OAUTH-REVIEW-UI: só true quando o PRÓPRIO /start já validou Super
   // Admin + company de teste antes de assinar o state (ver esse arquivo) —
   // nunca inferido de nenhum input não assinado desta request.
-  const isReviewUiFlow = flow === OAUTH_STATE_FLOW_REVIEW_UI;
+  const isReviewUiFlow = flow === OAUTH_STATE_FLOW_REVIEW_UI && isMetaIntegrationsReviewEnabled();
 
   // Envs da troca — fail closed. META_APP_SECRET é a MESMA credencial já
   // usada em Production pelo webhook; server-only, nunca devolvida/logada.

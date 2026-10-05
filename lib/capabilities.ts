@@ -349,8 +349,13 @@ export const META_OAUTH_REVIEW_TEST_COMPANY_ID = '0dfc73ee-bca9-4fdf-aa50-b22794
 export type MetaIntegrationsReviewCapabilityUser = {
   platformRole: User['platformRole'];
   companyId: string | null;
+  reviewFlagEnabled: boolean;
 };
 
 export function canAccessMetaIntegrationsReviewTab(user: MetaIntegrationsReviewCapabilityUser | null | undefined): boolean {
-  return user?.platformRole === 'super_admin' && user?.companyId === META_OAUTH_REVIEW_TEST_COMPANY_ID;
+  return (
+    user?.reviewFlagEnabled === true &&
+    user?.platformRole === 'super_admin' &&
+    user?.companyId === META_OAUTH_REVIEW_TEST_COMPANY_ID
+  );
 }

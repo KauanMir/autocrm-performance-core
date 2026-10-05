@@ -106,6 +106,19 @@ afterEach(() => {
 });
 
 describe('GET /api/integrations/meta/oauth/callback — redirect da UI de review (flow=review_ui)', () => {
+  beforeEach(() => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
+  });
+
+  it('flag OFF no momento do callback + state flow=review_ui -> NUNCA 302 (volta ao JSON de sempre)', async () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'false');
+    const res = await GET(
+      callbackRequest({ code: FAKE_CODE, state: stateFor({ flow: 'review_ui' }) }, bindingCookie()),
+    );
+    expect(res.status).not.toBe(302);
+    expect(res.headers.get('location')).toBeNull();
+  });
+
   it('flow=review_ui + sucesso completo -> 302 para /company/<test-id> com meta_review assinado na URL; sem JSON, sem code/token', async () => {
     const res = await GET(
       callbackRequest({ code: FAKE_CODE, state: stateFor({ flow: 'review_ui' }) }, bindingCookie()),

@@ -275,6 +275,44 @@ describe('POST /api/integrations/meta/oauth/start', () => {
 // teste fixa (META_TEST_COMPANY_ID). Qualquer outra combinação -> 403
 // forbidden, sem `f` no state — nenhum piloto é afetado.
 describe('POST /api/integrations/meta/oauth/start — flow: "review_ui" (App Review UI)', () => {
+  beforeEach(() => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
+  });
+
+  it('flag ausente + Super Admin na company de teste + flow=review_ui -> 403 forbidden, RPC nunca chamada, sem state', async () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', undefined as unknown as string);
+    const client = fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: true });
+    mocks.requireAuthenticatedActor.mockResolvedValue(authorizedActor(client));
+    const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID, flow: 'review_ui' } }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe('forbidden');
+    expect(client.rpc).not.toHaveBeenCalledWith('is_platform_super_admin');
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it("flag 'false' + Super Admin na company de teste + flow=review_ui -> 403 forbidden", async () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'false');
+    mocks.requireAuthenticatedActor.mockResolvedValue(
+      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: true })),
+    );
+    const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID, flow: 'review_ui' } }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe('forbidden');
+  });
+
+  it('flag OFF não afeta o OAuth normal (sem flow=review_ui): 200 e state sem `f`', async () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'false');
+    mocks.requireAuthenticatedActor.mockResolvedValue(
+      authorizedActor(fakeUserClient({ companyId: COMPANY_ID, allowed: true })),
+    );
+    const res = await POST(startRequest({ body: { company_id: COMPANY_ID } }));
+    expect(res.status).toBe(200);
+    const state = new URL((await res.json()).authorizationUrl).searchParams.get('state') ?? '';
+    const cookieValue = cookieValueFromSetCookie(res.headers.get('set-cookie')) ?? '';
+    const verified = verifyOAuthState(state, { secret: SECRET_BUF, expectedBinding: cookieValue });
+    expect(verified.ok && verified.payload.f).toBeFalsy();
+  });
+
   it('Super Admin + company de teste + flow=review_ui -> 200, state carrega f=review_ui', async () => {
     mocks.requireAuthenticatedActor.mockResolvedValue(
       authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: true })),

@@ -384,24 +384,28 @@ describe('canManageFollowUpTemplates', () => {
 describe('canAccessMetaIntegrationsReviewTab — META-OAUTH-REVIEW-UI', () => {
   const OTHER_COMPANY_ID = 'company-a';
 
-  it('Super Admin operando na company de teste: true', () => {
-    expect(canAccessMetaIntegrationsReviewTab({ platformRole: 'super_admin', companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID })).toBe(true);
+  it('flag ON + Super Admin na company de teste: true', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ reviewFlagEnabled: true, platformRole: 'super_admin', companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID })).toBe(true);
   });
 
-  it('Super Admin em qualquer outra company: false', () => {
-    expect(canAccessMetaIntegrationsReviewTab({ platformRole: 'super_admin', companyId: OTHER_COMPANY_ID })).toBe(false);
+  it('flag OFF (false) + Super Admin na company de teste: false', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ reviewFlagEnabled: false, platformRole: 'super_admin', companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID })).toBe(false);
   });
 
-  it('Super Admin sem company (global, fora de contexto operacional): false', () => {
-    expect(canAccessMetaIntegrationsReviewTab({ platformRole: 'super_admin', companyId: null })).toBe(false);
+  it('flag ON + Super Admin em qualquer outra company: false', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ reviewFlagEnabled: true, platformRole: 'super_admin', companyId: OTHER_COMPANY_ID })).toBe(false);
   });
 
-  it('Manager na própria company de teste (hipotético): false — nunca Manager, mesmo na company certa', () => {
-    expect(canAccessMetaIntegrationsReviewTab({ platformRole: null, companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID })).toBe(false);
+  it('flag ON + Super Admin sem company (global): false', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ reviewFlagEnabled: true, platformRole: 'super_admin', companyId: null })).toBe(false);
   });
 
-  it('Seller na company de teste: false', () => {
-    expect(canAccessMetaIntegrationsReviewTab({ platformRole: null, companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID })).toBe(false);
+  it('flag ON + Manager na company de teste: false', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ reviewFlagEnabled: true, platformRole: null, companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID })).toBe(false);
+  });
+
+  it('flag OFF + Manager na company de teste: false', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ reviewFlagEnabled: false, platformRole: null, companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID })).toBe(false);
   });
 
   it('null/undefined: false', () => {
