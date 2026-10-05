@@ -7,10 +7,13 @@
 export type MetaReviewStatusResult =
   | {
       outcome: 'ok';
+      reviewOutcome: 'success';
+      persisted: boolean;
       stage: string;
       page: { matched: boolean; advertiseTaskPresent: boolean; readEngagementVerified: boolean };
       pageSubscription: { verified: boolean; field: string };
     }
+  | { outcome: 'ok'; reviewOutcome: 'failure'; failureCode: string }
   | { outcome: 'domain_error'; code: string }
   | { outcome: 'error' };
 
@@ -64,6 +67,13 @@ export async function fetchMetaReviewStatusRequest(
     return { outcome: 'domain_error', code: body.error };
   }
 
+  if (body.outcome === 'failure') {
+    if (typeof body.failureCode !== 'string') {
+      return { outcome: 'error' };
+    }
+    return { outcome: 'ok', reviewOutcome: 'failure', failureCode: body.failureCode };
+  }
+
   const page = body.page;
   const pageSubscription = body.pageSubscription;
   if (
@@ -81,6 +91,8 @@ export async function fetchMetaReviewStatusRequest(
 
   return {
     outcome: 'ok',
+    reviewOutcome: 'success',
+    persisted: body.persisted === true,
     stage: body.stage,
     page: {
       matched: page.matched,

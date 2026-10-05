@@ -147,6 +147,33 @@ describe('GET /api/integrations/meta/oauth/review-status', () => {
     expect(serialized).not.toContain(JWT);
   });
 
+  it('token de falha de persistência -> 200 com outcome failure e código fechado, sem métricas de Page', async () => {
+    const token = createReviewResultToken({
+      secret: SECRET_BUF,
+      companyId: META_TEST_COMPANY_ID,
+      outcome: 'failure',
+      failureCode: 'page_already_connected',
+    });
+    const res = await GET(statusRequest({ token }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      stage: 'test_page_permissions_verified',
+      outcome: 'failure',
+      persisted: false,
+      failureCode: 'page_already_connected',
+    });
+  });
+
+  it('token de sucesso com persistência -> outcome success e persisted true', async () => {
+    const token = createReviewResultToken({ secret: SECRET_BUF, companyId: META_TEST_COMPANY_ID, outcome: 'success', persisted: true });
+    const res = await GET(statusRequest({ token }));
+    const body = await res.json();
+    expect(body.outcome).toBe('success');
+    expect(body.persisted).toBe(true);
+    expect(JSON.stringify(body)).not.toMatch(/ciphertext|access_token|v1\./);
+  });
+
   it('META_OAUTH_STATE_SECRET ausente -> 500 fail closed, sem vazar segredo', async () => {
     vi.stubEnv('META_OAUTH_STATE_SECRET', '');
     const res = await GET(statusRequest({ token: validToken() }));

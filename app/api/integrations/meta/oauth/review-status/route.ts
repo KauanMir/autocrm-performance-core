@@ -127,11 +127,23 @@ export async function GET(request: Request): Promise<Response> {
     durationMs: Date.now() - startedAt,
   });
 
-  // Mesmo shape do sucesso do callback — sem nenhum dado sensível, sem
-  // nenhuma chamada de rede feita aqui.
+  // Falha de persistência: só o código fechado, sem nenhuma métrica de Page.
+  if (verified.payload.outcome === 'failure') {
+    return jsonResponse(200, {
+      ok: true,
+      stage: verified.payload.stage,
+      outcome: 'failure',
+      persisted: false,
+      failureCode: verified.payload.failureCode,
+    });
+  }
+
+  // Sucesso: mesmo shape de antes, sem dado sensível e sem chamada de rede.
   return jsonResponse(200, {
     ok: true,
     stage: verified.payload.stage,
+    outcome: 'success',
+    persisted: verified.payload.persisted,
     page: { matched: true, advertiseTaskPresent: true, readEngagementVerified: true },
     pageSubscription: { verified: true, field: LEADGEN_SUBSCRIBED_FIELD },
   });

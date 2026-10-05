@@ -27,6 +27,19 @@ const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const MAX_RAW_TOKEN_LENGTH = 2048;
 
+// Catálogo fechado de falhas de persistência exibíveis na review UI. Nunca
+// mensagem SQL, Graph, ciphertext, token, chave ou stack.
+export const REVIEW_RESULT_FAILURE_CODES = [
+  'page_already_connected',
+  'persistence_unavailable',
+  'connection_persist_failed',
+  'token_encryption_failed',
+  'invalid_persistence_input',
+] as const;
+
+export type ReviewResultFailureCode = (typeof REVIEW_RESULT_FAILURE_CODES)[number];
+export type ReviewResultOutcome = 'success' | 'failure';
+
 export interface MetaOAuthReviewResultPayload {
   v: number;
   p: string;
@@ -35,6 +48,9 @@ export interface MetaOAuthReviewResultPayload {
   exp: number;
   cid: string;
   stage: typeof REVIEW_RESULT_STAGE_VERIFIED;
+  outcome: ReviewResultOutcome;
+  persisted: boolean;
+  failureCode: ReviewResultFailureCode | null;
 }
 
 function sign(body: string, secret: Buffer): string {
@@ -55,10 +71,15 @@ export interface CreateReviewResultTokenOptions {
   secret: Buffer;
   companyId: string;
   nowMs?: number;
+  outcome?: ReviewResultOutcome;
+  persisted?: boolean;
+  failureCode?: ReviewResultFailureCode | null;
 }
 
 export function createReviewResultToken(opts: CreateReviewResultTokenOptions): string {
   const nowSec = Math.floor((opts.nowMs ?? Date.now()) / 1000);
+  const outcome: ReviewResultOutcome = opts.outcome ?? 'success';
+  const failureCode = outcome === 'failure' ? (opts.failureCode ?? 'connection_persist_failed') : null;
   const payload: MetaOAuthReviewResultPayload = {
     v: VERSION,
     p: PURPOSE,
@@ -67,6 +88,9 @@ export function createReviewResultToken(opts: CreateReviewResultTokenOptions): s
     exp: nowSec + REVIEW_RESULT_TTL_SECONDS,
     cid: opts.companyId,
     stage: REVIEW_RESULT_STAGE_VERIFIED,
+    outcome,
+    persisted: outcome === 'success' && opts.persisted === true,
+    failureCode,
   };
   const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   return `${body}.${sign(body, opts.secret)}`;
@@ -128,7 +152,8 @@ export function verifyReviewResultToken(
     !Number.isFinite(payload.exp) ||
     typeof payload.cid !== 'string' ||
     !UUID_PATTERN.test(payload.cid) ||
-    payload.stage !== REVIEW_RESULT_STAGE_VERIFIED
+    payload.stage !== REVIEW_RESULT_STAGE_VERIFIED ||
+    !isOutcomeShapeValid(payload)
   ) {
     return { ok: false, reason: 'malformed' };
   }
@@ -156,6 +181,23 @@ export function verifyReviewResultToken(
       exp: payload.exp as number,
       cid: payload.cid as string,
       stage: payload.stage as typeof REVIEW_RESULT_STAGE_VERIFIED,
+      outcome: payload.outcome as ReviewResultOutcome,
+      persisted: payload.persisted as boolean,
+      failureCode: payload.failureCode as ReviewResultFailureCode | null,
     },
   };
+}
+
+function isOutcomeShapeValid(payload: Record<string, unknown>): boolean {
+  if (payload.outcome === 'success') {
+    return typeof payload.persisted === 'boolean' && payload.failureCode === null;
+  }
+  if (payload.outcome === 'failure') {
+    return (
+      payload.persisted === false &&
+      typeof payload.failureCode === 'string' &&
+      (REVIEW_RESULT_FAILURE_CODES as readonly string[]).includes(payload.failureCode)
+    );
+  }
+  return false;
 }

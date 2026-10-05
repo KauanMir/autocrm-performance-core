@@ -83,7 +83,18 @@ import {
   LEADGEN_SUBSCRIBED_FIELD,
 } from '@/lib/server/meta-oauth/config';
 import { verifyOAuthState, OAUTH_STATE_FLOW_REVIEW_UI } from '@/lib/server/meta-oauth/state';
-import { createReviewResultToken } from '@/lib/server/meta-oauth/review-result';
+import {
+  createReviewResultToken,
+  type ReviewResultFailureCode,
+} from '@/lib/server/meta-oauth/review-result';
+import { isMetaConnectionPersistenceEnabled } from '@/lib/server/meta-oauth/env';
+import {
+  findMetaConnectionOwnerByPage,
+  persistMetaPageConnection,
+  type MetaConnectionRpcPort,
+  type MetaPersistenceErrorCode,
+} from '@/lib/server/meta-oauth/connection-persistence';
+import { createMetaConnectionRpcPort } from '@/lib/server/meta-oauth/connection-rpc';
 import { isMetaIntegrationsReviewEnabled } from '@/lib/flags';
 import { readBindingCookie, clearBindingCookie } from '@/lib/server/meta-oauth/cookie';
 import { exchangeCodeForToken } from '@/lib/server/meta-oauth/token-exchange';
@@ -92,6 +103,7 @@ import { fetchPageReadEngagement } from '@/lib/server/meta-oauth/page-read-engag
 import {
   fetchGrantedUserPermissions,
   findMissingRequiredPermission,
+  REQUIRED_LEAD_ADS_PERMISSIONS,
 } from '@/lib/server/meta-oauth/user-permissions';
 import { subscribePageToWebhookField } from '@/lib/server/meta-oauth/page-subscription';
 import { logMetaOAuthEvent, logMetaOAuthError } from '@/lib/server/meta-oauth/logger';
@@ -159,6 +171,20 @@ function reviewUiRedirectResponse(location: string): Response {
       'Set-Cookie': clearBindingCookie(isSecureEnv()),
     },
   });
+}
+
+// Erros da camada de persistência viram código fechado de review. Nunca
+// mensagem SQL, Graph, ciphertext, token ou chave.
+function toReviewFailureCode(code: MetaPersistenceErrorCode): ReviewResultFailureCode {
+  switch (code) {
+    case 'page_already_connected':
+    case 'persistence_unavailable':
+    case 'token_encryption_failed':
+    case 'invalid_persistence_input':
+      return code;
+    default:
+      return 'connection_persist_failed';
+  }
 }
 
 // Sanitização defensiva de qualquer string vinda da Meta antes de ir para
@@ -503,6 +529,43 @@ export async function GET(request: Request): Promise<Response> {
     return errorResponse(502, 'test_page_access_token_missing', { clearCookie: true });
   }
 
+  // META-P4B: persistência SÓ no fluxo review_ui com flag ligada. Falha de
+  // persistência vira redirect de review com código fechado (sem JSON cru).
+  const persistenceEnabled = isReviewUiFlow && isMetaConnectionPersistenceEnabled();
+  let persistencePort: MetaConnectionRpcPort | null = null;
+  const failReview = (code: ReviewResultFailureCode): Response => {
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'persistence_failed',
+      reason: code,
+      testPageId: META_TEST_PAGE_ID,
+      durationMs: Date.now() - startedAt,
+    });
+    const failureToken = createReviewResultToken({
+      secret,
+      companyId: META_TEST_COMPANY_ID,
+      outcome: 'failure',
+      failureCode: code,
+    });
+    const failureUrl = new URL(`/company/${META_TEST_COMPANY_ID}`, appOrigin);
+    failureUrl.searchParams.set('meta_review', failureToken);
+    return reviewUiRedirectResponse(failureUrl.toString());
+  };
+
+  if (persistenceEnabled) {
+    try {
+      persistencePort = createMetaConnectionRpcPort();
+    } catch {
+      return failReview('persistence_unavailable');
+    }
+    const owner = await findMetaConnectionOwnerByPage({ rpc: persistencePort }, META_TEST_PAGE_ID);
+    if (!owner.ok) return failReview(toReviewFailureCode('code' in owner ? owner.code : 'connection_persist_failed'));
+    if (owner.value && owner.value.companyId !== META_TEST_COMPANY_ID) {
+      return failReview('page_already_connected');
+    }
+  }
+
   const advertiseTaskPresent = pageLookup.tasks.includes(REQUIRED_LEADGEN_PAGE_TASK);
   if (!advertiseTaskPresent) {
     logMetaOAuthEvent({
@@ -553,8 +616,7 @@ export async function GET(request: Request): Promise<Response> {
     subscribedField: LEADGEN_SUBSCRIBED_FIELD,
     graphApiVersion,
   });
-  // A partir daqui `pageLookup.pageAccessToken` (Page Access Token) não é
-  // mais referenciado.
+  const leadgenSubscribedAt = new Date();
 
   if (!subscription.ok) {
     // `in` em vez de narrowing pelo discriminante: o tsconfig do projeto
@@ -572,6 +634,33 @@ export async function GET(request: Request): Promise<Response> {
       durationMs: Date.now() - startedAt,
     });
     return errorResponse(502, 'test_page_subscription_failed', { clearCookie: true });
+  }
+
+  // Único uso do Page Access Token após o subscribe: cifrado em memória pela
+  // camada de persistência e enviado somente como ciphertext à RPC. Sem
+  // persistência (flag OFF ou fluxo não-review), o token não sai daqui.
+  if (persistenceEnabled && persistencePort) {
+    const persisted = await persistMetaPageConnection(
+      { rpc: persistencePort },
+      {
+        companyId: META_TEST_COMPANY_ID,
+        pageId: META_TEST_PAGE_ID,
+        pageName: pageLookup.pageName,
+        pageAccessToken: pageLookup.pageAccessToken,
+        grantedScopes: [...REQUIRED_LEAD_ADS_PERMISSIONS],
+        connectedAt: new Date(),
+        connectedBy: uid,
+        leadgenSubscribedAt,
+      },
+    );
+    if (!persisted.ok) return failReview(toReviewFailureCode('code' in persisted ? persisted.code : 'connection_persist_failed'));
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'persistence_completed',
+      testPageId: META_TEST_PAGE_ID,
+      durationMs: Date.now() - startedAt,
+    });
   }
 
   logMetaOAuthEvent({
@@ -596,7 +685,12 @@ export async function GET(request: Request): Promise<Response> {
   // mas o valor efetivamente usado na URL de redirect é a constante fixa,
   // nunca `cid` bruto do state. ═════════════════════════════════════════
   if (isReviewUiFlow) {
-    const token = createReviewResultToken({ secret, companyId: META_TEST_COMPANY_ID });
+    const token = createReviewResultToken({
+      secret,
+      companyId: META_TEST_COMPANY_ID,
+      outcome: 'success',
+      persisted: persistenceEnabled,
+    });
     const redirectUrl = new URL(`/company/${META_TEST_COMPANY_ID}`, appOrigin);
     redirectUrl.searchParams.set('meta_review', token);
     return reviewUiRedirectResponse(redirectUrl.toString());

@@ -91,6 +91,8 @@ describe('MetaIntegrationsTabSection — retorno do callback (meta_review na URL
     window.history.pushState(null, '', `/company/${COMPANY_ID}?meta_review=signed-token-abc`);
     m.fetchMetaReviewStatusRequest.mockResolvedValue({
       outcome: 'ok',
+      reviewOutcome: 'success',
+      persisted: false,
       stage: 'test_page_permissions_verified',
       page: { matched: true, advertiseTaskPresent: true, readEngagementVerified: true },
       pageSubscription: { verified: true, field: 'leadgen' },
@@ -111,6 +113,8 @@ describe('MetaIntegrationsTabSection — retorno do callback (meta_review na URL
     window.history.pushState(null, '', `/company/${COMPANY_ID}?meta_review=signed-token-abc`);
     m.fetchMetaReviewStatusRequest.mockResolvedValue({
       outcome: 'ok',
+      reviewOutcome: 'success',
+      persisted: false,
       stage: 'test_page_permissions_verified',
       page: { matched: true, advertiseTaskPresent: true, readEngagementVerified: true },
       pageSubscription: { verified: true, field: 'leadgen' },
@@ -127,6 +131,8 @@ describe('MetaIntegrationsTabSection — retorno do callback (meta_review na URL
     window.history.pushState(null, '', `/company/${COMPANY_ID}?meta_review=signed-token-abc`);
     m.fetchMetaReviewStatusRequest.mockResolvedValue({
       outcome: 'ok',
+      reviewOutcome: 'success',
+      persisted: false,
       stage: 'test_page_permissions_verified',
       page: { matched: true, advertiseTaskPresent: true, readEngagementVerified: true },
       pageSubscription: { verified: true, field: 'leadgen' },
@@ -158,6 +164,8 @@ describe('MetaIntegrationsTabSection — sem segredo no client, sem persistênci
     window.history.pushState(null, '', `/company/${COMPANY_ID}?meta_review=signed-token-abc`);
     m.fetchMetaReviewStatusRequest.mockResolvedValue({
       outcome: 'ok',
+      reviewOutcome: 'success',
+      persisted: false,
       stage: 'test_page_permissions_verified',
       page: { matched: true, advertiseTaskPresent: true, readEngagementVerified: true },
       pageSubscription: { verified: true, field: 'leadgen' },
@@ -173,6 +181,8 @@ describe('MetaIntegrationsTabSection — sem segredo no client, sem persistênci
     window.history.pushState(null, '', `/company/${COMPANY_ID}?meta_review=signed-token-abc`);
     m.fetchMetaReviewStatusRequest.mockResolvedValue({
       outcome: 'ok',
+      reviewOutcome: 'success',
+      persisted: false,
       stage: 'test_page_permissions_verified',
       page: { matched: true, advertiseTaskPresent: true, readEngagementVerified: true },
       pageSubscription: { verified: true, field: 'leadgen' },
@@ -180,5 +190,68 @@ describe('MetaIntegrationsTabSection — sem segredo no client, sem persistênci
     render(<MetaIntegrationsTabSection companyId={COMPANY_ID} />);
     await waitFor(() => expect(screen.getByTestId('meta-integration-verified')).toBeInTheDocument());
     expect(localSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('MetaIntegrationsTabSection — persistência P4B (review result)', () => {
+  it('sucesso com persistência: mostra "Conexão persistida com segurança" e os quatro itens validados', async () => {
+    window.history.pushState(null, '', `/company/${COMPANY_ID}?meta_review=signed-token-persisted`);
+    m.fetchMetaReviewStatusRequest.mockResolvedValue({
+      outcome: 'ok',
+      reviewOutcome: 'success',
+      persisted: true,
+      stage: 'test_page_permissions_verified',
+      page: { matched: true, advertiseTaskPresent: true, readEngagementVerified: true },
+      pageSubscription: { verified: true, field: 'leadgen' },
+    });
+    render(<MetaIntegrationsTabSection companyId={COMPANY_ID} />);
+    await waitFor(() => expect(screen.getByTestId('meta-integration-verified')).toBeInTheDocument());
+    expect(screen.getByText('Conexão persistida com segurança')).toBeInTheDocument();
+    expect(screen.getByText('leads_retrieval: Validado')).toBeInTheDocument();
+    expect(screen.queryByText('Fluxo de teste concluído. O token não é salvo nesta etapa.')).toBeNull();
+  });
+
+  it('falha de persistência genérica: mensagem amigável, sem status de sucesso', async () => {
+    window.history.pushState(null, '', `/company/${COMPANY_ID}?meta_review=signed-token-fail`);
+    m.fetchMetaReviewStatusRequest.mockResolvedValue({
+      outcome: 'ok',
+      reviewOutcome: 'failure',
+      failureCode: 'connection_persist_failed',
+    });
+    render(<MetaIntegrationsTabSection companyId={COMPANY_ID} />);
+    await waitFor(() => expect(screen.getByTestId('meta-integration-persist-failed')).toBeInTheDocument());
+    expect(screen.getByText('Não foi possível concluir a conexão Meta. Tente conectar novamente.')).toBeInTheDocument();
+    expect(screen.queryByTestId('meta-integration-verified')).toBeNull();
+  });
+
+  it('page_already_connected: informa sem revelar dados de outra company', async () => {
+    window.history.pushState(null, '', `/company/${COMPANY_ID}?meta_review=signed-token-conflict`);
+    m.fetchMetaReviewStatusRequest.mockResolvedValue({
+      outcome: 'ok',
+      reviewOutcome: 'failure',
+      failureCode: 'page_already_connected',
+    });
+    render(<MetaIntegrationsTabSection companyId={COMPANY_ID} />);
+    await waitFor(() => expect(screen.getByText('Esta Página já está vinculada a outra empresa no CRM.')).toBeInTheDocument());
+    expect(document.body.textContent ?? '').not.toMatch(/ciphertext|access_token|v1\.|SQL|DETAIL/);
+  });
+
+  it('refresh depois do retorno: a URL já foi limpa, a tela volta para Conectar Meta', async () => {
+    window.history.pushState(null, '', `/company/${COMPANY_ID}?meta_review=signed-token-once`);
+    m.fetchMetaReviewStatusRequest.mockResolvedValue({
+      outcome: 'ok',
+      reviewOutcome: 'success',
+      persisted: true,
+      stage: 'test_page_permissions_verified',
+      page: { matched: true, advertiseTaskPresent: true, readEngagementVerified: true },
+      pageSubscription: { verified: true, field: 'leadgen' },
+    });
+    const { unmount } = render(<MetaIntegrationsTabSection companyId={COMPANY_ID} />);
+    await waitFor(() => expect(screen.getByTestId('meta-integration-verified')).toBeInTheDocument());
+    unmount();
+    expect(new URL(window.location.href).searchParams.has('meta_review')).toBe(false);
+    render(<MetaIntegrationsTabSection companyId={COMPANY_ID} />);
+    expect(screen.queryByTestId('meta-integration-verified')).toBeNull();
+    expect(screen.getByText('Conectar Meta')).toBeInTheDocument();
   });
 });

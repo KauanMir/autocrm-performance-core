@@ -31,8 +31,16 @@ const MISSING_SESSION_ERROR = 'Sua sessão expirou. Entre novamente.';
 type ReviewStatusState =
   | { kind: 'idle' }
   | { kind: 'checking' }
-  | { kind: 'verified' }
+  | { kind: 'verified'; persisted: boolean }
+  | { kind: 'persist_failed'; message: string }
   | { kind: 'status_error'; message: string };
+
+const PERSIST_FAILED_GENERIC = 'Não foi possível concluir a conexão Meta. Tente conectar novamente.';
+const PAGE_ALREADY_CONNECTED = 'Esta Página já está vinculada a outra empresa no CRM.';
+
+function persistFailureMessage(failureCode: string): string {
+  return failureCode === 'page_already_connected' ? PAGE_ALREADY_CONNECTED : PERSIST_FAILED_GENERIC;
+}
 
 export function MetaIntegrationsTabSection({ companyId }: MetaIntegrationsTabSectionProps) {
   const [status, setStatus] = useState<ReviewStatusState>({ kind: 'idle' });
@@ -74,7 +82,13 @@ export function MetaIntegrationsTabSection({ companyId }: MetaIntegrationsTabSec
         return;
       }
       const result = await fetchMetaReviewStatusRequest(token, accessToken);
-      setStatus(result.outcome === 'ok' ? { kind: 'verified' } : { kind: 'status_error', message: GENERIC_STATUS_ERROR });
+      if (result.outcome === 'ok' && result.reviewOutcome === 'success') {
+        setStatus({ kind: 'verified', persisted: result.persisted });
+      } else if (result.outcome === 'ok' && result.reviewOutcome === 'failure') {
+        setStatus({ kind: 'persist_failed', message: persistFailureMessage(result.failureCode) });
+      } else {
+        setStatus({ kind: 'status_error', message: GENERIC_STATUS_ERROR });
+      }
     })();
   }, [getAccessToken]);
 
@@ -93,6 +107,7 @@ export function MetaIntegrationsTabSection({ companyId }: MetaIntegrationsTabSec
   };
 
   const verified = status.kind === 'verified';
+  const persisted = status.kind === 'verified' && status.persisted;
 
   return (
     <LCard style={{ maxWidth: 560 }}>
@@ -110,6 +125,11 @@ export function MetaIntegrationsTabSection({ companyId }: MetaIntegrationsTabSec
             <Icon name="checkCircle" size={16} stroke={2.2} style={{ color: 'var(--green)' }} />
             <LBadge tone="green">Autorização Meta validada</LBadge>
           </div>
+          {persisted && (
+            <div data-testid="meta-integration-persisted" style={{ fontSize: 13, marginBottom: 10 }}>
+              Conexão persistida com segurança
+            </div>
+          )}
           <div style={{ fontSize: 13, marginBottom: 10 }}>
             <strong>Página de teste:</strong> {META_TEST_PAGE_LABEL}
           </div>
@@ -122,7 +142,11 @@ export function MetaIntegrationsTabSection({ companyId }: MetaIntegrationsTabSec
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--t-500)', display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 18 }}>
             <Icon name="shield" size={14} stroke={2} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>Fluxo de teste concluído. O token não é salvo nesta etapa.</span>
+            <span>
+              {persisted
+                ? 'Conexão concluída. O token fica cifrado no servidor e nunca é exibido.'
+                : 'Fluxo de teste concluído. O token não é salvo nesta etapa.'}
+            </span>
           </div>
           <LBtn kind="ghost" icon="refresh" onClick={handleConnect}
             style={{ opacity: isPending ? 0.6 : 1, cursor: isPending ? 'not-allowed' : 'pointer' }}>
@@ -134,6 +158,12 @@ export function MetaIntegrationsTabSection({ companyId }: MetaIntegrationsTabSec
           {status.kind === 'checking' && (
             <div data-testid="meta-integration-checking" style={{ fontSize: 12.5, color: 'var(--t-500)', marginBottom: 14 }}>
               Verificando autorização…
+            </div>
+          )}
+          {status.kind === 'persist_failed' && (
+            <div role="alert" data-testid="meta-integration-persist-failed"
+              style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 10, background: 'var(--red-bg)', border: '1px solid var(--red-line)', color: 'var(--red)', fontSize: 12.5 }}>
+              {status.message}
             </div>
           )}
           {status.kind === 'status_error' && (

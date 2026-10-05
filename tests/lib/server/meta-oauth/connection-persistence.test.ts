@@ -328,9 +328,16 @@ describe('logs e isolamento', () => {
     for (const spy of consoleSpies) expect(spy).not.toHaveBeenCalled();
   });
 
-  it('o callback OAuth ainda não importa a camada de persistência (P4A não altera o fluxo)', () => {
+  it('o callback só chega à persistência atrás da flag e do fluxo review, e depois do subscribe', () => {
     const source = readFileSync(path.resolve(process.cwd(), 'app/api/integrations/meta/oauth/callback/route.ts'), 'utf8');
-    expect(source).not.toContain('connection-persistence');
-    expect(source).not.toContain('meta_connection_');
+    const owner = source.indexOf('findMetaConnectionOwnerByPage(');
+    const subscribe = source.indexOf('await subscribePageToWebhookField(');
+    const persist = source.indexOf('await persistMetaPageConnection(');
+    expect(owner).toBeGreaterThan(0);
+    expect(subscribe).toBeGreaterThan(0);
+    expect(persist).toBeGreaterThan(subscribe);
+    expect(owner).toBeLessThan(subscribe);
+    expect(source).toContain('const persistenceEnabled = isReviewUiFlow && isMetaConnectionPersistenceEnabled();');
+    expect(source).not.toMatch(/meta_connection_(upsert|owner_by_page|status|lookup_by_page)/);
   });
 });
