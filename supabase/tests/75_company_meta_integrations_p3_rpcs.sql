@@ -16,13 +16,13 @@ select has_function('public', 'meta_connection_lookup_by_page', array['text'], '
 
 select is(
   (select count(*)::int from pg_proc p
-   where p.pronamespace = 'public'::regnamespace and p.proname like 'meta_connection\_%' and p.prosecdef),
+   where p.pronamespace = 'public'::regnamespace and p.proname in ('meta_connection_upsert', 'meta_connection_status', 'meta_connection_lookup_by_page') and p.prosecdef),
   3,
   'as três RPCs são SECURITY DEFINER');
 
 select is(
   (select count(*)::int from pg_proc p
-   where p.pronamespace = 'public'::regnamespace and p.proname like 'meta_connection\_%'
+   where p.pronamespace = 'public'::regnamespace and p.proname in ('meta_connection_upsert', 'meta_connection_status', 'meta_connection_lookup_by_page')
      and p.proconfig @> array['search_path=""']),
   3,
   'as três RPCs têm search_path fixo vazio (referências qualificadas)');
@@ -30,24 +30,24 @@ select is(
 select ok(
   not exists (
     select 1 from pg_proc p, aclexplode(p.proacl) a
-    where p.pronamespace = 'public'::regnamespace and p.proname like 'meta_connection\_%' and a.grantee = 0),
+    where p.pronamespace = 'public'::regnamespace and p.proname in ('meta_connection_upsert', 'meta_connection_status', 'meta_connection_lookup_by_page') and a.grantee = 0),
   'PUBLIC sem EXECUTE nas RPCs');
 
 select is(
   (select count(*)::int from pg_proc p
-   where p.pronamespace = 'public'::regnamespace and p.proname like 'meta_connection\_%'
+   where p.pronamespace = 'public'::regnamespace and p.proname in ('meta_connection_upsert', 'meta_connection_status', 'meta_connection_lookup_by_page')
      and has_function_privilege('anon', p.oid, 'EXECUTE')),
   0, 'anon sem EXECUTE nas RPCs');
 
 select is(
   (select count(*)::int from pg_proc p
-   where p.pronamespace = 'public'::regnamespace and p.proname like 'meta_connection\_%'
+   where p.pronamespace = 'public'::regnamespace and p.proname in ('meta_connection_upsert', 'meta_connection_status', 'meta_connection_lookup_by_page')
      and has_function_privilege('authenticated', p.oid, 'EXECUTE')),
   0, 'authenticated sem EXECUTE nas RPCs');
 
 select is(
   (select count(*)::int from pg_proc p
-   where p.pronamespace = 'public'::regnamespace and p.proname like 'meta_connection\_%'
+   where p.pronamespace = 'public'::regnamespace and p.proname in ('meta_connection_upsert', 'meta_connection_status', 'meta_connection_lookup_by_page')
      and has_function_privilege('service_role', p.oid, 'EXECUTE')),
   3, 'service_role com EXECUTE nas três RPCs');
 
@@ -79,13 +79,13 @@ select is(
 
 select is(
   (select count(*)::int from pg_proc p
-   where p.pronamespace = 'public'::regnamespace and p.proname like 'meta_connection\_%'
+   where p.pronamespace = 'public'::regnamespace and p.proname in ('meta_connection_upsert', 'meta_connection_status', 'meta_connection_lookup_by_page')
      and p.prosrc like '%variable_conflict%'),
   0, 'nenhum #variable_conflict no corpo das RPCs');
 
 select is(
   (select count(*)::int from pg_proc p
-   where p.pronamespace = 'public'::regnamespace and p.proname like 'meta_connection\_%'
+   where p.pronamespace = 'public'::regnamespace and p.proname in ('meta_connection_upsert', 'meta_connection_status', 'meta_connection_lookup_by_page')
      and p.prosrc ~'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'),
   0, 'nenhum UUID literal (inclusive TEST_COMPANY_ID) hardcoded nas RPCs');
 

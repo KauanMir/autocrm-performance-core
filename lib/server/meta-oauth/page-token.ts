@@ -33,7 +33,7 @@ export type PageTokenLookupFailureReason =
 export type PageTokenLookupResult =
   // Page alvo encontrada em /me/accounts. `pageAccessToken` pode vir vazio
   // se a Meta devolver a entrada sem `access_token` (caller deve tratar).
-  | { ok: true; found: true; httpStatus: number; pageAccessToken: string; tasks: string[] }
+  | { ok: true; found: true; httpStatus: number; pageId: string; pageName: string; pageAccessToken: string; tasks: string[] }
   // Página alvo NÃO está na lista devolvida.
   | { ok: true; found: false; httpStatus: number }
   // Falha de rede/HTTP/parse — nunca o corpo bruto da Meta.
@@ -113,7 +113,8 @@ export async function fetchPageAccessToken(input: FetchPageAccessTokenInput): Pr
 
     const accessToken = typeof obj.access_token === 'string' ? obj.access_token : '';
     const tasks = Array.isArray(obj.tasks) ? obj.tasks.filter((t): t is string => typeof t === 'string') : [];
-    return { ok: true, found: true, httpStatus, pageAccessToken: accessToken, tasks };
+    const pageName = typeof obj.name === 'string' ? obj.name : '';
+    return { ok: true, found: true, httpStatus, pageId: input.targetPageId, pageName, pageAccessToken: accessToken, tasks };
   }
 
   return { ok: true, found: false, httpStatus };

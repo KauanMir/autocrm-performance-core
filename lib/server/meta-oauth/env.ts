@@ -120,6 +120,13 @@ export function getMetaTokenEncryptionKeyV1(): Buffer {
   return Buffer.from(raw, 'hex');
 }
 
+// META_CONNECTION_PERSISTENCE_ENABLED — liga a persistência real da conexão
+// Meta (cifragem + meta_connection_upsert). Server-only, sem NEXT_PUBLIC_, sem
+// override de localStorage. Default OFF; só a string exata "true" liga.
+export function isMetaConnectionPersistenceEnabled(): boolean {
+  return process.env.META_CONNECTION_PERSISTENCE_ENABLED === 'true';
+}
+
 // META_GRAPH_API_VERSION — OPCIONAL. A Meta versiona a Graph API
 // trimestralmente; deixar como env permite acompanhar sem mudar código.
 // Se ausente/mal formada, cai no default de lib/server/meta-oauth/config.ts
