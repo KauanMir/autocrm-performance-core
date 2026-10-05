@@ -16,6 +16,7 @@ export const META_LEAD_ERROR_CODES = [
   'invalid_field_data',
   'missing_name',
   'missing_phone',
+  'duplicate_phone_ambiguous',
   'max_attempts',
   'event_expired',
 ] as const;
@@ -42,6 +43,7 @@ const ERROR_KIND: Record<MetaLeadErrorCode, MetaLeadErrorKind> = {
   invalid_field_data: 'terminal',
   missing_name: 'terminal',
   missing_phone: 'terminal',
+  duplicate_phone_ambiguous: 'terminal',
   max_attempts: 'terminal',
   event_expired: 'terminal',
 };

@@ -7,8 +7,9 @@ select has_table('public', 'meta_leadgen_events', 'tabela existe');
 
 select columns_are('public', 'meta_leadgen_events',
   array['id', 'integration_id', 'company_id', 'page_id', 'leadgen_id', 'form_id', 'status', 'crm_lead_id',
-        'attempts', 'locked_until', 'last_error_code', 'received_at', 'processed_at', 'created_at', 'updated_at'],
-  'colunas exatas: sem field_data, nome, telefone, email, CPF ou payload');
+        'attempts', 'locked_until', 'last_error_code', 'received_at', 'processed_at', 'created_at', 'updated_at',
+        'next_attempt_at', 'lease_token'],
+  'colunas exatas (P1 + P2.2 lease/retry): sem field_data, nome, telefone, email, CPF ou payload');
 
 select ok((select relrowsecurity from pg_class where oid = 'public.meta_leadgen_events'::regclass), 'RLS habilitado');
 select ok(not exists (select 1 from pg_policies where tablename = 'meta_leadgen_events'), 'zero policies');
@@ -22,8 +23,8 @@ select is(
 
 select is(
   (select count(*)::int from pg_proc p where p.pronamespace = 'public'::regnamespace
-     and p.proname like 'meta_leadgen_event\_%'),
-  1, 'única RPC do ledger é meta_leadgen_event_register');
+     and p.proname in ('meta_leadgen_event_claim', 'meta_leadgen_event_mark_failed', 'meta_leadgen_event_mark_processed')),
+  0, 'RPCs P1 removidas (claim/mark_failed/mark_processed) continuam ausentes');
 
 select is(
   (select count(*)::int from pg_proc p where p.pronamespace = 'public'::regnamespace

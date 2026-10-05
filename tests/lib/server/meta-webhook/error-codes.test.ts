@@ -8,7 +8,7 @@ import {
 } from '@/lib/server/meta-webhook/error-codes';
 
 describe('lista fechada de códigos', () => {
-  it('contém exatamente os 15 códigos aprovados', () => {
+  it('contém exatamente os 16 códigos aprovados', () => {
     expect([...META_LEAD_ERROR_CODES].sort()).toEqual(
       [
         'token_decrypt_failed',
@@ -24,6 +24,7 @@ describe('lista fechada de códigos', () => {
         'invalid_field_data',
         'missing_name',
         'missing_phone',
+        'duplicate_phone_ambiguous',
         'max_attempts',
         'event_expired',
       ].sort(),
@@ -43,6 +44,14 @@ describe('lista fechada de códigos', () => {
     expect(isMetaLeadErrorCode('')).toBe(false);
     expect(isMetaLeadErrorCode(undefined)).toBe(false);
     expect(isMetaLeadErrorCode('object_not_found')).toBe(false);
+  });
+});
+
+describe('duplicate_phone_ambiguous', () => {
+  it('existe e é terminal (2+ leads ativos com o mesmo telefone)', () => {
+    expect(isMetaLeadErrorCode('duplicate_phone_ambiguous')).toBe(true);
+    expect(metaLeadErrorKind('duplicate_phone_ambiguous')).toBe('terminal');
+    expect(isMetaLeadErrorRetryable('duplicate_phone_ambiguous')).toBe(false);
   });
 });
 
@@ -80,6 +89,7 @@ describe('classes', () => {
       'invalid_field_data',
       'missing_name',
       'missing_phone',
+      'duplicate_phone_ambiguous',
       'max_attempts',
       'event_expired',
     ] as const) {

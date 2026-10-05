@@ -1078,7 +1078,9 @@ export type Database = {
           integration_id: string
           last_error_code: string | null
           leadgen_id: string
+          lease_token: string | null
           locked_until: string | null
+          next_attempt_at: string
           page_id: string
           processed_at: string | null
           received_at: string
@@ -1095,7 +1097,9 @@ export type Database = {
           integration_id: string
           last_error_code?: string | null
           leadgen_id: string
+          lease_token?: string | null
           locked_until?: string | null
+          next_attempt_at?: string
           page_id: string
           processed_at?: string | null
           received_at: string
@@ -1112,7 +1116,9 @@ export type Database = {
           integration_id?: string
           last_error_code?: string | null
           leadgen_id?: string
+          lease_token?: string | null
           locked_until?: string | null
+          next_attempt_at?: string
           page_id?: string
           processed_at?: string | null
           received_at?: string
@@ -2747,6 +2753,17 @@ export type Database = {
           token_key_version: number
         }[]
       }
+      meta_connection_lookup_for_processing: {
+        Args: { p_integration_id: string }
+        Returns: {
+          out_access_token_ciphertext: string
+          out_company_id: string
+          out_integration_id: string
+          out_page_id: string
+          out_status: string
+          out_token_key_version: number
+        }[]
+      }
       meta_connection_owner_by_page: {
         Args: { p_page_id: string }
         Returns: {
@@ -2793,6 +2810,51 @@ export type Database = {
           page_id: string
           page_name: string
           status: string
+        }[]
+      }
+      meta_leadgen_error_kind: { Args: { p_code: string }; Returns: string }
+      meta_leadgen_event_claim_batch: {
+        Args: {
+          p_event_id?: string
+          p_lease_seconds?: number
+          p_limit?: number
+        }
+        Returns: {
+          out_attempts: number
+          out_company_id: string
+          out_event_id: string
+          out_form_id: string
+          out_integration_id: string
+          out_leadgen_id: string
+          out_lease_token: string
+          out_locked_until: string
+          out_page_id: string
+        }[]
+      }
+      meta_leadgen_event_complete: {
+        Args: {
+          p_car: string
+          p_event_id: string
+          p_lease_token: string
+          p_name: string
+          p_phone: string
+        }
+        Returns: {
+          out_crm_lead_id: string
+          out_outcome: string
+        }[]
+      }
+      meta_leadgen_event_fail: {
+        Args: {
+          p_error_code: string
+          p_event_id: string
+          p_lease_token: string
+        }
+        Returns: {
+          out_attempts: number
+          out_next_attempt_at: string
+          out_outcome: string
+          out_status: string
         }[]
       }
       meta_leadgen_event_register: {
