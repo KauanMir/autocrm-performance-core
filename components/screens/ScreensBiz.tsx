@@ -11,11 +11,12 @@ import { LeadService, VisitService, DealService, SaleService, SellerService, Pip
 import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
-import { canManageCompanySettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites, canManageFollowUpTemplates, canManageCompetitionRewards } from '@/lib/capabilities';
+import { canManageCompanySettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites, canManageFollowUpTemplates, canManageCompetitionRewards, canAccessMetaIntegrationsReviewTab } from '@/lib/capabilities';
 import { UsersTabSection } from '@/components/users/UsersTabSection';
 import { FollowUpsTabSection } from '@/components/followUpTemplates/FollowUpsTabSection';
 import { CompetitionRewardsTabSection } from '@/components/competitionRewards/CompetitionRewardsTabSection';
 import { CompetitionRewardHistorySection } from '@/components/competitionRewards/CompetitionRewardHistorySection';
+import { MetaIntegrationsTabSection } from '@/components/integrations/MetaIntegrationsTabSection';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled } from '@/lib/flags';
 import { useCompanySettings } from '@/lib/hooks/useCompanySettings';
@@ -1369,7 +1370,15 @@ export function ScreenAjustes({ go }: any) {
   // leitura precisa ser condicional na ORIGEM, não no consumo, porque
   // LeadService.getAll() já lança ao ser chamada, antes de qualquer JSX.
   const leads = currentUser?.activeMembership ? LeadService.getAll() : [];
-  const [tab, setTab] = useState('Empresa');
+  // META-OAUTH-REVIEW-UI: só abre direto em "Integrações" quando a própria
+  // URL já carrega o marcador `meta_review` (o redirect assinado do
+  // callback OAuth Meta — ver app/company/[companyId]/page.tsx). Qualquer
+  // outro acesso continua abrindo em "Empresa", exatamente como antes.
+  const [tab, setTab] = useState(() => (
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('meta_review')
+      ? 'Integrações'
+      : 'Empresa'
+  ));
   // COMPANY-SETTINGS-R1-EXEC §23 — estado do fixture LOCAL preservado
   // integralmente para preview/dev (isLocalCompany abaixo decide qual dos
   // dois caminhos é renderizado). CompanyService.get() nunca lança
@@ -1500,12 +1509,24 @@ export function ScreenAjustes({ go }: any) {
   // reward_campaign negam os demais com 42501); a UI reflete essa authority.
   const competitionRewardsAccess = canManageCompetitionRewards(currentUser);
   const competitionCompanyId = currentUser?.activeMembership?.companyId ?? null;
+  // META-OAUTH-REVIEW-UI — aba "Integrações": SOMENTE Super Admin operando
+  // explicitamente no contexto da company de teste fixa (mesmo `companyId`
+  // já resolvido acima para Empresa/Follow-ups — isOperationalSuperAdmin
+  // ? operational.companyId : activeMembership.companyId). Qualquer piloto,
+  // qualquer Manager/Seller (mesmo na própria company de teste), ou Super
+  // Admin em qualquer outra company: capability false, aba fora do array,
+  // fora do DOM.
+  const metaIntegrationsReviewAccess = canAccessMetaIntegrationsReviewTab({
+    platformRole: currentUser?.platformRole ?? null,
+    companyId,
+  });
   const allowedTabs: string[] = [
     ...(companySettingsAccess ? ['Empresa'] : []),
     ...(invitesAccess ? ['Usuários'] : []),
     ...(stageTabVisible ? ['Etapas'] : []),
     ...(followUpReadAccess ? ['Follow-ups'] : []),
     ...(competitionRewardsAccess ? ['Competição'] : []),
+    ...(metaIntegrationsReviewAccess ? ['Integrações'] : []),
   ];
   // Derivação SÍNCRONA: aba proibida nunca renderiza, nem por um frame, e o
   // estado antigo de aba não atravessa troca de usuário.
@@ -1738,6 +1759,9 @@ export function ScreenAjustes({ go }: any) {
             membershipRole="manager"
           />
         </>
+      )}
+      {activeTab === 'Integrações' && metaIntegrationsReviewAccess && companyId && (
+        <MetaIntegrationsTabSection companyId={companyId} />
       )}
     </LightScreen>
   );

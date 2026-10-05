@@ -56,6 +56,15 @@
 // no projeto; nenhuma rota existente é afetada. Rota pública por
 // necessidade (a Meta redireciona o browser sem o Bearer do SPA) — a
 // proteção é a assinatura do `state` + o binding do cookie.
+//
+// META-OAUTH-REVIEW-UI: quando (e SÓ quando) `state.f === "review_ui"`
+// (assinado pelo /start, só para Super Admin + company de teste — ver esse
+// arquivo) e o resultado é `test_page_permissions_verified`, esta rota
+// devolve um 302 para a SPA (Ajustes > Integrações) em vez do JSON de
+// sempre, com um token de resultado EFÊMERO e assinado na querystring
+// (lib/server/meta-oauth/review-result.ts — TTL curto, nunca persistido,
+// nunca token/segredo). Qualquer outro caso (piloto, erro, sem o flag)
+// continua exatamente como antes.
 import { randomUUID } from 'node:crypto';
 import { getAppUrl, InvalidAppUrlError } from '@/lib/server/env';
 import {
@@ -73,7 +82,8 @@ import {
   REQUIRED_LEADGEN_PAGE_TASK,
   LEADGEN_SUBSCRIBED_FIELD,
 } from '@/lib/server/meta-oauth/config';
-import { verifyOAuthState } from '@/lib/server/meta-oauth/state';
+import { verifyOAuthState, OAUTH_STATE_FLOW_REVIEW_UI } from '@/lib/server/meta-oauth/state';
+import { createReviewResultToken } from '@/lib/server/meta-oauth/review-result';
 import { readBindingCookie, clearBindingCookie } from '@/lib/server/meta-oauth/cookie';
 import { exchangeCodeForToken } from '@/lib/server/meta-oauth/token-exchange';
 import { fetchPageAccessToken } from '@/lib/server/meta-oauth/page-token';
@@ -125,6 +135,23 @@ function jsonResponse(status: number, body: unknown, extraHeaders?: Record<strin
 function errorResponse(status: number, code: CallbackErrorCode, opts?: { clearCookie?: boolean }): Response {
   const headers = opts?.clearCookie ? { 'Set-Cookie': clearBindingCookie(isSecureEnv()) } : undefined;
   return jsonResponse(status, { ok: false, error: code }, headers);
+}
+
+// META-OAUTH-REVIEW-UI: 302 de volta para a SPA — só usado no ramo de
+// sucesso quando `isReviewUiFlow` é true (ver abaixo). Nunca carrega
+// code/token/segredo — só o token de resultado efêmero e assinado
+// (lib/server/meta-oauth/review-result.ts), que prova apenas que este
+// callback chegou a `test_page_permissions_verified` para a company de
+// teste, dentro de um TTL curto.
+function reviewUiRedirectResponse(location: string): Response {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: location,
+      'Cache-Control': 'no-store',
+      'Set-Cookie': clearBindingCookie(isSecureEnv()),
+    },
+  });
 }
 
 // Sanitização defensiva de qualquer string vinda da Meta antes de ir para
@@ -275,11 +302,15 @@ export async function GET(request: Request): Promise<Response> {
   // SÓ AGORA (depois de TODO o gate) troca o `code` por access token,
   // exclusivamente server-side. O cookie é consumido (limpo) em todos os
   // ramos abaixo — o binding não pode ser reutilizado (anti-replay).
-  const { uid, cid } = stateResult.payload;
+  const { uid, cid, f: flow } = stateResult.payload;
   const contextFlags = {
     userIdPresent: typeof uid === 'string',
     companyIdPresent: typeof cid === 'string',
   };
+  // META-OAUTH-REVIEW-UI: só true quando o PRÓPRIO /start já validou Super
+  // Admin + company de teste antes de assinar o state (ver esse arquivo) —
+  // nunca inferido de nenhum input não assinado desta request.
+  const isReviewUiFlow = flow === OAUTH_STATE_FLOW_REVIEW_UI;
 
   // Envs da troca — fail closed. META_APP_SECRET é a MESMA credencial já
   // usada em Production pelo webhook; server-only, nunca devolvida/logada.
@@ -501,6 +532,7 @@ export async function GET(request: Request): Promise<Response> {
     requestId,
     operation: 'oauth_callback',
     result: 'test_page_permissions_verified',
+    reviewUiRedirect: isReviewUiFlow,
     metaHttpStatus: subscription.httpStatus,
     testPageId: META_TEST_PAGE_ID,
     pageFound: true,
@@ -509,6 +541,20 @@ export async function GET(request: Request): Promise<Response> {
     subscribedField: LEADGEN_SUBSCRIBED_FIELD,
     durationMs: Date.now() - startedAt,
   });
+
+  // ═══ META-OAUTH-REVIEW-UI: SÓ quando este state foi emitido pelo /start
+  // para a UI de review (flow=review_ui, já validada Super Admin + company
+  // de teste antes de chegar aqui) — volta para Ajustes > Integrações em
+  // vez do JSON abaixo. `cid` aqui é SEMPRE META_TEST_COMPANY_ID quando
+  // isReviewUiFlow é true (o /start nunca assina `f` para outra company),
+  // mas o valor efetivamente usado na URL de redirect é a constante fixa,
+  // nunca `cid` bruto do state. ═════════════════════════════════════════
+  if (isReviewUiFlow) {
+    const token = createReviewResultToken({ secret, companyId: META_TEST_COMPANY_ID });
+    const redirectUrl = new URL(`/company/${META_TEST_COMPANY_ID}`, appOrigin);
+    redirectUrl.searchParams.set('meta_review', token);
+    return reviewUiRedirectResponse(redirectUrl.toString());
+  }
 
   // Resposta: só metadados seguros. NUNCA o SUAT, NUNCA o Page Access
   // Token, nunca o `code`, nunca o App Secret, nunca outras Pages, nunca o

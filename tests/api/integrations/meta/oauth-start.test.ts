@@ -14,6 +14,7 @@ vi.mock('@/lib/server/invites/http', async (importOriginal) => {
 import { POST } from '@/app/api/integrations/meta/oauth/start/route';
 import { verifyOAuthState } from '@/lib/server/meta-oauth/state';
 import { BINDING_COOKIE_NAME } from '@/lib/server/meta-oauth/cookie';
+import { META_TEST_COMPANY_ID } from '@/lib/server/meta-oauth/config';
 
 const STATE_SECRET_HEX = 'a'.repeat(64);
 const SECRET_BUF = Buffer.from(STATE_SECRET_HEX, 'hex');
@@ -30,6 +31,8 @@ function fakeUserClient(opts: {
   companyErr?: unknown;
   allowed?: unknown;
   permErr?: unknown;
+  isSuperAdmin?: unknown;
+  superAdminErr?: unknown;
 } = {}) {
   return {
     rpc: vi.fn((name: string) => {
@@ -38,6 +41,9 @@ function fakeUserClient(opts: {
       }
       if (name === 'is_manager_or_platform') {
         return Promise.resolve({ data: opts.allowed ?? true, error: opts.permErr ?? null });
+      }
+      if (name === 'is_platform_super_admin') {
+        return Promise.resolve({ data: opts.isSuperAdmin ?? false, error: opts.superAdminErr ?? null });
       }
       throw new Error(`unexpected rpc: ${name}`);
     }),
@@ -260,5 +266,79 @@ describe('POST /api/integrations/meta/oauth/start', () => {
     expect(logged).not.toContain(cookieValue);
     expect(logged).not.toContain(STATE_SECRET_HEX);
     expect(logged).toContain('authorization_url_issued');
+  });
+});
+
+// META-OAUTH-REVIEW-UI — `flow: "review_ui"` opcional no body: só é aceito
+// (vira `f` assinado no state) quando o ator é Super Admin de plataforma
+// (is_platform_super_admin) E a company resolvida é EXATAMENTE a company de
+// teste fixa (META_TEST_COMPANY_ID). Qualquer outra combinação -> 403
+// forbidden, sem `f` no state — nenhum piloto é afetado.
+describe('POST /api/integrations/meta/oauth/start — flow: "review_ui" (App Review UI)', () => {
+  it('Super Admin + company de teste + flow=review_ui -> 200, state carrega f=review_ui', async () => {
+    mocks.requireAuthenticatedActor.mockResolvedValue(
+      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: true })),
+    );
+    const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID, flow: 'review_ui' } }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const state = new URL(body.authorizationUrl).searchParams.get('state') ?? '';
+    const cookieValue = cookieValueFromSetCookie(res.headers.get('set-cookie')) ?? '';
+    const verified = verifyOAuthState(state, { secret: SECRET_BUF, expectedBinding: cookieValue });
+    expect(verified.ok).toBe(true);
+    if (verified.ok) {
+      expect(verified.payload.f).toBe('review_ui');
+      expect(verified.payload.cid).toBe(META_TEST_COMPANY_ID);
+    }
+  });
+
+  it('Super Admin + OUTRA company + flow=review_ui -> 403 forbidden, nenhum state emitido', async () => {
+    mocks.requireAuthenticatedActor.mockResolvedValue(
+      authorizedActor(fakeUserClient({ companyId: COMPANY_ID, allowed: true, isSuperAdmin: true })),
+    );
+    const res = await POST(startRequest({ body: { company_id: COMPANY_ID, flow: 'review_ui' } }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe('forbidden');
+  });
+
+  it('Manager (não Super Admin) na company de teste + flow=review_ui -> 403 forbidden', async () => {
+    mocks.requireAuthenticatedActor.mockResolvedValue(
+      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: false })),
+    );
+    const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID, flow: 'review_ui' } }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe('forbidden');
+  });
+
+  it('erro na RPC is_platform_super_admin -> 500 server_misconfigured (fail closed)', async () => {
+    mocks.requireAuthenticatedActor.mockResolvedValue(
+      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, superAdminErr: { message: 'boom' } })),
+    );
+    const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID, flow: 'review_ui' } }));
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe('server_misconfigured');
+  });
+
+  it('flow com valor fora do catálogo fechado -> 400 invalid_body', async () => {
+    mocks.requireAuthenticatedActor.mockResolvedValue(
+      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: true })),
+    );
+    const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID, flow: 'anything_else' } }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('invalid_body');
+  });
+
+  it('sem flow no body (fluxo normal, piloto): state NUNCA carrega `f`, mesmo para Super Admin na company de teste', async () => {
+    mocks.requireAuthenticatedActor.mockResolvedValue(
+      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: true })),
+    );
+    const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID } }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const state = new URL(body.authorizationUrl).searchParams.get('state') ?? '';
+    const cookieValue = cookieValueFromSetCookie(res.headers.get('set-cookie')) ?? '';
+    const verified = verifyOAuthState(state, { secret: SECRET_BUF, expectedBinding: cookieValue });
+    expect(verified.ok).toBe(true);
+    if (verified.ok) expect(verified.payload.f).toBeUndefined();
   });
 });

@@ -16,6 +16,14 @@
 //       interno — não é PII sensível nem segredo; vai assinado).
 //   cid OPCIONAL: id da company alvo, já autorizada no /start (UUID
 //       interno). Nunca access token, App Secret, senha ou PII.
+//   f   OPCIONAL: indicador de fluxo NÃO sensível, restrito a um único
+//       literal fixo ("review_ui" — UI de demonstração do App Review).
+//       Setado pelo /start SÓ quando o próprio /start já validou Super
+//       Admin + company de teste (nunca aceito de um valor não assinado do
+//       cliente); o /callback só troca o comportamento de resposta
+//       (redirect em vez de JSON) quando este campo, já verificado por
+//       HMAC, é exatamente "review_ui". Nenhum outro valor é aceito —
+//       qualquer string diferente derruba o state inteiro como malformed.
 //
 // Propriedades de segurança:
 //   - imprevisível: nonce de CSPRNG (randomBytes);
@@ -48,9 +56,14 @@ export interface OAuthStatePayload {
   b?: string;
   uid?: string;
   cid?: string;
+  f?: string;
 }
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+// Único literal aceito para `f` — catálogo fechado, não uma string livre.
+export const OAUTH_STATE_FLOW_REVIEW_UI = 'review_ui' as const;
+export type OAuthStateFlow = typeof OAUTH_STATE_FLOW_REVIEW_UI;
 
 // ── helpers ───────────────────────────────────────────────────────────
 function sign(body: string, secret: Buffer): string {
@@ -96,6 +109,9 @@ export interface CreateOAuthStateOptions {
   // manter compatibilidade com states já emitidos sem eles.
   userId?: string;
   companyId?: string;
+  // Só setado pelo /start após ele mesmo já ter validado Super Admin +
+  // company de teste — nunca repassado de um input não verificado.
+  flow?: OAuthStateFlow;
 }
 
 export function createOAuthState(opts: CreateOAuthStateOptions): string {
@@ -117,6 +133,9 @@ export function createOAuthState(opts: CreateOAuthStateOptions): string {
   }
   if (opts.companyId) {
     payload.cid = opts.companyId;
+  }
+  if (opts.flow) {
+    payload.f = opts.flow;
   }
 
   const body = encodePayload(payload);
@@ -187,7 +206,10 @@ export function verifyOAuthState(raw: unknown, opts: VerifyOAuthStateOptions): V
     !Number.isFinite(payload.exp) ||
     (payload.b !== undefined && typeof payload.b !== 'string') ||
     (payload.uid !== undefined && (typeof payload.uid !== 'string' || !UUID_PATTERN.test(payload.uid))) ||
-    (payload.cid !== undefined && (typeof payload.cid !== 'string' || !UUID_PATTERN.test(payload.cid)))
+    (payload.cid !== undefined && (typeof payload.cid !== 'string' || !UUID_PATTERN.test(payload.cid))) ||
+    // catálogo fechado: qualquer valor além do único literal aceito derruba
+    // o state inteiro (nunca uma string livre vinda do corpo assinado).
+    (payload.f !== undefined && payload.f !== OAUTH_STATE_FLOW_REVIEW_UI)
   ) {
     return { ok: false, reason: 'malformed' };
   }
@@ -247,6 +269,7 @@ export function verifyOAuthState(raw: unknown, opts: VerifyOAuthStateOptions): V
       ...(hasBinding ? { b: payload.b as string } : {}),
       ...(typeof payload.uid === 'string' ? { uid: payload.uid } : {}),
       ...(typeof payload.cid === 'string' ? { cid: payload.cid } : {}),
+      ...(typeof payload.f === 'string' ? { f: payload.f } : {}),
     },
   };
 }

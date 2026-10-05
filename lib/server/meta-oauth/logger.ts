@@ -12,7 +12,7 @@
 // /me/accounts) ou qualquer PII.
 export interface MetaOAuthLogFields {
   requestId: string;
-  operation: 'oauth_callback' | 'oauth_start';
+  operation: 'oauth_callback' | 'oauth_start' | 'oauth_review_status';
   result: string;
   // Metadados técnicos mínimos — todos opcionais.
   reason?: string; // motivo sanitizado de rejeição (enum interno)
@@ -40,6 +40,9 @@ export interface MetaOAuthLogFields {
   // Leitura mínima da Page (pages_read_engagement) — só o booleano de
   // resultado, nunca o corpo (id/name) devolvido pela Meta.
   readEngagementVerified?: boolean;
+  // META-OAUTH-REVIEW-UI — só o booleano de qual caminho de resposta o
+  // callback tomou no sucesso (redirect assinado vs. JSON de sempre).
+  reviewUiRedirect?: boolean;
 }
 
 export function logMetaOAuthEvent(fields: MetaOAuthLogFields): void {

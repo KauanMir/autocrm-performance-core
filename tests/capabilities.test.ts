@@ -10,6 +10,8 @@ import {
   membershipLifecycleCapabilities,
   canUseFollowUpTemplate,
   canManageFollowUpTemplates,
+  canAccessMetaIntegrationsReviewTab,
+  META_OAUTH_REVIEW_TEST_COMPANY_ID,
   type MembershipLifecycleActor,
   type MembershipLifecycleTargetRow,
   type CommercialMutationCapabilityInput,
@@ -372,5 +374,38 @@ describe('canManageFollowUpTemplates', () => {
   it('sem ator (null/undefined): false', () => {
     expect(canManageFollowUpTemplates({ actor: null, companyStatus: 'ativa' })).toBe(false);
     expect(canManageFollowUpTemplates({ actor: undefined, companyStatus: 'ativa' })).toBe(false);
+  });
+});
+
+// META-OAUTH-REVIEW-UI — aba "Integrações" de Ajustes: SOMENTE Super Admin
+// operando explicitamente na company de teste fixa (App Review da Meta).
+// Nenhum Manager/Seller, nem em nenhuma outra company, nem o próprio Super
+// Admin fora dessa company específica.
+describe('canAccessMetaIntegrationsReviewTab — META-OAUTH-REVIEW-UI', () => {
+  const OTHER_COMPANY_ID = 'company-a';
+
+  it('Super Admin operando na company de teste: true', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ platformRole: 'super_admin', companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID })).toBe(true);
+  });
+
+  it('Super Admin em qualquer outra company: false', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ platformRole: 'super_admin', companyId: OTHER_COMPANY_ID })).toBe(false);
+  });
+
+  it('Super Admin sem company (global, fora de contexto operacional): false', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ platformRole: 'super_admin', companyId: null })).toBe(false);
+  });
+
+  it('Manager na própria company de teste (hipotético): false — nunca Manager, mesmo na company certa', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ platformRole: null, companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID })).toBe(false);
+  });
+
+  it('Seller na company de teste: false', () => {
+    expect(canAccessMetaIntegrationsReviewTab({ platformRole: null, companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID })).toBe(false);
+  });
+
+  it('null/undefined: false', () => {
+    expect(canAccessMetaIntegrationsReviewTab(null)).toBe(false);
+    expect(canAccessMetaIntegrationsReviewTab(undefined)).toBe(false);
   });
 });

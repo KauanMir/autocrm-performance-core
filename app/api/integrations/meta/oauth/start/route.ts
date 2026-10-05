@@ -21,8 +21,15 @@
 // integração no banco; não conecta nenhuma Página/conta.
 //
 // ISOLAMENTO: importado por nada além do fluxo Meta OAuth. Sem middleware.
-// Nenhum tenant existente é afetado — não há UI, e a rota só responde a
-// um POST autenticado por Manager/Super Admin.
+// Nenhum tenant existente é afetado — a rota só responde a um POST
+// autenticado por Manager/Super Admin.
+//
+// META-OAUTH-REVIEW-UI: body opcional `flow: "review_ui"` (UI mínima de
+// Ajustes > Integrações, só para o vídeo do App Review). Só é aceito
+// (vira `f` no state assinado) quando, ALÉM da autorização normal acima,
+// o ator é Super Admin (is_platform_super_admin()) E a company resolvida é
+// EXATAMENTE a company de teste fixa (META_TEST_COMPANY_ID). Qualquer
+// piloto continua exatamente como antes — nunca alcança este ramo.
 import { randomUUID } from 'node:crypto';
 import {
   requireAuthenticatedActor,
@@ -39,8 +46,9 @@ import {
   getMetaLoginConfigId,
   MissingMetaLoginConfigIdError,
 } from '@/lib/server/meta-oauth/env';
-import { createOAuthState } from '@/lib/server/meta-oauth/state';
+import { createOAuthState, OAUTH_STATE_FLOW_REVIEW_UI } from '@/lib/server/meta-oauth/state';
 import { buildMetaAuthorizationUrl } from '@/lib/server/meta-oauth/authorize-url';
+import { META_TEST_COMPANY_ID } from '@/lib/server/meta-oauth/config';
 import {
   generateBinding,
   serializeBindingCookie,
@@ -51,7 +59,10 @@ import { logMetaOAuthEvent, logMetaOAuthError } from '@/lib/server/meta-oauth/lo
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const ALLOWED_BODY_KEYS = ['company_id'] as const;
+// META-OAUTH-REVIEW-UI: `flow` opcional, catálogo fechado de UM literal
+// ("review_ui") — validado abaixo antes de qualquer efeito. Nunca repassado
+// direto ao state sem a checagem extra de Super Admin + company de teste.
+const ALLOWED_BODY_KEYS = ['company_id', 'flow'] as const;
 
 type StartErrorCode =
   | 'server_misconfigured'
@@ -156,6 +167,12 @@ export async function POST(request: Request): Promise<Response> {
     return errorResponse(400, 'invalid_body');
   }
 
+  const rawFlow = bodyResult.value.flow;
+  if (rawFlow !== undefined && rawFlow !== null && rawFlow !== OAUTH_STATE_FLOW_REVIEW_UI) {
+    return errorResponse(400, 'invalid_body');
+  }
+  const requestedReviewUiFlow = rawFlow === OAUTH_STATE_FLOW_REVIEW_UI;
+
   // ── autenticação (mecanismo real do CRM) ─────────────────────────
   const actorResult = await requireAuthenticatedActor(request);
   if (actorResult.ok === false) {
@@ -220,6 +237,50 @@ export async function POST(request: Request): Promise<Response> {
     return errorResponse(403, 'forbidden');
   }
 
+  // ── META-OAUTH-REVIEW-UI: gate ADICIONAL, só quando a UI de Integrações
+  // pediu explicitamente o indicador `review_ui` — nunca aceito de um valor
+  // não verificado do cliente. Precisa das DUAS condições, checadas
+  // server-side: (a) a company já resolvida acima é EXATAMENTE a company de
+  // teste fixa; (b) o ator é Super Admin de plataforma (is_platform_super_
+  // admin(), mesma RPC usada por app/api/admin/users/[profileId]/email/
+  // route.ts — nunca inferido de is_manager_or_platform, que também aceita
+  // Manager). Falhar qualquer uma das duas => 403 forbidden, SEM `f` no
+  // state (o fluxo de start continua funcionando normalmente pros pilotos
+  // — só perde o indicador de redirect da UI de review). ──────────────────
+  let reviewUiAuthorized = false;
+  if (requestedReviewUiFlow) {
+    if (targetCompanyId !== META_TEST_COMPANY_ID) {
+      logMetaOAuthEvent({
+        requestId,
+        operation: 'oauth_start',
+        result: 'forbidden',
+        authenticatedUserPresent: true,
+        companyResolved: true,
+        permissionGranted: true,
+        durationMs: Date.now() - startedAt,
+      });
+      return errorResponse(403, 'forbidden');
+    }
+    const { data: isSuperAdmin, error: superAdminError } = await userClient.rpc('is_platform_super_admin');
+    if (superAdminError) {
+      logMetaOAuthError('permission_check_failed', { requestId });
+      return errorResponse(500, 'server_misconfigured');
+    }
+    if (isSuperAdmin !== true) {
+      logMetaOAuthEvent({
+        requestId,
+        operation: 'oauth_start',
+        result: 'forbidden',
+        authenticatedUserPresent: true,
+        companyResolved: true,
+        permissionGranted: true,
+        durationMs: Date.now() - startedAt,
+      });
+      return errorResponse(403, 'forbidden');
+    }
+    reviewUiAuthorized = true;
+  }
+
   // ── binding + state ─────────────────────────────────────────────
   const binding = generateBinding();
   const state = createOAuthState({
@@ -228,6 +289,7 @@ export async function POST(request: Request): Promise<Response> {
     userId: actor.profileId,
     companyId: targetCompanyId,
     ttlSeconds: BINDING_COOKIE_MAX_AGE_SECONDS,
+    ...(reviewUiAuthorized ? { flow: OAUTH_STATE_FLOW_REVIEW_UI } : {}),
   });
 
   const setCookie = serializeBindingCookie({ value: binding, secure: isSecureEnv() });

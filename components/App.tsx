@@ -706,7 +706,13 @@ function AuthenticatedApp({
   );
 }
 
-export function App({ operationalCompanyId = null }: { operationalCompanyId?: string | null } = {}) {
+// META-OAUTH-REVIEW-UI: `initialScreen` é OPCIONAL e aditivo — default
+// undefined preserva 100% do comportamento anterior ('home') para todo
+// chamador existente. Só app/company/[companyId]/page.tsx passa um valor,
+// e só quando a própria URL já carrega o marcador do redirect assinado do
+// callback OAuth Meta (ver esse arquivo) — nenhuma outra rota é afetada,
+// nenhum mecanismo genérico de "deep link por tela" foi criado.
+export function App({ operationalCompanyId = null, initialScreen }: { operationalCompanyId?: string | null; initialScreen?: string } = {}) {
   // PILOT-UI-TRUTH-FIXES-R1-EXEC — TweaksPanel é uma ferramenta de dev/QA
   // (edit-mode via postMessage, revisão de telas de Auth, fixtures locais),
   // nunca deve alcançar um usuário real (Manager/Seller/Super Admin) em
@@ -720,7 +726,7 @@ export function App({ operationalCompanyId = null }: { operationalCompanyId?: st
   // de teste rodar.
   const isDevPreview = process.env.NODE_ENV === 'development';
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
-  const [current, setCurrent] = useState('home');
+  const [current, setCurrent] = useState(initialScreen ?? 'home');
   // PILOT-UI-TRUTH-FIXES-R1-EXEC §11 — parâmetros opcionais de navegação
   // (ex.: filtro inicial de Clientes), mesmo padrão de payload já usado por
   // openFlow. Nunca persiste entre navegações: cada chamada de go()

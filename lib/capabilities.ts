@@ -335,3 +335,22 @@ export function canManageFollowUpTemplates(input: ManageFollowUpTemplatesCapabil
 export function canManageCompetitionRewards(user: CapabilityUser): boolean {
   return isActiveManager(user);
 }
+
+// META-OAUTH-REVIEW-UI — aba "Integrações" de Ajustes: UI mínima e isolada
+// para demonstrar o fluxo Meta Lead Ads no App Review. SOMENTE Super Admin
+// operando explicitamente no contexto da company de teste fixa (mesmo id de
+// lib/server/meta-oauth/config.ts:META_TEST_COMPANY_ID — duplicado aqui de
+// propósito: este módulo é client-safe e nunca importa lib/server/*).
+// Qualquer outra company, ou qualquer outro papel (Manager/Seller, mesmo na
+// própria company de teste), NUNCA vê a aba — nem vazio, nem parcial.
+// Nenhum piloto é afetado: nenhuma outra company tem este id.
+export const META_OAUTH_REVIEW_TEST_COMPANY_ID = '0dfc73ee-bca9-4fdf-aa50-b227940b2869';
+
+export type MetaIntegrationsReviewCapabilityUser = {
+  platformRole: User['platformRole'];
+  companyId: string | null;
+};
+
+export function canAccessMetaIntegrationsReviewTab(user: MetaIntegrationsReviewCapabilityUser | null | undefined): boolean {
+  return user?.platformRole === 'super_admin' && user?.companyId === META_OAUTH_REVIEW_TEST_COMPANY_ID;
+}

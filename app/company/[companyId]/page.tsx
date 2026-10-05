@@ -8,10 +8,25 @@
 import { App } from '@/components/App';
 import { AppProviders } from '@/components/providers/AppProviders';
 
-export default function CompanyOperationPage({ params }: { params: { companyId: string } }) {
+// META-OAUTH-REVIEW-UI: `meta_review` na querystring é o único marcador que
+// esta rota reconhece — presente SÓ quando o callback OAuth Meta (ver
+// app/api/integrations/meta/oauth/callback/route.ts) redirecionou de volta
+// para cá após validar o `state.flow === "review_ui"` assinado. Não é um
+// mecanismo genérico de deep link: nenhum outro valor de searchParams abre
+// nenhuma outra tela. `initialScreen="ajustes"` é o único efeito — a
+// verificação real do token (assinado, efêmero) acontece dentro da aba
+// Integrações, nunca aqui.
+export default function CompanyOperationPage({
+  params,
+  searchParams,
+}: {
+  params: { companyId: string };
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
+  const hasMetaReviewMarker = typeof searchParams?.meta_review === 'string' && searchParams.meta_review !== '';
   return (
     <AppProviders>
-      <App operationalCompanyId={params.companyId} />
+      <App operationalCompanyId={params.companyId} initialScreen={hasMetaReviewMarker ? 'ajustes' : undefined} />
     </AppProviders>
   );
 }
