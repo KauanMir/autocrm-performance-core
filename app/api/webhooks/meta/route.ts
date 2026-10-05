@@ -6,8 +6,9 @@
 // ISOLAMENTO (regra crítica desta etapa): esta rota e o módulo
 // lib/server/meta-webhook/ são infraestrutura isolada. NÃO cria lead, NÃO
 // consulta Graph API, NÃO toca pipeline/telas/ranking/automação/
-// notificação, NÃO escreve no banco, NÃO altera dado de nenhuma company
-// existente. O único efeito colateral do POST é uma linha de log redigida.
+// notificação, NÃO altera dado de nenhuma company existente. Com a flag
+// META_LEAD_INGESTION_ENABLED desligada o POST não toca no banco; ligada,
+// registra SOMENTE o evento leadgen (ledger idempotente) da TEST COMPANY.
 //
 // IDEMPOTÊNCIA: não implementada nesta fase, de propósito — nada é
 // persistido. Quando começarmos a criar leads reais, será OBRIGATÓRIO
@@ -22,6 +23,8 @@ import {
 import { verifyMetaSignature } from '@/lib/server/meta-webhook/signature';
 import { parseMetaWebhookPayload } from '@/lib/server/meta-webhook/events';
 import { logMetaWebhookEvent, logMetaWebhookError } from '@/lib/server/meta-webhook/logger';
+import { isMetaLeadIngestionEnabled } from '@/lib/server/meta-webhook/env';
+import { ingestLeadgenChange } from '@/lib/server/meta-webhook/ingestion';
 
 export const runtime = 'nodejs';
 // Um webhook nunca pode ser servido de cache: cada handshake/evento é
@@ -149,20 +152,40 @@ export async function POST(request: Request): Promise<Response> {
     return textResponse(200, 'ok');
   }
 
-  // (8) eventos leadgen: registrar SOMENTE metadados técnicos mínimos
-  // (page_id, form_id, leadgen_id, created_time). Nunca nome, telefone,
-  // e-mail, respostas do formulário ou payload completo.
+  // (8) eventos leadgen. Flag OFF: zero Supabase, só log booleano. Flag ON:
+  // registro idempotente no ledger para a TEST COMPANY. IDs nunca vão para log.
+  const ingestionEnabled = isMetaLeadIngestionEnabled();
+  let infraFailure = false;
   for (const change of parsed.leadgenChanges) {
+    const changeStartedAt = Date.now();
+    const result = ingestionEnabled ? await ingestLeadgenChange(change) : 'flag_off';
+    if (result === 'infra_failure') infraFailure = true;
     logMetaWebhookEvent({
       requestId,
       operation: 'event',
-      result: 'leadgen_received',
+      result: `leadgen_${result}`,
       object: 'page',
       field: 'leadgen',
-      formId: change.formId,
-      leadgenId: change.leadgenId,
-      createdTime: change.createdTime,
+      formPresent: change.formId !== undefined,
+      leadgenPresent: change.leadgenId !== undefined,
+      testCompany: result === 'registered' || result === 'already_exists',
+      durationMs: Date.now() - changeStartedAt,
     });
+  }
+
+  // Falha de infraestrutura antes do evento ser durável: 503 para a Meta
+  // reentregar. Registro é idempotente, então a reentrega não duplica.
+  if (infraFailure) {
+    logMetaWebhookEvent({
+      requestId,
+      operation: 'event',
+      result: 'infra_failure_503',
+      object: 'page',
+      field: 'leadgen',
+      changeCount: parsed.leadgenChanges.length,
+      durationMs: Date.now() - startedAt,
+    });
+    return textResponse(503, 'service unavailable');
   }
 
   // (10) Page sem nenhuma mudança leadgen: ignora com segurança, 200.

@@ -181,16 +181,19 @@ describe('POST /api/webhooks/meta (eventos)', () => {
     expect(bad.status).toBe(403);
   });
 
-  it('9. evento Page + leadgen válido → processado sem erro, 200, loga só metadados técnicos', async () => {
+  it('9. evento Page + leadgen válido com flag OFF → 200, loga só booleanos, sem IDs', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const res = await POST(
       postRequest({ body: PAGE_LEADGEN_BODY, headers: { 'X-Hub-Signature-256': sign(PAGE_LEADGEN_BODY) } }),
     );
     expect(res.status).toBe(200);
-    const logged = logSpy.mock.calls.map((a) => JSON.stringify(a)).join('\n');
-    expect(logged).toContain('leadgen_received');
-    expect(logged).toContain('7778889990001112'); // form_id — metadado técnico permitido
-    expect(logged).toContain('9990001112223334'); // leadgen_id — metadado técnico permitido
+    const logged = logSpy.mock.calls.map((a) => a.join(' ')).join('\n');
+    expect(logged).toContain('leadgen_flag_off');
+    expect(logged).toContain('"formPresent":true');
+    expect(logged).toContain('"leadgenPresent":true');
+    expect(logged).not.toContain('7778889990001112');
+    expect(logged).not.toContain('9990001112223334');
+    expect(logged).not.toContain('1112223334445556');
   });
 
   it('10. evento Page não relacionado a leadgen → ignorado, 200', async () => {

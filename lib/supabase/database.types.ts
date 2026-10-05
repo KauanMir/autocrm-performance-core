@@ -1067,6 +1067,82 @@ export type Database = {
           },
         ]
       }
+      meta_leadgen_events: {
+        Row: {
+          attempts: number
+          company_id: string
+          created_at: string
+          crm_lead_id: string | null
+          form_id: string | null
+          id: string
+          integration_id: string
+          last_error_code: string | null
+          leadgen_id: string
+          locked_until: string | null
+          page_id: string
+          processed_at: string | null
+          received_at: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          company_id: string
+          created_at?: string
+          crm_lead_id?: string | null
+          form_id?: string | null
+          id?: string
+          integration_id: string
+          last_error_code?: string | null
+          leadgen_id: string
+          locked_until?: string | null
+          page_id: string
+          processed_at?: string | null
+          received_at: string
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          company_id?: string
+          created_at?: string
+          crm_lead_id?: string | null
+          form_id?: string | null
+          id?: string
+          integration_id?: string
+          last_error_code?: string | null
+          leadgen_id?: string
+          locked_until?: string | null
+          page_id?: string
+          processed_at?: string | null
+          received_at?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meta_leadgen_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_leadgen_events_crm_lead_fk"
+            columns: ["company_id", "crm_lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "meta_leadgen_events_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "company_meta_integrations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pipeline_stages: {
         Row: {
           code: string
@@ -2717,6 +2793,21 @@ export type Database = {
           page_id: string
           page_name: string
           status: string
+        }[]
+      }
+      meta_leadgen_event_register: {
+        Args: {
+          p_company_id: string
+          p_form_id?: string
+          p_integration_id: string
+          p_leadgen_id: string
+          p_page_id: string
+          p_received_at?: string
+        }
+        Returns: {
+          out_created: boolean
+          out_event_id: string
+          out_status: string
         }[]
       }
       move_lead_to_stage: {

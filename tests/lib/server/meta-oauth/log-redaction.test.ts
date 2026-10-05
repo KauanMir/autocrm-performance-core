@@ -19,11 +19,13 @@ describe('redação de Page ID nos logs', () => {
     expect(read('app/api/integrations/meta/oauth/callback/route.ts')).not.toMatch(/testPageId/);
   });
 
-  it('webhook não registra pageId do evento leadgen (formId e leadgenId continuam)', () => {
+  it('webhook não registra IDs do evento leadgen nos logs (só booleanos)', () => {
     const source = read('app/api/webhooks/meta/route.ts');
     expect(source).not.toMatch(/pageId: change\.pageId/);
-    expect(source).toMatch(/formId: change\.formId/);
-    expect(source).toMatch(/leadgenId: change\.leadgenId/);
+    expect(source).not.toMatch(/formId: change\.formId/);
+    expect(source).not.toMatch(/leadgenId: change\.leadgenId/);
+    expect(source).toMatch(/formPresent: change\.formId !== undefined/);
+    expect(source).toMatch(/leadgenPresent: change\.leadgenId !== undefined/);
   });
 
   it('o Page ID continua sendo usado na lógica (Graph, ownership, persistência)', () => {

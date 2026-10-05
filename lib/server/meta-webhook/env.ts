@@ -36,3 +36,10 @@ export function getMetaWebhookVerifyToken(): string {
 export function getMetaAppSecret(): string {
   return readNonEmpty('META_APP_SECRET');
 }
+
+// META_LEAD_INGESTION_ENABLED — liga o registro de eventos leadgen. Default
+// OFF; só a string exata "true" liga. Server-only, sem NEXT_PUBLIC_. Com a
+// flag OFF o webhook valida, parseia e responde 200, sem tocar no banco.
+export function isMetaLeadIngestionEnabled(): boolean {
+  return process.env.META_LEAD_INGESTION_ENABLED === 'true';
+}
