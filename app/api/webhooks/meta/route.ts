@@ -7,13 +7,13 @@
 // lib/server/meta-webhook/ são infraestrutura isolada. NÃO cria lead, NÃO
 // consulta Graph API, NÃO toca pipeline/telas/ranking/automação/
 // notificação, NÃO altera dado de nenhuma company existente. Com a flag
-// META_LEAD_INGESTION_ENABLED desligada o POST não toca no banco; ligada,
-// registra SOMENTE o evento leadgen (ledger idempotente) da TEST COMPANY.
+// META_LEAD_INGESTION_ENABLED desligada o POST não toca no banco. Ligada, só
+// para a TEST COMPANY: registra o evento de forma durável e agenda uma tentativa
+// imediata de processamento via waitUntil (aceleração, não durabilidade).
 //
-// IDEMPOTÊNCIA: não implementada nesta fase, de propósito — nada é
-// persistido. Quando começarmos a criar leads reais, será OBRIGATÓRIO
-// deduplicar por leadgen_id (ou identificador equivalente) antes de
-// qualquer escrita. Ver docs/META-WEBHOOK.md.
+// IDEMPOTÊNCIA: o ledger meta_leadgen_events é único por (page_id, leadgen_id).
+// Entregas repetidas agendam no máximo uma tentativa a mais; o claim com lease
+// do processor é a barreira de processamento efetivo. Ver docs/META-WEBHOOK.md.
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   getMetaAppSecret,
@@ -25,6 +25,7 @@ import { parseMetaWebhookPayload } from '@/lib/server/meta-webhook/events';
 import { logMetaWebhookEvent, logMetaWebhookError } from '@/lib/server/meta-webhook/logger';
 import { isMetaLeadIngestionEnabled } from '@/lib/server/meta-webhook/env';
 import { ingestLeadgenChange } from '@/lib/server/meta-webhook/ingestion';
+import { scheduleMetaLeadgenProcessing } from '@/lib/server/meta-webhook/schedule-leadgen-processing';
 
 export const runtime = 'nodejs';
 // Um webhook nunca pode ser servido de cache: cada handshake/evento é
@@ -158,7 +159,9 @@ export async function POST(request: Request): Promise<Response> {
   let infraFailure = false;
   for (const change of parsed.leadgenChanges) {
     const changeStartedAt = Date.now();
-    const result = ingestionEnabled ? await ingestLeadgenChange(change) : 'flag_off';
+    const result = ingestionEnabled
+      ? await ingestLeadgenChange(change, undefined, { onRegistered: scheduleMetaLeadgenProcessing })
+      : 'flag_off';
     if (result === 'infra_failure') infraFailure = true;
     logMetaWebhookEvent({
       requestId,
@@ -201,10 +204,8 @@ export async function POST(request: Request): Promise<Response> {
     return textResponse(200, 'ok');
   }
 
-  // (9) NADA além do log acima: sem Graph API, sem criar Lead, sem
-  // atribuir vendedor, sem timeline/tarefa/visita/negociação, sem mexer
-  // em ranking, sem notificação, sem automação, sem persistir conteúdo
-  // pessoal do lead.
+  // (9) Nesta rota não há Graph API nem criação de lead: o processamento
+  // ocorre só em waitUntil, depois do registro durável já feito.
   // (11) resposta rápida — nenhuma operação lenta antes do 200.
   logMetaWebhookEvent({
     requestId,

@@ -32,9 +32,15 @@ const defaultDeps = (): LeadgenIngestionDeps => ({
   register: registerLeadgenEvent,
 });
 
+export interface LeadgenIngestionOptions {
+  // Chamado somente depois do registro durável (created ou already_exists).
+  onRegistered?: (eventId: string) => void;
+}
+
 export async function ingestLeadgenChange(
   change: LeadgenChangeMeta,
   deps: LeadgenIngestionDeps = defaultDeps(),
+  options: LeadgenIngestionOptions = {},
 ): Promise<LeadgenIngestionResult> {
   const pageId = change.pageId;
   const leadgenId = change.leadgenId;
@@ -66,5 +72,6 @@ export async function ingestLeadgenChange(
     receivedAt: new Date(),
   });
   if (!registered.ok) return 'infra_failure';
+  options.onRegistered?.(registered.value.eventId);
   return registered.value.created ? 'registered' : 'already_exists';
 }
