@@ -69,8 +69,15 @@ export async function processMetaLeadgenEvent(
   const claimed = await deps.rpc.claimEvent(eventId);
   if (!claimed.ok) return INFRA;
   if (claimed.value === null) return { outcome: 'not_claimed' };
-  const event = claimed.value;
+  return processClaimedMetaLeadgenEvent(claimed.value, deps);
+}
 
+// Processa evento que já tem lease vigente. Não faz claim: quem chama é
+// responsável por ter adquirido o lease (claimEvent ou claimBatch).
+export async function processClaimedMetaLeadgenEvent(
+  event: ClaimedEvent,
+  deps: MetaLeadProcessorDeps,
+): Promise<MetaLeadProcessorResult> {
   const lookup = await deps.rpc.lookupIntegration(event.integrationId);
   if (!lookup.ok) return INFRA;
   const integration = lookup.value;

@@ -45,6 +45,7 @@ export interface FailEventInput {
 
 export interface ProcessingRpc {
   claimEvent(eventId: string): Promise<ProcessingRpcResult<ClaimedEvent | null>>;
+  claimBatch(limit: number, leaseSeconds: number): Promise<ProcessingRpcResult<ClaimedEvent[]>>;
   lookupIntegration(integrationId: string): Promise<ProcessingRpcResult<ProcessingIntegration | null>>;
   completeLead(input: CompleteLeadInput): Promise<ProcessingRpcResult<{ outcome: string }>>;
   failEvent(input: FailEventInput): Promise<ProcessingRpcResult<{ outcome: string }>>;
@@ -140,6 +141,25 @@ export function createProcessingRpc(client: SupabaseClient<Database> = createAdm
       if (rows.length === 0) return { ok: true, value: null };
       const claimed = readClaim(rows[0]);
       return claimed ? { ok: true, value: claimed } : INFRA;
+    },
+
+    async claimBatch(limit, leaseSeconds) {
+      const reply = await safeRpc(() =>
+        client.rpc('meta_leadgen_event_claim_batch', {
+          p_event_id: undefined,
+          p_limit: limit,
+          p_lease_seconds: leaseSeconds,
+        }),
+      );
+      const rows = asRows(reply);
+      if (!rows || rows.length > limit) return INFRA;
+      const claimed: ClaimedEvent[] = [];
+      for (const row of rows) {
+        const event = readClaim(row);
+        if (!event) return INFRA;
+        claimed.push(event);
+      }
+      return { ok: true, value: claimed };
     },
 
     async lookupIntegration(integrationId) {

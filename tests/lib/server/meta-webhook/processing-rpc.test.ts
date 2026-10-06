@@ -94,6 +94,43 @@ describe('claimEvent', () => {
   });
 });
 
+describe('claimBatch', () => {
+  it('chama a RPC sem p_event_id, com o limite e o lease informados', async () => {
+    rpc.mockResolvedValue({ data: [], error: null });
+    await createProcessingRpc().claimBatch(20, 300);
+    expect(rpc).toHaveBeenCalledWith(
+      'meta_leadgen_event_claim_batch',
+      expect.objectContaining({ p_limit: 20, p_lease_seconds: 300 }),
+    );
+    const args = rpc.mock.calls[0][1] as Record<string, unknown>;
+    expect(args.p_event_id ?? null).toBeNull();
+  });
+
+  it('mapeia cada linha para ClaimedEvent', async () => {
+    rpc.mockResolvedValue({ data: [claimRow, { ...claimRow, out_event_id: 'f9e00000-0000-0000-0000-000000000903' }], error: null });
+    const r = await createProcessingRpc().claimBatch(20, 300);
+    expect(r.ok && r.value.map((e) => e.eventId)).toEqual([EVENT_ID, 'f9e00000-0000-0000-0000-000000000903']);
+  });
+
+  it('zero linhas → lista vazia', async () => {
+    rpc.mockResolvedValue({ data: [], error: null });
+    expect(await createProcessingRpc().claimBatch(20, 300)).toEqual({ ok: true, value: [] });
+  });
+
+  it('mais linhas que o limite → infrastructure_error', async () => {
+    rpc.mockResolvedValue({ data: [claimRow, claimRow], error: null });
+    expect(await createProcessingRpc().claimBatch(1, 300)).toEqual({ ok: false, code: 'infrastructure_error' });
+  });
+
+  it('linha malformada ou erro → infrastructure_error sem mensagem bruta', async () => {
+    rpc.mockResolvedValue({ data: [{ out_event_id: EVENT_ID }], error: null });
+    expect(await createProcessingRpc().claimBatch(20, 300)).toEqual({ ok: false, code: 'infrastructure_error' });
+    rpc.mockResolvedValue({ data: null, error: { message: 'raw batch detail' } });
+    const r = await createProcessingRpc().claimBatch(20, 300);
+    expect(JSON.stringify(r)).not.toContain('raw batch detail');
+  });
+});
+
 describe('lookupIntegration', () => {
   it('chama a RPC com p_integration_id', async () => {
     rpc.mockResolvedValue({ data: [lookupRow], error: null });

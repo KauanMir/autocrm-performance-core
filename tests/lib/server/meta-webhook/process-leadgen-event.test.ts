@@ -47,6 +47,7 @@ type RpcOverrides = Partial<{
 function makeRpc(overrides: RpcOverrides = {}) {
   const rpc = {
     claimEvent: vi.fn(async (_eventId: string) => overrides.claim ?? { ok: true as const, value: EVENT }),
+    claimBatch: vi.fn(async (_limit: number, _lease: number) => ({ ok: true as const, value: [] as ClaimedEvent[] })),
     lookupIntegration: vi.fn(
       async (_integrationId: string) => overrides.lookup ?? { ok: true as const, value: CONNECTED },
     ),
