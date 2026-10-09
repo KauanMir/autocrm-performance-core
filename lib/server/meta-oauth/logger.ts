@@ -12,7 +12,7 @@
 // /me/accounts) ou qualquer PII.
 export interface MetaOAuthLogFields {
   requestId: string;
-  operation: 'oauth_callback' | 'oauth_start' | 'oauth_review_status';
+  operation: 'oauth_callback' | 'oauth_start' | 'oauth_review_status' | 'diagnostics';
   result: string;
   // Metadados técnicos mínimos — todos opcionais.
   reason?: string; // motivo sanitizado de rejeição (enum interno)

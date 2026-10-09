@@ -63,6 +63,9 @@ export function resolveGraphApiVersion(): string {
 export const META_TEST_COMPANY_ID = '0dfc73ee-bca9-4fdf-aa50-b227940b2869'; // [SMOKE-SA-S1] Empresa Teste
 export const META_TEST_PAGE_ID = '1381033925087695'; // Facebook Page "KAPA CRM Teste"
 
+// Formulário de teste (Page de teste) — usado só pelo diagnóstico read-only.
+export const META_TEST_FORM_ID = '1086756704316763';
+
 // Task exigida pela doc oficial de webhooks de leadgen para o Page Access
 // Token usado em /subscribed_apps: "requested from a person who can
 // perform the ADVERTISE task on the Page being queried".
