@@ -20,7 +20,7 @@ vi.mock('@/lib/hooks/useStartMetaOAuth', async (importOriginal) => {
 });
 
 vi.mock('@/lib/services', () => ({
-  AuthService: { getSession: m.getSession },
+  AuthService: { getSession: m.getSession, getCurrentUser: () => null },
 }));
 
 vi.mock('@/lib/integrations/metaReviewStatusRequest', async (importOriginal) => {

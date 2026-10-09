@@ -19,6 +19,7 @@ import { LBtn, LBadge, LCard } from '@/components/ui/kit';
 import { AuthService } from '@/lib/services';
 import { useStartMetaOAuth, getStartMetaOAuthErrorMessage } from '@/lib/hooks/useStartMetaOAuth';
 import { fetchMetaReviewStatusRequest } from '@/lib/integrations/metaReviewStatusRequest';
+import { MetaDiagnosticsPanel } from '@/components/integrations/MetaDiagnosticsPanel';
 
 export type MetaIntegrationsTabSectionProps = {
   companyId: string;
@@ -184,6 +185,7 @@ export function MetaIntegrationsTabSection({ companyId }: MetaIntegrationsTabSec
           )}
         </>
       )}
+      <MetaDiagnosticsPanel companyId={companyId} />
     </LCard>
   );
 }
