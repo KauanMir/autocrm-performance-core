@@ -4,18 +4,24 @@
 // verify token (GET) e o HMAC SHA-256 do X-Hub-Signature-256 (POST), com o
 // App Secret do app Meta (mesmo mecanismo de /api/webhooks/meta).
 //
-// FASE W1 — só fundação. Esta rota e lib/server/whatsapp-webhook/* são
-// infraestrutura isolada: NÃO escreve no banco, NÃO chama a Graph API, NÃO
-// cria conversa/lead/tarefa, NÃO toca Meta Lead Ads, cron, pilotos nem
-// nenhuma company. Só valida, classifica (message_received / message_status
-// / ignorado) e loga metadados booleanos. Ver docs/WHATSAPP-CLOUD-API.md.
+// W1 — valida, classifica (message_received / message_status / ignorado) e
+// loga metadados booleanos. NÃO chama a Graph API, NÃO cria conversa/lead/
+// tarefa, NÃO toca Meta Lead Ads, cron nem pilotos.
+//
+// W2A — com WHATSAPP_INGESTION_ENABLED=true (default OFF), registra cada
+// evento no ledger idempotente whatsapp_webhook_events, resolvendo
+// phone_number_id → company. Flag OFF: zero banco, comportamento exato da W1.
+// Falha de infraestrutura no registro → 503 para a Meta reentregar (o
+// registro é idempotente). Ver docs/WHATSAPP-CLOUD-API.md.
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   getWhatsAppAppSecret,
   getWhatsAppWebhookVerifyToken,
+  isWhatsAppIngestionEnabled,
   MissingWhatsAppWebhookEnvError,
 } from '@/lib/server/whatsapp-webhook/env';
 import { parseWhatsAppWebhookPayload } from '@/lib/server/whatsapp-webhook/events';
+import { ingestWhatsAppEvents, type WhatsAppIngestionSummary } from '@/lib/server/whatsapp-webhook/ingestion';
 import { logWhatsAppWebhookError, logWhatsAppWebhookEvent } from '@/lib/server/whatsapp-webhook/logger';
 // Função pura (HMAC + timingSafeEqual), sem I/O nem estado: reaproveitada
 // em vez de duplicada. Não traz nenhum comportamento do Lead Ads junto.
@@ -165,7 +171,32 @@ export async function POST(request: Request): Promise<Response> {
     });
   });
 
-  // W1: nada é persistido nem processado — só o resumo e 200 rápido.
+  // W2A: só com a flag ON e havendo eventos. Flag OFF não entra aqui —
+  // nenhum client Supabase é criado.
+  if (isWhatsAppIngestionEnabled() && parsed.events.length > 0) {
+    const ingestionStartedAt = Date.now();
+    let ingestion: WhatsAppIngestionSummary;
+    try {
+      ingestion = await ingestWhatsAppEvents(parsed.events);
+    } catch {
+      ingestion = { registeredCount: 0, duplicateCount: 0, unknownNumberCount: 0, unusableCount: 0, infraFailure: true };
+    }
+    logWhatsAppWebhookEvent({
+      requestId,
+      phase: 'event',
+      result: ingestion.infraFailure ? 'ingestion_infra_failure' : 'ingestion',
+      registeredCount: ingestion.registeredCount,
+      duplicateCount: ingestion.duplicateCount,
+      unknownNumberCount: ingestion.unknownNumberCount,
+      unusableCount: ingestion.unusableCount,
+      durationMs: Date.now() - ingestionStartedAt,
+    });
+    if (ingestion.infraFailure) {
+      return textResponse(503, 'service unavailable');
+    }
+  }
+
+  // Nenhuma conversa/mensagem CRM é criada — só o resumo e 200.
   logWhatsAppWebhookEvent({
     requestId,
     phase: 'event',

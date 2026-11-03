@@ -459,21 +459,47 @@ describe('POST /api/webhooks/whatsapp — privacidade e isolamento', () => {
     expect(logged).not.toContain('"entry"');
   });
 
-  it('o módulo WhatsApp não importa Supabase, Graph, waitUntil nem a ingestão Lead Ads', () => {
+  it('a rota só importa a allowlist prevista (Supabase só via ingestão WhatsApp, atrás da flag)', () => {
+    const source = readFileSync(resolve(process.cwd(), 'app/api/webhooks/whatsapp/route.ts'), 'utf8');
+    const imports = (source.match(/from\s+'[^']+'/g) ?? []).map((s) => s.replace(/^from\s+'|'$/g, ''));
+    expect(imports.sort()).toEqual(
+      [
+        '@/lib/server/meta-webhook/signature',
+        '@/lib/server/whatsapp-webhook/env',
+        '@/lib/server/whatsapp-webhook/events',
+        '@/lib/server/whatsapp-webhook/ingestion',
+        '@/lib/server/whatsapp-webhook/logger',
+        'node:crypto',
+      ].sort(),
+    );
+  });
+
+  it('módulos WhatsApp não importam Graph, waitUntil, OAuth nem a ingestão/processamento Lead Ads', () => {
     const root = process.cwd();
     const files = [
       'app/api/webhooks/whatsapp/route.ts',
       'lib/server/whatsapp-webhook/env.ts',
       'lib/server/whatsapp-webhook/events.ts',
       'lib/server/whatsapp-webhook/logger.ts',
+      'lib/server/whatsapp-webhook/ingestion.ts',
+      'lib/server/whatsapp-webhook/events-rpc.ts',
+      'lib/server/whatsapp-webhook/event-hashes.ts',
+      'lib/server/whatsapp-connection/connection-rpc.ts',
+      'lib/server/whatsapp-connection/connection-persistence.ts',
+      'lib/server/whatsapp-connection/token-crypto.ts',
+      'lib/server/whatsapp-connection/env.ts',
     ];
     for (const file of files) {
       const source = readFileSync(resolve(root, file), 'utf8');
       const imports = source.match(/from\s+'[^']+'/g) ?? [];
       for (const spec of imports) {
-        expect(spec).not.toMatch(/supabase|graph|@vercel\/functions|ingestion|schedule|meta-oauth|process-/);
+        expect(spec).not.toMatch(/graph|@vercel\/functions|meta-oauth|meta-webhook\/(?!signature')|process-|schedule/);
       }
       expect(source).not.toMatch(/\bfetch\s*\(/);
+    }
+    // W1 (env/events/logger) continua sem nenhum acesso a banco.
+    for (const file of files.slice(1, 4)) {
+      expect(readFileSync(resolve(root, file), 'utf8')).not.toMatch(/supabase/i);
     }
   });
 

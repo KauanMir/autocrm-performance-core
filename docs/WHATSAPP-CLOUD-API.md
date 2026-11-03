@@ -1,9 +1,11 @@
-# Integração WhatsApp Cloud API — Fase W1 (fundação do webhook)
+# Integração WhatsApp Cloud API — W1 (webhook) + W2A (conexão + ledger)
 
 Rota: `https://crm.assessoriakapa.com.br/api/webhooks/whatsapp`
 Implementação: `app/api/webhooks/whatsapp/route.ts` + `lib/server/whatsapp-webhook/*`
++ `lib/server/whatsapp-connection/*` (W2A). A W2A está descrita na seção
+[W2A](#w2a--conexão-multiempresa--ledger-de-eventos) abaixo.
 
-## Arquitetura inicial
+## Arquitetura inicial (W1)
 
 ```
 Meta (WhatsApp Cloud API)
@@ -17,9 +19,10 @@ app/api/webhooks/whatsapp/route.ts      runtime nodejs, force-dynamic
    └─ lib/server/whatsapp-webhook/logger.ts   log com allowlist de campos
 ```
 
-- Módulo **isolado**: não importa Supabase, Graph, `waitUntil`, ingestão
-  ou processamento do Lead Ads, OAuth, cron. Do Lead Ads só reaproveita a
+- Módulo **isolado**: não importa Graph, `waitUntil`, ingestão ou
+  processamento do Lead Ads, OAuth, cron. Do Lead Ads só reaproveita a
   função pura `verifyMetaSignature` (HMAC + `timingSafeEqual`, sem I/O).
+  Supabase só entra pela ingestão da W2A, atrás de `WHATSAPP_INGESTION_ENABLED`.
 - `/api/webhooks/meta` não foi alterado e não conhece o WhatsApp.
 - Não há middleware no projeto; a rota é pública por necessidade (a Meta
   chama sem sessão). A proteção é o verify token (GET) e o HMAC (POST).
@@ -102,39 +105,161 @@ totais.
 `phone_number_id`, WABA id, `wamid`, valor de `object` desconhecido,
 payload bruto, assinatura, tokens, App Secret.
 
-## Configuração no painel Meta (quando for ativar — NÃO feito nesta fase)
+## Configuração no painel Meta (W1 — já feita pelo usuário)
 
-1. Vercel: definir `WHATSAPP_WEBHOOK_VERIFY_TOKEN` (Production).
-   `META_APP_SECRET` já existe.
+1. Vercel: `WHATSAPP_WEBHOOK_VERIFY_TOKEN` (Production). `META_APP_SECRET`
+   já existia.
 2. Meta for Developers > app KAPA CRM > WhatsApp > Configuração > Webhook:
    Callback URL = rota acima; Verify token = mesmo valor.
-3. Assinar o campo `messages`.
+3. Campo `messages` assinado.
+
+---
+
+## W2A — conexão multiempresa + ledger de eventos
+
+### Arquitetura
+
+```
+POST /api/webhooks/whatsapp  (assinatura → parse → classificação, igual W1)
+   │
+   └─ WHATSAPP_INGESTION_ENABLED === "true" e há eventos?
+        não → resumo + 200 (exatamente a W1, zero banco)
+        sim → lib/server/whatsapp-webhook/ingestion.ts
+                ├─ owner_by_phone_number(phone_number_id)  (1x por número/entrega)
+                │     desconhecido → conta unknownNumber, 200
+                ├─ hash SHA-256 do wamid (event-hashes.ts)
+                └─ whatsapp_webhook_event_register(...)  (idempotente)
+              falha de infraestrutura → 503 (Meta reentrega)
+
+lib/server/whatsapp-connection/
+   ├─ env.ts                    WHATSAPP_TOKEN_ENCRYPTION_KEY_V1
+   ├─ token-crypto.ts           AAD whatsapp-access-token:v1:<company>:<phone_number_id>
+   ├─ connection-rpc.ts         upsert / owner_by_phone_number (service_role)
+   └─ connection-persistence.ts persistWhatsAppConnection (sem rota/UI ainda)
+lib/server/crypto/aead-envelope.ts   primitiva AES-256-GCM genérica
+```
+
+Nada cria conversa, mensagem CRM, lead ou tarefa. Nenhuma chamada Graph.
+
+### Migrations
+
+- `20261103100000_whatsapp_connections_w2a.sql` — `whatsapp_connections` +
+  4 RPCs.
+- `20261103110000_whatsapp_webhook_events_w2a.sql` — `whatsapp_webhook_events`
+  + RPC de registro.
+
+Ambas as tabelas: RLS habilitado, **zero policies**, `revoke all` de
+`public/anon/authenticated/service_role` (nem service_role lê direto). Acesso
+somente por RPC `SECURITY DEFINER`, `search_path = ''`, EXECUTE só
+`service_role`.
+
+`whatsapp_connections`: `UNIQUE (company_id, phone_number_id)` (reconnect
+idempotente) + índice único parcial `phone_number_id WHERE status =
+'connected'` (um número conectado pertence a uma única company). Conectado
+exige ciphertext e `connected_at`. Sem coluna de token em plaintext.
+
+### RPCs
+
+| RPC | Retorna | Ciphertext? |
+|---|---|---|
+| `whatsapp_connection_upsert(company, waba, phone_number_id, display, ciphertext, key_version, connected_at, connected_by)` | id, company, waba, phone_number_id, display, status, connected_at | **não** (só entrada) |
+| `whatsapp_connection_status(company)` | metadados da(s) conexão(ões) | **não** |
+| `whatsapp_connection_owner_by_phone_number(phone_number_id)` | connection_id, company_id, status (só connected) | **não** |
+| `whatsapp_connection_lookup_for_processing(phone_number_id)` | + access_token_ciphertext, token_key_version | **sim — a única** |
+| `whatsapp_webhook_event_register(...)` | out_event_id, out_processing_status, out_created | — |
+
+Erros controlados: `invalid_input`, `phone_number_already_connected`,
+`connection_not_connected`. O upsert audita em `audit_log` só `status`
+(sem WABA/phone_number_id/token).
+
+### Criptografia
+
+- **Chave própria**: `WHATSAPP_TOKEN_ENCRYPTION_KEY_V1` (64 hex), separada de
+  `META_TOKEN_ENCRYPTION_KEY_V1`. Vazamento/rotação de uma integração não
+  afeta a outra.
+- **Primitiva genérica** `lib/server/crypto/aead-envelope.ts`: AES-256-GCM,
+  IV aleatório de 12 bytes, tag 16 bytes, envelope
+  `v<N>.<iv>.<tag>.<ct>` (base64url) — **mesmo formato** do envelope da Meta.
+- **AAD por domínio**: `whatsapp-access-token:v1:<company_id>:<phone_number_id>`.
+  Ciphertext movido para outra company/número não decifra; ciphertext da Meta
+  não abre como WhatsApp e vice-versa.
+- `lib/server/meta-oauth/token-crypto.ts` **não foi alterado** (pode migrar
+  para a primitiva genérica numa fase própria, sem mudar o formato).
+
+### Idempotência do ledger
+
+O **wamid não é armazenado**: ele codifica o telefone do contato em base64.
+O app calcula em memória (`lib/server/whatsapp-webhook/event-hashes.ts`):
+
+- `message_id_hash = sha256('whatsapp-message-id:v1:' + wamid)`
+- `status_key_hash = sha256('whatsapp-status-key:v1:' + 's:' + status_bruto)`
+  (valor não-string: prefixo `j:` + JSON, para não colidir com a string)
+
+A RPC deriva `event_key` (UNIQUE) de forma determinística:
+
+| Evento | Material da chave |
+|---|---|
+| mensagem recebida | `wa-webhook-event:v1:message:<phone_number_id>:<message_id_hash>:-` |
+| status | `wa-webhook-event:v1:status:<phone_number_id>:<message_id_hash>:<status_key_hash>` |
+
+- Reentrega da mesma mensagem ou da mesma transição de status → `out_created
+  = false`, nenhuma linha nova.
+- Mensagem e status com o mesmo wamid **não colidem** (kind na chave).
+- Cada transição (`sent` → `delivered` → `read`) é um evento distinto.
+- O **status bruto** entra só no hash: nunca vai ao banco (a RPC rejeita
+  `p_status_key_hash` que não seja 64 hex), nunca é logado nem devolvido. O
+  ledger guarda apenas a classificação (`status_value` da allowlist ou
+  `other`). Dois statuses desconhecidos distintos do mesmo wamid ficam ambos
+  `other`, mas com `event_key` diferentes.
+- O owner (`phone_number_id → company`) é resolvido no máximo uma vez por
+  `phone_number_id` distinto em cada entrega (cache por request; nada
+  persiste entre requests).
+
+Colunas do ledger: só metadados (kind, hash, tipo/status da allowlist,
+timestamps, processing_status). **Nunca** texto, telefone/nome do contato,
+wamid cru, mídia ou payload.
+
+### Flags
+
+| Flag | Default | Efeito |
+|---|---|---|
+| `WHATSAPP_INGESTION_ENABLED` | `false` | Só `"true"` exato liga. OFF = W1 idêntica (nenhum client Supabase criado). |
+
+Com a flag ON e nenhuma conexão cadastrada (estado atual), todos os eventos
+caem em `unknownNumberCount` e a resposta continua `200`.
+
+### Logs da ingestão (só contagens)
+
+```json
+[whatsapp-webhook] {"operation":"whatsapp_webhook","requestId":"<uuid>","phase":"event","result":"ingestion","registeredCount":1,"duplicateCount":0,"unknownNumberCount":0,"unusableCount":0,"durationMs":12}
+[whatsapp-webhook] {"operation":"whatsapp_webhook","requestId":"<uuid>","phase":"event","result":"ingestion_infra_failure","registeredCount":0,"duplicateCount":0,"unknownNumberCount":0,"unusableCount":0,"durationMs":3}
+```
 
 ## O que ainda NÃO está implementado
 
-- Persistência (conexão, WABA, phone number, mensagens, status) — nenhuma
-  tabela/migration.
-- Inbox / conversas / vínculo com lead.
+- Inbox / conversas / mensagens CRM / vínculo com lead.
 - Envio de mensagens e templates.
 - Chamadas à Graph API (download de mídia, etc.).
-- Idempotência por `wamid` (pré-requisito antes de qualquer escrita — a
-  Meta reentrega eventos).
-- Roteamento multiempresa por `phone_number_id` e Embedded Signup.
-- Feature flag por company / rollout de pilotos.
+- Rota/UI que chame `persistWhatsAppConnection` (Embedded Signup).
+- Desconexão (RPC de `disconnect`) e marcação de erro da conexão.
+- Processamento do ledger (`processing → processed/failed`, lease, sweep).
 - Assinatura dos campos além de `messages`.
 
-## Próximos passos (W2+)
+## Próximos passos (W2B)
 
-1. **Conexão**: tabela `whatsapp_connections` (company_id, waba_id,
-   phone_number_id, display name/quality, token cifrado com chave
-   versionada — padrão de `META_TOKEN_ENCRYPTION_KEY_V1`) + RLS por company
-   + RPC de lookup `phone_number_id → company` para o webhook.
-2. **Ledger idempotente** de eventos (`UNIQUE (phone_number_id, wamid)` /
-   status por `(wamid, status)`), flag default OFF, só company de teste.
-3. **Inbox**: conversas + mensagens (conteúdo só após decisão explícita de
-   retenção/LGPD), UI restrita.
-4. **Enviar/receber**: envio via Graph server-only (janela de 24h), status
-   de entrega atualizando o ledger.
-5. **Templates**: listagem/sincronização e envio fora da janela.
-6. **Embedded Signup multiempresa**: onboarding self-service por company,
-   reaproveitando o padrão de state/binding do OAuth Meta.
+1. **Conversa + mensagem**: tabelas `whatsapp_conversations` (company,
+   connection, contato identificado por hash + telefone cifrado ou exibido
+   conforme decisão LGPD, vínculo opcional com lead) e `whatsapp_messages`
+   (direção, tipo, conteúdo **só após decisão explícita de retenção**,
+   `message_id_hash`, status). RLS por company para leitura no browser.
+2. **Processamento**: worker que faz claim com lease no ledger
+   (`received → processing → processed/failed`), cria conversa/mensagem e
+   correlaciona statuses pelo `message_id_hash` (mesmo hash no wamid do
+   envio). Sweep para eventos parados, no padrão do Lead Ads.
+3. **Inbox**: UI restrita (flag por company), lista de conversas e thread.
+4. **Envio**: rota server-only que usa `lookup_for_processing` + decifra o
+   token, chama a Graph (janela de 24h), grava a mensagem de saída e o hash do
+   wamid devolvido.
+5. **Templates**: sincronização e envio fora da janela.
+6. **Embedded Signup multiempresa**: onboarding por company chamando
+   `persistWhatsAppConnection`, reaproveitando state/binding do OAuth Meta.

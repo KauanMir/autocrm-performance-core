@@ -39,3 +39,10 @@ export function getWhatsAppWebhookVerifyToken(): string {
 export function getWhatsAppAppSecret(): string {
   return readNonEmpty('META_APP_SECRET');
 }
+
+// WHATSAPP_INGESTION_ENABLED — liga o registro dos eventos no ledger
+// (whatsapp_webhook_events). Default OFF; só a string exata "true" liga.
+// Server-only, sem NEXT_PUBLIC_. OFF = comportamento da W1, sem banco.
+export function isWhatsAppIngestionEnabled(): boolean {
+  return process.env.WHATSAPP_INGESTION_ENABLED === 'true';
+}

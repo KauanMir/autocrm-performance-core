@@ -21,6 +21,11 @@ export interface WhatsAppWebhookLogFields {
   messageReceivedCount?: number;
   messageStatusCount?: number;
   ignoredChangeCount?: number;
+  // Ingestão (W2A, só com a flag ON) — contagens, nunca IDs externos.
+  registeredCount?: number;
+  duplicateCount?: number;
+  unknownNumberCount?: number;
+  unusableCount?: number;
   durationMs?: number;
 }
 
@@ -37,6 +42,10 @@ const ALLOWED_KEYS: ReadonlyArray<keyof WhatsAppWebhookLogFields> = [
   'messageReceivedCount',
   'messageStatusCount',
   'ignoredChangeCount',
+  'registeredCount',
+  'duplicateCount',
+  'unknownNumberCount',
+  'unusableCount',
   'durationMs',
 ];
 
