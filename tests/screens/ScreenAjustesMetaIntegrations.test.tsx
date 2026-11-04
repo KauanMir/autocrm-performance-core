@@ -149,6 +149,7 @@ describe('aba Integrações — visibilidade (META-OAUTH-REVIEW-UI)', () => {
     fireEvent.click(tab);
     const stub = screen.getByTestId('meta-integrations-tab-stub');
     expect(stub).toHaveAttribute('data-company', META_OAUTH_REVIEW_TEST_COMPANY_ID);
+    expect(screen.getByTestId('whatsapp-diagnostics-panel')).toBeInTheDocument();
   });
 
   it('2. Super Admin operando em OUTRA company -> NÃO vê a aba (nem no DOM)', () => {
@@ -157,6 +158,7 @@ describe('aba Integrações — visibilidade (META-OAUTH-REVIEW-UI)', () => {
     render(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Integrações')).toBeNull();
     expect(screen.queryByTestId('meta-integrations-tab-stub')).toBeNull();
+    expect(screen.queryByTestId('whatsapp-diagnostics-panel')).toBeNull();
   });
 
   it('3. Super Admin global (sem contexto operacional aberto) -> NÃO vê a aba', () => {

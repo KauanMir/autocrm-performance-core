@@ -17,6 +17,7 @@ import { FollowUpsTabSection } from '@/components/followUpTemplates/FollowUpsTab
 import { CompetitionRewardsTabSection } from '@/components/competitionRewards/CompetitionRewardsTabSection';
 import { CompetitionRewardHistorySection } from '@/components/competitionRewards/CompetitionRewardHistorySection';
 import { MetaIntegrationsTabSection } from '@/components/integrations/MetaIntegrationsTabSection';
+import { WhatsAppDiagnosticsPanel } from '@/components/integrations/WhatsAppDiagnosticsPanel';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled, isMetaIntegrationsReviewEnabled } from '@/lib/flags';
 import { useCompanySettings } from '@/lib/hooks/useCompanySettings';
@@ -1762,7 +1763,10 @@ export function ScreenAjustes({ go }: any) {
         </>
       )}
       {activeTab === 'Integrações' && metaIntegrationsReviewAccess && companyId && (
-        <MetaIntegrationsTabSection companyId={companyId} />
+        <>
+          <MetaIntegrationsTabSection companyId={companyId} />
+          <WhatsAppDiagnosticsPanel companyId={companyId} />
+        </>
       )}
     </LightScreen>
   );

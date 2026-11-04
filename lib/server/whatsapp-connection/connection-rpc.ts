@@ -47,6 +47,33 @@ function toRpcFailure(error: { code?: string; message?: string } | null): RpcFai
   return error ? { code: error.code, message: error.message } : null;
 }
 
+// Saúde da conexão para o diagnóstico (W2B-2). Só estes campos: WABA, número e
+// número exibido, que a RPC também devolve, são descartados aqui e nunca saem
+// deste adaptador.
+export interface WhatsAppConnectionHealthRow {
+  status: string;
+  connected_at: string | null;
+  disconnected_at: string | null;
+  last_error_code: string | null;
+}
+
+export async function fetchWhatsAppConnectionHealth(
+  companyId: string,
+): Promise<{ data: WhatsAppConnectionHealthRow[] | null; error: RpcFailure | null }> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc('whatsapp_connection_status', { p_company_id: companyId });
+  if (error) return { data: null, error: toRpcFailure(error) };
+  return {
+    data: (data ?? []).map((row) => ({
+      status: row.status,
+      connected_at: row.connected_at,
+      disconnected_at: row.disconnected_at,
+      last_error_code: row.last_error_code,
+    })),
+    error: null,
+  };
+}
+
 export function createWhatsAppConnectionRpcPort(): WhatsAppConnectionRpcPort {
   const admin = createAdminClient();
   return {

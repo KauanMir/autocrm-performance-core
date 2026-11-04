@@ -524,6 +524,33 @@ Esperado: `connections = 1`, `test_company_connected = 1`,
 
 Não há RPC de desconexão ainda: reverter exige SQL manual aprovado.
 
+## Diagnóstico (W2B-2)
+
+`GET /api/integrations/whatsapp/diagnostics`. Implementação:
+`app/api/integrations/whatsapp/diagnostics/route.ts` e
+`lib/server/whatsapp-connection/diagnostics.ts`. Interface: painel "Diagnóstico
+WhatsApp" na aba Integrações de Ajustes.
+
+Gates, nesta ordem: JWT válido, `is_platform_super_admin` e `company_id`, se
+informado, igual ao da TEST COMPANY. A empresa consultada é fixa no servidor.
+Admin, Manager e Seller recebem `403`. A aba da interface depende de
+`NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW`; a rota não.
+
+| Campo | Conteúdo |
+|---|---|
+| `integrationStatus` | `awaiting_waba_confirmation`, `connection_not_ready`, `misconfigured` ou `unavailable`. Nunca indica sucesso |
+| `ingestion` | `enabled` ou `disabled`, o valor efetivo no runtime. Sem o valor bruto |
+| `config` | Booleanos de presença e, na chave, do formato. Formato válido não prova que é a chave certa |
+| `connection` | Estado, quantidade, data da conexão e código de erro validado |
+| `events` | Sempre `unavailable`. O ledger nega acesso ao `service_role` e nenhuma RPC devolve contagem. A RPC está planejada na W2B-4 |
+| `wabaSubscription` | Sempre `not_confirmed`. Sem chamada à Graph; a confirmação é manual |
+| `deployment` | `VERCEL_ENV` e SHA curto de `VERCEL_GIT_COMMIT_SHA`; `null` quando ausentes ou inválidos |
+| `warnings` | `ingestion_enabled` quando a flag estiver ligada |
+
+Sem Graph, sem decifrar token, sem `lookup_for_processing` e sem escrita. WABA,
+número e número exibido são descartados no adaptador. O log traz só `requestId`,
+resultado e duração.
+
 ## O que ainda NÃO está implementado
 
 - Captura do conteúdo: o parser ignora `from`, `contacts[]`, texto e ID de mídia.
@@ -704,9 +731,9 @@ Toda fase termina em parada para autorização.
 |---|---|---|
 | **W2B-0** Diagnóstico | Verificações read-only | **Concluída**, com o bloqueio da WABA e os itens abertos do [estado atual](#estado-atual-w2b-0-2026-11-04) |
 | **W2B-1** Documentação | Este documento | Revisado e aprovado |
-| **W2B-2** Diagnóstico | Rota Super Admin: flag em runtime, chave presente, SHA do deployment, contagens; inscrição por ID do app só com token válido, senão `unknown` | Só booleanos e contagens; testes de permissão e de vazamento |
+| **W2B-2** Diagnóstico | [Rota Super Admin](#diagnóstico-w2b-2): flag em runtime, configuração, conexão, SHA do deployment; inscrição sempre "não confirmada" | Só valores fechados; testes de permissão e de vazamento |
 | **W2B-3** Parser | Extração em memória, com e sem `from`/`wa_id` | Testes por tipo e com BSUID; nada novo nos logs |
-| **W2B-4** Banco (local) | Tabelas, RLS, RPC transacional, `capture_enabled` | pgTAP de isolamento, idempotência, grants e papéis; tipos com CLI 2.116.0 |
+| **W2B-4** Banco (local) | Tabelas, RLS, RPC transacional, `capture_enabled`, RPC de contagem de eventos para o diagnóstico | pgTAP de isolamento, idempotência, grants e papéis; tipos com CLI 2.116.0 |
 | **W2B-5** Aplicação | Cifragem e RPC atrás dos dois gates | Reentrega não duplica; `503` em falha; Lead Ads sem regressão |
 | **W2B-6** Produção | Backup, migrations, chaves, deploy. **Flag segue OFF, WABA não inscrita, gate desligado** | Local igual ao remoto; persistência validada; auditoria read-only; outras empresas intactas |
 | **W2B-7** Smoke | Sequência abaixo, só na TEST COMPANY | 1 evento, 1 mensagem cifrada, reentrega sem duplicar, rollback testado |
