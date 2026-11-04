@@ -235,12 +235,178 @@ caem em `unknownNumberCount` e a resposta continua `200`.
 [whatsapp-webhook] {"operation":"whatsapp_webhook","requestId":"<uuid>","phase":"event","result":"ingestion_infra_failure","registeredCount":0,"duplicateCount":0,"unknownNumberCount":0,"unusableCount":0,"durationMs":3}
 ```
 
+### Bootstrap da conexão de teste (one-shot, manual)
+
+**Objetivo:** persistir a PRIMEIRA conexão WhatsApp — **somente** o número de
+TESTE da Meta, **somente** na TEST COMPANY
+(`0dfc73ee-bca9-4fdf-aa50-b227940b2869`) — para provar em produção a
+persistência + cifragem da W2A. **Não é o fluxo definitivo de onboarding:** o
+futuro Embedded Signup multiempresa substitui este bootstrap.
+**PROIBIDO usar com número, WABA ou token de cliente real.**
+
+| Arquivo | Papel |
+|---|---|
+| `scripts/whatsapp/bootstrap-test-connection.ps1` | launcher (jeito recomendado de rodar) |
+| `scripts/whatsapp/bootstrap-test-connection.ts` | entrada Node (`npm run whatsapp:bootstrap-test-connection`, via `tsx` fixo) |
+| `scripts/whatsapp/bootstrap-test-connection-core.ts` | lógica testável (validação, preflight, Graph, escrita, round-trip, saída) |
+
+Nenhum arquivo de `app/`, `lib/` ou `components/` importa `scripts/` (teste
+garante). Não há endpoint, Server Action nem UI. Fixos no código (não vêm da
+sessão): URL `https://qglirrsyhdfbgkmchwcw.supabase.co`, TEST COMPANY, Graph
+`v26.0`.
+
+**Variáveis da sessão** (o launcher preenche; o script não carrega `.env*` e
+recusa argumentos de linha de comando):
+
+| Variável | Classe | Regra |
+|---|---|---|
+| `WA_BOOTSTRAP_ACCESS_TOKEN` | **SECRET** | 20–2048 chars, sem espaço |
+| `WA_BOOTSTRAP_SERVICE_ROLE_KEY` | **SECRET** | JWT `role=service_role` + `ref=qglirrsyhdfbgkmchwcw`, ou `sb_secret_…` (anon e outros projetos são recusados) |
+| `WA_BOOTSTRAP_ENCRYPTION_KEY` | **SECRET** | 64 hex minúsculo — **mesmo valor** de `WHATSAPP_TOKEN_ENCRYPTION_KEY_V1` na Vercel (pegar do Bitwarden) |
+| `WA_BOOTSTRAP_WABA_ID` | non-secret | `^[0-9]{1,30}$`, diferente do phone_number_id |
+| `WA_BOOTSTRAP_PHONE_NUMBER_ID` | non-secret | `^[0-9]{1,30}$` |
+| `WA_BOOTSTRAP_DISPLAY_PHONE_NUMBER` | non-secret, opcional | `^[0-9 +()-]{1,32}$`; os dígitos têm de bater com a Graph |
+| `WA_BOOTSTRAP_CONNECTED_BY` | non-secret, opcional | UUID de `profiles` existente (vai para `audit_log`) |
+| `WA_BOOTSTRAP_CONFIRM` | non-secret | exatamente `TEST_COMPANY_ONLY` (o launcher sempre define) |
+| `WA_BOOTSTRAP_MODE` | non-secret | ausente/vazio/`dry-run` → nunca grava; `write` → grava após TODOS os preflights; outro valor → aborta |
+
+**dry-run × write:**
+
+- **dry-run** (default): validação local → preflight Supabase somente leitura
+  → Graph somente leitura. **Zero escrita** (nenhum upsert, nenhum lookup de
+  ciphertext). `createdOrUpdated: false`.
+- **write**: o mesmo e, só então, **uma** escrita funcional —
+  `whatsapp_connection_upsert` (via `persistWhatsAppConnection`) — gravando
+  company_id, waba_id, phone_number_id, display (se informado), ciphertext,
+  `token_key_version = 1`, `status = connected`, connected_by (se informado).
+  A única escrita adicional é o `audit_log` que a própria RPC grava
+  (`after_data` só com `status`). Nada é escrito em `whatsapp_webhook_events`.
+- **dry-run é obrigatório antes do write:** o launcher sempre roda o dry-run
+  primeiro; o write só roda se o dry-run passar **e** você digitar a
+  confirmação `GRAVAR TEST COMPANY`.
+
+**Ordem (qualquer falha aborta antes da escrita):**
+
+1. validação local (sem rede; erro → exit 2);
+2. preflight somente leitura: TEST COMPANY existe; `connected_by` existe;
+   `owner_by_phone_number` — outra company → aborta; TEST COMPANY →
+   `alreadyConnected: true` (o write atualiza a mesma linha);
+   `whatsapp_webhook_events` responde `42501` (existe e o acesso direto é
+   negado, como a migration define);
+3. Graph somente leitura, token **só** no header `Authorization`, sem seguir
+   redirect: `GET /<phone_number_id>?fields=id,display_phone_number` (token
+   válido + número encontrado) e `GET /<waba_id>/phone_numbers?fields=id&limit=100`
+   (WABA acessível + número pertence à WABA) + display confere;
+4. (write) `whatsapp_connection_upsert` — uma vez;
+5. (write) round-trip: `lookup_for_processing`, ciphertext só em memória,
+   decifra com a chave da sessão, compara com o token original →
+   `roundTripOk`. Se `false`: exit ≠ 0, **sem** segundo upsert e sem
+   correção automática.
+
+**Criptografia:** exatamente a da W2A, sem crypto duplicada no script —
+AES-256-GCM, envelope `v1.<iv>.<tag>.<ct>`, key version 1, AAD
+`whatsapp-access-token:v1:<company_id>:<phone_number_id>`, tudo dentro de
+`persistWhatsAppConnection` / `decryptWhatsAppAccessToken`. O token plaintext
+só existe em memória; a chave da sessão nunca é persistida; ciphertext e AAD
+nunca são impressos.
+
+**Saída** (única linha `[whatsapp-bootstrap] {...}`):
+
+```json
+{
+  "success": true,
+  "mode": "write",
+  "company": "TEST_COMPANY",
+  "failedStep": null,
+  "code": null,
+  "alreadyConnected": false,
+  "connectionStatus": "connected",
+  "graphTokenValid": true,
+  "graphWabaAccessible": true,
+  "graphPhoneFound": true,
+  "graphPhoneMatchesWaba": true,
+  "graphDisplayMatches": true,
+  "graphHttpStatus": null,
+  "graphCode": null,
+  "roundTripOk": true,
+  "keyVersion": 1,
+  "createdOrUpdated": true,
+  "durationMs": 1234
+}
+```
+
+Em dry-run: `createdOrUpdated: false`, `roundTripOk`/`keyVersion` `null`,
+`connectionStatus` `null` (ou `"connected"` se já existir). Em falha:
+`failedStep` + `code` fixos e, na Graph, só `graphHttpStatus`/`graphCode`
+numéricos. Nunca: token, service role, chave, ciphertext, AAD, WABA ID,
+phone_number_id, número exibido, resposta bruta da Graph/Supabase, header
+Authorization ou env vars. `createdOrUpdated: null` = erro inesperado em
+write: conferir com o SQL abaixo antes de qualquer nova ação.
+
+**Token temporário:** o token da tela "Testar a API" da Meta expira (~24h).
+Depois disso a conexão continua `connected` com um token morto (Graph 190).
+Serve só para este smoke; antes da W2B trocar por token de System User
+(rodar o bootstrap de novo atualiza a mesma linha).
+
+**Execução** — janela **nova e dedicada** do PowerShell, na raiz do repo:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\whatsapp\bootstrap-test-connection.ps1
+```
+
+O launcher pergunta o modo (Enter = dry-run), WABA ID, Phone Number ID,
+display e connected_by (input normal, non-secret) e os três segredos por
+`Read-Host -AsSecureString` (não vão para o histórico). Não aceita parâmetros.
+SecureString → BSTR → env do processo; o BSTR é liberado com `ZeroFreeBSTR`.
+
+**Cleanup:**
+
+- script Node: apaga `WA_BOOTSTRAP_*` do `process.env` ao ler e de novo no
+  `finally`; zera o buffer da chave; solta as referências;
+- launcher: o `finally` remove todas as `WA_BOOTSTRAP_*` do processo e
+  sobrescreve o clipboard;
+- **limite:** strings JS/.NET (token, service role, a string intermediária
+  do BSTR) são imutáveis e **não podem ser zeradas com garantia** — ficam no
+  heap até o GC. Por isso: janela dedicada, **fechar a janela** no fim e, se
+  o histórico do clipboard (Win+V) estiver ligado, apagar as entradas com
+  segredo. Não rodar com `Start-Transcript` ativo.
+
+**Ingestão continua OFF:** o bootstrap não lê nem altera
+`WHATSAPP_INGESTION_ENABLED`. Com a flag OFF, a existência da conexão não
+registra eventos.
+
+**Validação pós-bootstrap** (somente leitura,
+`npx supabase@2.116.0 db query --linked -f <arquivo>`; nenhuma coluna de
+ciphertext é devolvida, só formato/tamanho):
+
+```sql
+select
+  (select count(*) from public.whatsapp_connections) as connections,
+  (select count(*) from public.whatsapp_connections
+     where company_id = '0dfc73ee-bca9-4fdf-aa50-b227940b2869' and status = 'connected'
+       and token_key_version = 1 and connected_at is not null) as test_company_connected,
+  (select bool_and(access_token_ciphertext ~ '^v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]+$'
+                   and char_length(access_token_ciphertext) between 1 and 4096)
+     from public.whatsapp_connections) as ciphertext_envelope_ok,
+  (select count(*) from public.audit_log where action = 'whatsapp_connection_upserted') as audit_rows,
+  (select bool_and(after_data = '{"status": "connected"}'::jsonb)
+     from public.audit_log where action = 'whatsapp_connection_upserted') as audit_after_data_status_only,
+  (select count(*) from public.whatsapp_webhook_events) as events;
+```
+
+Esperado: `connections = 1`, `test_company_connected = 1`,
+`ciphertext_envelope_ok = true`, `audit_rows = 1`,
+`audit_after_data_status_only = true`, `events = 0`.
+
+Não há RPC de desconexão ainda: reverter exige SQL manual aprovado.
+
 ## O que ainda NÃO está implementado
 
 - Inbox / conversas / mensagens CRM / vínculo com lead.
 - Envio de mensagens e templates.
 - Chamadas à Graph API (download de mídia, etc.).
-- Rota/UI que chame `persistWhatsAppConnection` (Embedded Signup).
+- Rota/UI que chame `persistWhatsAppConnection` (Embedded Signup). Hoje só o
+  bootstrap manual da conexão de TESTE (`scripts/whatsapp/`) a usa.
 - Desconexão (RPC de `disconnect`) e marcação de erro da conexão.
 - Processamento do ledger (`processing → processed/failed`, lease, sweep).
 - Assinatura dos campos além de `messages`.

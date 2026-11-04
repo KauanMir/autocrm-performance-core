@@ -8,7 +8,8 @@
     "start": "next start",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "whatsapp:bootstrap-test-connection": "tsx scripts/whatsapp/bootstrap-test-connection.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.1",
@@ -29,6 +30,7 @@
     "@types/react-dom": "^18",
     "@vitejs/plugin-react": "^6.0.3",
     "jsdom": "^29.1.1",
+    "tsx": "4.23.15",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }
