@@ -38,6 +38,7 @@ import {
   PLATFORM_MANUAL_TIMELINE_ICON,
 } from '@/components/commercial/PlatformLeadActions';
 import type { LeadEventType } from '@/lib/commercial/leadEventRegistry';
+import { LeadFormSubmissionsSection } from '@/components/leads/LeadFormSubmissionsSection';
 
 export type PlatformLeadDetailsProps = {
   lead: PlatformLeadRow;
@@ -208,6 +209,8 @@ export function PlatformLeadDetails({
           />
         </div>
       )}
+
+      <LeadFormSubmissionsSection leadId={lead.id} companyId={companyId} authorized />
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 18 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>

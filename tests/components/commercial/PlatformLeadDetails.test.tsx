@@ -7,6 +7,9 @@
 // pelos testes dedicados de cada hook).
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+// META-MVP1: a seção de respostas do formulário tem testes próprios
+// (tests/components/leads/LeadFormSubmissionsSection.test.tsx).
+vi.mock('@/components/leads/LeadFormSubmissionsSection', () => ({ LeadFormSubmissionsSection: () => null }));
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { PlatformLeadRow, PlatformPipelineStageRow, PlatformSellerRow } from '@/lib/commercial/repository';
 import { PlatformCommercialError } from '@/lib/commercial/errors';

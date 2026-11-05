@@ -22,6 +22,7 @@ import { useAddLeadTimelineEntry } from '@/lib/hooks/useAddLeadTimelineEntry';
 import type { LeadModel } from '@/lib/leads/adapter';
 import { resolveTaskRemoteMode } from '@/lib/tasks/remoteTasksMode';
 import { canUseFollowUpTemplate } from '@/lib/capabilities';
+import { LeadFormSubmissionsSection } from '@/components/leads/LeadFormSubmissionsSection';
 
 export const CARS = ['Golf GTI 2022', 'Honda HR-V 2023', 'Toyota Corolla 2023', 'VW Polo 2023', 'Jeep Compass 2022', 'Hyundai Creta 2023', 'Fiat Pulse 2023', 'Chevrolet Onix 2023', 'Renault Kardian 2024', 'Nissan Kicks 2023'];
 export const ORIGINS: [string, string][] = [['Showroom', 'car'], ['WhatsApp', 'message'], ['Instagram', 'instagram'], ['Webmotors', 'search'], ['iCarros', 'car'], ['Mercado Livre', 'card'], ['Grupo VIP', 'star'], ['Site', 'grid'], ['Indicação', 'users'], ['Telefone', 'phone']];
@@ -872,6 +873,7 @@ function RemoteLeadTimelinePanel({ companyId, leadId, userId, membershipRole, us
 
   return (
     <>
+      <LeadFormSubmissionsSection leadId={leadId} companyId={companyId} authorized={authorized} />
       {timeline.isLoading ? (
         <div data-testid="remote-lead-timeline-loading" style={{ padding: '20px 0', color: 'var(--t-500)', fontSize: 13 }}>Carregando…</div>
       ) : timeline.isError ? (

@@ -6,6 +6,9 @@
 // `LeadService.getAll()[0]`; ver describe dedicado abaixo).
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+// META-MVP1: a seção de respostas do formulário tem testes próprios
+// (tests/components/leads/LeadFormSubmissionsSection.test.tsx).
+vi.mock('@/components/leads/LeadFormSubmissionsSection', () => ({ LeadFormSubmissionsSection: () => null }));
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { FlowVerCliente } from '@/components/flows/FlowsShared';
