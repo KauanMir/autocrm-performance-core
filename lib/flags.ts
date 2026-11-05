@@ -225,3 +225,19 @@ export function isSuperAdminCommercialWriteEnabled(): boolean {
 export function isMetaIntegrationsReviewEnabled(): boolean {
   return parseFlagValue(process.env.NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW) === true;
 }
+
+// WHATSAPP-W2B-8 — caixa de entrada WhatsApp. Default OFF e sem override de
+// localStorage, pelo mesmo motivo da flag acima. A leitura real ainda depende de
+// WHATSAPP_INBOX_READ_ENABLED no servidor e das RPCs da inbox aplicadas no banco.
+export function isWhatsAppInboxEnabled(): boolean {
+  return parseFlagValue(process.env.NEXT_PUBLIC_FF_WHATSAPP_INBOX) === true;
+}
+
+// Dados fictícios para ver a tela em desenvolvimento. Nunca vale em Preview ou
+// Production: exige NODE_ENV 'development', e a tela mantém um aviso permanente.
+export function isWhatsAppInboxDemoEnabled(): boolean {
+  return (
+    process.env.NODE_ENV === 'development' &&
+    parseFlagValue(process.env.NEXT_PUBLIC_FF_WHATSAPP_INBOX_DEMO) === true
+  );
+}

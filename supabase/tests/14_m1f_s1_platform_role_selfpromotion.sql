@@ -259,6 +259,11 @@ select is(
 -- is_active (origem e destino), sellers.is_active/membership_id (origem
 -- e destino) e leads.seller_id (mesma decisão do S6-C: nunca
 -- updated_by_profile_id).
+--
+-- ATUALIZAÇÃO (WHATSAPP-W2B-8): whatsapp_inbox_read_allowed lê platform_role
+-- do ator informado pela rota, porque roda sob service_role, sem auth.uid(),
+-- e is_platform_super_admin() não se aplica. É STABLE, nunca escreve, e sem
+-- EXECUTE para nenhum papel (provado em 84_whatsapp_inbox_read_w2b8.sql).
 select is(
   (select count(*)::int
      from pg_proc p
@@ -273,7 +278,8 @@ select is(
                              'accept_invite', 'update_profile_name', 'update_membership_role',
                              'get_profile_email_update_state', 'commit_profile_email_update',
                              'suspend_membership', 'reactivate_membership',
-                             'offboard_seller', 'offboard_manager', 'transfer_membership')
+                             'offboard_seller', 'offboard_manager', 'transfer_membership',
+                             'whatsapp_inbox_read_allowed')
       and pg_get_functiondef(p.oid) ilike '%platform_role%'),
   0, 'nenhuma funcao SECURITY DEFINER pre-existente (RPCs do M1-C/M1-E, helpers) referencia platform_role');
 -- Reforço específico do S2: is_platform_super_admin() referencia
@@ -282,6 +288,19 @@ select is(
 select is(
   (select p.provolatile from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = 'is_platform_super_admin'),
   's', 'is_platform_super_admin() e STABLE (somente leitura) — a excecao acima nao abre caminho de escrita');
+-- Reforço da W2B-8: a exceção de whatsapp_inbox_read_allowed não pode virar caminho
+-- de escrita nem de consulta direta por nenhum papel.
+select is(
+  (select p.provolatile from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = 'whatsapp_inbox_read_allowed'),
+  's', 'whatsapp_inbox_read_allowed() e STABLE (somente leitura) — a excecao acima nao abre caminho de escrita');
+select ok(
+  pg_get_functiondef('public.whatsapp_inbox_read_allowed(uuid, uuid)'::regprocedure) !~* '\y(update|insert|delete|grant|alter)\y',
+  'whatsapp_inbox_read_allowed() nao contem comando de escrita');
+select is(
+  (select count(*)::int
+     from unnest(array['anon', 'authenticated', 'service_role']) r
+    where has_function_privilege(r, 'public.whatsapp_inbox_read_allowed(uuid, uuid)', 'EXECUTE')),
+  0, 'whatsapp_inbox_read_allowed() sem EXECUTE para anon, authenticated e service_role');
 select is(
   (select count(*)::int
      from pg_proc p

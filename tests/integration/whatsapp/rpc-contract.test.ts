@@ -122,7 +122,8 @@ describe('segurança operacional das migrations W2B-4', () => {
       '20261105110000_whatsapp_capture_rpcs_w2b4.sql',
     ]);
     const all = readdirSync(MIGRATIONS).filter((file) => file.endsWith('.sql')).sort();
-    expect(all.slice(-2)).toEqual(files);
+    const afterW2a = all.slice(all.indexOf('20261103110000_whatsapp_webhook_events_w2a.sql') + 1);
+    expect(afterW2a.slice(0, 2)).toEqual(files);
   });
 
   it.each(['20261105100000_whatsapp_conversations_w2b4.sql', '20261105110000_whatsapp_capture_rpcs_w2b4.sql'])(

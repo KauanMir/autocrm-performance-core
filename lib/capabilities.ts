@@ -359,3 +359,22 @@ export function canAccessMetaIntegrationsReviewTab(user: MetaIntegrationsReviewC
     user?.companyId === META_OAUTH_REVIEW_TEST_COMPANY_ID
   );
 }
+
+// WHATSAPP-W2B-8 — caixa de entrada WhatsApp, somente leitura. Enquanto a matriz de
+// permissões da inbox não for aprovada: SOMENTE Super Admin operando a company de
+// teste fixa. Manager e Seller nunca veem a tela, nem na própria company de teste.
+// Capability própria, nunca reutiliza a de Integrações: as duas evoluem separadas.
+// A autorização real é da rota e das RPCs.
+export type WhatsAppInboxCapabilityUser = {
+  platformRole: User['platformRole'];
+  companyId: string | null;
+  inboxFlagEnabled: boolean;
+};
+
+export function canAccessWhatsAppInbox(user: WhatsAppInboxCapabilityUser | null | undefined): boolean {
+  return (
+    user?.inboxFlagEnabled === true &&
+    user?.platformRole === 'super_admin' &&
+    user?.companyId === META_OAUTH_REVIEW_TEST_COMPANY_ID
+  );
+}

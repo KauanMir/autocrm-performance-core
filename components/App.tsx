@@ -7,8 +7,8 @@ import { useViewport } from '@/lib/hooks/useViewport';
 import { useTweaks, TweaksPanel, TweakSection, TweakRadio, TweakToggle, TweakButton } from '@/components/ui/TweaksPanel';
 import { NAV_ROLES, TASK_STATE } from '@/lib/data';
 import type { User } from '@/lib/data';
-import { isRemoteStagesEnabled, isPlatformAdminEnabled, isSuperAdminCommercialReadEnabled } from '@/lib/flags';
-import { canAccessStageSettings, canAccessPlatformAdmin, canManageInvites, canAccessCommercialWorkspace } from '@/lib/capabilities';
+import { isRemoteStagesEnabled, isPlatformAdminEnabled, isSuperAdminCommercialReadEnabled, isWhatsAppInboxEnabled } from '@/lib/flags';
+import { canAccessStageSettings, canAccessPlatformAdmin, canManageInvites, canAccessCommercialWorkspace, canAccessWhatsAppInbox } from '@/lib/capabilities';
 import { isLocalCommercialDataAllowed } from '@/lib/leads/localCommercialAccess';
 import { useQueryCacheIdentity } from '@/lib/hooks/useQueryCacheIdentity';
 import { useLeadsRemoteBridgeLifecycle } from '@/lib/hooks/useLeadsRemoteBridgeLifecycle';
@@ -29,6 +29,7 @@ import { Home } from '@/components/screens/Home';
 import { ScreenClientes, ScreenAndamento, ScreenPendencias } from '@/components/screens/ScreensOps';
 import { ScreenVisitas, ScreenPropostas, ScreenVendas, ScreenResultados, ScreenAjustes } from '@/components/screens/ScreensBiz';
 import { ScreenEmpresas } from '@/components/screens/ScreenEmpresas';
+import { ScreenConversas } from '@/components/whatsappInbox/ScreenConversas';
 import { FlowLayer } from '@/components/flows/FlowLayer';
 
 const TWEAK_DEFAULTS = {
@@ -110,10 +111,14 @@ const SUPER_ADMIN_OPERATIONAL_NAV_IDS = [...COMMERCIAL_NAV_IDS, 'pendencias', 'v
 // DEFINER, reaproveita _resolve_commercial_read_company do V2A). Usuários/
 // Convites continuam fora da operação da empresa (nunca entram nesta
 // lista).
-function operationalSuperAdminNavIds(user: User): string[] {
+function operationalSuperAdminNavIds(user: User, companyId: string | null): string[] {
   const ids = ['home'];
   if (isSuperAdminCommercialReadEnabled() && canAccessCommercialWorkspace(user)) {
     ids.push('clientes', 'andamento', 'pendencias', 'visitas', 'propostas', 'vendas', 'resultados');
+  }
+  // WHATSAPP-W2B-8: só no contexto operacional da company de teste, com a flag ligada.
+  if (canAccessWhatsAppInbox({ platformRole: user.platformRole ?? null, companyId, inboxFlagEnabled: isWhatsAppInboxEnabled() })) {
+    ids.push('conversas');
   }
   if (canManageInvites(user) || (isRemoteStagesEnabled() && canAccessStageSettings(user))) {
     ids.push('ajustes');
@@ -121,13 +126,13 @@ function operationalSuperAdminNavIds(user: User): string[] {
   return ids;
 }
 
-function allowedNavIds(user: User | null, operationalMode: OperationalCompanyMode = 'none'): string[] {
+function allowedNavIds(user: User | null, operationalMode: OperationalCompanyMode = 'none', operationalCompanyId: string | null = null): string[] {
   if (!user) return [];
   const isSuperAdmin = user.platformRole === 'super_admin';
   const membershipRole = user.activeMembership?.role ?? null;
 
   if (isSuperAdmin && operationalMode === 'super_admin') {
-    return operationalSuperAdminNavIds(user);
+    return operationalSuperAdminNavIds(user, operationalCompanyId);
   }
 
   const base = isSuperAdmin
@@ -192,7 +197,7 @@ function useRailModel(currentUser: User): RailModel {
   // operacional/identidade. Manager/Seller: mode==='membership',
   // comportamento inalterado. Super Admin sem /company/[id]: mode==='none'.
   const operational = useOperationalCompanyContext();
-  const allowedIds = allowedNavIds(currentUser, operational.mode);
+  const allowedIds = allowedNavIds(currentUser, operational.mode, operational.companyId);
   const isOperationalSuperAdmin = operational.mode === 'super_admin';
   // M1-E E7-A1: SellerService lê catálogo LOCAL — fora do modo local nunca
   // é consultado aqui.
@@ -565,7 +570,7 @@ function AuthenticatedApp({
   useEffect(() => { if (isDesktop) setNavOpen(false); }, [isDesktop]);
 
   const go = (id: string, params: any = null) => {
-    const allowed = allowedNavIds(currentUser, operational.mode);
+    const allowed = allowedNavIds(currentUser, operational.mode, operational.companyId);
     if (!allowed.includes(id)) return;
     setCurrent(id);
     setNavParams(params);
@@ -574,10 +579,10 @@ function AuthenticatedApp({
   };
 
   useEffect(() => {
-    const allowed = allowedNavIds(currentUser, operational.mode);
+    const allowed = allowedNavIds(currentUser, operational.mode, operational.companyId);
     if (!allowed.includes(current)) setCurrent('home');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, current, operational.mode]);
+  }, [currentUser, current, operational.mode, operational.companyId]);
 
   // SUPER-ADMIN-COMPANY-CONTEXT-B1-EXEC §11 — Super Admin SEM contexto de
   // empresa (mode==='none') nunca deve pousar numa Home comercial vazia:
@@ -619,11 +624,12 @@ function AuthenticatedApp({
     propostas: ScreenPropostas,
     vendas: ScreenVendas,
     resultados: ScreenResultados,
+    conversas: ScreenConversas,
     ajustes: ScreenAjustes,
     empresas: ScreenEmpresas,
   };
 
-  const effectiveCurrent = allowedNavIds(currentUser, operational.mode).includes(current) ? current : 'home';
+  const effectiveCurrent = allowedNavIds(currentUser, operational.mode, operational.companyId).includes(current) ? current : 'home';
   const Cur = Screens[effectiveCurrent];
   const navItem = (NAV as any[]).find((n: any) => n.id === effectiveCurrent);
 

@@ -4064,6 +4064,53 @@ export type Database = {
           out_outcome: string
         }[]
       }
+      whatsapp_inbox_list_conversations: {
+        Args: {
+          p_actor_profile_id: string
+          p_before_id?: string
+          p_before_last_message_at?: string
+          p_company_id: string
+          p_limit?: number
+        }
+        Returns: {
+          out_conversation_id: string
+          out_last_connection_id: string
+          out_last_content_ciphertext: string
+          out_last_content_key_version: number
+          out_last_message_at: string
+          out_last_message_id_hash: string
+          out_last_message_type: string
+          out_message_count: number
+          out_pii_ciphertext: string
+          out_pii_key_version: number
+          out_pii_ref: string
+        }[]
+      }
+      whatsapp_inbox_list_messages: {
+        Args: {
+          p_actor_profile_id: string
+          p_before_id?: string
+          p_before_occurred_at?: string
+          p_before_received_at?: string
+          p_company_id: string
+          p_conversation_id: string
+          p_limit?: number
+        }
+        Returns: {
+          out_connection_id: string
+          out_content_ciphertext: string
+          out_content_key_version: number
+          out_message_id: string
+          out_message_id_hash: string
+          out_message_type: string
+          out_occurred_at: string
+          out_received_at: string
+        }[]
+      }
+      whatsapp_inbox_read_allowed: {
+        Args: { p_actor_profile_id: string; p_company_id: string }
+        Returns: boolean
+      }
       whatsapp_webhook_event_register: {
         Args: {
           p_company_id: string
