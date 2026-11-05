@@ -24,6 +24,7 @@ export type MetaPersistenceErrorCode =
   | 'token_encryption_failed'
   | 'page_already_connected'
   | 'persistence_unavailable'
+  | 'token_short_lived'
   | 'connection_persist_failed';
 
 export type MetaPersistenceResult<T> =
@@ -45,6 +46,25 @@ export interface UpsertRpcArgs {
   p_connected_at: string;
   p_connected_by: string;
   p_leadgen_subscribed_at: string;
+  // META-MVP1 — validade verificada server-side (debug_token).
+  p_token_origin: TokenOrigin;
+  p_token_expires_at: string | null;
+  p_token_data_access_expires_at: string | null;
+  p_token_checked_at: string;
+}
+
+// Como o token de Página foi obtido:
+//   exchanged_long_lived  — token de usuário trocado por longa duração antes do /me/accounts;
+//   original_token — o token veio sem expires_in (ex.: usuário do sistema) ou a troca
+//                    por longa duração falhou; a validade real é a do debug_token.
+export type TokenOrigin = 'exchanged_long_lived' | 'original_token';
+
+export interface MetaTokenHealth {
+  origin: TokenOrigin;
+  // null = a Meta não informou expiração.
+  expiresAt: Date | null;
+  dataAccessExpiresAt: Date | null;
+  checkedAt: Date;
 }
 
 export interface UpsertRpcRow {
@@ -70,6 +90,7 @@ export interface OwnerRpcRow {
 export interface MetaConnectionRpcPort {
   upsert(args: UpsertRpcArgs): Promise<{ data: UpsertRpcRow[] | null; error: RpcFailure | null }>;
   ownerByPage(pageId: string): Promise<{ data: OwnerRpcRow[] | null; error: RpcFailure | null }>;
+  ownerForIngestion(pageId: string): Promise<{ data: OwnerRpcRow[] | null; error: RpcFailure | null }>;
 }
 
 export interface PersistenceDeps {
@@ -86,6 +107,7 @@ export interface PersistMetaPageConnectionInput {
   connectedAt: Date;
   connectedBy: string;
   leadgenSubscribedAt: Date;
+  tokenHealth: MetaTokenHealth;
 }
 
 export interface MetaConnectionMetadata {
@@ -107,6 +129,17 @@ export interface MetaConnectionOwner {
 
 function isValidDate(value: unknown): value is Date {
   return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
+function isValidTokenHealth(health: unknown): health is MetaTokenHealth {
+  if (typeof health !== 'object' || health === null) return false;
+  const value = health as Partial<MetaTokenHealth>;
+  return (
+    (value.origin === 'exchanged_long_lived' || value.origin === 'original_token') &&
+    isValidDate(value.checkedAt) &&
+    (value.expiresAt === null || isValidDate(value.expiresAt)) &&
+    (value.dataAccessExpiresAt === null || isValidDate(value.dataAccessExpiresAt))
+  );
 }
 
 function scopesAreExactlyRequired(scopes: readonly string[]): boolean {
@@ -133,6 +166,7 @@ async function callWithOneRetry<T extends { error: RpcFailure | null }>(
 function mapUpsertRpcError(error: RpcFailure): MetaPersistenceErrorCode {
   if (error.message === 'page_already_connected') return 'page_already_connected';
   if (error.message === 'invalid_input') return 'invalid_persistence_input';
+  if (error.message === 'token_short_lived' || error.message === 'token_data_access_expired') return 'token_short_lived';
   if (error.code === 'PGRST202') return 'persistence_unavailable';
   return 'connection_persist_failed';
 }
@@ -189,7 +223,8 @@ export async function persistMetaPageConnection(
     !scopesAreExactlyRequired(input.grantedScopes) ||
     !isValidDate(input.connectedAt) ||
     typeof input.connectedBy !== 'string' || !UUID_PATTERN.test(input.connectedBy) ||
-    !isValidDate(input.leadgenSubscribedAt)
+    !isValidDate(input.leadgenSubscribedAt) ||
+    !isValidTokenHealth(input.tokenHealth)
   ) {
     return { ok: false, code: 'invalid_persistence_input' };
   }
@@ -216,6 +251,10 @@ export async function persistMetaPageConnection(
     p_connected_at: input.connectedAt.toISOString(),
     p_connected_by: input.connectedBy,
     p_leadgen_subscribed_at: input.leadgenSubscribedAt.toISOString(),
+    p_token_origin: input.tokenHealth.origin,
+    p_token_expires_at: input.tokenHealth.expiresAt?.toISOString() ?? null,
+    p_token_data_access_expires_at: input.tokenHealth.dataAccessExpiresAt?.toISOString() ?? null,
+    p_token_checked_at: input.tokenHealth.checkedAt.toISOString(),
   };
 
   const outcome = await callWithOneRetry(() => deps.rpc.upsert(args));

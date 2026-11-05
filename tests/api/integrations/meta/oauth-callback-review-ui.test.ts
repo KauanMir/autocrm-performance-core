@@ -8,6 +8,7 @@
 // como antes — coberto por oauth-callback.test.ts e
 // oauth-callback-page-subscription.test.ts, que não mudam.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { debugTokenResponse, isDebugTokenUrl } from '@/tests/helpers/metaGraphFakes';
 
 import { GET } from '@/app/api/integrations/meta/oauth/callback/route';
 import { createOAuthState } from '@/lib/server/meta-oauth/state';
@@ -105,6 +106,7 @@ beforeEach(() => {
 
   fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown) => {
     const u = urlOf(input);
+    if (isDebugTokenUrl(u)) return debugTokenResponse(APP_ID);
     if (u.pathname.endsWith('/oauth/access_token')) return tokenOkResponse();
 
     if (u.pathname.endsWith('/me/permissions')) return permissionsResponse();

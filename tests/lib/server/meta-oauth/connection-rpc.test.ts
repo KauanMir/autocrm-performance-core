@@ -23,6 +23,10 @@ const ARGS = {
   p_connected_at: '2026-10-05T12:00:00.000Z',
   p_connected_by: 'f7000000-0000-4000-8000-000000000001',
   p_leadgen_subscribed_at: '2026-10-05T12:00:01.000Z',
+  p_token_origin: 'exchanged_long_lived' as const,
+  p_token_expires_at: null,
+  p_token_data_access_expires_at: '2027-01-05T12:00:00.000Z',
+  p_token_checked_at: '2026-10-05T12:00:01.000Z',
 };
 
 beforeEach(() => {
@@ -31,11 +35,12 @@ beforeEach(() => {
 });
 
 describe('createMetaConnectionRpcPort — upsert', () => {
-  it('chama meta_connection_upsert com os argumentos recebidos, sem reescrever nada', async () => {
+  it('META-MVP1: chama meta_connection_upsert_v2 com os argumentos recebidos (null de validade vira ausente)', async () => {
     mocks.rpc.mockResolvedValue({ data: [{ id: 'x' }], error: null });
     const port = createMetaConnectionRpcPort();
     await port.upsert(ARGS);
-    expect(mocks.rpc).toHaveBeenCalledWith('meta_connection_upsert', ARGS);
+    expect(mocks.rpc).toHaveBeenCalledWith('meta_connection_upsert_v2', { ...ARGS, p_token_expires_at: undefined });
+    expect(mocks.rpc.mock.calls.map((c) => c[0])).not.toContain('meta_connection_upsert');
   });
 
   it('devolve data e error reduzidos a código e mensagem internos', async () => {
@@ -67,6 +72,15 @@ describe('createMetaConnectionRpcPort — owner by page', () => {
     const port = createMetaConnectionRpcPort();
     await port.ownerByPage('700000000000001');
     expect(mocks.rpc.mock.calls.map((c) => c[0])).not.toContain('meta_connection_lookup_by_page');
+  });
+});
+
+describe('createMetaConnectionRpcPort — owner for ingestion (META-MVP1)', () => {
+  it('chama meta_connection_owner_for_ingestion (connected OU error) com p_page_id', async () => {
+    mocks.rpc.mockResolvedValue({ data: [], error: null });
+    const port = createMetaConnectionRpcPort();
+    await port.ownerForIngestion('700000000000001');
+    expect(mocks.rpc).toHaveBeenCalledWith('meta_connection_owner_for_ingestion', { p_page_id: '700000000000001' });
   });
 });
 

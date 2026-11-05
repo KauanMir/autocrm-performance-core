@@ -85,7 +85,22 @@ describe('sucesso e payload', () => {
       json(200, { id: LEADGEN, created_time: '2026-10-05T12:00:00+0000', ad_id: '1', form_id: '2', field_data: fieldData }),
     );
     const r = await run(fetcher);
-    expect(r).toEqual({ ok: true, value: { id: LEADGEN, fieldData } });
+    // META-MVP1: created_time normalizado para ISO; ad_id/form_id preservados.
+    expect(r).toEqual({
+      ok: true,
+      value: { id: LEADGEN, fieldData, createdTime: '2026-10-05T12:00:00.000Z', adId: '1', formId: '2' },
+    });
+  });
+
+  it('META-MVP1: metadados ausentes ou fora do formato viram null, nunca erro', async () => {
+    const fieldData = [{ name: 'full_name', values: ['Cliente Teste'] }];
+    const { fetcher } = fakeFetch(() =>
+      json(200, { id: LEADGEN, created_time: 'ontem', ad_id: 'abc', form_id: 42, field_data: fieldData }),
+    );
+    expect(await run(fetcher)).toEqual({
+      ok: true,
+      value: { id: LEADGEN, fieldData, createdTime: null, adId: null, formId: null },
+    });
   });
 
   it('200 sem field_data → graph_malformed', async () => {

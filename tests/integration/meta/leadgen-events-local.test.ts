@@ -12,7 +12,8 @@ import { createMetaConnectionRpcPort } from '@/lib/server/meta-oauth/connection-
 import { registerLeadgenEvent } from '@/lib/server/meta-webhook/leadgen-events-rpc';
 
 const RUN = process.env.META_P1_LOCAL === '1';
-const CONTAINER = 'supabase_db_autocrm-performance-core';
+// Container configurable to target an isolated local project (never the owner's shared volumes by accident).
+const CONTAINER = process.env.LOCAL_SUPABASE_DB_CONTAINER ?? process.env.META_LOCAL_DB_CONTAINER ?? 'supabase_db_autocrm-performance-core';
 const REQUIRED = ['pages_show_list', 'pages_read_engagement', 'pages_manage_metadata', 'leads_retrieval'];
 const FAKE_PAGE = '930000000000001';
 const FAKE_PAGE_OTHER = '930000000000002';
@@ -54,10 +55,11 @@ describe.runIf(RUN)('META-INGESTION-P1 — ledger local real', () => {
     if (created.error || !created.data.user) throw new Error('fixture_user_failed');
     userId = created.data.user.id;
 
-    const profile = await admin()
-      .from('profiles')
-      .upsert({ id: userId, name: 'P1 Fixture', email, is_active: true }, { onConflict: 'id' });
-    if (profile.error) throw new Error('fixture_profile_failed');
+    // service_role only reads profiles(id) since 20261109100000; the fixture row is written as postgres.
+    sql(
+      `insert into public.profiles (id, name, email, is_active) values ('${userId}', 'P1 Fixture', '${email}', true)\n` +
+        `on conflict (id) do update set name = excluded.name, email = excluded.email, is_active = excluded.is_active;\n`,
+    );
 
     const upsert = await createMetaConnectionRpcPort().upsert({
       p_company_id: companyId,
@@ -69,6 +71,10 @@ describe.runIf(RUN)('META-INGESTION-P1 — ledger local real', () => {
       p_connected_at: new Date('2026-10-05T12:00:00.000Z').toISOString(),
       p_connected_by: userId,
       p_leadgen_subscribed_at: new Date('2026-10-05T12:00:01.000Z').toISOString(),
+      p_token_origin: 'exchanged_long_lived',
+      p_token_expires_at: null,
+      p_token_data_access_expires_at: null,
+      p_token_checked_at: new Date().toISOString(),
     });
     if (upsert.error || !upsert.data?.[0]) throw new Error('fixture_integration_failed');
     integrationId = upsert.data[0].id;

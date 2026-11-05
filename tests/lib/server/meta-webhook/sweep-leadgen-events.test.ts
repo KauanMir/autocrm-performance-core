@@ -29,6 +29,8 @@ const CONNECTED: ProcessingIntegration = {
   status: 'connected',
   ciphertext: 'v1.FAKE',
   tokenKeyVersion: 1,
+  tokenExpiresAt: null,
+  tokenDataAccessExpiresAt: null,
 };
 
 function eventsOf(n: number): ClaimedEvent[] {
@@ -38,6 +40,7 @@ function eventsOf(n: number): ClaimedEvent[] {
     companyId: COMPANY,
     pageId: PAGE,
     leadgenId: `96000000000${String(100 + i)}`,
+    formId: null,
     attempts: 1,
     leaseToken: `fa100000-0000-0000-0000-${String(100 + i).padStart(12, '0')}`,
   }));
@@ -69,6 +72,8 @@ function makeMocks(o: Overrides = {}) {
       async (_input: FailEventInput): Promise<ProcessingRpcResult<{ outcome: string }>> =>
         o.failEvent ?? { ok: true, value: { outcome: 'retry_scheduled' } },
     ),
+    loadFormMappings: vi.fn(async (): Promise<ProcessingRpcResult<{ target: string; fieldKey: string }[]>> => ({ ok: true, value: [] })),
+    markIntegrationError: vi.fn(async (): Promise<ProcessingRpcResult<{ outcome: string }>> => ({ ok: true, value: { outcome: 'marked' } })),
   };
 }
 
@@ -87,6 +92,9 @@ function makeDeps(o: Overrides = {}) {
           { name: 'full_name', values: [`Cliente ${input.leadgenId}`] },
           { name: 'phone_number', values: [`61 9${input.leadgenId.slice(-8)}`] },
         ],
+        createdTime: null,
+        adId: null,
+        formId: null,
       },
     })),
     normalizeLead: normalizeLeadgenFieldData,

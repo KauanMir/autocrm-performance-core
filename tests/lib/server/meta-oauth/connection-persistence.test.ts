@@ -34,6 +34,7 @@ function validInput(over: Partial<PersistMetaPageConnectionInput> = {}): Persist
     connectedAt: CONNECTED_AT,
     connectedBy: CONNECTED_BY,
     leadgenSubscribedAt: LEADGEN_AT,
+    tokenHealth: { origin: 'exchanged_long_lived', expiresAt: null, dataAccessExpiresAt: null, checkedAt: LEADGEN_AT },
     ...over,
   };
 }
@@ -73,6 +74,7 @@ function makePort(opts: {
       ownerCalls.push(pageId);
       return opts.owner ? opts.owner() : { data: [], error: null };
     },
+    ownerForIngestion: async () => ({ data: [], error: null }),
   };
 }
 
@@ -308,6 +310,11 @@ describe('validação de entrada — falha antes de cifrar e de chamar a RPC', (
     ['connectedAt inválido', { connectedAt: new Date('nope') }],
     ['connectedBy não uuid', { connectedBy: 'browser-value' }],
     ['leadgen inválido', { leadgenSubscribedAt: new Date('nope') }],
+    // META-MVP1 — validade do token é obrigatória e tipada.
+    ['tokenHealth ausente', { tokenHealth: undefined }],
+    ['origem desconhecida', { tokenHealth: { origin: 'guess' as never, expiresAt: null, dataAccessExpiresAt: null, checkedAt: LEADGEN_AT } }],
+    ['checkedAt inválido', { tokenHealth: { origin: 'exchanged_long_lived', expiresAt: null, dataAccessExpiresAt: null, checkedAt: new Date('nope') } }],
+    ['expiresAt inválido', { tokenHealth: { origin: 'exchanged_long_lived', expiresAt: new Date('nope'), dataAccessExpiresAt: null, checkedAt: LEADGEN_AT } }],
   ];
 
   it.each(bad)('%s -> invalid_persistence_input, zero RPC', async (_label, over) => {
@@ -339,5 +346,38 @@ describe('logs e isolamento', () => {
     expect(owner).toBeLessThan(subscribe);
     expect(source).toContain('const persistenceEnabled = isReviewUiFlow && isMetaConnectionPersistenceEnabled();');
     expect(source).not.toMatch(/meta_connection_(upsert|owner_by_page|status|lookup_by_page)/);
+  });
+});
+
+describe('META-MVP1 — validade do token na persistência', () => {
+  it('origem, expiração, expiração de acesso a dados e checkedAt chegam à RPC', async () => {
+    const port = makePort();
+    const expiresAt = new Date('2027-01-01T00:00:00.000Z');
+    const dataAccess = new Date('2027-02-01T00:00:00.000Z');
+    await persistMetaPageConnection(
+      { rpc: port, isEnabled: enabled },
+      validInput({ tokenHealth: { origin: 'original_token', expiresAt, dataAccessExpiresAt: dataAccess, checkedAt: LEADGEN_AT } }),
+    );
+    const [args] = port.upsertCalls;
+    expect(args.p_token_origin).toBe('original_token');
+    expect(args.p_token_expires_at).toBe(expiresAt.toISOString());
+    expect(args.p_token_data_access_expires_at).toBe(dataAccess.toISOString());
+    expect(args.p_token_checked_at).toBe(LEADGEN_AT.toISOString());
+  });
+
+  it('sem expiração informada -> null (nunca inventa data)', async () => {
+    const port = makePort();
+    await persistMetaPageConnection({ rpc: port, isEnabled: enabled }, validInput());
+    expect(port.upsertCalls[0].p_token_expires_at).toBeNull();
+    expect(port.upsertCalls[0].p_token_data_access_expires_at).toBeNull();
+  });
+
+  it.each(['token_short_lived', 'token_data_access_expired'])('%s do banco -> token_short_lived, sem retry', async (message) => {
+    const port = makePort({ upsert: async () => ({ data: null, error: { code: 'P0001', message } }) });
+    expect(await persistMetaPageConnection({ rpc: port, isEnabled: enabled }, validInput())).toEqual({
+      ok: false,
+      code: 'token_short_lived',
+    });
+    expect(port.upsertCalls).toHaveLength(1);
   });
 });

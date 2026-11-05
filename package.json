@@ -10,7 +10,8 @@
     "test:run": "vitest run",
     "test:watch": "vitest",
     "whatsapp:bootstrap-test-connection": "tsx scripts/whatsapp/bootstrap-test-connection.ts",
-    "whatsapp:validate-local": "tsx scripts/whatsapp/local-validation/validate-capture-local.ts"
+    "whatsapp:validate-local": "tsx scripts/whatsapp/local-validation/validate-capture-local.ts",
+    "meta:sweep-local": "tsx scripts/meta/local-sweep-scheduler.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.1",

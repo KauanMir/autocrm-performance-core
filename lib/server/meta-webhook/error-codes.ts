@@ -5,6 +5,7 @@
 export const META_LEAD_ERROR_CODES = [
   'token_decrypt_failed',
   'token_invalid',
+  'token_expired',
   'graph_permission_missing',
   'graph_timeout',
   'graph_error',
@@ -37,6 +38,8 @@ const ERROR_KIND: Record<MetaLeadErrorCode, MetaLeadErrorKind> = {
   crm_create_failed: 'retryable',
   token_decrypt_failed: 'operational',
   token_invalid: 'operational',
+  // A validade salva na conexão já passou: nem chama a Graph, pede reconexão.
+  token_expired: 'operational',
   graph_permission_missing: 'operational',
   initial_stage_missing: 'operational',
   integration_not_found: 'terminal',

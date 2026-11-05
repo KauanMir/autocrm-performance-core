@@ -21,6 +21,7 @@ const EVENT: ClaimedEvent = {
   companyId: 'f9eeeeee-1111-1111-1111-111111111111',
   pageId: '950000000000901',
   leadgenId: '9990001112223390',
+  formId: '1086000000000001',
   attempts: 1,
   leaseToken: 'f9100000-0000-0000-0000-000000000901',
 };
@@ -31,6 +32,8 @@ const CONNECTED: ProcessingIntegration = {
   status: 'connected',
   ciphertext: 'v1.FAKE-CT',
   tokenKeyVersion: 1,
+  tokenExpiresAt: null,
+  tokenDataAccessExpiresAt: null,
 };
 const FIELD_DATA = [
   { name: 'full_name', values: ['Cliente Fake'] },
@@ -42,6 +45,8 @@ type RpcOverrides = Partial<{
   lookup: Awaited<ReturnType<ProcessingRpc['lookupIntegration']>>;
   complete: Awaited<ReturnType<ProcessingRpc['completeLead']>>;
   fail: Awaited<ReturnType<ProcessingRpc['failEvent']>>;
+  mappings: Awaited<ReturnType<ProcessingRpc['loadFormMappings']>>;
+  mark: Awaited<ReturnType<ProcessingRpc['markIntegrationError']>>;
 }>;
 
 function makeRpc(overrides: RpcOverrides = {}) {
@@ -57,6 +62,12 @@ function makeRpc(overrides: RpcOverrides = {}) {
     failEvent: vi.fn(
       async (_input: FailEventInput) => overrides.fail ?? { ok: true as const, value: { outcome: 'retry_scheduled' } },
     ),
+    loadFormMappings: vi.fn(
+      async (_companyId: string, _formId: string | null) => overrides.mappings ?? { ok: true as const, value: [] },
+    ),
+    markIntegrationError: vi.fn(
+      async (_integrationId: string, _code: string) => overrides.mark ?? { ok: true as const, value: { outcome: 'marked' } },
+    ),
   };
   return rpc;
 }
@@ -70,8 +81,12 @@ function makeDeps(
     rpc,
     graphApiVersion: vi.fn(() => 'v26.0'),
     decryptToken: vi.fn(() => ({ ok: true as const, token: TOKEN })),
-    fetchLead: vi.fn(async () => ({ ok: true as const, value: { id: EVENT.leadgenId, fieldData: FIELD_DATA } })),
+    fetchLead: vi.fn(async () => ({
+      ok: true as const,
+      value: { id: EVENT.leadgenId, fieldData: FIELD_DATA, createdTime: '2026-11-05T12:00:00.000Z', adId: '120000000000001', formId: null as string | null },
+    })),
     normalizeLead: vi.fn(normalizeLeadgenFieldData),
+    log: vi.fn(),
     ...extra,
   };
   return { deps: deps as MetaLeadProcessorDeps & typeof deps, rpc };
@@ -230,17 +245,62 @@ describe('NORMALIZE', () => {
     expect(rpc.failEvent).toHaveBeenCalledTimes(1);
   });
 
-  it('normalize recebe o fieldData do Graph e complete recebe apenas name/phone/car', async () => {
-    const { deps, rpc } = makeDeps();
+  it('META-MVP1: normalize recebe fieldData + mapeamento; complete recebe contato, respostas e metadados', async () => {
+    const { deps, rpc } = makeDeps({}, {
+      fetchLead: vi.fn(async () => ({
+        ok: true as const,
+        value: {
+          id: EVENT.leadgenId,
+          fieldData: [...FIELD_DATA, { name: 'email', values: ['fake@test.local'] }, { name: 'cor', values: ['Prata'] }],
+          createdTime: '2026-11-05T12:00:00.000Z',
+          adId: '120000000000001',
+          formId: null,
+        },
+      })),
+    });
     await run(deps);
-    expect(deps.normalizeLead).toHaveBeenCalledWith(FIELD_DATA);
+    expect(deps.normalizeLead).toHaveBeenCalledWith(expect.any(Array), {});
     expect(rpc.completeLead).toHaveBeenCalledWith({
       eventId: EVENT.eventId,
       leaseToken: EVENT.leaseToken,
       name: 'Cliente Fake',
       phone: '61999990001',
-      car: 'Não informado',
+      email: 'fake@test.local',
+      vehicle: null,
+      answers: [{ key: 'cor', values: ['Prata'] }],
+      formId: EVENT.formId,
+      adId: '120000000000001',
+      submittedAt: '2026-11-05T12:00:00.000Z',
     });
+  });
+
+  it('META-MVP1: mapeamento do formulário (company + form) decide o veículo', async () => {
+    const { deps, rpc } = makeDeps(
+      { mappings: { ok: true, value: [{ target: 'vehicle', fieldKey: 'qual_carro' }] } },
+      {
+        fetchLead: vi.fn(async () => ({
+          ok: true as const,
+          value: {
+            id: EVENT.leadgenId,
+            fieldData: [...FIELD_DATA, { name: 'qual_carro', values: ['Onix 2024'] }],
+            createdTime: null,
+            adId: null,
+            formId: '1086000000000002',
+          },
+        })),
+      },
+    );
+    await run(deps);
+    // form_id da Graph tem precedência sobre o do webhook.
+    expect(rpc.loadFormMappings).toHaveBeenCalledWith(EVENT.companyId, '1086000000000002');
+    expect(rpc.completeLead.mock.calls[0][0]).toMatchObject({ vehicle: 'Onix 2024', answers: [], formId: '1086000000000002' });
+  });
+
+  it('META-MVP1: falha ao ler o mapeamento → infrastructure_error, sem complete e sem fail', async () => {
+    const { deps, rpc } = makeDeps({ mappings: { ok: false, code: 'infrastructure_error' } });
+    expect(await run(deps)).toEqual({ outcome: 'infrastructure_error' });
+    expect(rpc.completeLead).not.toHaveBeenCalled();
+    expect(rpc.failEvent).not.toHaveBeenCalled();
   });
 
   it('normalize nunca é chamado se Graph falhar (G)', async () => {
@@ -367,5 +427,89 @@ describe('segurança do resultado', () => {
     await run(deps);
     expect(deps.decryptToken).not.toHaveBeenCalled();
     expect(deps.fetchLead).not.toHaveBeenCalled();
+  });
+});
+
+describe('META-MVP1 — saúde do token e da conexão', () => {
+  it('Graph token_invalid (190) marca a conexão como erro e reagenda o evento', async () => {
+    const { deps, rpc } = makeDeps({}, { fetchLead: vi.fn(async () => ({ ok: false as const, code: 'token_invalid' as const })) });
+    expect(await run(deps)).toEqual({ outcome: 'failed', errorCode: 'token_invalid' });
+    expect(rpc.markIntegrationError).toHaveBeenCalledWith(EVENT.integrationId, 'token_invalid');
+    expect(rpc.failEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('Graph graph_permission_missing marca permission_missing', async () => {
+    const { deps, rpc } = makeDeps({}, {
+      fetchLead: vi.fn(async () => ({ ok: false as const, code: 'graph_permission_missing' as const })),
+    });
+    await run(deps);
+    expect(rpc.markIntegrationError).toHaveBeenCalledWith(EVENT.integrationId, 'permission_missing');
+  });
+
+  it.each(['graph_timeout', 'graph_error', 'lead_not_found'] as const)('%s NÃO marca a conexão', async (code) => {
+    const { deps, rpc } = makeDeps({}, { fetchLead: vi.fn(async () => ({ ok: false as const, code })) });
+    await run(deps);
+    expect(rpc.markIntegrationError).not.toHaveBeenCalled();
+  });
+
+  it('falha ao marcar a conexão não impede reagendar o evento', async () => {
+    const { deps, rpc } = makeDeps(
+      { mark: { ok: false, code: 'infrastructure_error' } },
+      { fetchLead: vi.fn(async () => ({ ok: false as const, code: 'token_invalid' as const })) },
+    );
+    expect(await run(deps)).toEqual({ outcome: 'failed', errorCode: 'token_invalid' });
+    expect(rpc.failEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['token vencido', { tokenExpiresAt: '2026-01-01T00:00:00.000Z' }],
+    ['acesso a dados vencido', { tokenDataAccessExpiresAt: '2026-01-01T00:00:00.000Z' }],
+  ])('%s → marca token_expired, fail token_expired, sem decrypt nem Graph', async (_label, override) => {
+    const { deps, rpc } = makeDeps(
+      { lookup: { ok: true, value: { ...CONNECTED, ...override } } },
+      { now: () => new Date('2026-11-05T12:00:00.000Z') },
+    );
+    expect(await run(deps)).toEqual({ outcome: 'failed', errorCode: 'token_expired' });
+    expect(rpc.markIntegrationError).toHaveBeenCalledWith(EVENT.integrationId, 'token_expired');
+    expect(deps.decryptToken).not.toHaveBeenCalled();
+    expect(deps.fetchLead).not.toHaveBeenCalled();
+  });
+
+  it('validade no futuro segue normalmente', async () => {
+    const { deps } = makeDeps(
+      { lookup: { ok: true, value: { ...CONNECTED, tokenDataAccessExpiresAt: '2027-01-01T00:00:00.000Z' } } },
+      { now: () => new Date('2026-11-05T12:00:00.000Z') },
+    );
+    expect(await run(deps)).toEqual({ outcome: 'created' });
+  });
+});
+
+describe('META-MVP1 — log de processamento', () => {
+  it('um log por tentativa, com UUID interno, outcome e contadores; sem PII, IDs Meta ou token', async () => {
+    const { deps } = makeDeps();
+    await run(deps);
+    expect(deps.log).toHaveBeenCalledTimes(1);
+    const entry = (deps.log as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(entry).toMatchObject({ operation: 'leadgen_process', trigger: 'webhook', eventRef: EVENT.eventId, outcome: 'created', answersCount: 0 });
+    const serialized = JSON.stringify(entry);
+    for (const forbidden of [TOKEN, EVENT.leadgenId, EVENT.pageId, EVENT.companyId, 'Cliente Fake', '61999990001']) {
+      expect(serialized).not.toContain(forbidden);
+    }
+  });
+
+  it('falha registra o errorCode e a marcação da conexão', async () => {
+    const { deps } = makeDeps({}, { fetchLead: vi.fn(async () => ({ ok: false as const, code: 'token_invalid' as const })) });
+    await run(deps);
+    expect((deps.log as ReturnType<typeof vi.fn>).mock.calls[0][0]).toMatchObject({
+      outcome: 'failed', errorCode: 'token_invalid', integrationMarked: 'token_invalid',
+    });
+  });
+
+  it('exceção inesperada vira infrastructure_error e ainda é registrada; log que lança não derruba', async () => {
+    const { deps } = makeDeps({}, {
+      fetchLead: vi.fn(async () => { throw new Error('boom secret'); }),
+      log: vi.fn(() => { throw new Error('log down'); }),
+    });
+    expect(await run(deps)).toEqual({ outcome: 'infrastructure_error' });
   });
 });

@@ -26,6 +26,28 @@ export function logMetaWebhookEvent(fields: MetaWebhookLogFields): void {
   console.log('[meta-webhook]', JSON.stringify(fields));
 }
 
+// META-MVP1 — resultado de cada tentativa de processamento. `eventRef` é o
+// UUID INTERNO da linha do ledger (não é ID da Meta nem PII) e liga o log à
+// fila de revisão. Nunca nome, telefone, e-mail, respostas, IDs da Meta ou token.
+export interface MetaLeadProcessingLogFields {
+  operation: 'leadgen_process';
+  trigger: 'webhook' | 'sweep' | 'manual_requeue';
+  eventRef: string;
+  outcome: string;
+  errorCode?: string;
+  integrationMarked?: 'token_invalid' | 'token_expired' | 'permission_missing';
+  answersCount?: number;
+  answersTruncated?: number;
+  sensitiveOmitted?: number;
+  mappedTargets?: number;
+  durationMs?: number;
+}
+
+export function logMetaLeadProcessing(fields: MetaLeadProcessingLogFields): void {
+  // eslint-disable-next-line no-console
+  console.log('[meta-leadgen]', JSON.stringify(fields));
+}
+
 // Para erros inesperados: objeto já redigido, nunca o erro original (que
 // pode carregar stack/mensagem bruta de uma dependência).
 export function logMetaWebhookError(context: string, safeDetail: Record<string, unknown>): void {

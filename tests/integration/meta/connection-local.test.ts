@@ -17,7 +17,8 @@ import {
 import { decryptMetaPageToken, encryptMetaPageToken } from '@/lib/server/meta-oauth/token-crypto';
 
 const RUN = process.env.META_P4B5_LOCAL === '1';
-const CONTAINER = 'supabase_db_autocrm-performance-core';
+// Container configurable to target an isolated local project (never the owner's shared volumes by accident).
+const CONTAINER = process.env.LOCAL_SUPABASE_DB_CONTAINER ?? process.env.META_LOCAL_DB_CONTAINER ?? 'supabase_db_autocrm-performance-core';
 const FAKE_KEY_HEX = 'cd'.repeat(32);
 const FAKE_KEY = Buffer.from(FAKE_KEY_HEX, 'hex');
 const FAKE_PAGE_TOKEN = 'FAKE-PAGE-TOKEN-p4b5-local-only';
@@ -56,10 +57,11 @@ describe.runIf(RUN)('META-P4B.5 — integração local real', () => {
     if (created.error || !created.data.user) throw new Error('fixture_user_failed');
     userId = created.data.user.id;
 
-    const profile = await admin
-      .from('profiles')
-      .upsert({ id: userId, name: 'P4B5 Fixture', email, is_active: true }, { onConflict: 'id' });
-    if (profile.error) throw new Error(`fixture_profile_failed: ${profile.error.message}`);
+    // service_role only reads profiles(id) since 20261109100000; the fixture row is written as postgres.
+    sql(
+      `insert into public.profiles (id, name, email, is_active) values ('${userId}', 'P4B5 Fixture', '${email}', true)\n` +
+        `on conflict (id) do update set name = excluded.name, email = excluded.email, is_active = excluded.is_active;\n`,
+    );
   });
 
   afterAll(async () => {
@@ -91,6 +93,10 @@ describe.runIf(RUN)('META-P4B.5 — integração local real', () => {
       p_connected_at: new Date('2026-10-05T12:00:00.000Z').toISOString(),
       p_connected_by: userId,
       p_leadgen_subscribed_at: new Date('2026-10-05T12:00:01.000Z').toISOString(),
+      p_token_origin: 'exchanged_long_lived',
+      p_token_expires_at: null,
+      p_token_data_access_expires_at: null,
+      p_token_checked_at: new Date().toISOString(),
       ...overrides,
     };
   }
@@ -147,6 +153,7 @@ describe.runIf(RUN)('META-P4B.5 — integração local real', () => {
         connectedAt: new Date(),
         connectedBy: userId,
         leadgenSubscribedAt: new Date(),
+        tokenHealth: { origin: 'exchanged_long_lived', expiresAt: null, dataAccessExpiresAt: null, checkedAt: new Date() },
       },
     );
     expect(sanitized).toEqual({ ok: false, code: 'page_already_connected' });
@@ -188,6 +195,7 @@ describe.runIf(RUN)('META-P4B.5 — integração local real', () => {
         connectedAt: new Date(),
         connectedBy: userId,
         leadgenSubscribedAt: new Date(),
+        tokenHealth: { origin: 'exchanged_long_lived', expiresAt: null, dataAccessExpiresAt: null, checkedAt: new Date() },
       },
     );
     expect(result.ok).toBe(true);
@@ -234,6 +242,7 @@ describe.runIf(RUN)('META-P4B.5 — integração local real', () => {
         connectedAt: new Date(),
         connectedBy: userId,
         leadgenSubscribedAt: new Date(),
+        tokenHealth: { origin: 'exchanged_long_lived', expiresAt: null, dataAccessExpiresAt: null, checkedAt: new Date() },
       },
     );
     expect(result).toEqual({ ok: false, code: 'persistence_disabled' });

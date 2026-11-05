@@ -10,6 +10,7 @@
 // banco — os quatro endpoints da Meta (token exchange, /me/accounts,
 // GET /{page-id}/posts, /subscribed_apps) são mockados por pathname.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { debugTokenResponse, isDebugTokenUrl, isLongLivedExchangeUrl } from '@/tests/helpers/metaGraphFakes';
 
 import { GET } from '@/app/api/integrations/meta/oauth/callback/route';
 import { createOAuthState } from '@/lib/server/meta-oauth/state';
@@ -146,6 +147,7 @@ beforeEach(() => {
 
   fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown) => {
     const u = urlOf(input);
+    if (isDebugTokenUrl(u)) return debugTokenResponse(APP_ID);
     if (u.pathname.endsWith('/oauth/access_token')) return tokenResponse();
     if (u.pathname.endsWith('/me/permissions')) return permissionsResponse();
     if (u.pathname.endsWith('/me/accounts')) return accountsResponse();
@@ -371,6 +373,7 @@ describe('GET /api/integrations/meta/oauth/callback — teste técnico controlad
   it('10c. GET /{page-id}/posts timeout -> test_page_read_engagement_failed', async () => {
     fetchMock.mockImplementation(async (input: unknown) => {
       const u = urlOf(input);
+      if (isDebugTokenUrl(u)) return debugTokenResponse(APP_ID);
       if (u.pathname.endsWith('/oauth/access_token')) return tokenResponse();
       if (u.pathname.endsWith('/me/permissions')) return permissionsResponse();
       if (u.pathname.endsWith('/me/accounts')) return accountsResponse();
@@ -438,6 +441,7 @@ describe('GET /api/integrations/meta/oauth/callback — teste técnico controlad
   it('12c. /me/accounts timeout -> page_token_lookup_failed', async () => {
     fetchMock.mockImplementation(async (input: unknown) => {
       const u = urlOf(input);
+      if (isDebugTokenUrl(u)) return debugTokenResponse(APP_ID);
       if (u.pathname.endsWith('/oauth/access_token')) return tokenResponse();
       if (u.pathname.endsWith('/me/permissions')) return permissionsResponse();
       if (u.pathname.endsWith('/me/accounts')) {
@@ -471,6 +475,7 @@ describe('GET /api/integrations/meta/oauth/callback — teste técnico controlad
   it('13c. /subscribed_apps timeout -> test_page_subscription_failed', async () => {
     fetchMock.mockImplementation(async (input: unknown) => {
       const u = urlOf(input);
+      if (isDebugTokenUrl(u)) return debugTokenResponse(APP_ID);
       if (u.pathname.endsWith('/oauth/access_token')) return tokenResponse();
       if (u.pathname.endsWith('/me/permissions')) return permissionsResponse();
       if (u.pathname.endsWith('/me/accounts')) return accountsResponse();
@@ -547,7 +552,10 @@ describe('GET /api/integrations/meta/oauth/callback — teste técnico controlad
     expect(callsTo('/me/accounts')).toHaveLength(1);
     expect(callsTo('/posts')).toHaveLength(1);
     expect(callsTo('/subscribed_apps')).toHaveLength(1);
-    expect(fetchMock).toHaveBeenCalledTimes(5); // token + me/permissions + accounts + read engagement (posts) + subscribe
+    expect(callsTo('/debug_token')).toHaveLength(1);
+    // META-MVP1: token + troca por longa duração + me/permissions + accounts
+    // + debug_token + read engagement (posts) + subscribe
+    expect(fetchMock).toHaveBeenCalledTimes(7);
   });
 
   it('resposta de sucesso do caminho de teste nunca inclui SUAT, Page token, code ou outras Pages', async () => {
@@ -555,6 +563,136 @@ describe('GET /api/integrations/meta/oauth/callback — teste técnico controlad
     const serialized = JSON.stringify(await res.json());
     for (const secret of [FAKE_SUAT, FAKE_PAGE_TOKEN, OTHER_PAGE_TOKEN, FAKE_CODE, '999999999999999']) {
       expect(serialized).not.toContain(secret);
+    }
+  });
+});
+
+// ═══ META-MVP1 — validade do token antes de inscrever/persistir ═══════════
+describe('META-MVP1 — token de longa duração e debug_token no callback (company de teste)', () => {
+  const LONG_LIVED = 'FAKE-LONG-LIVED-USER-TOKEN-must-never-leak';
+
+  function route(overrides: {
+    exchange?: () => Response;
+    longLived?: () => Response;
+    debug?: () => Response;
+  } = {}) {
+    fetchMock.mockImplementation(async (input: unknown) => {
+      const u = urlOf(input);
+      if (isLongLivedExchangeUrl(u)) {
+        return overrides.longLived?.() ?? new Response(JSON.stringify({ access_token: LONG_LIVED, expires_in: 5183944 }), { status: 200 });
+      }
+      if (isDebugTokenUrl(u)) return overrides.debug?.() ?? debugTokenResponse(APP_ID);
+      if (u.pathname.endsWith('/oauth/access_token')) return overrides.exchange?.() ?? tokenOkResponse();
+      if (u.pathname.endsWith('/me/permissions')) return permissionsOkResponse();
+      if (u.pathname.endsWith('/me/accounts')) return accountsOkResponse();
+      if (u.pathname.endsWith('/subscribed_apps')) return subscribeOkResponse();
+      if (u.pathname === `/${GRAPH_VERSION}/${META_TEST_PAGE_ID}/posts`) return readEngagementOkResponse();
+      throw new Error(`unexpected fetch in test: ${u.toString()}`);
+    });
+  }
+
+  const longLivedCalls = () =>
+    fetchMock.mock.calls.map((c) => urlOf(c[0])).filter((u) => isLongLivedExchangeUrl(u));
+
+  it('troca com expires_in -> troca por longa duração UMA vez e usa esse token no /me/accounts', async () => {
+    route();
+    const res = await GET(testCompanyRequest());
+    expect(res.status).toBe(200);
+    const calls = longLivedCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].searchParams.get('fb_exchange_token')).toBe(FAKE_SUAT);
+    expect(calls[0].searchParams.get('client_id')).toBe(APP_ID);
+    const [{ url }] = callsTo('/me/accounts');
+    expect(url.searchParams.get('access_token')).toBe(LONG_LIVED);
+  });
+
+  it('troca SEM expires_in (ex.: usuário do sistema) -> não chama fb_exchange_token', async () => {
+    route({ exchange: () => new Response(JSON.stringify({ access_token: FAKE_SUAT }), { status: 200 }) });
+    const res = await GET(testCompanyRequest());
+    expect(res.status).toBe(200);
+    expect(longLivedCalls()).toHaveLength(0);
+    const [{ url }] = callsTo('/me/accounts');
+    expect(url.searchParams.get('access_token')).toBe(FAKE_SUAT);
+  });
+
+  it('falha na troca por longa duração NÃO recusa: segue com o token original e o debug_token decide', async () => {
+    route({ longLived: () => new Response('err', { status: 400 }) });
+    const res = await GET(testCompanyRequest());
+    expect(res.status).toBe(200);
+    const [{ url }] = callsTo('/me/accounts');
+    expect(url.searchParams.get('access_token')).toBe(FAKE_SUAT);
+    expect(callsTo('/debug_token')).toHaveLength(1);
+    expect(callsTo('/subscribed_apps')).toHaveLength(1);
+  });
+
+  it('falha na troca + token de Página que vence em horas → recusado pelo debug_token, sem inscrição', async () => {
+    route({
+      longLived: () => new Response('err', { status: 400 }),
+      debug: () => debugTokenResponse(APP_ID, { expires_at: Math.floor(Date.now() / 1000) + 3600 }),
+    });
+    const res = await GET(testCompanyRequest());
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ ok: false, error: 'page_token_short_lived' });
+    expect(callsTo('/subscribed_apps')).toHaveLength(0);
+  });
+
+  it('debug_token sem `type` (campo fora da referência oficial) é aceito', async () => {
+    route({ debug: () => new Response(JSON.stringify({ data: { app_id: APP_ID, is_valid: true, expires_at: 0 } }), { status: 200 }) });
+    expect((await GET(testCompanyRequest())).status).toBe(200);
+  });
+
+  it('debug_token com profile_id de outra Página → recusado', async () => {
+    route({ debug: () => debugTokenResponse(APP_ID, { profile_id: '999' }) });
+    const res = await GET(testCompanyRequest());
+    expect(await res.json()).toEqual({ ok: false, error: 'page_token_invalid' });
+  });
+
+  it('debug_token chamado com o token de Página e o token de app SÓ no header', async () => {
+    route();
+    await GET(testCompanyRequest());
+    const debug = fetchMock.mock.calls.find((c) => isDebugTokenUrl(urlOf(c[0])));
+    expect(debug).toBeDefined();
+    const url = urlOf(debug![0]);
+    expect(url.searchParams.get('input_token')).toBe(FAKE_PAGE_TOKEN);
+    expect(url.toString()).not.toContain(APP_SECRET);
+    const headers = (debug![1] as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBe(`Bearer ${APP_ID}|${APP_SECRET}`);
+    expect((debug![1] as RequestInit).redirect).toBe('error');
+  });
+
+  it.each([
+    ['inválido', { is_valid: false }, 'page_token_invalid'],
+    ['de outro app', { app_id: '999' }, 'page_token_invalid'],
+    ['que não é de Página', { type: 'USER' }, 'page_token_invalid'],
+    ['que expira em 1 dia', { expires_at: Math.floor(Date.now() / 1000) + 86400 }, 'page_token_short_lived'],
+    ['com acesso a dados vencido', { data_access_expires_at: Math.floor(Date.now() / 1000) - 60 }, 'page_token_invalid'],
+  ])('token de Página %s -> 502 e NUNCA inscreve a Page', async (_label, overrides, error) => {
+    route({ debug: () => debugTokenResponse(APP_ID, overrides) });
+    const res = await GET(testCompanyRequest());
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ ok: false, error });
+    expect(callsTo('/subscribed_apps')).toHaveLength(0);
+    expect(callsTo('/posts')).toHaveLength(0);
+  });
+
+  it('debug_token indisponível -> 502 page_token_inspection_failed, sem inscrição', async () => {
+    route({ debug: () => new Response('err', { status: 500 }) });
+    const res = await GET(testCompanyRequest());
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ ok: false, error: 'page_token_inspection_failed' });
+    expect(callsTo('/subscribed_apps')).toHaveLength(0);
+  });
+
+  it('nenhuma resposta ou log carrega o token de longa duração', async () => {
+    const logs: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((...args) => { logs.push(args.join(' ')); });
+    vi.spyOn(console, 'error').mockImplementation((...args) => { logs.push(args.join(' ')); });
+    route();
+    const res = await GET(testCompanyRequest());
+    const body = JSON.stringify(await res.json());
+    for (const secret of [LONG_LIVED, FAKE_SUAT, FAKE_PAGE_TOKEN, APP_SECRET]) {
+      expect(body).not.toContain(secret);
+      for (const line of logs) expect(line).not.toContain(secret);
     }
   });
 });

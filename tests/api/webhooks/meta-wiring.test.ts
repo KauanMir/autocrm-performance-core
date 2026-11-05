@@ -10,18 +10,21 @@ const mocks = vi.hoisted(() => ({
   processMetaLeadgenEvent: vi.fn(),
   createMetaLeadgenProcessorDeps: vi.fn(() => ({})),
   waitUntil: vi.fn(),
+  sweep: vi.fn(),
   captured: [] as Promise<unknown>[],
 }));
 
 vi.mock('@vercel/functions', () => ({ waitUntil: mocks.waitUntil }));
 vi.mock('@/lib/server/meta-oauth/connection-rpc', () => ({
-  createMetaConnectionRpcPort: () => ({ ownerByPage: mocks.ownerByPage }),
+  // META-MVP1: a ingestão usa owner_for_ingestion (connected OU error).
+  createMetaConnectionRpcPort: () => ({ ownerForIngestion: mocks.ownerByPage }),
 }));
 vi.mock('@/lib/server/meta-webhook/leadgen-events-rpc', () => ({ registerLeadgenEvent: mocks.register }));
 vi.mock('@/lib/server/meta-webhook/process-leadgen-event', () => ({
   processMetaLeadgenEvent: mocks.processMetaLeadgenEvent,
   createMetaLeadgenProcessorDeps: mocks.createMetaLeadgenProcessorDeps,
 }));
+vi.mock('@/lib/server/meta-webhook/sweep-leadgen-events', () => ({ sweepMetaLeadgenEvents: mocks.sweep }));
 
 import { POST } from '@/app/api/webhooks/meta/route';
 
@@ -79,6 +82,7 @@ beforeEach(() => {
   mocks.register.mockReset().mockResolvedValue(registered);
   mocks.processMetaLeadgenEvent.mockReset().mockResolvedValue({ outcome: 'created' });
   mocks.createMetaLeadgenProcessorDeps.mockReset().mockImplementation(() => ({}));
+  mocks.sweep.mockReset().mockResolvedValue({ attempted: 0 });
   mocks.captured.length = 0;
   mocks.waitUntil.mockReset().mockImplementation((p: Promise<unknown>) => {
     mocks.captured.push(p);
@@ -296,5 +300,42 @@ describe('webhook duplicado', () => {
     expect(mocks.waitUntil).toHaveBeenCalledTimes(2);
     await settle();
     expect(mocks.processMetaLeadgenEvent.mock.calls.map((c) => c[0])).toEqual([EVENT_ID, EVENT_ID]);
+  });
+});
+
+describe('META-MVP1 — conexão em erro e sweep oportunístico', () => {
+  it('conexão da Page de teste em status error → evento REGISTRADO (aguarda reconexão), não descartado', async () => {
+    mocks.ownerByPage.mockResolvedValue({
+      data: [{ integration_id: INTEGRATION_ID, company_id: META_TEST_COMPANY_ID, page_id: META_TEST_PAGE_ID, status: 'error' }],
+      error: null,
+    });
+    const res = await POST(post(pageBody()));
+    expect(res.status).toBe(200);
+    expect(mocks.register).toHaveBeenCalledTimes(1);
+  });
+
+  it('conexão disconnected → não registra (desconexão é decisão explícita)', async () => {
+    mocks.ownerByPage.mockResolvedValue({
+      data: [{ integration_id: INTEGRATION_ID, company_id: META_TEST_COMPANY_ID, page_id: META_TEST_PAGE_ID, status: 'disconnected' }],
+      error: null,
+    });
+    await POST(post(pageBody()));
+    expect(mocks.register).not.toHaveBeenCalled();
+  });
+
+  it('depois do evento novo, a mesma execução faz um sweep de até 5 eventos vencidos', async () => {
+    await POST(post(pageBody()));
+    await settle();
+    expect(mocks.processMetaLeadgenEvent.mock.calls[0][2]).toBe('webhook');
+    expect(mocks.sweep).toHaveBeenCalledTimes(1);
+    expect(mocks.sweep.mock.calls[0][0]).toMatchObject({ limit: 5 });
+  });
+
+  it('sweep oportunístico que lança não afeta a resposta nem vaza', async () => {
+    mocks.sweep.mockRejectedValue(new Error('sweep secret detail'));
+    const res = await POST(post(pageBody()));
+    await settle();
+    expect(res.status).toBe(200);
+    expect(await res.text()).not.toContain('secret');
   });
 });

@@ -1,6 +1,7 @@
 // META-P4B — callback com persistência real (review_ui + flag ON). A porta RPC
 // é mockada (sem Supabase). Tokens, chaves e ciphertexts são FAKE.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { debugTokenResponse, isDebugTokenUrl } from '@/tests/helpers/metaGraphFakes';
 
 const mocks = vi.hoisted(() => {
   const port = {
@@ -110,6 +111,7 @@ beforeEach(() => {
 
   fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: unknown) => {
     const u = urlOf(input);
+    if (isDebugTokenUrl(u)) return debugTokenResponse(APP_ID);
     if (u.pathname.endsWith('/oauth/access_token')) {
       return json({ access_token: FAKE_SUAT, token_type: 'bearer', expires_in: 5183944 });
     }
@@ -177,6 +179,9 @@ describe('flag ON + review_ui — sucesso e conteúdo da RPC', () => {
     expect([...args.p_granted_scopes].sort()).toEqual([...REQUIRED].sort());
     expect(args.p_connected_by).toBe(USER_ID);
     expect(args.p_token_key_version).toBe(1);
+    expect(args.p_token_origin).toBe('exchanged_long_lived');
+    expect(args.p_token_expires_at).toBeNull();
+    expect(new Date(args.p_token_checked_at).toString()).not.toBe('Invalid Date');
     expect(new Date(args.p_connected_at).toString()).not.toBe('Invalid Date');
     expect(new Date(args.p_leadgen_subscribed_at).toString()).not.toBe('Invalid Date');
   });
@@ -195,6 +200,7 @@ describe('flag ON + review_ui — sucesso e conteúdo da RPC', () => {
     const order: string[] = [];
     fetchMock.mockImplementation(async (input: unknown, init?: RequestInit) => {
       const u = urlOf(input);
+      if (isDebugTokenUrl(u)) return debugTokenResponse(APP_ID);
       if (u.pathname.endsWith('/subscribed_apps')) order.push('subscribe');
       if (u.pathname.endsWith('/oauth/access_token')) return json({ access_token: FAKE_SUAT, token_type: 'bearer', expires_in: 5183944 });
       if (u.pathname.endsWith('/me/permissions')) return json({ data: REQUIRED.map((permission) => ({ permission, status: 'granted' })) });

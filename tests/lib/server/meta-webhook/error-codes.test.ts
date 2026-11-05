@@ -8,11 +8,12 @@ import {
 } from '@/lib/server/meta-webhook/error-codes';
 
 describe('lista fechada de códigos', () => {
-  it('contém exatamente os 16 códigos aprovados', () => {
+  it('contém exatamente os 17 códigos aprovados (META-MVP1: + token_expired)', () => {
     expect([...META_LEAD_ERROR_CODES].sort()).toEqual(
       [
         'token_decrypt_failed',
         'token_invalid',
+        'token_expired',
         'graph_permission_missing',
         'graph_timeout',
         'graph_error',
@@ -75,6 +76,7 @@ describe('classes', () => {
     for (const code of [
       'token_decrypt_failed',
       'token_invalid',
+      'token_expired',
       'graph_permission_missing',
       'initial_stage_missing',
     ] as const) {

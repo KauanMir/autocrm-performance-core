@@ -107,6 +107,12 @@ import {
 } from '@/lib/server/meta-oauth/user-permissions';
 import { subscribePageToWebhookField } from '@/lib/server/meta-oauth/page-subscription';
 import { logMetaOAuthEvent, logMetaOAuthError } from '@/lib/server/meta-oauth/logger';
+import {
+  evaluatePageToken,
+  exchangeForLongLivedUserToken,
+  inspectAccessToken,
+} from '@/lib/server/meta-oauth/token-lifetime';
+import type { MetaTokenHealth, TokenOrigin } from '@/lib/server/meta-oauth/connection-persistence';
 
 export const runtime = 'nodejs';
 // Um callback OAuth nunca pode ser servido de cache. Escopo estrito desta
@@ -134,7 +140,11 @@ type CallbackErrorCode =
   | 'test_page_access_token_missing'
   | 'test_page_missing_advertise_task'
   | 'test_page_read_engagement_failed'
-  | 'test_page_subscription_failed';
+  | 'test_page_subscription_failed'
+  // META-MVP1 — validade do token antes de inscrever/persistir.
+  | 'page_token_inspection_failed'
+  | 'page_token_invalid'
+  | 'page_token_short_lived';
 
 function isSecureEnv(): boolean {
   return process.env.NODE_ENV === 'production';
@@ -441,10 +451,45 @@ export async function GET(request: Request): Promise<Response> {
   // — nunca logados, nunca devolvidos, nunca persistidos. ═══════════════
   const graphApiVersion = resolveGraphApiVersion();
 
+  // ═══ META-MVP1 — token de longa duração ANTES de derivar o de Página. ══
+  // Doc oficial: token de Página derivado de token de usuário de curta
+  // duração também expira em horas; derivado de um de longa duração não
+  // expira. Se a troca do `code` informou expires_in, é token de usuário com
+  // validade: troca por longa duração. Sem expires_in (ex.: usuário do
+  // sistema), usa o token como veio. A validade real do token de Página é
+  // confirmada adiante com debug_token, antes de inscrever e persistir.
+  let tokenOrigin: TokenOrigin = 'original_token';
+  let userAccessToken = exchange.accessToken;
+  if (exchange.expiresInSeconds !== undefined) {
+    const longLived = await exchangeForLongLivedUserToken({
+      userAccessToken: exchange.accessToken,
+      appId,
+      appSecret,
+      graphApiVersion,
+    });
+    if ('accessToken' in longLived) {
+      userAccessToken = longLived.accessToken;
+      tokenOrigin = 'exchanged_long_lived';
+    } else {
+      // Falha na troca NÃO recusa a conexão: alguns tokens válidos (ex.: usuário
+      // do sistema com expires_in) não aceitam fb_exchange_token. Segue com o
+      // token original; o debug_token adiante decide se o token de Página é
+      // durável. Recusar aqui rejeitaria tokens válidos.
+      logMetaOAuthEvent({
+        requestId,
+        operation: 'oauth_callback',
+        result: 'long_lived_exchange_skipped',
+        reason: longLived.reason,
+        metaHttpStatus: longLived.httpStatus,
+        durationMs: Date.now() - startedAt,
+      });
+    }
+  }
+
   // Antes de QUALQUER operação sobre a Page: as quatro permissões de Lead
   // Ads precisam estar concedidas ao usuário. Falha = nada é feito adiante.
   const userPermissions = await fetchGrantedUserPermissions({
-    userAccessToken: exchange.accessToken,
+    userAccessToken,
     graphApiVersion,
   });
   if (!userPermissions.ok) {
@@ -481,7 +526,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const pageLookup = await fetchPageAccessToken({
-    accessToken: exchange.accessToken,
+    accessToken: userAccessToken,
     targetPageId: META_TEST_PAGE_ID,
     graphApiVersion,
   });
@@ -576,6 +621,47 @@ export async function GET(request: Request): Promise<Response> {
     return errorResponse(502, 'test_page_missing_advertise_task', { clearCookie: true });
   }
 
+  // ═══ META-MVP1 — validade do token de Página (debug_token) ANTES de
+  // inscrever a Page e de persistir. Token inválido, de outro app, que não é
+  // de Página ou que expira em menos de 7 dias nunca vira conexão. ═════════
+  const tokenCheckedAt = new Date();
+  const inspection = await inspectAccessToken({
+    inputToken: pageLookup.pageAccessToken,
+    appId,
+    appSecret,
+    graphApiVersion,
+  });
+  if (!inspection.ok) {
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: 'page_token_inspection_failed',
+      reason: 'reason' in inspection ? inspection.reason : 'unknown',
+      metaHttpStatus: 'httpStatus' in inspection ? inspection.httpStatus : undefined,
+      tokenOrigin,
+      durationMs: Date.now() - startedAt,
+    });
+    return errorResponse(502, 'page_token_inspection_failed', { clearCookie: true });
+  }
+  const verdict = evaluatePageToken(inspection.inspection, tokenCheckedAt, META_TEST_PAGE_ID);
+  if (!verdict.ok) {
+    const reason = 'reason' in verdict ? verdict.reason : 'page_token_invalid';
+    logMetaOAuthEvent({
+      requestId,
+      operation: 'oauth_callback',
+      result: reason,
+      tokenOrigin,
+      durationMs: Date.now() - startedAt,
+    });
+    return errorResponse(502, reason, { clearCookie: true });
+  }
+  const tokenHealth: MetaTokenHealth = {
+    origin: tokenOrigin,
+    expiresAt: 'expiresAt' in verdict ? verdict.expiresAt : null,
+    dataAccessExpiresAt: 'dataAccessExpiresAt' in verdict ? verdict.dataAccessExpiresAt : null,
+    checkedAt: tokenCheckedAt,
+  };
+
   // ═══ (9a) leitura mínima e read-only de conteúdo publicado pela própria
   // Page — gera uso de `pages_read_engagement`. GET /{page-id}/posts com
   // fields=id&limit=1, exclusivamente com o Page Access Token (nunca o
@@ -644,6 +730,7 @@ export async function GET(request: Request): Promise<Response> {
         connectedAt: new Date(),
         connectedBy: uid,
         leadgenSubscribedAt,
+        tokenHealth,
       },
     );
     if (!persisted.ok) return failReview(toReviewFailureCode('code' in persisted ? persisted.code : 'connection_persist_failed'));
@@ -665,6 +752,9 @@ export async function GET(request: Request): Promise<Response> {
     advertiseTaskPresent: true,
     readEngagementVerified: true,
     subscribedField: LEADGEN_SUBSCRIBED_FIELD,
+    tokenOrigin,
+    pageTokenExpires: tokenHealth.expiresAt !== null,
+    pageTokenDataAccessExpires: tokenHealth.dataAccessExpiresAt !== null,
     durationMs: Date.now() - startedAt,
   });
 

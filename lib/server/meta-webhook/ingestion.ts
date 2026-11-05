@@ -27,10 +27,15 @@ export interface LeadgenIngestionDeps {
   register: typeof registerLeadgenEvent;
 }
 
+// META-MVP1: owner_for_ingestion devolve conexões connected OU error. Uma
+// conexão em erro (token recusado) continua recebendo o evento no ledger: o
+// lead espera a reconexão visível na fila, em vez de ser descartado com 200.
 const defaultDeps = (): LeadgenIngestionDeps => ({
-  ownerByPage: (pageId) => createMetaConnectionRpcPort().ownerByPage(pageId),
+  ownerByPage: (pageId) => createMetaConnectionRpcPort().ownerForIngestion(pageId),
   register: registerLeadgenEvent,
 });
+
+const INGESTABLE_STATUSES: readonly string[] = ['connected', 'error'];
 
 export interface LeadgenIngestionOptions {
   // Chamado somente depois do registro durável (created ou already_exists).
@@ -59,7 +64,7 @@ export async function ingestLeadgenChange(
 
   const row = owner.data?.[0];
   if (!row) return 'skipped_no_connection';
-  if (row.status !== 'connected' || row.company_id !== META_TEST_COMPANY_ID) {
+  if (!INGESTABLE_STATUSES.includes(row.status) || row.company_id !== META_TEST_COMPANY_ID) {
     return 'skipped_other_company';
   }
 

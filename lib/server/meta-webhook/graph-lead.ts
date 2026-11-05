@@ -24,6 +24,23 @@ export type GraphLeadErrorCode = Extract<
 export interface GraphLeadRecord {
   id: string;
   fieldData: unknown[];
+  // Metadados opcionais: ausentes ou fora do formato viram null, nunca erro.
+  createdTime?: string | null;
+  adId?: string | null;
+  formId?: string | null;
+}
+
+const META_NUMERIC_ID = /^\d{1,64}$/;
+
+function optionalNumericId(value: unknown): string | null {
+  return typeof value === 'string' && META_NUMERIC_ID.test(value) ? value : null;
+}
+
+// A Graph devolve created_time como "2026-11-05T12:00:00+0000".
+function optionalTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 40) return null;
+  const parsed = new Date(value.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 export type GraphLeadResult =
@@ -88,14 +105,23 @@ async function parseLeadBody(response: Response, leadgenId: string): Promise<Gra
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return { ok: false, code: 'graph_malformed' };
   }
-  const record = body as { id?: unknown; field_data?: unknown };
+  const record = body as { id?: unknown; field_data?: unknown; created_time?: unknown; ad_id?: unknown; form_id?: unknown };
   if (typeof record.id !== 'string' || record.id !== leadgenId) {
     return { ok: false, code: 'graph_malformed' };
   }
   if (!Array.isArray(record.field_data)) {
     return { ok: false, code: 'graph_malformed' };
   }
-  return { ok: true, value: { id: record.id, fieldData: record.field_data } };
+  return {
+    ok: true,
+    value: {
+      id: record.id,
+      fieldData: record.field_data,
+      createdTime: optionalTimestamp(record.created_time),
+      adId: optionalNumericId(record.ad_id),
+      formId: optionalNumericId(record.form_id),
+    },
+  };
 }
 
 export async function fetchMetaLead(input: FetchMetaLeadInput): Promise<GraphLeadResult> {

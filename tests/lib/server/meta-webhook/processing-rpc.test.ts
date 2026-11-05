@@ -18,6 +18,7 @@ const claimRow = {
   out_company_id: COMPANY_ID,
   out_page_id: '950000000000902',
   out_leadgen_id: '9990001112223392',
+  out_form_id: '1086000000000001',
   out_attempts: 1,
   out_lease_token: LEASE,
   out_locked_until: '2026-10-05T12:01:30.000Z',
@@ -30,6 +31,8 @@ const lookupRow = {
   out_status: 'connected',
   out_access_token_ciphertext: 'v1.FAKE-CT',
   out_token_key_version: 1,
+  out_token_expires_at: null,
+  out_token_data_access_expires_at: '2027-01-01T00:00:00+00:00',
 };
 
 beforeEach(() => {
@@ -58,6 +61,7 @@ describe('claimEvent', () => {
         companyId: COMPANY_ID,
         pageId: '950000000000902',
         leadgenId: '9990001112223392',
+        formId: '1086000000000001',
         attempts: 1,
         leaseToken: LEASE,
       },
@@ -150,6 +154,8 @@ describe('lookupIntegration', () => {
         status: 'connected',
         ciphertext: 'v1.FAKE-CT',
         tokenKeyVersion: 1,
+        tokenExpiresAt: null,
+        tokenDataAccessExpiresAt: '2027-01-01T00:00:00+00:00',
       },
     });
   });
@@ -182,15 +188,26 @@ describe('completeLead', () => {
       leaseToken: LEASE,
       name: 'Cliente Fake',
       phone: '61999990002',
-      car: 'Não informado',
+      email: 'fake@test.local',
+      vehicle: null,
+      answers: [{ key: 'cor', values: ['Prata'] }],
+      formId: '1086000000000001',
+      adId: null,
+      submittedAt: '2026-11-05T12:00:00.000Z',
     });
-    expect(rpc).toHaveBeenCalledWith('meta_leadgen_event_complete', {
+    expect(rpc).toHaveBeenCalledWith('meta_leadgen_event_complete_v2', {
       p_event_id: EVENT_ID,
       p_lease_token: LEASE,
       p_name: 'Cliente Fake',
       p_phone: '61999990002',
-      p_car: 'Não informado',
+      p_email: 'fake@test.local',
+      p_vehicle: undefined,
+      p_answers: [{ key: 'cor', values: ['Prata'] }],
+      p_form_id: '1086000000000001',
+      p_ad_id: undefined,
+      p_submitted_at: '2026-11-05T12:00:00.000Z',
     });
+    expect(rpc.mock.calls.map((c) => c[0])).not.toContain('meta_leadgen_event_complete');
   });
 
   it('devolve o outcome', async () => {
@@ -200,7 +217,12 @@ describe('completeLead', () => {
       leaseToken: LEASE,
       name: 'x',
       phone: '61999990002',
-      car: 'y',
+      email: null,
+      vehicle: null,
+      answers: [],
+      formId: null,
+      adId: null,
+      submittedAt: null,
     });
     expect(r).toEqual({ ok: true, value: { outcome: 'linked_existing' } });
   });
@@ -212,7 +234,12 @@ describe('completeLead', () => {
       leaseToken: LEASE,
       name: 'x',
       phone: '61999990002',
-      car: 'y',
+      email: null,
+      vehicle: null,
+      answers: [],
+      formId: null,
+      adId: null,
+      submittedAt: null,
     });
     expect(r).toEqual({ ok: false, code: 'infrastructure_error' });
     expect(JSON.stringify(r)).not.toContain('secret_constraint');
@@ -225,7 +252,12 @@ describe('completeLead', () => {
       leaseToken: LEASE,
       name: 'x',
       phone: '61999990002',
-      car: 'y',
+      email: null,
+      vehicle: null,
+      answers: [],
+      formId: null,
+      adId: null,
+      submittedAt: null,
     });
     expect(r).toEqual({ ok: false, code: 'infrastructure_error' });
   });
@@ -252,6 +284,42 @@ describe('failEvent', () => {
     rpc.mockResolvedValue({ data: null, error: { message: 'raw pg detail' } });
     const r = await createProcessingRpc().failEvent({ eventId: EVENT_ID, leaseToken: LEASE, errorCode: 'graph_error' });
     expect(r).toEqual({ ok: false, code: 'infrastructure_error' });
+    expect(JSON.stringify(r)).not.toContain('raw pg detail');
+  });
+});
+
+describe('META-MVP1 — loadFormMappings', () => {
+  it('formId null → lista vazia, sem chamar a RPC', async () => {
+    expect(await createProcessingRpc().loadFormMappings(COMPANY_ID, null)).toEqual({ ok: true, value: [] });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('chama meta_form_mapping_for_processing e mapeia as linhas', async () => {
+    rpc.mockResolvedValue({ data: [{ out_target: 'vehicle', out_field_key: 'qual_carro' }], error: null });
+    const r = await createProcessingRpc().loadFormMappings(COMPANY_ID, '1086000000000001');
+    expect(rpc).toHaveBeenCalledWith('meta_form_mapping_for_processing', { p_company_id: COMPANY_ID, p_form_id: '1086000000000001' });
+    expect(r).toEqual({ ok: true, value: [{ target: 'vehicle', fieldKey: 'qual_carro' }] });
+  });
+
+  it('erro ou linha malformada → infrastructure_error', async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: 'raw' } });
+    expect(await createProcessingRpc().loadFormMappings(COMPANY_ID, '1')).toEqual({ ok: false, code: 'infrastructure_error' });
+    rpc.mockResolvedValue({ data: [{ out_target: 1 }], error: null });
+    expect(await createProcessingRpc().loadFormMappings(COMPANY_ID, '1')).toEqual({ ok: false, code: 'infrastructure_error' });
+  });
+});
+
+describe('META-MVP1 — markIntegrationError', () => {
+  it('chama meta_connection_mark_error e devolve o outcome', async () => {
+    rpc.mockResolvedValue({ data: [{ out_outcome: 'marked' }], error: null });
+    const r = await createProcessingRpc().markIntegrationError(INTEGRATION_ID, 'token_invalid');
+    expect(rpc).toHaveBeenCalledWith('meta_connection_mark_error', { p_integration_id: INTEGRATION_ID, p_error_code: 'token_invalid' });
+    expect(r).toEqual({ ok: true, value: { outcome: 'marked' } });
+  });
+
+  it('erro → infrastructure_error sem mensagem bruta', async () => {
+    rpc.mockResolvedValue({ data: null, error: { message: 'raw pg detail' } });
+    const r = await createProcessingRpc().markIntegrationError(INTEGRATION_ID, 'token_expired');
     expect(JSON.stringify(r)).not.toContain('raw pg detail');
   });
 });

@@ -42,6 +42,10 @@ export interface MetaOAuthLogFields {
   // META-OAUTH-REVIEW-UI — só o booleano de qual caminho de resposta o
   // callback tomou no sucesso (redirect assinado vs. JSON de sempre).
   reviewUiRedirect?: boolean;
+  // META-MVP1 — origem e validade do token de Página (nunca o token).
+  tokenOrigin?: 'exchanged_long_lived' | 'original_token';
+  pageTokenExpires?: boolean;
+  pageTokenDataAccessExpires?: boolean;
 }
 
 export function logMetaOAuthEvent(fields: MetaOAuthLogFields): void {
