@@ -96,6 +96,13 @@ function addDaysForTest(d: Date, days: number): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
 }
 
+// Data 'Personalizado' SEMPRE no futuro (30 dias à frente do relógio real). A
+// data fixa '2026-09-01' virou passado em set/2026 e o fluxo — corretamente —
+// bloqueia agendamento no passado, o que derrubava 17 testes sem defeito no
+// produto. A regra da aplicação continua a mesma; só o dado do teste muda.
+const FUTURE = addDaysForTest(new Date(), 30);
+const FUTURE_DATE = localYMDForTest(FUTURE);
+
 // COMMERCIAL-REMOTE-BASELINE-RECOVERY-REAGENDAR-VISITA-EXEC: 'Hoje'+'17:00'
 // fica no passado assim que o relógio real da máquina passa das 17:00
 // locais — resolveRemoteVisitScheduledAt (Flows2.tsx) bloqueia scheduledAt
@@ -138,7 +145,7 @@ describe('FlowReagendarVisita — sem Visit no payload', () => {
 describe('FlowReagendarVisita — same-id / payload full-replace', () => {
   it('updateVisit chamado com visitId/expectedVersion/vehicles/note/assignedSellerId preservados', async () => {
     renderFlow({ visit: remoteVisit() });
-    fillWhen('Personalizado', { date: '2026-09-01', time: '16:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '16:00' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
     await waitFor(() => expect(updateVisitSpy).toHaveBeenCalled());
 
@@ -148,16 +155,16 @@ describe('FlowReagendarVisita — same-id / payload full-replace', () => {
     expect(call.vehicles).toEqual(['Golf GTI 2022']);
     expect(call.note).toBe('nota original');
     expect(call.assignedSellerId).toBe('seller-1');
-    expect(new Date(call.scheduledAt).getFullYear()).toBe(2026);
-    expect(new Date(call.scheduledAt).getMonth()).toBe(8);
-    expect(new Date(call.scheduledAt).getDate()).toBe(1);
+    expect(new Date(call.scheduledAt).getFullYear()).toBe(FUTURE.getFullYear());
+    expect(new Date(call.scheduledAt).getMonth()).toBe(FUTURE.getMonth());
+    expect(new Date(call.scheduledAt).getDate()).toBe(FUTURE.getDate());
     expect(new Date(call.scheduledAt).getHours()).toBe(16);
     expect(m.visitServiceUpdate).not.toHaveBeenCalled();
   });
 
   it('múltiplos veículos preservados intactos (nunca perde nenhum)', async () => {
     renderFlow({ visit: remoteVisit({ vehicles: ['Golf GTI 2022', 'Honda HR-V 2023', 'Fusca 1978'] }) });
-    fillWhen('Personalizado', { date: '2026-09-01', time: '16:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '16:00' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
     await waitFor(() => expect(updateVisitSpy).toHaveBeenCalled());
 
@@ -168,7 +175,7 @@ describe('FlowReagendarVisita — same-id / payload full-replace', () => {
 describe('FlowReagendarVisita — Lead/client imutáveis', () => {
   it('leadId/clientName nunca fazem parte do payload de update', async () => {
     renderFlow({ visit: remoteVisit({ leadId: 'lead-9', clientName: 'Ana Souza' }) });
-    fillWhen('Personalizado', { date: '2026-09-01', time: '16:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '16:00' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
     await waitFor(() => expect(updateVisitSpy).toHaveBeenCalled());
 
@@ -277,7 +284,7 @@ describe('FlowReagendarVisita — data/hora: futuro válido e passado rejeitado'
 
   it('Outro horário (fora dos slots) é aceito e enviado corretamente', async () => {
     renderFlow({ visit: remoteVisit() });
-    fillWhen('Personalizado', { date: '2026-09-01', time: '19:45' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '19:45' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
     await waitFor(() => expect(updateVisitSpy).toHaveBeenCalled());
     const scheduledAt = new Date(updateVisitSpy.mock.calls[0][0].scheduledAt);
@@ -292,7 +299,7 @@ describe('FlowReagendarVisita — Seller (role e Manager): sem picker, sempre pr
     renderFlow({ visit: remoteVisit({ assignedSellerId: 'seller-self' }) });
     expect(screen.queryByText('Selecione o vendedor…')).toBeNull();
 
-    fillWhen('Personalizado', { date: '2026-09-01', time: '16:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '16:00' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
     await waitFor(() => expect(updateVisitSpy).toHaveBeenCalled());
     expect(updateVisitSpy.mock.calls[0][0].assignedSellerId).toBe('seller-self');
@@ -302,7 +309,7 @@ describe('FlowReagendarVisita — Seller (role e Manager): sem picker, sempre pr
     renderFlow({ visit: remoteVisit({ assignedSellerId: 'seller-historico-inativo' }) });
     expect(screen.queryByText('Selecione o vendedor…')).toBeNull();
 
-    fillWhen('Personalizado', { date: '2026-09-01', time: '16:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '16:00' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
     await waitFor(() => expect(updateVisitSpy).toHaveBeenCalled());
     expect(updateVisitSpy.mock.calls[0][0].assignedSellerId).toBe('seller-historico-inativo');
@@ -313,7 +320,7 @@ describe('FlowReagendarVisita — pending/double-submit', () => {
   it('isPending=true: clique não gera segunda chamada', () => {
     m.useUpdateVisit.mockImplementation(() => updateHookResult(updateVisitSpy, { isPending: true }));
     renderFlow({ visit: remoteVisit() });
-    fillWhen('Personalizado', { date: '2026-09-01', time: '10:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '10:00' });
 
     expect(screen.getByText('Reagendando…')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Reagendando…'));
@@ -324,7 +331,7 @@ describe('FlowReagendarVisita — pending/double-submit', () => {
 describe('FlowReagendarVisita — sucesso remoto', () => {
   it('close() só é chamado depois do resolve; sem escrita local (VisitService/LeadService)', async () => {
     const { close } = renderFlow({ visit: remoteVisit() });
-    fillWhen('Personalizado', { date: '2026-09-01', time: '10:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '10:00' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
 
     expect(close).not.toHaveBeenCalled();
@@ -346,7 +353,7 @@ describe.each([
   it(`mostra "${expectedMessage}", bloqueia novos submits, sem sucesso, sem create/local write`, async () => {
     updateVisitSpy.mockRejectedValueOnce(new RemoteVisitsError(code as any, { operation: 'update_visit' }));
     const { close } = renderFlow({ visit: remoteVisit() });
-    fillWhen('Personalizado', { date: '2026-09-01', time: '10:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '10:00' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
 
     expect(await screen.findByText(expectedMessage)).toBeInTheDocument();
@@ -364,7 +371,7 @@ describe('FlowReagendarVisita — erro genérico (RETRYABLE)', () => {
   it('mostra mensagem, permite nova tentativa, erro anterior é limpo', async () => {
     updateVisitSpy.mockRejectedValueOnce(new RemoteVisitsError('remote_visits_mutation_generic_error', { operation: 'update_visit' }));
     renderFlow({ visit: remoteVisit() });
-    fillWhen('Personalizado', { date: '2026-09-01', time: '10:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '10:00' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
     expect(await screen.findByText('Não foi possível reagendar a visita. Tente novamente.')).toBeInTheDocument();
 
@@ -379,7 +386,7 @@ describe('FlowReagendarVisita — identity_changed', () => {
   it('fecha o flow, nenhuma mensagem de erro, nenhum sucesso declarado por engano', async () => {
     updateVisitSpy.mockRejectedValueOnce(new RemoteVisitsError('remote_visits_mutation_identity_changed', { operation: 'update_visit' }));
     const { close } = renderFlow({ visit: remoteVisit() });
-    fillWhen('Personalizado', { date: '2026-09-01', time: '10:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '10:00' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
 
     await waitFor(() => expect(close).toHaveBeenCalled());
@@ -390,7 +397,7 @@ describe('FlowReagendarVisita — identity_changed', () => {
 describe('FlowReagendarVisita — nenhuma outra mutation é importada/chamada', () => {
   it('sucesso não dispara create/confirm/cancel/register — apenas updateVisit', async () => {
     renderFlow({ visit: remoteVisit() });
-    fillWhen('Personalizado', { date: '2026-09-01', time: '10:00' });
+    fillWhen('Personalizado', { date: FUTURE_DATE, time: '10:00' });
     fireEvent.click(screen.getByRole('button', { name: 'Reagendar' }));
     await waitFor(() => expect(updateVisitSpy).toHaveBeenCalledTimes(1));
     expect(m.visitServiceUpdate).not.toHaveBeenCalled();

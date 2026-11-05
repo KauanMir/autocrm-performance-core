@@ -1,5 +1,10 @@
 # Integração Meta — OAuth "Login do Facebook para Empresas"
 
+> **Atualização META-MVP1:** a conexão da Página de teste é persistida (cifrada),
+> com troca por token de longa duração e verificação por `debug_token` — ver
+> `docs/META-LEADADS-MVP1.md`. Trechos abaixo que dizem "sem persistência" são
+> históricos.
+
 Documento separado de `docs/META-WEBHOOK.md` (webhook leadgen) de propósito
 — são fluxos distintos.
 

@@ -6,6 +6,9 @@
 > As seções de Fase 1 abaixo são históricas; o código já inclui ingestão e processamento.
 > Consulte `docs/DEVELOPMENT-STATUS.md` para evidências, limites e pendências atuais,
 > incluindo comprovação do agendamento de recuperação e teste de reentrega.
+> **Atualização META-MVP1:** ledger, processamento, retry, fila de revisão e
+> respostas do formulário já existem — ver `docs/META-LEADADS-MVP1.md`. As
+> seções abaixo descrevem a Fase 1 e estão mantidas como histórico.
 
 Rota: `https://crm.assessoriakapa.com.br/api/webhooks/meta`
 Implementação: `app/api/webhooks/meta/route.ts` + `lib/server/meta-webhook/*`
