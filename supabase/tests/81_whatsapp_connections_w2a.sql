@@ -8,7 +8,7 @@ select has_table('public', 'whatsapp_connections', 'tabela existe');
 select columns_are('public', 'whatsapp_connections',
   array['id', 'company_id', 'waba_id', 'phone_number_id', 'display_phone_number', 'access_token_ciphertext',
         'token_key_version', 'status', 'connected_at', 'connected_by', 'disconnected_at', 'last_error_code',
-        'last_error_at', 'created_at', 'updated_at'],
+        'last_error_at', 'created_at', 'updated_at', 'capture_enabled'],
   'colunas exatas: sem coluna de token em plaintext');
 
 select ok((select relrowsecurity from pg_class where oid = 'public.whatsapp_connections'::regclass), 'RLS habilitado');
