@@ -5,6 +5,22 @@ Implementação: `app/api/webhooks/whatsapp/route.ts` + `lib/server/whatsapp-web
 + `lib/server/whatsapp-connection/*` (W2A). A W2A está descrita na seção
 [W2A](#w2a--conexão-multiempresa--ledger-de-eventos) abaixo.
 
+## Decisão de 2026-11-05: Liberação B congelada
+
+O backup real do Supabase de produção foi adiado. Por isso:
+
+| Item | Situação |
+|---|---|
+| **Liberação B** (migrations W2B-4 em produção) | **Congelada** |
+| **Liberação C** (publicar W2B-3 a W2B-5) | Pendente |
+| **W2B-7** (primeiro recebimento real) | Bloqueada |
+| Migrations remotas | Nenhuma sem nova autorização |
+| Desenvolvimento | Segue local, só com dados fictícios |
+
+Para retomar a Liberação B é obrigatório preparar um backup real seguro e comprovar
+a restauração. Consulta de leitura feita em 2026-11-05: produção em Postgres 17.11,
+79 migrations, sem nada da W2B-4.
+
 ## Estado atual (W2B-0, 2026-11-04)
 
 **Receber mensagens reais no CRM ainda não é possível.** Há dois motivos: a
@@ -566,9 +582,86 @@ Sem Graph, sem decifrar token, sem `lookup_for_processing` e sem escrita. WABA,
 número e número exibido são descartados no adaptador. O log traz só `requestId`,
 resultado e duração.
 
+## Inbox somente leitura (W2B-8)
+
+**Existe só em commit local, sem publicação.** Nenhum dado real existe:
+depende da [Liberação B](#decisão-de-2026-11-05-liberação-b-congelada).
+
+Tela "Conversas" no contexto operacional da empresa: lista, prévia, histórico e
+estados de carregamento, vazio e erro. Não há envio, resposta ou vínculo com lead.
+Mídia aparece como indisponível, tipos não suportados têm rótulo próprio, e mensagem
+que não decifra aparece como ilegível, sem derrubar a página.
+
+**Busca local.** Filtra em memória as conversas já carregadas, pelo nome, telefone
+mascarado e prévia. Não consulta a API, não lê o histórico e não grava o termo na URL
+nem no navegador. Com mais páginas disponíveis, cobre só as carregadas e avisa isso na
+tela. Busca no histórico exigiria decifrar mensagens no servidor e é outra decisão.
+
+**Acesso.** Até a matriz de permissões ser aprovada, só o Super Admin ativo operando a
+TEST COMPANY lê:
+
+| Camada | Regra |
+|---|---|
+| Menu e tela | `canAccessWhatsAppInbox` e `NEXT_PUBLIC_FF_WHATSAPP_INBOX` |
+| Rota | JWT → `is_platform_super_admin` → `company_id` igual à TEST COMPANY → `WHATSAPP_INBOX_READ_ENABLED` |
+| RPC | `whatsapp_inbox_read_allowed`: ator Super Admin ativo e TEST COMPANY, gravados no banco |
+| Tabelas | Continuam sem grants e sem policies; EXECUTE das RPCs só para `service_role` |
+
+Manager e Seller não veem a tela, nem na TEST COMPANY. Conversa de outra empresa e
+conversa inexistente têm a mesma resposta (`404`).
+
+**Dados.** O ciphertext só chega ao servidor, que decifra com
+`WHATSAPP_CONTENT_ENCRYPTION_KEY_V1` e devolve um DTO escrito campo a campo: nome,
+telefone mascarado (`+55 ••••• 1234`), conteúdo e horários. HMAC, hashes, wamid, BSUID,
+IDs de mídia e o telefone completo não saem do servidor. O cliente guarda tudo só em
+memória (`gcTime: 0`). Os logs trazem apenas contagens e códigos.
+
+| Rota | Retorno |
+|---|---|
+| `GET /api/integrations/whatsapp/inbox/conversations?company_id=` | 30 conversas por página, com `nextCursor` |
+| `GET .../conversations/{id}/messages?company_id=` | 50 mensagens em ordem cronológica, com `nextCursor` para as anteriores |
+
+A leitura ainda não gera registro de auditoria por acesso. Isso precisa ser decidido
+junto com a matriz de permissões, antes de ampliar o acesso.
+
+**Migration:** `20261105120000_whatsapp_inbox_read_w2b8.sql` cria só três funções, sem
+tocar em tabelas. **Não faz parte das migrations W2B-4 já preparadas para a Liberação
+B.** Ao retomar, decidir se entra na mesma janela e refazer o procedimento de backup e
+as verificações, que hoje esperam 81 migrations.
+
+**Modo demonstração.** Só funciona com `NODE_ENV=development`, usa dados fictícios
+gerados no navegador, com aviso fixo, e não consulta as rotas da inbox. Nem o código nem
+os dados entram no build de produção, mesmo com as flags ligadas.
+
+**Nunca rodar só `npm run dev` com as flags.** O login do CRM usaria o Supabase e os
+segredos que estiverem em `.env.local`, que pode apontar para a produção. A demonstração
+exige, no próprio processo, porque variáveis do processo têm prioridade sobre `.env.local`:
+
+1. Supabase local descartável, em cópia sem `.temp`, com contas fictícias.
+2. `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` e
+   `SUPABASE_SERVICE_ROLE_KEY` desse Supabase local.
+3. `NEXT_PUBLIC_FF_WHATSAPP_INBOX=true` e `NEXT_PUBLIC_FF_WHATSAPP_INBOX_DEMO=true`.
+4. `WHATSAPP_INBOX_READ_ENABLED=false`, `WHATSAPP_INGESTION_ENABLED=false` e
+   `NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW=false`.
+5. Todo segredo e integração externa (Meta, WhatsApp, e-mail e cron) anulados com valor
+   vazio.
+6. Só em loopback: `next dev -H 127.0.0.1`. O Supabase CLI publica API, Postgres e e-mail
+   em todas as interfaces, sem opção para mudar, então esses contêineres precisam ser
+   recriados com publicação em `127.0.0.1`.
+
+Antes de usar, comprovar: nenhuma referência à produção no JavaScript compilado, nenhuma
+conexão do servidor para fora da máquina e nenhuma porta da demonstração fora de loopback.
+
+**Backlog.** Preservar busca e seleção ao cruzar 1024px de largura, por exemplo ao girar
+um tablet ou redimensionar a janela. A troca de layout do App remonta a tela e hoje limpa
+os dois. Não bloqueia a W2B-8.
+
+Atendimento automatizado: ver [plano técnico](./WHATSAPP-AI-ATTENDANT-PLAN.md), ainda
+sem implementação.
+
 ## O que ainda NÃO está implementado
 
-- Inbox e leitura de conversas pelo CRM.
+- Inbox com dados reais: a W2B-8 existe só localmente e depende da Liberação B.
 - Vínculo com lead: `lead_id` e sua FK entram na W2B-9, em migration própria.
 - Mensagens de grupo: são recusadas e contadas, sem conteúdo.
 - Tratamento das mudanças de identidade (`user_changed_number` e
@@ -814,10 +907,12 @@ Ver [Access Tokens](https://developers.facebook.com/documentation/business-messa
 | Fase | Situação |
 |---|---|
 | W2B-0 e W2B-1 | Concluídas e publicadas |
-| W2B-2 Diagnóstico | Commit local, pronto para publicação |
+| W2B-2 Diagnóstico | Publicada (Liberação A, `1da7ccf`) |
 | W2B-3, W2B-4 e W2B-5 | Implementadas no repositório, sem publicação |
-| W2B-6 | [Plano pronto](#plano-de-publicação-w2b-6), não executado |
-| W2B-7 a W2B-10 | Não iniciadas |
+| W2B-6 | [Plano pronto](#plano-de-publicação-w2b-6). **Liberação B congelada**, ver [decisão](#decisão-de-2026-11-05-liberação-b-congelada) |
+| W2B-7 | Bloqueada pela Liberação B |
+| W2B-8 Inbox | Visual aprovado, em commit local, sem publicação, ver [seção própria](#inbox-somente-leitura-w2b-8) |
+| W2B-9 e W2B-10 | Não iniciadas |
 
 Toda fase termina em parada para autorização.
 
@@ -851,6 +946,9 @@ Se a mensagem não chegar, parar e diagnosticar. Não mudar o modo do app sem
 decisão própria.
 
 ### Plano de publicação (W2B-6)
+
+**Liberação B congelada desde 2026-11-05.** Retomar exige backup real seguro com
+restauração comprovada e nova autorização.
 
 **Nada abaixo foi executado.** Cada passo de escrita exige autorização específica.
 
@@ -945,7 +1043,7 @@ Push-Location $work
 npx supabase@2.116.0 start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor
 ```
 
-1. **pgTAP real:** `npx supabase@2.116.0 test db`. Critério: 81, 82 e 83 passam, e a
+1. **pgTAP real:** `npx supabase@2.116.0 test db`. Critério: 81, 82, 83 e 84 passam, e a
    lista de falhas é igual à do baseline: 40 asserções antigas em 24 arquivos,
    medidas sem a W2B-4.
 2. **Fixture**, pelo `psql` do container, porque `db query --local -f` não aceita vários
