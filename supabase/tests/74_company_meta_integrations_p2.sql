@@ -18,9 +18,11 @@ select columns_are(
     'id', 'company_id', 'page_id', 'page_name', 'access_token_ciphertext',
     'token_key_version', 'granted_scopes', 'status', 'leadgen_subscribed_at',
     'connected_at', 'connected_by', 'disconnected_at', 'last_error_code',
-    'last_error_at', 'created_at', 'updated_at'
+    'last_error_at', 'created_at', 'updated_at',
+    -- META-MVP1: saúde do token
+    'token_origin', 'token_expires_at', 'token_data_access_expires_at', 'token_checked_at'
   ],
-  'colunas exatas do schema aprovado');
+  'colunas exatas do schema aprovado (P2 + META-MVP1)');
 
 select col_type_is('public', 'company_meta_integrations', 'id', 'uuid', 'id é uuid');
 select col_type_is('public', 'company_meta_integrations', 'token_key_version', 'smallint', 'key version é smallint');

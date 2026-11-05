@@ -8,7 +8,10 @@ select has_table('public', 'meta_leadgen_events', 'tabela existe');
 select columns_are('public', 'meta_leadgen_events',
   array['id', 'integration_id', 'company_id', 'page_id', 'leadgen_id', 'form_id', 'status', 'crm_lead_id',
         'attempts', 'locked_until', 'last_error_code', 'received_at', 'processed_at', 'created_at', 'updated_at',
-        'next_attempt_at', 'lease_token'],
+        'next_attempt_at', 'lease_token',
+        -- META-MVP1: reprocessamento manual e resolução de revisão (sem PII)
+        'requeue_count', 'last_requeued_at', 'last_requeued_by', 'review_resolved_at', 'review_resolved_by',
+        'review_resolution'],
   'colunas exatas (P1 + P2.2 lease/retry): sem field_data, nome, telefone, email, CPF ou payload');
 
 select ok((select relrowsecurity from pg_class where oid = 'public.meta_leadgen_events'::regclass), 'RLS habilitado');

@@ -8,7 +8,10 @@ select * from no_plan();
 select columns_are('public', 'meta_leadgen_events',
   array['id', 'integration_id', 'company_id', 'page_id', 'leadgen_id', 'form_id', 'status', 'crm_lead_id',
         'attempts', 'locked_until', 'last_error_code', 'received_at', 'processed_at', 'created_at', 'updated_at',
-        'next_attempt_at', 'lease_token'],
+        'next_attempt_at', 'lease_token',
+        -- META-MVP1: reprocessamento manual e resolução de revisão (sem PII)
+        'requeue_count', 'last_requeued_at', 'last_requeued_by', 'review_resolved_at', 'review_resolved_by',
+        'review_resolution'],
   'colunas P2: somente next_attempt_at e lease_token adicionadas');
 
 select ok(exists (select 1 from pg_constraint where conname = 'meta_leadgen_events_state_ck' and contype = 'c'),
