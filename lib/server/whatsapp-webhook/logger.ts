@@ -26,6 +26,13 @@ export interface WhatsAppWebhookLogFields {
   duplicateCount?: number;
   unknownNumberCount?: number;
   unusableCount?: number;
+  // Captura (W2B-5) — contagens, nunca conteúdo.
+  capturedCount?: number;
+  captureDisabledCount?: number;
+  wabaMismatchCount?: number;
+  failedCount?: number;
+  groupMessageCount?: number;
+  invalidTimestampCount?: number;
   durationMs?: number;
 }
 
@@ -46,6 +53,12 @@ const ALLOWED_KEYS: ReadonlyArray<keyof WhatsAppWebhookLogFields> = [
   'duplicateCount',
   'unknownNumberCount',
   'unusableCount',
+  'capturedCount',
+  'captureDisabledCount',
+  'wabaMismatchCount',
+  'failedCount',
+  'groupMessageCount',
+  'invalidTimestampCount',
   'durationMs',
 ];
 

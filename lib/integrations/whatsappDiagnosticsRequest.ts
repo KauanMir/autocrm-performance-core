@@ -23,10 +23,22 @@ export type WhatsAppDiagnosticsReport = {
     connectedAt: string | null;
     lastErrorCode: string | null;
   };
+  capture: { enabledConnections: number | null; contentEncryptionKey: boolean; contactHmacKey: boolean };
+  // null = indisponível. Nunca 0 por falta de dado.
+  events: {
+    count: number;
+    pending: number;
+    failed: number;
+    messages: number;
+    lastEventAt: string | null;
+    refused: { wabaMismatch: number; contactUnresolved: number; groupMessage: number };
+  } | null;
   // Sempre não confirmada nesta fase, mesmo que a API devolva outro valor.
   wabaSubscription: 'not_confirmed';
   deployment: { environment: 'production' | 'preview' | 'development' | null; commitSha: string | null };
   ingestionWarning: boolean;
+  captureKeysWarning: boolean;
+  refusedWarning: boolean;
 };
 
 export type WhatsAppDiagnosticsResult =
@@ -58,13 +70,44 @@ async function readJsonSafely(response: Response): Promise<unknown> {
   }
 }
 
+function safeCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function parseEvents(value: unknown): WhatsAppDiagnosticsReport['events'] {
+  if (!isPlainObject(value) || value.availability !== 'available') return null;
+  const count = safeCount(value.count);
+  const pending = safeCount(value.pending);
+  const failed = safeCount(value.failed);
+  const messages = safeCount(value.messages);
+  if (count === null || pending === null || failed === null || messages === null) return null;
+
+  const refused = isPlainObject(value.refused) ? value.refused : null;
+  const wabaMismatch = refused ? safeCount(refused.wabaMismatch) : null;
+  const contactUnresolved = refused ? safeCount(refused.contactUnresolved) : null;
+  const groupMessage = refused ? safeCount(refused.groupMessage) : null;
+  if (wabaMismatch === null || contactUnresolved === null || groupMessage === null) return null;
+
+  return {
+    count,
+    pending,
+    failed,
+    messages,
+    lastEventAt: typeof value.lastEventAt === 'string' && ISO_DATE.test(value.lastEventAt) ? value.lastEventAt : null,
+    refused: { wabaMismatch, contactUnresolved, groupMessage },
+  };
+}
+
 function parseReport(body: Record<string, unknown>): WhatsAppDiagnosticsReport | null {
-  const { config, connection, deployment, integrationStatus, ingestion, warnings } = body;
+  const { capture, config, connection, deployment, integrationStatus, ingestion, warnings } = body;
   if (
     typeof integrationStatus !== 'string' ||
     !INTEGRATION_STATUSES.includes(integrationStatus) ||
     (ingestion !== 'enabled' && ingestion !== 'disabled') ||
     !isPlainObject(config) ||
+    !isPlainObject(capture) ||
+    typeof capture.contentEncryptionKey !== 'boolean' ||
+    typeof capture.contactHmacKey !== 'boolean' ||
     !isPlainObject(connection) ||
     !isPlainObject(deployment) ||
     typeof config.webhookVerifyToken !== 'boolean' ||
@@ -97,6 +140,12 @@ function parseReport(body: Record<string, unknown>): WhatsAppDiagnosticsReport |
           ? connection.lastErrorCode
           : null,
     },
+    capture: {
+      enabledConnections: safeCount(capture.enabledConnections),
+      contentEncryptionKey: capture.contentEncryptionKey,
+      contactHmacKey: capture.contactHmacKey,
+    },
+    events: parseEvents(body.events),
     wabaSubscription: 'not_confirmed',
     deployment: {
       environment:
@@ -107,6 +156,8 @@ function parseReport(body: Record<string, unknown>): WhatsAppDiagnosticsReport |
         typeof deployment.commitSha === 'string' && SHORT_SHA.test(deployment.commitSha) ? deployment.commitSha : null,
     },
     ingestionWarning: Array.isArray(warnings) && warnings.includes('ingestion_enabled'),
+    captureKeysWarning: Array.isArray(warnings) && warnings.includes('capture_keys_invalid'),
+    refusedWarning: Array.isArray(warnings) && warnings.includes('messages_refused'),
   };
 }
 

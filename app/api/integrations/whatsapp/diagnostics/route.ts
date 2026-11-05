@@ -10,6 +10,7 @@ import { isValidUuid, jsonResponse, requireAuthenticatedActor } from '@/lib/serv
 import { META_TEST_COMPANY_ID } from '@/lib/server/meta-oauth/config';
 import { fetchWhatsAppConnectionHealth } from '@/lib/server/whatsapp-connection/connection-rpc';
 import { logWhatsAppDiagnostics, runWhatsAppDiagnostics } from '@/lib/server/whatsapp-connection/diagnostics';
+import { fetchWhatsAppDiagnosticsSummary } from '@/lib/server/whatsapp-webhook/capture-rpc';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -53,7 +54,11 @@ export async function GET(request: Request): Promise<Response> {
     }
   }
 
-  const report = await runWhatsAppDiagnostics({ testCompanyId: META_TEST_COMPANY_ID, loadConnectionHealth });
+  const report = await runWhatsAppDiagnostics({
+    testCompanyId: META_TEST_COMPANY_ID,
+    loadConnectionHealth,
+    loadSummary: fetchWhatsAppDiagnosticsSummary,
+  });
   log('completed');
   return jsonResponse(200, { ok: true, ...report });
 }
