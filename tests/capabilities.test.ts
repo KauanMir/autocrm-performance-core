@@ -11,6 +11,7 @@ import {
   canUseFollowUpTemplate,
   canManageFollowUpTemplates,
   canAccessMetaIntegrationsReviewTab,
+  canAccessWhatsAppInbox,
   META_OAUTH_REVIEW_TEST_COMPANY_ID,
   type MembershipLifecycleActor,
   type MembershipLifecycleTargetRow,
@@ -411,5 +412,28 @@ describe('canAccessMetaIntegrationsReviewTab — META-OAUTH-REVIEW-UI', () => {
   it('null/undefined: false', () => {
     expect(canAccessMetaIntegrationsReviewTab(null)).toBe(false);
     expect(canAccessMetaIntegrationsReviewTab(undefined)).toBe(false);
+  });
+});
+
+describe('canAccessWhatsAppInbox — WHATSAPP-W2B-8', () => {
+  const base = { platformRole: 'super_admin' as const, companyId: META_OAUTH_REVIEW_TEST_COMPANY_ID, inboxFlagEnabled: true };
+
+  it('Super Admin na company de teste com a flag: true', () => {
+    expect(canAccessWhatsAppInbox(base)).toBe(true);
+  });
+
+  it('flag desligada: false', () => {
+    expect(canAccessWhatsAppInbox({ ...base, inboxFlagEnabled: false })).toBe(false);
+  });
+
+  it('outra company ou nenhuma: false', () => {
+    expect(canAccessWhatsAppInbox({ ...base, companyId: 'company-a' })).toBe(false);
+    expect(canAccessWhatsAppInbox({ ...base, companyId: null })).toBe(false);
+  });
+
+  it('sem papel de plataforma, mesmo na company de teste: false', () => {
+    expect(canAccessWhatsAppInbox({ ...base, platformRole: null })).toBe(false);
+    expect(canAccessWhatsAppInbox(null)).toBe(false);
+    expect(canAccessWhatsAppInbox(undefined)).toBe(false);
   });
 });

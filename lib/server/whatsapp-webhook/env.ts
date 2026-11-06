@@ -2,8 +2,8 @@
 // server-only do webhook oficial da WhatsApp Cloud API. Mesmo padrão de
 // lib/server/meta-webhook/env.ts: NUNCA prefixar NEXT_PUBLIC_, NUNCA
 // importado por código client-side, NUNCA expõe o valor em erro/log (só o
-// nome da variável ausente/vazia). Módulo isolado: só o Route Handler de
-// /api/webhooks/whatsapp importa lib/server/whatsapp-webhook/*.
+// nome da variável ausente/vazia). Módulo isolado: lib/server/whatsapp-webhook/*
+// não é importado por código client-side.
 
 export type WhatsAppWebhookEnvName = 'WHATSAPP_WEBHOOK_VERIFY_TOKEN' | 'META_APP_SECRET';
 

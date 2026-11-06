@@ -1678,6 +1678,7 @@ export type Database = {
       whatsapp_connections: {
         Row: {
           access_token_ciphertext: string | null
+          capture_enabled: boolean
           company_id: string
           connected_at: string | null
           connected_by: string | null
@@ -1695,6 +1696,7 @@ export type Database = {
         }
         Insert: {
           access_token_ciphertext?: string | null
+          capture_enabled?: boolean
           company_id: string
           connected_at?: string | null
           connected_by?: string | null
@@ -1712,6 +1714,7 @@ export type Database = {
         }
         Update: {
           access_token_ciphertext?: string | null
+          capture_enabled?: boolean
           company_id?: string
           connected_at?: string | null
           connected_by?: string | null
@@ -1744,6 +1747,197 @@ export type Database = {
           },
         ]
       }
+      whatsapp_contacts: {
+        Row: {
+          bsuid_hmac: string | null
+          company_id: string
+          created_at: string
+          hmac_key_version: number
+          id: string
+          phone_hmac: string | null
+          pii_ciphertext: string
+          pii_has_phone: boolean
+          pii_key_version: number
+          pii_ref: string
+          pii_source_at: string
+          updated_at: string
+        }
+        Insert: {
+          bsuid_hmac?: string | null
+          company_id: string
+          created_at?: string
+          hmac_key_version: number
+          id?: string
+          phone_hmac?: string | null
+          pii_ciphertext: string
+          pii_has_phone: boolean
+          pii_key_version: number
+          pii_ref: string
+          pii_source_at: string
+          updated_at?: string
+        }
+        Update: {
+          bsuid_hmac?: string | null
+          company_id?: string
+          created_at?: string
+          hmac_key_version?: number
+          id?: string
+          phone_hmac?: string | null
+          pii_ciphertext?: string
+          pii_has_phone?: boolean
+          pii_key_version?: number
+          pii_ref?: string
+          pii_source_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_contacts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      whatsapp_conversations: {
+        Row: {
+          company_id: string
+          connection_id: string
+          contact_id: string
+          created_at: string
+          first_message_at: string
+          id: string
+          last_message_at: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          connection_id: string
+          contact_id: string
+          created_at?: string
+          first_message_at: string
+          id?: string
+          last_message_at: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          connection_id?: string
+          contact_id?: string
+          created_at?: string
+          first_message_at?: string
+          id?: string
+          last_message_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_conversations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_conversations_connection_fk"
+            columns: ["company_id", "connection_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_connections"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "whatsapp_conversations_contact_fk"
+            columns: ["company_id", "contact_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_contacts"
+            referencedColumns: ["company_id", "id"]
+          },
+        ]
+      }
+      whatsapp_messages: {
+        Row: {
+          company_id: string
+          connection_id: string
+          contact_id: string
+          content_ciphertext: string
+          content_key_version: number
+          conversation_id: string
+          created_at: string
+          direction: string
+          event_id: string
+          id: string
+          message_id_hash: string
+          message_type: string
+          occurred_at: string
+          received_at: string
+        }
+        Insert: {
+          company_id: string
+          connection_id: string
+          contact_id: string
+          content_ciphertext: string
+          content_key_version: number
+          conversation_id: string
+          created_at?: string
+          direction: string
+          event_id: string
+          id?: string
+          message_id_hash: string
+          message_type: string
+          occurred_at: string
+          received_at: string
+        }
+        Update: {
+          company_id?: string
+          connection_id?: string
+          contact_id?: string
+          content_ciphertext?: string
+          content_key_version?: number
+          conversation_id?: string
+          created_at?: string
+          direction?: string
+          event_id?: string
+          id?: string
+          message_id_hash?: string
+          message_type?: string
+          occurred_at?: string
+          received_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_messages_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_conversation_fk"
+            columns: [
+              "company_id",
+              "conversation_id",
+              "connection_id",
+              "contact_id",
+            ]
+            isOneToOne: false
+            referencedRelation: "whatsapp_conversations"
+            referencedColumns: [
+              "company_id",
+              "id",
+              "connection_id",
+              "contact_id",
+            ]
+          },
+          {
+            foreignKeyName: "whatsapp_messages_event_fk"
+            columns: ["company_id", "event_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_webhook_events"
+            referencedColumns: ["company_id", "id"]
+          },
+        ]
+      }
       whatsapp_webhook_events: {
         Row: {
           attempts: number
@@ -1761,6 +1955,7 @@ export type Database = {
           processed_at: string | null
           processing_status: string
           received_at: string
+          request_id: string | null
           status_value: string | null
           updated_at: string
         }
@@ -1780,6 +1975,7 @@ export type Database = {
           processed_at?: string | null
           processing_status?: string
           received_at: string
+          request_id?: string | null
           status_value?: string | null
           updated_at?: string
         }
@@ -1799,6 +1995,7 @@ export type Database = {
           processed_at?: string | null
           processing_status?: string
           received_at?: string
+          request_id?: string | null
           status_value?: string | null
           updated_at?: string
         }
@@ -3718,6 +3915,24 @@ export type Database = {
         Args: { p_vehicles: string[] }
         Returns: boolean
       }
+      whatsapp_capture_gate: {
+        Args: {
+          p_connection_id: string
+          p_expected_company_id: string
+          p_phone_number_id: string
+          p_waba_id: string
+        }
+        Returns: string
+      }
+      whatsapp_connection_capture_context: {
+        Args: { p_phone_number_id: string }
+        Returns: {
+          out_capture_allowed: boolean
+          out_company_id: string
+          out_connection_id: string
+          out_waba_id: string
+        }[]
+      }
       whatsapp_connection_lookup_for_processing: {
         Args: { p_phone_number_id: string }
         Returns: {
@@ -3736,6 +3951,17 @@ export type Database = {
           company_id: string
           connection_id: string
           status: string
+        }[]
+      }
+      whatsapp_connection_set_capture: {
+        Args: {
+          p_actor_profile_id: string
+          p_capture_enabled: boolean
+          p_connection_id: string
+        }
+        Returns: {
+          out_capture_enabled: boolean
+          out_connection_id: string
         }[]
       }
       whatsapp_connection_status: {
@@ -3774,6 +4000,116 @@ export type Database = {
           status: string
           waba_id: string
         }[]
+      }
+      whatsapp_diagnostics_summary: {
+        Args: { p_company_id: string }
+        Returns: {
+          out_capture_enabled_connections: number
+          out_contacts_total: number
+          out_conversations_total: number
+          out_events_contact_unresolved: number
+          out_events_failed: number
+          out_events_group_message: number
+          out_events_processed: number
+          out_events_received: number
+          out_events_total: number
+          out_events_waba_mismatch: number
+          out_last_event_at: string
+          out_messages_total: number
+        }[]
+      }
+      whatsapp_inbound_event_mark_failed: {
+        Args: {
+          p_connection_id: string
+          p_error_code: string
+          p_expected_company_id: string
+          p_message_id_hash: string
+          p_message_type: string
+          p_occurred_at: string
+          p_phone_number_id: string
+          p_received_at: string
+          p_request_id: string
+          p_waba_id: string
+        }
+        Returns: {
+          out_event_id: string
+          out_outcome: string
+        }[]
+      }
+      whatsapp_inbound_message_capture: {
+        Args: {
+          p_bsuid_hmac: string
+          p_connection_id: string
+          p_content_ciphertext: string
+          p_content_key_version: number
+          p_expected_company_id: string
+          p_hmac_key_version: number
+          p_message_id_hash: string
+          p_message_type: string
+          p_occurred_at: string
+          p_phone_hmac: string
+          p_phone_number_id: string
+          p_pii_ciphertext: string
+          p_pii_has_phone: boolean
+          p_pii_key_version: number
+          p_pii_ref: string
+          p_received_at: string
+          p_request_id: string
+          p_waba_id: string
+        }
+        Returns: {
+          out_conversation_id: string
+          out_event_id: string
+          out_message_id: string
+          out_outcome: string
+        }[]
+      }
+      whatsapp_inbox_list_conversations: {
+        Args: {
+          p_actor_profile_id: string
+          p_before_id?: string
+          p_before_last_message_at?: string
+          p_company_id: string
+          p_limit?: number
+        }
+        Returns: {
+          out_conversation_id: string
+          out_last_connection_id: string
+          out_last_content_ciphertext: string
+          out_last_content_key_version: number
+          out_last_message_at: string
+          out_last_message_id_hash: string
+          out_last_message_type: string
+          out_message_count: number
+          out_pii_ciphertext: string
+          out_pii_key_version: number
+          out_pii_ref: string
+        }[]
+      }
+      whatsapp_inbox_list_messages: {
+        Args: {
+          p_actor_profile_id: string
+          p_before_id?: string
+          p_before_occurred_at?: string
+          p_before_received_at?: string
+          p_company_id: string
+          p_conversation_id: string
+          p_limit?: number
+        }
+        Returns: {
+          out_connection_id: string
+          out_content_ciphertext: string
+          out_content_key_version: number
+          out_message_id: string
+          out_message_id_hash: string
+          out_message_type: string
+          out_occurred_at: string
+          out_received_at: string
+        }[]
+      }
+      whatsapp_inbox_read_allowed: {
+        Args: { p_actor_profile_id: string; p_company_id: string }
+        Returns: boolean
       }
       whatsapp_webhook_event_register: {
         Args: {

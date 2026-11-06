@@ -9,11 +9,16 @@
 // e a inscrição só é confirmada por verificação manual. `integrationStatus`
 // nunca informa sucesso enquanto essa confirmação não existir.
 //
-// `events` é sempre indisponível: whatsapp_webhook_events nega acesso direto até
-// ao service_role, e nenhuma RPC devolve contagem. Devolver 0 seria enganoso.
+// `events` vem da RPC whatsapp_diagnostics_summary (W2B-4). Se ela ainda não
+// existir no banco ou falhar, fica indisponível: devolver 0 seria enganoso.
 import { getWhatsAppAppSecret, getWhatsAppWebhookVerifyToken, isWhatsAppIngestionEnabled } from '@/lib/server/whatsapp-webhook/env';
+import type { WhatsAppDiagnosticsSummary } from '@/lib/server/whatsapp-webhook/capture-rpc';
 import type { WhatsAppConnectionHealthRow } from './connection-rpc';
-import { getWhatsAppTokenEncryptionKeyV1 } from './env';
+import {
+  getWhatsAppContactHmacKeyV1,
+  getWhatsAppContentEncryptionKeyV1,
+  getWhatsAppTokenEncryptionKeyV1,
+} from './env';
 
 export type WhatsAppIntegrationStatus =
   | 'awaiting_waba_confirmation'
@@ -37,18 +42,34 @@ export interface WhatsAppDiagnosticsReport {
     connectedAt: string | null;
     lastErrorCode: string | null;
   };
-  events: { availability: 'unavailable'; count: null };
+  capture: {
+    enabledConnections: number | null;
+    contentEncryptionKey: boolean;
+    contactHmacKey: boolean;
+  };
+  events:
+    | { availability: 'unavailable'; count: null }
+    | {
+        availability: 'available';
+        count: number;
+        pending: number;
+        failed: number;
+        messages: number;
+        lastEventAt: string | null;
+        refused: { wabaMismatch: number; contactUnresolved: number; groupMessage: number };
+      };
   wabaSubscription: 'not_confirmed';
   deployment: {
     environment: 'production' | 'preview' | 'development' | null;
     commitSha: string | null;
   };
-  warnings: 'ingestion_enabled'[];
+  warnings: ('ingestion_enabled' | 'capture_keys_invalid' | 'messages_refused')[];
 }
 
 export interface WhatsAppDiagnosticsDeps {
   testCompanyId: string;
   loadConnectionHealth(companyId: string): Promise<{ ok: true; rows: WhatsAppConnectionHealthRow[] } | { ok: false }>;
+  loadSummary(companyId: string): Promise<WhatsAppDiagnosticsSummary | null>;
 }
 
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
@@ -63,9 +84,9 @@ function canRead(read: () => unknown): boolean {
   }
 }
 
-function isTokenEncryptionKeyValid(): boolean {
+function isKeyValid(read: () => Buffer): boolean {
   try {
-    getWhatsAppTokenEncryptionKeyV1().fill(0);
+    read().fill(0);
     return true;
   } catch {
     return false;
@@ -116,6 +137,31 @@ async function loadConnection(deps: WhatsAppDiagnosticsDeps): Promise<WhatsAppDi
   }
 }
 
+async function loadSummary(deps: WhatsAppDiagnosticsDeps): Promise<WhatsAppDiagnosticsSummary | null> {
+  try {
+    return await deps.loadSummary(deps.testCompanyId);
+  } catch {
+    return null;
+  }
+}
+
+function toEventsReport(summary: WhatsAppDiagnosticsSummary | null): WhatsAppDiagnosticsReport['events'] {
+  if (summary === null) return { availability: 'unavailable', count: null };
+  return {
+    availability: 'available',
+    count: summary.eventsTotal,
+    pending: summary.eventsReceived,
+    failed: summary.eventsFailed,
+    messages: summary.messagesTotal,
+    lastEventAt: toIsoDate(summary.lastEventAt),
+    refused: {
+      wabaMismatch: summary.eventsWabaMismatch,
+      contactUnresolved: summary.eventsContactUnresolved,
+      groupMessage: summary.eventsGroupMessage,
+    },
+  };
+}
+
 function resolveIntegrationStatus(
   config: WhatsAppDiagnosticsReport['config'],
   connection: WhatsAppDiagnosticsReport['connection'],
@@ -131,19 +177,32 @@ export async function runWhatsAppDiagnostics(deps: WhatsAppDiagnosticsDeps): Pro
   const config = {
     webhookVerifyToken: canRead(getWhatsAppWebhookVerifyToken),
     appSecret: canRead(getWhatsAppAppSecret),
-    tokenEncryptionKey: isTokenEncryptionKeyValid(),
+    tokenEncryptionKey: isKeyValid(getWhatsAppTokenEncryptionKeyV1),
   };
+  const contentEncryptionKey = isKeyValid(getWhatsAppContentEncryptionKeyV1);
+  const contactHmacKey = isKeyValid(getWhatsAppContactHmacKeyV1);
   const connection = await loadConnection(deps);
+  const summary = await loadSummary(deps);
+  const enabledConnections = summary?.captureEnabledConnections ?? null;
+  const captureKeysInvalid = (enabledConnections ?? 0) > 0 && (!contentEncryptionKey || !contactHmacKey);
+  const messagesRefused =
+    summary !== null &&
+    summary.eventsWabaMismatch + summary.eventsContactUnresolved + summary.eventsGroupMessage > 0;
 
   return {
     integrationStatus: resolveIntegrationStatus(config, connection),
     ingestion,
     config,
     connection,
-    events: { availability: 'unavailable', count: null },
+    capture: { enabledConnections, contentEncryptionKey, contactHmacKey },
+    events: toEventsReport(summary),
     wabaSubscription: 'not_confirmed',
     deployment: readDeployment(),
-    warnings: ingestion === 'enabled' ? ['ingestion_enabled'] : [],
+    warnings: [
+      ...(ingestion === 'enabled' ? (['ingestion_enabled'] as const) : []),
+      ...(captureKeysInvalid ? (['capture_keys_invalid'] as const) : []),
+      ...(messagesRefused ? (['messages_refused'] as const) : []),
+    ],
   };
 }
 

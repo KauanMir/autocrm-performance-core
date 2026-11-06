@@ -28,6 +28,7 @@ const okBody = {
   ingestion: 'disabled',
   config: { webhookVerifyToken: true, appSecret: true, tokenEncryptionKey: true },
   connection: { state: 'connected', count: 1, connectedAt: '2026-11-04T20:42:29.164Z', lastErrorCode: null },
+  capture: { enabledConnections: null, contentEncryptionKey: false, contactHmacKey: false },
   events: { availability: 'unavailable', count: null },
   wabaSubscription: 'not_confirmed',
   deployment: { environment: 'production', commitSha: '4b59e4b' },
@@ -154,10 +155,56 @@ describe('WhatsAppDiagnosticsPanel — chamada e renderização', () => {
     expect(screen.queryByTestId('whatsapp-diagnostics-result')).toBeNull();
   });
 
-  it('contagem vinda da API é ignorada: eventos seguem "Não disponível"', async () => {
-    respond({ ...okBody, events: { availability: 'available', count: 7 } });
+  it('sem resumo no banco, eventos e captura ficam "Não disponível"', async () => {
+    await runDiagnostics();
+    const result = await screen.findByTestId('whatsapp-diagnostics-result');
+    expect(result).toHaveTextContent('Eventos no ledger: Não disponível');
+    expect(result).toHaveTextContent('Mensagens capturadas: Não disponível');
+    expect(result).toHaveTextContent('Captura de mensagens: Não disponível');
+    expect(result).toHaveTextContent('Chave de conteúdo: Ausente ou inválida');
+  });
+
+  it('com resumo, mostra contagens e o estado da captura', async () => {
+    respond({
+      ...okBody,
+      capture: { enabledConnections: 1, contentEncryptionKey: true, contactHmacKey: true },
+      events: {
+        availability: 'available', count: 7, pending: 1, failed: 2, messages: 4, lastEventAt: null,
+        refused: { wabaMismatch: 1, contactUnresolved: 1, groupMessage: 0 },
+      },
+    });
+    await runDiagnostics();
+    const result = await screen.findByTestId('whatsapp-diagnostics-result');
+    expect(result).toHaveTextContent('Eventos no ledger: 7 (1 pendentes, 2 com falha)');
+    expect(result).toHaveTextContent('Mensagens capturadas: 4');
+    expect(result).toHaveTextContent('Captura de mensagens: Habilitada');
+    expect(result).toHaveTextContent('Recusadas por WABA divergente: 1');
+    expect(result).toHaveTextContent('Recusadas por contato não identificado: 1');
+    expect(result).toHaveTextContent('Recusadas por serem de grupo: 0');
+  });
+
+  it('recusas geram alerta sem expor valores', async () => {
+    respond({ ...okBody, warnings: ['messages_refused'] });
+    await runDiagnostics();
+    expect(await screen.findByTestId('whatsapp-diagnostics-refused-warning')).toHaveTextContent('Há mensagens recusadas');
+  });
+
+  it('contagem inválida vira "Não disponível", nunca 0', async () => {
+    respond({
+      ...okBody,
+      events: {
+        availability: 'available', count: '7', pending: 1, failed: 2, messages: 4,
+        refused: { wabaMismatch: 0, contactUnresolved: 0, groupMessage: 0 },
+      },
+    });
     await runDiagnostics();
     expect(await screen.findByTestId('whatsapp-diagnostics-result')).toHaveTextContent('Eventos no ledger: Não disponível');
+  });
+
+  it('captura sem chaves válidas → alerta visível', async () => {
+    respond({ ...okBody, warnings: ['capture_keys_invalid'] });
+    await runDiagnostics();
+    expect(await screen.findByTestId('whatsapp-diagnostics-capture-keys-warning')).toBeInTheDocument();
   });
 
   it('deployment desconhecido → "Não identificado"', async () => {

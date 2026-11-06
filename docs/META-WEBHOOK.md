@@ -1,5 +1,12 @@
 # Integração Meta — Webhook oficial (Fase 1: infraestrutura)
 
+> Estado confirmado em 2026-11-06: teste Lead Ads ponta a ponta aprovado em produção
+> para a TEST COMPANY (Meta → webhook assinado → ledger → Graph → lead CRM).
+> App Meta em Ao vivo, com ingestão ainda limitada à Página/empresa de teste.
+> As seções de Fase 1 abaixo são históricas; o código já inclui ingestão e processamento.
+> Consulte `docs/DEVELOPMENT-STATUS.md` para evidências, limites e pendências atuais,
+> incluindo comprovação do agendamento de recuperação e teste de reentrega.
+
 Rota: `https://crm.assessoriakapa.com.br/api/webhooks/meta`
 Implementação: `app/api/webhooks/meta/route.ts` + `lib/server/meta-webhook/*`
 

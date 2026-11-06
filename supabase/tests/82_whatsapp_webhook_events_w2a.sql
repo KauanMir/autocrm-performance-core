@@ -8,7 +8,7 @@ select has_table('public', 'whatsapp_webhook_events', 'tabela existe');
 select columns_are('public', 'whatsapp_webhook_events',
   array['id', 'company_id', 'connection_id', 'phone_number_id', 'event_kind', 'event_key', 'message_id_hash',
         'message_type', 'status_value', 'processing_status', 'attempts', 'last_error_code', 'occurred_at',
-        'received_at', 'processed_at', 'created_at', 'updated_at'],
+        'received_at', 'processed_at', 'created_at', 'updated_at', 'request_id'],
   'colunas exatas: sem texto, telefone/nome do contato, wamid cru, status bruto, mídia ou payload');
 
 select ok((select relrowsecurity from pg_class where oid = 'public.whatsapp_webhook_events'::regclass), 'RLS habilitado');

@@ -8,7 +8,7 @@
 // intocada, continua com seu próprio "Remarcar" (marca RESCHEDULED +
 // reabre criar-visita), fora do escopo deste arquivo.
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { RemoteVisitsError } from '@/lib/visits/errors';
 
@@ -113,11 +113,18 @@ function freezeMorningToday(): Date {
 }
 
 beforeEach(() => {
+  // Relógio fixo anterior aos agendamentos de setembro usados neste arquivo.
+  // Só Date é mockado; os timers de waitFor continuam reais.
+  vi.setSystemTime(new Date(2026, 7, 31, 8, 0, 0));
   m.visitServiceUpdate.mockReset();
   m.leadServiceAddToTimeline.mockReset();
   updateVisitSpy = vi.fn().mockResolvedValue({});
   m.useUpdateVisit.mockReset().mockImplementation(() => updateHookResult(updateVisitSpy));
   m.user.current = manager();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('FlowReagendarVisita — sem Visit no payload', () => {

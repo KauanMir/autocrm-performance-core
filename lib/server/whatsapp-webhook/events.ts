@@ -84,7 +84,7 @@ function nonEmptyString(value: unknown): string | undefined {
 }
 
 // timestamp da Cloud API: segundos Unix em string.
-function unixSecondsToDate(value: unknown): Date | undefined {
+export function unixSecondsToDate(value: unknown): Date | undefined {
   if (typeof value !== 'string' || !/^[0-9]{1,12}$/.test(value)) return undefined;
   const seconds = Number(value);
   return seconds > 0 ? new Date(seconds * 1000) : undefined;
@@ -92,6 +92,14 @@ function unixSecondsToDate(value: unknown): Date | undefined {
 
 function allowlisted(value: unknown, allowed: Set<string>): string {
   return typeof value === 'string' && allowed.has(value) ? value : 'other';
+}
+
+export function classifyWhatsAppMessageType(value: unknown): string {
+  return allowlisted(value, MESSAGE_TYPES);
+}
+
+export function classifyWhatsAppStatus(value: unknown): string {
+  return allowlisted(value, STATUS_VALUES);
 }
 
 // `payload` é o resultado de JSON.parse(rawBody) — `unknown` de propósito.

@@ -14,7 +14,7 @@ export function Icon({ name, size = 20, stroke = 2, className, style }: {
   );
 }
 
-const ICONS: Record<string, React.ReactNode> = {
+export const ICONS: Record<string, React.ReactNode> = {
   dot: <circle cx="12" cy="12" r="2" />,
   home: <><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /></>,
   trophy: <><path d="M8 21h8" /><path d="M12 17v4" /><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z" /><path d="M5 4h2v3a3 3 0 0 1-3-3Z" /><path d="M19 4h-2v3a3 3 0 0 0 3-3Z" /></>,
@@ -67,6 +67,9 @@ const ICONS: Record<string, React.ReactNode> = {
   xCircle: <><circle cx="12" cy="12" r="9" /><path d="m15 9-6 6M9 9l6 6" /></>,
   clipboard: <><rect x="8" y="3" width="8" height="4" rx="1" /><path d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" /></>,
   shield: <><path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6l-8-4Z" /><path d="m9 12 2 2 4-4" /></>,
+  image: <><rect x="3" y="3" width="18" height="18" rx="2.5" /><circle cx="8.5" cy="8.5" r="1.6" /><path d="m21 15-4.6-4.6a1.5 1.5 0 0 0-2.1 0L5 21" /></>,
+  video: <><rect x="2" y="5" width="14" height="14" rx="2.5" /><path d="m16 10 5.2-3a.5.5 0 0 1 .8.4v9.2a.5.5 0 0 1-.8.4L16 14" /></>,
+  sticker: <><circle cx="12" cy="12" r="9" /><path d="M8.5 14.5s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8" /><path d="M9 9.5h.01M15 9.5h.01" /></>,
   doc: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></>,
   history: <><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.4 2.6L3 8" /><path d="M3 4v4h4" /><path d="M12 8v4l3 2" /></>,
   eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>,

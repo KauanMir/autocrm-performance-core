@@ -3,7 +3,7 @@
 // createAdminClient(). Erros do Supabase são reduzidos a código/mensagem
 // internos — quem consome compara códigos conhecidos e nunca os devolve ao
 // browser. lookup_for_processing (única RPC com ciphertext) fica de fora até
-// a W2B precisar dela.
+// mídia ou envio precisarem dela.
 import { createAdminClient } from '@/lib/server/supabase/admin';
 
 export interface RpcFailure {

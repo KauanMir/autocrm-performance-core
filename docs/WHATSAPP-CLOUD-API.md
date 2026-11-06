@@ -1,15 +1,35 @@
-# Integração WhatsApp Cloud API — W1 + W2A implementadas, W2B em planejamento
+# Integração WhatsApp Cloud API — W1 + W2A em produção, W2B em implementação
 
 Rota: `https://crm.assessoriakapa.com.br/api/webhooks/whatsapp`
 Implementação: `app/api/webhooks/whatsapp/route.ts` + `lib/server/whatsapp-webhook/*`
 + `lib/server/whatsapp-connection/*` (W2A). A W2A está descrita na seção
 [W2A](#w2a--conexão-multiempresa--ledger-de-eventos) abaixo.
 
+## Decisão de 2026-11-05: Liberação B congelada
+
+O backup real do Supabase de produção foi adiado. Por isso:
+
+| Item | Situação |
+|---|---|
+| **Liberação B** (migrations W2B-4 em produção) | **Congelada** |
+| **Liberação C** (publicar W2B-3 a W2B-5) | Pendente |
+| **W2B-7** (primeiro recebimento real) | Bloqueada |
+| Migrations remotas | Nenhuma sem nova autorização |
+| Desenvolvimento | Segue local, só com dados fictícios |
+
+Para retomar a Liberação B é obrigatório preparar um backup real seguro e comprovar
+a restauração. Consulta de leitura feita em 2026-11-05: produção em Postgres 17.11,
+79 migrations, sem nada da W2B-4.
+
 ## Estado atual (W2B-0, 2026-11-04)
 
 **Receber mensagens reais no CRM ainda não é possível.** Há dois motivos: a
-WABA de teste não está inscrita no app KAPA CRM, e o sistema ainda não guarda
-o conteúdo das mensagens.
+WABA de teste não está inscrita no app KAPA CRM, e a captura de conteúdo ainda
+não foi publicada.
+
+Esta seção descreve a **produção**. O código e as migrations das fases W2B-2 a
+W2B-5 estão no repositório, mas nada disso foi aplicado ou publicado. Ver
+[situação das fases](#plano-de-implementação).
 
 | Item | Estado | Evidência |
 |---|---|---|
@@ -67,6 +87,8 @@ app/api/webhooks/whatsapp/route.ts      runtime nodejs, force-dynamic
 | `META_APP_SECRET` | **Existente, reaproveitada.** Chave HMAC do `X-Hub-Signature-256`. | Mesma credencial já usada no Lead Ads e no OAuth. Nenhum segredo novo. |
 | `WHATSAPP_INGESTION_ENABLED` | **W2A.** Liga o registro no ledger. | Só `"true"` exato liga. Ver [Flags](#flags). |
 | `WHATSAPP_TOKEN_ENCRYPTION_KEY_V1` | **W2A.** Cifra o access token. | 64 hex minúsculo. Ver [Criptografia](#criptografia). |
+| `WHATSAPP_CONTENT_ENCRYPTION_KEY_V1` | **W2B-5.** Cifra conteúdo e dados do contato. | 64 hex minúsculo. Ainda não criada na Vercel. Própria da captura. |
+| `WHATSAPP_CONTACT_HMAC_KEY_V1` | **W2B-5.** HMAC da identidade do contato. | 64 hex minúsculo. Ainda não criada na Vercel. Trocá-la impede reencontrar contatos existentes. |
 
 Por que reutilizar `META_APP_SECRET`: o produto WhatsApp foi adicionado ao
 **mesmo app Meta "KAPA CRM"**, e a Meta assina todos os webhooks do app
@@ -324,10 +346,15 @@ wamid cru, mídia ou payload.
 | `WHATSAPP_INGESTION_ENABLED` | `false` | Só `"true"` exato liga. OFF = W1 idêntica (nenhum client Supabase criado). |
 
 Com a flag ON, um número sem conexão `connected` cai em `unknownNumberCount` e
-a resposta continua `200`. **O número da TEST COMPANY agora tem conexão:** com
-a flag ON, um evento dele grava no ledger uma linha sem conteúdo. **Não ligar a
-flag antes do smoke da W2B-7**, com autorização específica. Concluir a W2B-6 não
-autoriza ligá-la (ver
+a resposta continua `200`.
+
+- **Código hoje em produção (W2A):** com a flag ON, um evento do número da TEST
+  COMPANY grava no ledger uma linha sem conteúdo.
+- **Código da W2B-5:** a flag sozinha não grava nada. Também é preciso
+  `capture_enabled` na conexão.
+
+**Não ligar a flag antes do smoke da W2B-7**, com autorização específica. Concluir
+a W2B-6 não autoriza ligá-la (ver
 [riscos de perda de mensagens](#riscos-de-perda-de-mensagens)).
 
 **Verificação no deployment efetivo:** mudanças de variável na Vercel só valem
@@ -345,6 +372,9 @@ para novos deployments, e um rollback volta à configuração daquele deployment
 [whatsapp-webhook] {"operation":"whatsapp_webhook","requestId":"<uuid>","phase":"event","result":"ingestion","registeredCount":1,"duplicateCount":0,"unknownNumberCount":0,"unusableCount":0,"durationMs":12}
 [whatsapp-webhook] {"operation":"whatsapp_webhook","requestId":"<uuid>","phase":"event","result":"ingestion_infra_failure","registeredCount":0,"duplicateCount":0,"unknownNumberCount":0,"unusableCount":0,"durationMs":3}
 ```
+
+A partir da W2B-5, o resumo também traz `capturedCount`, `captureDisabledCount`,
+`wabaMismatchCount` e `failedCount`.
 
 ### Bootstrap da conexão de teste (one-shot, manual)
 
@@ -542,19 +572,102 @@ Admin, Manager e Seller recebem `403`. A aba da interface depende de
 | `ingestion` | `enabled` ou `disabled`, o valor efetivo no runtime. Sem o valor bruto |
 | `config` | Booleanos de presença e, na chave, do formato. Formato válido não prova que é a chave certa |
 | `connection` | Estado, quantidade, data da conexão e código de erro validado |
-| `events` | Sempre `unavailable`. O ledger nega acesso ao `service_role` e nenhuma RPC devolve contagem. A RPC está planejada na W2B-4 |
+| `capture` | Conexões com captura habilitada e formato das chaves da captura |
+| `events` | Contagens de `whatsapp_diagnostics_summary`, incluindo recusas por WABA, contato e grupo. Fica `unavailable`, nunca 0, enquanto a RPC não existir no banco ou falhar |
 | `wabaSubscription` | Sempre `not_confirmed`. Sem chamada à Graph; a confirmação é manual |
 | `deployment` | `VERCEL_ENV` e SHA curto de `VERCEL_GIT_COMMIT_SHA`; `null` quando ausentes ou inválidos |
-| `warnings` | `ingestion_enabled` quando a flag estiver ligada |
+| `warnings` | `ingestion_enabled` com a flag ligada; `capture_keys_invalid` com captura habilitada e chave inválida; `messages_refused` quando houver recusas |
 
 Sem Graph, sem decifrar token, sem `lookup_for_processing` e sem escrita. WABA,
 número e número exibido são descartados no adaptador. O log traz só `requestId`,
 resultado e duração.
 
+## Inbox somente leitura (W2B-8)
+
+**Existe só em commit local, sem publicação.** Nenhum dado real existe:
+depende da [Liberação B](#decisão-de-2026-11-05-liberação-b-congelada).
+
+Tela "Conversas" no contexto operacional da empresa: lista, prévia, histórico e
+estados de carregamento, vazio e erro. Não há envio, resposta ou vínculo com lead.
+Mídia aparece como indisponível, tipos não suportados têm rótulo próprio, e mensagem
+que não decifra aparece como ilegível, sem derrubar a página.
+
+**Busca local.** Filtra em memória as conversas já carregadas, pelo nome, telefone
+mascarado e prévia. Não consulta a API, não lê o histórico e não grava o termo na URL
+nem no navegador. Com mais páginas disponíveis, cobre só as carregadas e avisa isso na
+tela. Busca no histórico exigiria decifrar mensagens no servidor e é outra decisão.
+
+**Acesso.** Até a matriz de permissões ser aprovada, só o Super Admin ativo operando a
+TEST COMPANY lê:
+
+| Camada | Regra |
+|---|---|
+| Menu e tela | `canAccessWhatsAppInbox` e `NEXT_PUBLIC_FF_WHATSAPP_INBOX` |
+| Rota | JWT → `is_platform_super_admin` → `company_id` igual à TEST COMPANY → `WHATSAPP_INBOX_READ_ENABLED` |
+| RPC | `whatsapp_inbox_read_allowed`: ator Super Admin ativo e TEST COMPANY, gravados no banco |
+| Tabelas | Continuam sem grants e sem policies; EXECUTE das RPCs só para `service_role` |
+
+Manager e Seller não veem a tela, nem na TEST COMPANY. Conversa de outra empresa e
+conversa inexistente têm a mesma resposta (`404`).
+
+**Dados.** O ciphertext só chega ao servidor, que decifra com
+`WHATSAPP_CONTENT_ENCRYPTION_KEY_V1` e devolve um DTO escrito campo a campo: nome,
+telefone mascarado (`+55 ••••• 1234`), conteúdo e horários. HMAC, hashes, wamid, BSUID,
+IDs de mídia e o telefone completo não saem do servidor. O cliente guarda tudo só em
+memória (`gcTime: 0`). Os logs trazem apenas contagens e códigos.
+
+| Rota | Retorno |
+|---|---|
+| `GET /api/integrations/whatsapp/inbox/conversations?company_id=` | 30 conversas por página, com `nextCursor` |
+| `GET .../conversations/{id}/messages?company_id=` | 50 mensagens em ordem cronológica, com `nextCursor` para as anteriores |
+
+A leitura ainda não gera registro de auditoria por acesso. Isso precisa ser decidido
+junto com a matriz de permissões, antes de ampliar o acesso.
+
+**Migration:** `20261105120000_whatsapp_inbox_read_w2b8.sql` cria só três funções, sem
+tocar em tabelas. **Não faz parte das migrations W2B-4 já preparadas para a Liberação
+B.** Ao retomar, decidir se entra na mesma janela e refazer o procedimento de backup e
+as verificações, que hoje esperam 81 migrations.
+
+**Modo demonstração.** Só funciona com `NODE_ENV=development`, usa dados fictícios
+gerados no navegador, com aviso fixo, e não consulta as rotas da inbox. Nem o código nem
+os dados entram no build de produção, mesmo com as flags ligadas.
+
+**Nunca rodar só `npm run dev` com as flags.** O login do CRM usaria o Supabase e os
+segredos que estiverem em `.env.local`, que pode apontar para a produção. A demonstração
+exige, no próprio processo, porque variáveis do processo têm prioridade sobre `.env.local`:
+
+1. Supabase local descartável, em cópia sem `.temp`, com contas fictícias.
+2. `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` e
+   `SUPABASE_SERVICE_ROLE_KEY` desse Supabase local.
+3. `NEXT_PUBLIC_FF_WHATSAPP_INBOX=true` e `NEXT_PUBLIC_FF_WHATSAPP_INBOX_DEMO=true`.
+4. `WHATSAPP_INBOX_READ_ENABLED=false`, `WHATSAPP_INGESTION_ENABLED=false` e
+   `NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW=false`.
+5. Todo segredo e integração externa (Meta, WhatsApp, e-mail e cron) anulados com valor
+   vazio.
+6. Só em loopback: `next dev -H 127.0.0.1`. O Supabase CLI publica API, Postgres e e-mail
+   em todas as interfaces, sem opção para mudar, então esses contêineres precisam ser
+   recriados com publicação em `127.0.0.1`.
+
+Antes de usar, comprovar: nenhuma referência à produção no JavaScript compilado, nenhuma
+conexão do servidor para fora da máquina e nenhuma porta da demonstração fora de loopback.
+
+**Backlog.** Preservar busca e seleção ao cruzar 1024px de largura, por exemplo ao girar
+um tablet ou redimensionar a janela. A troca de layout do App remonta a tela e hoje limpa
+os dois. Não bloqueia a W2B-8.
+
+Atendimento automatizado: ver [plano técnico](./WHATSAPP-AI-ATTENDANT-PLAN.md), ainda
+sem implementação.
+
 ## O que ainda NÃO está implementado
 
-- Captura do conteúdo: o parser ignora `from`, `contacts[]`, texto e ID de mídia.
-- Contatos, conversas, mensagens CRM, Inbox e vínculo com lead.
+- Inbox com dados reais: a W2B-8 existe só localmente e depende da Liberação B.
+- Vínculo com lead: `lead_id` e sua FK entram na W2B-9, em migration própria.
+- Mensagens de grupo: são recusadas e contadas, sem conteúdo.
+- Tratamento das mudanças de identidade (`user_changed_number` e
+  `user_changed_user_id`): a mensagem `system` é capturada, mas os contatos não são
+  relacionados.
+- Exclusão de contato e política de retenção.
 - Envio de mensagens e templates.
 - Chamadas à Graph em runtime (download de mídia, etc.). No WhatsApp, hoje só o
   bootstrap chama a Graph, em leitura.
@@ -580,14 +693,16 @@ se perde.**
 | Número sem conexão `connected`, flag ON | `unknownNumberCount`, `200` e descarte | Conectar antes de divulgar o número |
 | Falha de infraestrutura | `503` e reentrega por até 7 dias; depois disso, perda | Monitorar com o diagnóstico da W2B-2 |
 | Token morto | Conexão segue `connected`; afeta mídia e envio, não texto | Detecção de erro de token, fase de mídia |
+| Captura habilitada sem chave válida | `503` e reentrega por até 7 dias; depois disso, perda | Criar as chaves antes de habilitar; alerta no diagnóstico |
+| WABA divergente, contato não identificado ou mensagem de grupo | `200` e conteúdo não guardado | Recusa intencional, contada sem dados pessoais no diagnóstico |
 
 Hoje o risco atinge só o número de teste. Nenhum cliente real está conectado.
 
 ## W2B — arquitetura aprovada e plano
 
-**Status: decisões aprovadas na W2B-1. Nada disto está implementado.** Nomes de
-tabelas, colunas e variáveis abaixo são propostas e podem mudar nas fases
-seguintes.
+**Status: decisões aprovadas na W2B-1. W2B-2 a W2B-5 implementadas no repositório,
+sem publicação.** A leitura pelo CRM, o vínculo com lead e a mídia ainda não
+existem.
 
 | Decisão | Status | Definição |
 |---|---|---|
@@ -599,7 +714,7 @@ seguintes.
 | Token | Aprovada | Não substituir nesta fase; procedimento [preparado](#token-de-system-user) |
 | Fases | Aprovada | W2B-9 (lead) separada da W2B-10 (mídia) |
 | Modo do app | Mantido | Permanece em Development nesta fase |
-| Retenção e exclusão | **Pendente** | [Requisito obrigatório](#retenção-e-exclusão-decisão-pendente) antes de concessionárias reais |
+| Retenção e exclusão | **Pendente, bloqueia a W2B-7** | [Requisito obrigatório](#retenção-e-exclusão-decisão-pendente) antes do smoke e de concessionárias reais; há trava no banco |
 | Agendador para mídia | **Pendente** | Só necessário na W2B-10 |
 
 ### Captura transacional
@@ -610,21 +725,64 @@ partir dele. Por isso, esta decisão substitui o worker do plano anterior.
 Uma RPC grava, na **mesma transação e antes do `200`**, o evento do ledger, o
 contato, a conversa e a mensagem.
 
+```
+POST /api/webhooks/whatsapp
+  assinatura → JSON → classificação (W1)
+  flag ON? não → 200, sem banco
+  ingestion.ts (uma consulta de conexão por número, por entrega)
+    inbound-parser.ts          normaliza; item ruim não derruba a entrega
+    conexão por phone_number_id  desconhecida → 200, sem gravar
+    capture_enabled              desligado → 200, sem gravar
+    entry[].id == WABA           divergente ou ausente → 200, recusa contada
+    grupo ou contato ausente     200, recusa contada, sem contato nem conversa
+    capture-crypto.ts            HMAC + envelopes; falha → 503
+    whatsapp_inbound_message_capture  falha → 503
+```
+
+A RPC repete a checagem de conexão, empresa, WABA e captura dentro da transação.
+Se o conteúdo não for persistido numa captura habilitada, a resposta é `503`.
+
 - Sem fila de payload com dados pessoais e sem agendador para receber texto.
 - Receber texto não usa token.
 - Custo: uma RPC a mais por mensagem no webhook. Falha de banco cai no `503`.
 - Tipo não suportado vira mensagem com placeholder.
-- Statuses seguem em `whatsapp_webhook_event_register` até existir envio.
+- Statuses seguem em `whatsapp_webhook_event_register` até existir envio. A checagem
+  de WABA e de captura deles fica na aplicação, antes da RPC.
 - Gate duplo: a flag global e `capture_enabled` por conexão (default `false`).
-  Conexão sem gate não grava nada e responde `200`, com contagem no log.
+  Conexão sem gate não grava nada, nem status, e responde `200`, com contagem no log.
 
-### Modelo de dados proposto
+### Modelo de dados
+
+Migrations `20261105100000_whatsapp_conversations_w2b4.sql` e
+`20261105110000_whatsapp_capture_rpcs_w2b4.sql`. **Ainda não aplicadas em produção.**
 
 | Tabela | Conteúdo | Chave de unicidade |
 |---|---|---|
-| `whatsapp_contacts` | HMACs de BSUID e telefone; telefone e nome cifrados | Por empresa + HMAC |
-| `whatsapp_conversations` | Conexão, contato, lead opcional, datas | Por empresa + conexão + contato |
-| `whatsapp_messages` | Direção, tipo, `occurred_at`, envelope cifrado, vínculo com o evento | Por empresa + `message_id_hash` |
+| `whatsapp_contacts` | HMACs de BSUID e telefone; telefone e nome no envelope `pii_ciphertext` | Por empresa + HMAC |
+| `whatsapp_conversations` | Conexão, contato, datas | Por empresa + conexão + contato |
+| `whatsapp_messages` | Direção, tipo, `occurred_at`, envelope cifrado, vínculo com o evento | Por empresa + conexão + `message_id_hash`; por evento |
+
+O mesmo wamid em dois números da empresa são duas mensagens, cada uma na sua
+conversa, como na `event_key`. As tabelas novas não têm FK para `leads`, para não
+travar escritas das concessionárias na migration.
+
+`whatsapp_connections` ganha `capture_enabled` (default `false`), e
+`whatsapp_webhook_events` ganha `request_id`.
+
+| RPC (EXECUTE só `service_role`) | Papel |
+|---|---|
+| `whatsapp_connection_capture_context` | Conexão, empresa, WABA e se a captura é permitida |
+| `whatsapp_inbound_message_capture` | Captura transacional e idempotente |
+| `whatsapp_inbound_event_mark_failed` | Recusa rastreada sem dado pessoal: `contact_unresolved`, `group_message` ou `waba_mismatch` |
+| `whatsapp_connection_set_capture` | Liga ou desliga a captura, com auditoria |
+| `whatsapp_diagnostics_summary` | Só contagens e data, por empresa |
+
+`whatsapp_capture_gate` é interna: nem o `service_role` a executa diretamente.
+
+Resultados da captura: `captured`, `duplicate`, `capture_disabled`, `waba_mismatch`,
+`connection_not_connected` e `event_company_mismatch`. Só os dois primeiros gravam
+ou confirmam a mensagem. Evento já existente sem mensagem, como uma linha da W2A,
+é completado pela reentrega.
 
 **BSUID:** desde abril de 2026 a Meta envia esse identificador por portfólio
 (`user_id`, `from_user_id`). Usuários com username podem chegar sem `wa_id` e sem
@@ -635,29 +793,48 @@ Ver [BSUIDs](https://developers.facebook.com/documentation/business-messaging/wh
 
 ### Isolamento multiempresa
 
-- A RPC deriva a empresa da conexão, nunca de parâmetro.
-- A RPC valida conexão, número e WABA (`entry[].id`, hoje ignorado pelo parser).
-- FKs compostas `(company_id, id)` impedem cruzar empresas por construção.
-- RLS espelha `leads_select` com os helpers `current_membership_*`: manager vê a
-  empresa; seller vê só conversas do próprio lead; conversa sem lead fica para
-  manager.
+- A RPC usa a empresa da conexão. O parâmetro `p_expected_company_id` só confirma
+  a empresa usada no AAD e no HMAC; divergência não grava nada.
+- A RPC valida conexão, número e WABA, comparando `entry[].id`.
+- FKs compostas com `company_id` impedem cruzar empresas por construção. A
+  mensagem aponta para conversa, conexão e contato na mesma FK.
+- RLS habilitado, zero policies e nenhum privilégio direto, nem para `service_role`.
+- Mensagem de grupo nunca vira conversa individual. A detecção é pela presença de
+  `group_id`, que não tem formato documentado. Status com `recipient_type: group`
+  também é recusado.
+- A leitura pelo CRM entra na W2B-8 e deve espelhar `leads_select` com os helpers
+  `current_membership_*`: manager vê a empresa; seller vê só conversas do próprio
+  lead; conversa sem lead fica para manager.
+- **Trava:** o CHECK `whatsapp_connections_capture_test_only_ck` só aceita
+  `capture_enabled = true` na TEST COMPANY, mesmo em `UPDATE` direto.
 
 ### Proteção de dados
 
 - Conteúdo, telefone, nome e wamid só em envelope AES-256-GCM, usando a primitiva
   `aead-envelope`. O ledger continua sem wamid.
-- Chaves novas propostas: `WHATSAPP_CONTENT_ENCRYPTION_KEY_V1` e
-  `WHATSAPP_CONTACT_HMAC_KEY_V1`, separadas da chave do token.
-- AAD por empresa e conversa. Ciphertext movido de lugar não decifra.
-- Busca por contato usa **HMAC com segredo**. SHA-256 puro de telefone é
-  reversível por força bruta.
+- Chaves próprias: `WHATSAPP_CONTENT_ENCRYPTION_KEY_V1` e
+  `WHATSAPP_CONTACT_HMAC_KEY_V1`, separadas da chave do token e zeradas ao fim da
+  entrega.
+- AAD por empresa, conexão e mensagem no conteúdo, e por empresa e `pii_ref` no
+  contato. Ciphertext movido de lugar não decifra.
+- Busca por contato usa **HMAC com segredo, vinculado à empresa**. SHA-256 puro de
+  telefone é reversível por força bruta.
 - Payload bruto nunca é guardado. Logs seguem com allowlist e só contagens.
 - A descriptografia ocorre em rota server-side autenticada. O conteúdo cifrado
   impede busca por texto no banco.
 
 ### Idempotência e recuperação
 
-- Mantém a `event_key` atual e adiciona unicidade por `message_id_hash`.
+- Mantém a `event_key` atual e adiciona unicidade por conexão e `message_id_hash`.
+- Horário fora da faixa de 01/01/2009 até 24h depois do recebimento é descartado, e
+  a mensagem usa o horário de recebimento. O limite inferior é o ano de criação do
+  WhatsApp, e o superior é tolerância de relógio. A mensagem não é perdida, e a ordem
+  da conversa não é afetada.
+- Reconectar pelo bootstrap mantém `capture_enabled`.
+- Contato é resolvido sob lock por empresa e HMAC. Identidades de contatos
+  diferentes nunca são fundidas.
+- Evento antigo não substitui envelope mais novo, e envelope sem telefone não
+  substitui um que tenha telefone.
 - A ordem da conversa vem de `occurred_at`, porque a Meta não garante sequência.
 - Falha de infraestrutura: `503` e reentrega da Meta.
 - Erro permanente: ledger `failed`, com código de conjunto fechado, e `200`.
@@ -674,8 +851,8 @@ Ver [BSUIDs](https://developers.facebook.com/documentation/business-messaging/wh
 
 ### Vínculo com lead
 
-Automático **somente com correspondência única e confiável**: exatamente um lead
-ativo compatível, na mesma empresa.
+Não implementado. Automático **somente com correspondência única e confiável**:
+exatamente um lead ativo compatível, na mesma empresa.
 
 | Situação | Resultado |
 |---|---|
@@ -691,8 +868,10 @@ correspondência confiável deve ser definido na W2B-9 e validado com número re
 
 ### Retenção e exclusão: decisão pendente
 
-**Nenhuma regra ou prazo foi definido.** Esta decisão é **requisito obrigatório**
-antes de liberar a captura para concessionárias reais. Falta definir:
+**Nenhuma regra ou prazo foi definido, e não há exclusão automática.** Esta decisão
+**bloqueia a W2B-7**, porque o smoke grava conteúdo real, e é requisito obrigatório
+antes de liberar a captura para concessionárias reais. A trava de banco só sai por
+migration própria, depois da decisão. Falta definir:
 
 - por quanto tempo guardar mensagens, contatos e eventos do ledger;
 - como atender pedidos de exclusão de um contato;
@@ -725,6 +904,16 @@ Ver [Access Tokens](https://developers.facebook.com/documentation/business-messa
 
 ### Plano de implementação
 
+| Fase | Situação |
+|---|---|
+| W2B-0 e W2B-1 | Concluídas e publicadas |
+| W2B-2 Diagnóstico | Publicada (Liberação A, `1da7ccf`) |
+| W2B-3, W2B-4 e W2B-5 | Implementadas no repositório, sem publicação |
+| W2B-6 | [Plano pronto](#plano-de-publicação-w2b-6). **Liberação B congelada**, ver [decisão](#decisão-de-2026-11-05-liberação-b-congelada) |
+| W2B-7 | Bloqueada pela Liberação B |
+| W2B-8 Inbox | Visual aprovado, em commit local, sem publicação, ver [seção própria](#inbox-somente-leitura-w2b-8) |
+| W2B-9 e W2B-10 | Não iniciadas |
+
 Toda fase termina em parada para autorização.
 
 | Fase | Entrega | Critério de aceite |
@@ -738,10 +927,12 @@ Toda fase termina em parada para autorização.
 | **W2B-6** Produção | Backup, migrations, chaves, deploy. **Flag segue OFF, WABA não inscrita, gate desligado** | Local igual ao remoto; persistência validada; auditoria read-only; outras empresas intactas |
 | **W2B-7** Smoke | Sequência abaixo, só na TEST COMPANY | 1 evento, 1 mensagem cifrada, reentrega sem duplicar, rollback testado |
 | **W2B-8** Inbox | Lista e thread somente leitura, para a TEST COMPANY | Testes de manager e seller; isolamento entre empresas |
-| **W2B-9** Vínculo com lead | Regra de correspondência única e confiável; revisão de casos ambíguos | Testes de 0, 1 e vários leads; variantes de telefone |
+| **W2B-9** Vínculo com lead | Migration com `lead_id` e FK; regra de correspondência única e confiável; revisão de casos ambíguos | Testes de 0, 1 e vários leads; variantes de telefone |
 | **W2B-10** Mídia | Token, worker, lease, agendador | Retentativas, expiração de 7 dias, token morto detectado |
 
-**Sequência do smoke (W2B-7).** Cada passo de escrita exige autorização específica:
+**Sequência do smoke (W2B-7).** Bloqueada até a aprovação da
+[política de retenção e exclusão](#retenção-e-exclusão-decisão-pendente). Cada passo
+de escrita exige autorização específica:
 
 1. Confirmar em leitura os pré-requisitos da
    [inscrição](#inscrição-do-kapa-crm-não-executada).
@@ -754,9 +945,134 @@ Toda fase termina em parada para autorização.
 Se a mensagem não chegar, parar e diagnosticar. Não mudar o modo do app sem
 decisão própria.
 
-O pgTAP deve ser comparado com as 46 falhas antigas já conhecidas. Migrations são
-aplicadas uma por vez.
+### Plano de publicação (W2B-6)
 
-Fora da W2B: envio com janela de 24h, templates, Embedded Signup multiempresa e
-desconexão. O envio usará `lookup_for_processing` e correlacionará statuses pelo
-`message_id_hash`.
+**Liberação B congelada desde 2026-11-05.** Retomar exige backup real seguro com
+restauração comprovada e nova autorização.
+
+**Nada abaixo foi executado.** Cada passo de escrita exige autorização específica.
+
+**Antes de começar:**
+
+1. Publicar a W2B-2 pelo preflight próprio.
+2. Confirmar que a [validação em Supabase local](#validação-em-supabase-local) segue
+   válida para o código a publicar.
+3. Confirmar no Activity Log da Vercel que não há variáveis pendentes.
+4. Confirmar que o projeto Supabase não tem integração GitHub aplicando migrations.
+
+**Ordem:**
+
+| # | Ação | Checkpoint |
+|---|---|---|
+| 1 | Backup do banco de produção | Arquivo conferido antes de seguir |
+| 2 | Aplicar `20261105100000_whatsapp_conversations_w2b4.sql` | Tabelas vazias, RLS ativo, zero policies, `capture_enabled` falso |
+| 3 | Aplicar `20261105110000_whatsapp_capture_rpcs_w2b4.sql` | Grants conferidos; local igual ao remoto |
+| 4 | Criar `WHATSAPP_CONTENT_ENCRYPTION_KEY_V1` e `WHATSAPP_CONTACT_HMAC_KEY_V1` em Production, guardando cópia no Bitwarden | Sem `NEXT_PUBLIC_`; chaves distintas entre si |
+| 5 | Push e deployment automático | Status `success`; `WHATSAPP_INGESTION_ENABLED` continua ausente |
+| 6 | Validar o diagnóstico com Super Admin | Flag desabilitada, captura desabilitada, chaves válidas, eventos disponíveis |
+| 7 | Validar `403` com Manager e Seller; `401` sem sessão | Nenhum dado devolvido |
+| 8 | Auditoria read-only | Outras empresas intactas; nenhuma linha nova nas tabelas de conversa |
+
+As migrations vêm antes do código porque são aditivas: o código atual em produção
+continua funcionando com elas. Aplicar uma por vez, sem seed e sem reset, em horário
+de baixo uso. Cada uma define `lock_timeout` de 5s: se não obtiver o lock em
+`companies`, ela falha sem enfileirar as escritas das concessionárias, e pode ser
+repetida. Enquanto a migration está aberta, `leads` e `profiles` ficam livres, e só
+escritas em `companies` esperam. Depois das RPCs, confirmar que o PostgREST já as enxerga.
+
+**Testes de segurança na auditoria:** papéis `anon`, `authenticated` e
+`service_role` sem acesso direto às tabelas; `has_function_privilege` só para
+`service_role`; tentativa de `capture_enabled = true` fora da TEST COMPANY recusada
+por uma transação revertida; isolamento conferido com as contagens por empresa.
+
+**Rollback:**
+
+| Situação | Ação |
+|---|---|
+| Falha numa migration | Parar. O CLI aplica cada arquivo em transação: falha não deixa efeito parcial nem histórico. Não tentar a seguinte |
+| Problema no deployment | Instant Rollback para o deployment anterior |
+| Problema na captura, depois da W2B-7 | `whatsapp_connection_set_capture(..., false, ...)`; retirar a flag e fazer novo deployment |
+| Remover estruturas | Só com autorização: as tabelas são aditivas e podem permanecer vazias |
+
+**Ativação controlada:** só depois da W2B-6 concluída e somente na TEST COMPANY,
+pela [sequência do smoke](#plano-de-implementação). Nenhuma concessionária recebe
+conexão, chave ou captura nesta etapa.
+
+**Critérios da W2B-7:** política de retenção e exclusão aprovada, destinatários
+confirmados, ausência de overrides confirmada, flag OFF confirmada em runtime, WABA
+inscrita com autorização específica, um único telefone autorizado e uma única
+mensagem de teste. A captura é ligada pela RPC `whatsapp_connection_set_capture`, sem
+rota no CRM, por caminho aprovado na própria fase.
+
+**Parar imediatamente se:**
+
+- qualquer tabela de outra empresa mudar;
+- aparecer dado pessoal em log, resposta ou coluna não cifrada;
+- o diagnóstico ou qualquer rota responder a usuário sem permissão;
+- a flag aparecer ligada fora do smoke autorizado;
+- uma migration falhar ou o estado local e remoto divergir;
+- o CRM das concessionárias apresentar erro após o deployment.
+
+### Validação em PGlite (permanente)
+
+`npm run test:run -- tests/integration/whatsapp` não precisa de Docker nem de rede.
+
+| Arquivo | Prova |
+|---|---|
+| `capture-pipeline.pglite.test.ts` | Migrations como dono não superusuário, pgTAP 81 a 83 por shim e o webhook completo até as RPCs |
+| `rpc-contract.test.ts` | Parâmetros e colunas TS contra as funções SQL; `lock_timeout`, ausência de `leads` e de comandos destrutivos |
+| `local-validation.pglite.test.ts` | Lógica do validador local e a recusa de hosts que não sejam locais |
+
+**PGlite não substitui o Supabase.** A conexão única impede concorrência real, a
+ponte só imita o PostgREST, e `auth`, `storage`, papéis e o shim do pgTAP são
+aproximações.
+
+### Validação em Supabase local
+
+**Exige iniciar o Docker Desktop, com autorização.** Nunca usar o banco de produção
+nem rodar reset no `supabase/` do repositório: ele é linkado à produção. Roda numa
+cópia descartável, sem `.temp`, em portas próprias, a partir da raiz do repositório, em
+PowerShell:
+
+```powershell
+$repo = (Get-Location).Path
+$work = Join-Path $env:TEMP 'kapa-w2b-local'
+robocopy supabase "$work\supabase" /E /XD snippets .temp .branches | Out-Null
+(Get-Content "$work\supabase\config.toml") -replace '^project_id = .*', 'project_id = "kapa-w2b-local"' -replace '= 543(\d\d)', '= 555$1' -replace '= 8083', '= 8583' | Set-Content "$work\supabase\config.toml"
+Push-Location $work
+npx supabase@2.116.0 start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor
+```
+
+1. **pgTAP real:** `npx supabase@2.116.0 test db`. Critério: 81, 82, 83 e 84 passam, e a
+   lista de falhas é igual à do baseline: 40 asserções antigas em 24 arquivos,
+   medidas sem a W2B-4.
+2. **Fixture**, pelo `psql` do container, porque `db query --local -f` não aceita vários
+   comandos: `Get-Content "$repo\scripts\whatsapp\local-validation\fixture.sql" | docker exec -i supabase_db_kapa-w2b-local psql -U postgres -d postgres -v ON_ERROR_STOP=1`.
+3. **Credenciais locais:** `npx supabase@2.116.0 status -o env` mostra `API_URL`,
+   `ANON_KEY`, `SERVICE_ROLE_KEY` e `JWT_SECRET`, todos locais.
+4. **PostgREST, JWT e concorrência**, a partir da raiz do repositório:
+
+   ```powershell
+   Set-Location $repo
+   $env:WA_LOCAL_SUPABASE_URL = '<API_URL>'
+   $env:WA_LOCAL_ANON_KEY = '<ANON_KEY>'
+   $env:WA_LOCAL_SERVICE_ROLE_KEY = '<SERVICE_ROLE_KEY>'
+   $env:WA_LOCAL_JWT_SECRET = '<JWT_SECRET>'
+   npm run whatsapp:validate-local
+   ```
+
+   O script recusa hosts que não sejam locais. Ele testa papéis com JWT real e dispara
+   requisições paralelas: mesma mensagem, contato novo e telefone com BSUID. Cada
+   requisição usa uma conexão do pool do PostgREST. Critério: todas as linhas `PASS`.
+5. **Deadlocks**, pelo mesmo `psql`:
+   `select deadlocks from pg_stat_database where datname = 'postgres'` deve seguir em 0.
+6. **Tipos:** na pasta da cópia, gerar com
+   `npx supabase@2.116.0 gen types typescript --local` e salvar a saída em
+   `lib/supabase/database.types.ts`, sem edição manual.
+7. **Encerrar:** `npx supabase@2.116.0 stop --no-backup`, voltar à raiz e remover a
+   pasta da cópia.
+
+
+## Backup rehearsal update — 2026-11-06
+
+A production logical backup was restored and the three pending WhatsApp migrations passed locally. All 208 database contract assertions passed after including source ACL metadata. Production remains unchanged. See DEVELOPMENT-STATUS.md for backup location, encryption, recovery limitations, and remaining release gates. Earlier freeze notes are historical; the full production release is still pending the remaining checks.

@@ -31,6 +31,9 @@ export const NAV = [
   { id: 'propostas', label: 'Propostas',    icon: 'handshake' },
   { id: 'vendas',    label: 'Vendas',       icon: 'trophy' },
   { id: 'resultados',label: 'Resultados',   icon: 'bars' },
+  // WHATSAPP-W2B-8: só existe para Super Admin na company de teste, com a flag
+  // ligada. Visibilidade real decidida em allowedNavIds (components/App.tsx).
+  { id: 'conversas', label: 'Conversas',    icon: 'message' },
   { id: 'ajustes',   label: 'Ajustes',      icon: 'gear' },
   // M1-F S3-B: só aparece para Super Admin da plataforma com a flag
   // NEXT_PUBLIC_FF_PLATFORM_ADMIN ON — visibilidade real decidida em

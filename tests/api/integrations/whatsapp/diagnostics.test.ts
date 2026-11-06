@@ -31,6 +31,8 @@ const COMMIT_SHA = '4b59e4ba26a185e08a51883a3a3733f076d5970c';
 const VERIFY_TOKEN = 'SENTINEL-VERIFY-TOKEN-must-not-leak';
 const APP_SECRET = 'SENTINEL-APP-SECRET-must-not-leak';
 const ENCRYPTION_KEY = 'ab'.repeat(32);
+const CONTENT_KEY = 'cd'.repeat(32);
+const HMAC_KEY = 'ef'.repeat(32);
 const WABA_ID = '918273645546372';
 const PHONE_NUMBER_ID = '564738291056473';
 const DISPLAY_PHONE = '+55 11 91234-5678';
@@ -70,6 +72,34 @@ function actor(opts: { isSuperAdmin?: unknown; err?: unknown } = {}) {
 
 const request = (query = '') => new Request(`${ENDPOINT}${query}`, { method: 'GET' });
 
+const summaryRow = {
+  out_events_total: 6,
+  out_events_received: 1,
+  out_events_processed: 4,
+  out_events_failed: 0,
+  out_events_waba_mismatch: 0,
+  out_events_contact_unresolved: 0,
+  out_events_group_message: 0,
+  out_last_event_at: '2026-11-05T10:00:00+00:00',
+  out_messages_total: 4,
+  out_contacts_total: 2,
+  out_conversations_total: 2,
+  out_capture_enabled_connections: 0,
+};
+
+// Por padrão, a RPC de resumo ainda não existe no banco, como hoje em produção.
+function arrangeRpc(opts: { status?: unknown; summary?: unknown } = {}) {
+  mocks.adminRpc.mockImplementation(async (name: string) => {
+    if (name === 'whatsapp_connection_status') return opts.status ?? { data: [connectionRow()], error: null };
+    if (name === 'whatsapp_diagnostics_summary') {
+      return opts.summary ?? { data: null, error: { code: 'PGRST202', message: 'function not found' } };
+    }
+    throw new Error(`unexpected rpc: ${name}`);
+  });
+}
+
+const statusCalls = () => mocks.adminRpc.mock.calls.filter((call) => call[0] === 'whatsapp_connection_status');
+
 let fetchSpy: ReturnType<typeof vi.spyOn>;
 let logSpy: ReturnType<typeof vi.spyOn>;
 let errSpy: ReturnType<typeof vi.spyOn>;
@@ -78,12 +108,14 @@ beforeEach(() => {
   vi.stubEnv('WHATSAPP_WEBHOOK_VERIFY_TOKEN', VERIFY_TOKEN);
   vi.stubEnv('META_APP_SECRET', APP_SECRET);
   vi.stubEnv('WHATSAPP_TOKEN_ENCRYPTION_KEY_V1', ENCRYPTION_KEY);
+  vi.stubEnv('WHATSAPP_CONTENT_ENCRYPTION_KEY_V1', CONTENT_KEY);
+  vi.stubEnv('WHATSAPP_CONTACT_HMAC_KEY_V1', HMAC_KEY);
   vi.stubEnv('WHATSAPP_INGESTION_ENABLED', undefined as unknown as string);
   vi.stubEnv('VERCEL_ENV', 'production');
   vi.stubEnv('VERCEL_GIT_COMMIT_SHA', COMMIT_SHA);
 
   mocks.requireAuthenticatedActor.mockResolvedValue(actor());
-  mocks.adminRpc.mockResolvedValue({ data: [connectionRow()], error: null });
+  arrangeRpc();
 
   fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network must not be used'));
   logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -181,13 +213,16 @@ describe('GET /api/integrations/whatsapp/diagnostics — isolamento', () => {
   ])('%s → consulta só a TEST COMPANY, uma vez, pela RPC de status', async (_label, query) => {
     const res = await GET(request(query));
     expect(res.status).toBe(200);
-    expect(mocks.adminRpc).toHaveBeenCalledTimes(1);
-    expect(mocks.adminRpc).toHaveBeenCalledWith('whatsapp_connection_status', { p_company_id: META_TEST_COMPANY_ID });
+    expect(statusCalls()).toEqual([['whatsapp_connection_status', { p_company_id: META_TEST_COMPANY_ID }]]);
+    expect(mocks.adminRpc).toHaveBeenCalledWith('whatsapp_diagnostics_summary', { p_company_id: META_TEST_COMPANY_ID });
+    expect(mocks.adminRpc).toHaveBeenCalledTimes(2);
   });
 });
 
 describe('GET /api/integrations/whatsapp/diagnostics — relatório', () => {
-  it('estado esperado: flag ausente, conexão ok, inscrição não confirmada', async () => {
+  it('estado atual de produção: flag ausente, sem resumo, inscrição não confirmada', async () => {
+    vi.stubEnv('WHATSAPP_CONTENT_ENCRYPTION_KEY_V1', '');
+    vi.stubEnv('WHATSAPP_CONTACT_HMAC_KEY_V1', '');
     const res = await GET(request());
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('no-store');
@@ -197,6 +232,7 @@ describe('GET /api/integrations/whatsapp/diagnostics — relatório', () => {
       ingestion: 'disabled',
       config: { webhookVerifyToken: true, appSecret: true, tokenEncryptionKey: true },
       connection: { state: 'connected', count: 1, connectedAt: '2026-11-04T20:42:29.164Z', lastErrorCode: null },
+      capture: { enabledConnections: null, contentEncryptionKey: false, contactHmacKey: false },
       events: { availability: 'unavailable', count: null },
       wabaSubscription: 'not_confirmed',
       deployment: { environment: 'production', commitSha: '4b59e4b' },
@@ -223,9 +259,63 @@ describe('GET /api/integrations/whatsapp/diagnostics — relatório', () => {
     expect(body.integrationStatus).toBe('awaiting_waba_confirmation');
   });
 
-  it('eventos ficam indisponíveis, nunca 0', async () => {
+  it('sem RPC de resumo no banco, eventos ficam indisponíveis, nunca 0', async () => {
     const body = await (await GET(request())).json();
     expect(body.events).toEqual({ availability: 'unavailable', count: null });
+    expect(body.capture.enabledConnections).toBeNull();
+    expect(JSON.stringify(body)).not.toContain('function not found');
+  });
+
+  it('com a RPC aplicada, devolve só contagens e data', async () => {
+    arrangeRpc({ summary: { data: [summaryRow], error: null } });
+    const body = await (await GET(request())).json();
+    expect(body.events).toEqual({
+      availability: 'available', count: 6, pending: 1, failed: 0, messages: 4, lastEventAt: '2026-11-05T10:00:00.000Z',
+      refused: { wabaMismatch: 0, contactUnresolved: 0, groupMessage: 0 },
+    });
+    expect(body.capture.enabledConnections).toBe(0);
+    expect(body.warnings).toEqual([]);
+  });
+
+  it('recusas aparecem como contagens e geram alerta, sem IDs', async () => {
+    arrangeRpc({
+      summary: {
+        data: [{ ...summaryRow, out_events_failed: 6, out_events_waba_mismatch: 3, out_events_contact_unresolved: 2, out_events_group_message: 1 }],
+        error: null,
+      },
+    });
+    const body = await (await GET(request())).json();
+    expect(body.events.refused).toEqual({ wabaMismatch: 3, contactUnresolved: 2, groupMessage: 1 });
+    expect(body.warnings).toEqual(['messages_refused']);
+    const output = everythingSerialized(body);
+    for (const secret of [WABA_ID, PHONE_NUMBER_ID, DISPLAY_PHONE]) expect(output).not.toContain(secret);
+  });
+
+  it('exceção na RPC de resumo não derruba o diagnóstico', async () => {
+    mocks.adminRpc.mockImplementation(async (name: string) => {
+      if (name === 'whatsapp_connection_status') return { data: [connectionRow()], error: null };
+      throw new Error('rpc detail secret');
+    });
+    const res = await GET(request());
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.events.availability).toBe('unavailable');
+    expect(everythingSerialized(body)).not.toContain('rpc detail secret');
+  });
+
+  it('captura habilitada sem chaves válidas gera alerta', async () => {
+    vi.stubEnv('WHATSAPP_CONTACT_HMAC_KEY_V1', 'curta');
+    arrangeRpc({ summary: { data: [{ ...summaryRow, out_capture_enabled_connections: 1 }], error: null } });
+    const body = await (await GET(request())).json();
+    expect(body.warnings).toEqual(['capture_keys_invalid']);
+    expect(body.capture).toEqual({ enabledConnections: 1, contentEncryptionKey: true, contactHmacKey: false });
+  });
+
+  it('chaves ausentes sem captura habilitada não geram alerta nem misconfigured', async () => {
+    vi.stubEnv('WHATSAPP_CONTENT_ENCRYPTION_KEY_V1', '');
+    const body = await (await GET(request())).json();
+    expect(body.warnings).toEqual([]);
+    expect(body.integrationStatus).toBe('awaiting_waba_confirmation');
   });
 
   it.each([
@@ -247,7 +337,7 @@ describe('GET /api/integrations/whatsapp/diagnostics — relatório', () => {
     ['desconectada', [connectionRow({ status: 'disconnected' })], 'disconnected', 1],
     ['com erro', [connectionRow({ status: 'error', last_error_code: 'token_invalid' })], 'error', 1],
   ])('%s → connection_not_ready', async (_label, rows, state, count) => {
-    mocks.adminRpc.mockResolvedValue({ data: rows, error: null });
+    arrangeRpc({ status: { data: rows, error: null } });
     const body = await (await GET(request())).json();
     expect(body.connection.state).toBe(state);
     expect(body.connection.count).toBe(count);
@@ -255,16 +345,13 @@ describe('GET /api/integrations/whatsapp/diagnostics — relatório', () => {
   });
 
   it('código de erro fora do formato é descartado', async () => {
-    mocks.adminRpc.mockResolvedValue({
-      data: [connectionRow({ status: 'error', last_error_code: 'Bearer token-vazado' })],
-      error: null,
-    });
+    arrangeRpc({ status: { data: [connectionRow({ status: 'error', last_error_code: 'Bearer token-vazado' })], error: null } });
     const body = await (await GET(request())).json();
     expect(body.connection.lastErrorCode).toBeNull();
   });
 
   it.each([
-    ['erro da RPC', () => mocks.adminRpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'rpc detail secret' } })],
+    ['erro da RPC', () => arrangeRpc({ status: { data: null, error: { code: '42501', message: 'rpc detail secret' } } })],
     ['exceção', () => mocks.adminRpc.mockRejectedValue(new Error('rpc detail secret'))],
   ])('%s → 200 com conexão indisponível, sem detalhe', async (_label, arrange) => {
     arrange();
@@ -306,6 +393,8 @@ describe('GET /api/integrations/whatsapp/diagnostics — ausência de vazamento'
       VERIFY_TOKEN,
       APP_SECRET,
       ENCRYPTION_KEY,
+      CONTENT_KEY,
+      HMAC_KEY,
       WABA_ID,
       PHONE_NUMBER_ID,
       DISPLAY_PHONE,
@@ -337,7 +426,7 @@ describe('GET /api/integrations/whatsapp/diagnostics — ausência de vazamento'
     const root = process.cwd();
     for (const file of ['app/api/integrations/whatsapp/diagnostics/route.ts', 'lib/server/whatsapp-connection/diagnostics.ts']) {
       const source = readFileSync(resolve(root, file), 'utf8');
-      expect(source).not.toMatch(/lookup_for_processing|whatsapp_connection_upsert|event_register|graph\.facebook|decryptWhatsApp|persistWhatsApp/);
+      expect(source).not.toMatch(/lookup_for_processing|whatsapp_connection_upsert|event_register|set_capture|message_capture|graph\.facebook|decryptWhatsApp|persistWhatsApp/);
     }
   });
 });
