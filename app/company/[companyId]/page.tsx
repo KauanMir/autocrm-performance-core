@@ -23,7 +23,11 @@ export default function CompanyOperationPage({
   params: { companyId: string };
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  const hasMetaReviewMarker = typeof searchParams?.meta_review === 'string' && searchParams.meta_review !== '';
+  // META-MVP2: a volta do OAuth (`meta_select` ou `meta_error`) também abre Ajustes.
+  const hasMetaReviewMarker = ['meta_review', 'meta_select', 'meta_error'].some((key) => {
+    const value = searchParams?.[key];
+    return typeof value === 'string' && value !== '';
+  });
   return (
     <AppProviders>
       <App operationalCompanyId={params.companyId} initialScreen={hasMetaReviewMarker ? 'ajustes' : undefined} />

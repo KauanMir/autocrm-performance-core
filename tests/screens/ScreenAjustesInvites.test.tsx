@@ -6,6 +6,8 @@
 // repassado a ele.
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+// META-MVP2: habilitação de Lead Ads da empresa (aba Integrações) fora do escopo deste arquivo.
+vi.mock('@/lib/hooks/useMetaLeadOps', () => ({ useMetaLeadAdsAccess: () => ({ data: false, isLoading: false }) }));
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
 

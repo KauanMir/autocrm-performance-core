@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Avatar, URG, LBtn, LBadge, Chip, Guide, LightScreen, PageHead, LCard } from '@/components/ui/kit';
 import { STAGES, TASK_STATE } from '@/lib/data';
+import { isUnassignedLead, UNASSIGNED_SELLER_FILTER } from '@/lib/commercial/leadDisplay';
 import { useStore } from '@/lib/store';
 import { LeadService, TaskService, PipelineService, AuthService, SellerService } from '@/lib/services';
 import { useRemoteLeadsScreenState, type RemoteLeadsScreenMode } from '@/lib/hooks/useRemoteLeadsScreenState';
@@ -347,9 +348,17 @@ function ScreenClientesLegacy({ go, initialFilter }: any) {
     }
 
     const allLeads: any[] = isActive ? [...leadsQuery.leads] : [];
-    const leadsFiltered = (!isSeller && sellerFilter !== 'Todos')
-      ? allLeads.filter((l: any) => l.sellerId === sellerFilter)
-      : allLeads;
+    // META-MVP2 — fila "Sem vendedor": leads sem responsável (ex.: vindos do
+    // Meta Lead Ads) só aparecem para o Manager; o Seller nunca os vê (RLS).
+    const unassignedCount = isSeller ? 0 : allLeads.filter((l: any) => isUnassignedLead(l)).length;
+    // Sem leitura concluída a contagem é desconhecida, não zero.
+    const unassignedKnown = isActive && !stagesLoading && !stagesBlockingError && !stagesEmpty && !stagesConfigError
+      && !leadsConfigError && !leadsBlockingError && !leadsLoading;
+    const leadsFiltered = isSeller || sellerFilter === 'Todos'
+      ? allLeads
+      : sellerFilter === UNASSIGNED_SELLER_FILTER
+        ? allLeads.filter((l: any) => isUnassignedLead(l))
+        : allLeads.filter((l: any) => l.sellerId === sellerFilter);
     const delayed = leadsFiltered.filter((l: any) => l.urgency === 'red').length;
     const sorted = sortByUrgency(filterByStageOrDelay(leadsFiltered, filter));
 
@@ -421,11 +430,23 @@ function ScreenClientesLegacy({ go, initialFilter }: any) {
             {showChrome && (
               <Guide tone="red" icon="flame" scream text={<span>Você tem <b>{delayed} clientes atrasados</b> sem contato. Comece por eles. São os que mais esfriam.</span>} action="Ver atrasados" onAction={() => setFilter('Atrasados')} />
             )}
+            {showChrome && !isSeller && unassignedCount > 0 && sellerFilter !== UNASSIGNED_SELLER_FILTER && (
+              <div data-testid="clientes-unassigned-banner">
+                <Guide tone="amber" icon="users"
+                  text={<span>Você tem <b>{unassignedCount} {unassignedCount === 1 ? 'lead' : 'leads'} sem vendedor</b>. Atribua para a equipe começar o atendimento.</span>}
+                  action="Ver sem vendedor" onAction={() => setSellerFilter(UNASSIGNED_SELLER_FILTER)} />
+              </div>
+            )}
             {showChrome && !isSeller && (
+              <div data-testid="clientes-seller-filter">
               <ChipRow style={{ marginBottom: 12 }}>
                 <Chip active={sellerFilter === 'Todos'} onClick={() => setSellerFilter('Todos')}>Todos</Chip>
+                <Chip active={sellerFilter === UNASSIGNED_SELLER_FILTER} onClick={() => setSellerFilter(UNASSIGNED_SELLER_FILTER)}>
+                  {unassignedKnown ? `Sem vendedor (${unassignedCount})` : 'Sem vendedor'}
+                </Chip>
                 {sellerLabels.sellerLabels.map((s) => <Chip key={s.seller_id} active={sellerFilter === s.seller_id} onClick={() => setSellerFilter(s.seller_id)}>{s.name}</Chip>)}
               </ChipRow>
+              </div>
             )}
             {showChrome && (
               <ChipRow style={{ marginBottom: 18 }}>

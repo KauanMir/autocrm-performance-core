@@ -1,8 +1,7 @@
-// tests/screens/ScreenAjustesMetaIntegrations.test.tsx — META-OAUTH-REVIEW-UI.
-// Quem vê a aba "Integrações" de ScreenAjustes: SOMENTE Super Admin operando
-// explicitamente no contexto da company de teste fixa (App Review da Meta).
-// Nenhum Manager/Seller (mesmo na company de teste), nenhum Super Admin em
-// qualquer OUTRA company, nenhum piloto afetado. A seção em si é stubada —
+// tests/screens/ScreenAjustesMetaIntegrations.test.tsx — META-MVP2.
+// Quem vê a aba "Integrações": flag ligada E (Super Admin com empresa aberta,
+// para habilitar) OU (Manager com a empresa HABILITADA). Seller nunca. Pilotos
+// ficam inalterados enquanto a empresa não for habilitada (padrão). A seção em si é stubada —
 // o comportamento dela tem cobertura própria em
 // tests/components/integrations/MetaIntegrationsTabSection.test.tsx.
 import React from 'react';
@@ -21,6 +20,16 @@ const m = vi.hoisted(() => ({
   useReorderStages: vi.fn(),
   operational: { current: { mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false } as any },
   user: { current: null as any },
+  leadAdsEnabled: { current: false },
+  accessCalls: [] as { companyId: string | null; authorized: boolean }[],
+  getAllLeads: vi.fn(() => [] as unknown[]),
+}));
+
+vi.mock('@/lib/hooks/useMetaLeadOps', () => ({
+  useMetaLeadAdsAccess: (companyId: string | null, authorized: boolean) => {
+    m.accessCalls.push({ companyId, authorized });
+    return { data: authorized ? m.leadAdsEnabled.current : undefined, isLoading: false };
+  },
 }));
 
 vi.mock('@/lib/hooks/usePipelineStages', () => ({ usePipelineStages: m.usePipelineStages }));
@@ -44,12 +53,13 @@ vi.mock('@/components/competitionRewards/CompetitionRewardHistorySection', () =>
 }));
 vi.mock('@/components/integrations/MetaIntegrationsTabSection', () => ({
   MetaIntegrationsTabSection: (props: Record<string, unknown>) => (
-    <div data-testid="meta-integrations-tab-stub" data-company={String(props.companyId)} />
+    <div data-testid="meta-integrations-tab-stub" data-company={String(props.companyId)}
+      data-super-admin={String(props.isSuperAdmin)} data-lead-ads-enabled={String(props.leadAdsEnabled)} />
   ),
 }));
 
 vi.mock('@/lib/services', () => ({
-  LeadService: { getAll: () => [] },
+  LeadService: { getAll: () => m.getAllLeads() },
   VisitService: { getAll: () => [] },
   DealService: { getAll: () => [] },
   SaleService: { getAll: () => [] },
@@ -93,6 +103,8 @@ afterEach(() => {
 beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
   m.user.current = null;
+  m.leadAdsEnabled.current = false;
+  m.accessCalls.length = 0;
   m.operational.current = { mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false };
   m.usePipelineStages.mockReturnValue(pipelineResult());
   m.useReorderStages.mockReturnValue({
@@ -101,7 +113,8 @@ beforeEach(() => {
   });
 });
 
-describe('aba Integrações — feature flag dedicada (META-OAUTH-REVIEW-UI)', () => {
+
+describe('aba Integrações — feature flag dedicada', () => {
   it('flag ausente + Super Admin na company de teste -> NÃO vê a aba', () => {
     vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', undefined as unknown as string);
     m.user.current = superAdminGlobal();
@@ -110,85 +123,109 @@ describe('aba Integrações — feature flag dedicada (META-OAUTH-REVIEW-UI)', (
     expect(screen.queryByText('Integrações')).toBeNull();
   });
 
-  it("flag 'false' + Super Admin na company de teste -> NÃO vê a aba", () => {
+  it("flag 'false' + Super Admin -> NÃO vê a aba", () => {
     vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'false');
-    m.user.current = superAdminGlobal();
-    m.operational.current = operationalSuperAdmin(META_OAUTH_REVIEW_TEST_COMPANY_ID);
-    render(<ScreenAjustes go={() => {}} />);
-    expect(screen.queryByText('Integrações')).toBeNull();
-  });
-
-  it("flag 'true' + Super Admin na company de teste -> VÊ a aba", () => {
-    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
-    m.user.current = superAdminGlobal();
-    m.operational.current = operationalSuperAdmin(META_OAUTH_REVIEW_TEST_COMPANY_ID);
-    render(<ScreenAjustes go={() => {}} />);
-    expect(screen.getByText('Integrações')).toBeInTheDocument();
-  });
-
-  it("flag 'true' + Super Admin em OUTRA company -> NÃO vê a aba", () => {
-    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
     m.user.current = superAdminGlobal();
     m.operational.current = operationalSuperAdmin(OTHER_COMPANY_ID);
     render(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Integrações')).toBeNull();
   });
 
-  it("flag 'true' + Manager na company de teste -> NÃO vê a aba", () => {
-    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
-    m.user.current = manager(META_OAUTH_REVIEW_TEST_COMPANY_ID);
+  it("flag 'false' + Manager com Lead Ads habilitado -> NÃO vê a aba", () => {
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'false');
+    m.leadAdsEnabled.current = true;
+    m.user.current = manager(OTHER_COMPANY_ID);
     render(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Integrações')).toBeNull();
   });
 });
 
-describe('aba Integrações — visibilidade (META-OAUTH-REVIEW-UI)', () => {
-  it('1. Super Admin operando na company de teste -> VÊ a aba e abre a seção com o companyId de teste', () => {
+describe('aba Integrações — visibilidade multiempresa (META-MVP2)', () => {
+  it('1. Super Admin na company de teste -> VÊ a aba, a seção e o diagnóstico de teste', () => {
     m.user.current = superAdminGlobal();
     m.operational.current = operationalSuperAdmin(META_OAUTH_REVIEW_TEST_COMPANY_ID);
     render(<ScreenAjustes go={() => {}} />);
-    const tab = screen.getByText('Integrações');
-    expect(tab).toBeInTheDocument();
-    fireEvent.click(tab);
+    fireEvent.click(screen.getByText('Integrações'));
     const stub = screen.getByTestId('meta-integrations-tab-stub');
     expect(stub).toHaveAttribute('data-company', META_OAUTH_REVIEW_TEST_COMPANY_ID);
+    expect(stub).toHaveAttribute('data-super-admin', 'true');
     expect(screen.getByTestId('whatsapp-diagnostics-panel')).toBeInTheDocument();
   });
 
-  it('2. Super Admin operando em OUTRA company -> NÃO vê a aba (nem no DOM)', () => {
+  it('2. Super Admin em OUTRA company -> VÊ a aba (para habilitar), sem diagnóstico de teste', () => {
     m.user.current = superAdminGlobal();
     m.operational.current = operationalSuperAdmin(OTHER_COMPANY_ID);
     render(<ScreenAjustes go={() => {}} />);
-    expect(screen.queryByText('Integrações')).toBeNull();
-    expect(screen.queryByTestId('meta-integrations-tab-stub')).toBeNull();
+    fireEvent.click(screen.getByText('Integrações'));
+    const stub = screen.getByTestId('meta-integrations-tab-stub');
+    expect(stub).toHaveAttribute('data-company', OTHER_COMPANY_ID);
+    expect(stub).toHaveAttribute('data-lead-ads-enabled', 'false');
     expect(screen.queryByTestId('whatsapp-diagnostics-panel')).toBeNull();
   });
 
-  it('3. Super Admin global (sem contexto operacional aberto) -> NÃO vê a aba', () => {
+  it('3. Super Admin global (sem empresa aberta) -> NÃO vê a aba', () => {
     m.user.current = superAdminGlobal();
     render(<ScreenAjustes go={() => {}} />);
     expect(screen.queryByText('Integrações')).toBeNull();
   });
 
-  it('4. Manager na company de teste -> NÃO vê a aba, mesmo sendo a company certa', () => {
-    m.user.current = manager(META_OAUTH_REVIEW_TEST_COMPANY_ID);
-    render(<ScreenAjustes go={() => {}} />);
-    expect(screen.queryByText('Integrações')).toBeNull();
-    expect(screen.queryByTestId('meta-integrations-tab-stub')).toBeNull();
-  });
-
-  it('5. Seller na company de teste -> NÃO vê a aba', () => {
-    m.user.current = seller(META_OAUTH_REVIEW_TEST_COMPANY_ID);
-    render(<ScreenAjustes go={() => {}} />);
-    expect(screen.queryByText('Integrações')).toBeNull();
-  });
-
-  it('6. Manager em company comum (piloto real) -> nenhuma mudança: continua vendo as abas de sempre, sem Integrações', () => {
+  it('4. Manager com a empresa DESABILITADA (padrão) -> NÃO vê a aba (pilotos inalterados)', () => {
     m.user.current = manager(OTHER_COMPANY_ID);
     render(<ScreenAjustes go={() => {}} />);
     for (const label of ['Empresa', 'Usuários', 'Follow-ups']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.queryByText('Integrações')).toBeNull();
+    expect(m.accessCalls.at(-1)).toEqual({ companyId: OTHER_COMPANY_ID, authorized: true });
+  });
+
+  it('5. Manager com a empresa HABILITADA -> VÊ a aba da própria empresa, sem controle de habilitação', () => {
+    m.leadAdsEnabled.current = true;
+    m.user.current = manager(OTHER_COMPANY_ID);
+    render(<ScreenAjustes go={() => {}} />);
+    fireEvent.click(screen.getByText('Integrações'));
+    const stub = screen.getByTestId('meta-integrations-tab-stub');
+    expect(stub).toHaveAttribute('data-company', OTHER_COMPANY_ID);
+    expect(stub).toHaveAttribute('data-super-admin', 'false');
+    expect(stub).toHaveAttribute('data-lead-ads-enabled', 'true');
+  });
+
+  it('6. Seller -> NUNCA vê a aba e nem consulta a habilitação, mesmo com a empresa habilitada', () => {
+    m.leadAdsEnabled.current = true;
+    m.user.current = seller(OTHER_COMPANY_ID);
+    render(<ScreenAjustes go={() => {}} />);
+    expect(screen.queryByText('Integrações')).toBeNull();
+    expect(m.accessCalls.every((call) => call.authorized === false)).toBe(true);
+  });
+});
+
+// Achado com navegador real: a volta do OAuth abre Ajustes direto, antes de existir
+// o espelho de leads. LeadService.getAll() lança e derrubava a tela do Manager.
+describe('volta do OAuth abre Ajustes antes do espelho de leads (META-MVP2)', () => {
+  const managerA = () => ({ ...m.user.current, activeMembership: { companyId: OTHER_COMPANY_ID, role: 'manager', sellerId: null } });
+
+  afterEach(() => {
+    m.getAllLeads.mockReset();
+    m.getAllLeads.mockImplementation(() => []);
+  });
+
+  it('sem espelho: a tela renderiza e a aba Integrações continua disponível', async () => {
+    const { RemoteLeadsError } = await import('@/lib/leads/errors');
+    m.getAllLeads.mockImplementation(() => { throw new RemoteLeadsError('remote_leads_snapshot_unavailable'); });
+    vi.stubEnv('NEXT_PUBLIC_FF_META_INTEGRATIONS_REVIEW', 'true');
+    m.user.current = managerA();
+    m.leadAdsEnabled.current = true;
+    m.operational.current = { mode: 'membership', companyId: OTHER_COMPANY_ID, identity: { status: 'ready' }, isReadOnly: false };
+    expect(() => render(<ScreenAjustes go={() => {}} />)).not.toThrow();
+    expect(screen.getByRole('button', { name: 'Integrações' })).toBeInTheDocument();
+  });
+
+  it('outro erro de leads continua aparecendo: não é engolido', async () => {
+    const { RemoteLeadsError } = await import('@/lib/leads/errors');
+    m.getAllLeads.mockImplementation(() => { throw new RemoteLeadsError('remote_leads_invalid_context'); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    m.user.current = managerA();
+    m.operational.current = { mode: 'membership', companyId: OTHER_COMPANY_ID, identity: { status: 'ready' }, isReadOnly: false };
+    expect(() => render(<ScreenAjustes go={() => {}} />)).toThrow('remote_leads_invalid_context');
   });
 });

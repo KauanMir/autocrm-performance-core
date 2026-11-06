@@ -1,4 +1,5 @@
 // Testes das capabilities puras (M1-D, commit 8).
+import { canAccessMetaLeadAdsTab } from '@/lib/capabilities';
 import { describe, expect, it } from 'vitest';
 import {
   canManageCompanySettings,
@@ -435,5 +436,36 @@ describe('canAccessWhatsAppInbox — WHATSAPP-W2B-8', () => {
     expect(canAccessWhatsAppInbox({ ...base, platformRole: null })).toBe(false);
     expect(canAccessWhatsAppInbox(null)).toBe(false);
     expect(canAccessWhatsAppInbox(undefined)).toBe(false);
+  });
+});
+
+describe('canAccessMetaLeadAdsTab (META-MVP2)', () => {
+  const base = { platformRole: null, membershipRole: null, companyId: 'company-a', reviewFlagEnabled: true, leadAdsEnabled: false } as const;
+
+  it('flag desligada: ninguém vê', () => {
+    expect(canAccessMetaLeadAdsTab({ ...base, platformRole: 'super_admin', reviewFlagEnabled: false })).toBe(false);
+    expect(canAccessMetaLeadAdsTab({ ...base, membershipRole: 'manager', leadAdsEnabled: true, reviewFlagEnabled: false })).toBe(false);
+  });
+
+  it('sem empresa no contexto: ninguém vê', () => {
+    expect(canAccessMetaLeadAdsTab({ ...base, platformRole: 'super_admin', companyId: null })).toBe(false);
+  });
+
+  it('Super Admin vê sempre: é quem habilita', () => {
+    expect(canAccessMetaLeadAdsTab({ ...base, platformRole: 'super_admin' })).toBe(true);
+  });
+
+  it('Manager só vê com a empresa habilitada', () => {
+    expect(canAccessMetaLeadAdsTab({ ...base, membershipRole: 'manager' })).toBe(false);
+    expect(canAccessMetaLeadAdsTab({ ...base, membershipRole: 'manager', leadAdsEnabled: true })).toBe(true);
+  });
+
+  it('Seller nunca vê', () => {
+    expect(canAccessMetaLeadAdsTab({ ...base, membershipRole: 'seller', leadAdsEnabled: true })).toBe(false);
+  });
+
+  it('usuário ausente: nunca vê', () => {
+    expect(canAccessMetaLeadAdsTab(null)).toBe(false);
+    expect(canAccessMetaLeadAdsTab(undefined)).toBe(false);
   });
 });

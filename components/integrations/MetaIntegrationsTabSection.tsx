@@ -20,9 +20,14 @@ import { AuthService } from '@/lib/services';
 import { useStartMetaOAuth, getStartMetaOAuthErrorMessage } from '@/lib/hooks/useStartMetaOAuth';
 import { fetchMetaReviewStatusRequest } from '@/lib/integrations/metaReviewStatusRequest';
 import { MetaDiagnosticsPanel } from '@/components/integrations/MetaDiagnosticsPanel';
+import { MetaLeadAdsAccessToggle, MetaPageSelectionPanel, MetaUnroutedEventsPanel } from '@/components/integrations/MetaLeadAdsCompanyControls';
 
 export type MetaIntegrationsTabSectionProps = {
   companyId: string;
+  // META-MVP2: Super Admin vê o controle de habilitação; sem habilitação não
+  // há botão de conectar. Defaults preservam o comportamento anterior.
+  isSuperAdmin?: boolean;
+  leadAdsEnabled?: boolean;
 };
 
 const META_TEST_PAGE_LABEL = 'KAPA CRM Teste';
@@ -43,7 +48,7 @@ function persistFailureMessage(failureCode: string): string {
   return failureCode === 'page_already_connected' ? PAGE_ALREADY_CONNECTED : PERSIST_FAILED_GENERIC;
 }
 
-export function MetaIntegrationsTabSection({ companyId }: MetaIntegrationsTabSectionProps) {
+export function MetaIntegrationsTabSection({ companyId, isSuperAdmin = false, leadAdsEnabled = true }: MetaIntegrationsTabSectionProps) {
   const [status, setStatus] = useState<ReviewStatusState>({ kind: 'idle' });
   const [startError, setStartError] = useState<string | null>(null);
   const checkedRef = useRef(false);
@@ -120,7 +125,16 @@ export function MetaIntegrationsTabSection({ companyId }: MetaIntegrationsTabSec
         Conecte sua Página do Facebook para autorizar o recebimento de leads no KAPA CRM.
       </div>
 
-      {verified ? (
+      {isSuperAdmin && <MetaLeadAdsAccessToggle companyId={companyId} />}
+      {isSuperAdmin && <MetaUnroutedEventsPanel companyId={companyId} />}
+      {leadAdsEnabled && <MetaPageSelectionPanel companyId={companyId} />}
+      {!leadAdsEnabled && (
+        <div data-testid="meta-lead-ads-disabled" style={{ fontSize: 12.5, color: 'var(--t-500)', marginBottom: 14 }}>
+          Lead Ads ainda não foi habilitado para esta empresa.
+        </div>
+      )}
+
+      {!leadAdsEnabled ? null : verified ? (
         <div data-testid="meta-integration-verified">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
             <Icon name="checkCircle" size={16} stroke={2.2} style={{ color: 'var(--green)' }} />

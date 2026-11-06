@@ -352,6 +352,27 @@ export type MetaIntegrationsReviewCapabilityUser = {
   reviewFlagEnabled: boolean;
 };
 
+// META-MVP2 — aba "Integrações" para Lead Ads multiempresa. Com a flag de
+// Integrações ligada e uma empresa no contexto:
+//   - Super Admin: sempre (é quem habilita/desabilita a empresa);
+//   - Manager ativo da empresa: só quando a empresa já está habilitada;
+//   - Seller: nunca.
+// A autorização real continua no banco (is_manager_or_platform +
+// company_meta_lead_ads_access); esta capability só decide a interface.
+export type MetaLeadAdsTabCapabilityUser = {
+  platformRole: User['platformRole'];
+  membershipRole: 'manager' | 'seller' | null;
+  companyId: string | null;
+  reviewFlagEnabled: boolean;
+  leadAdsEnabled: boolean;
+};
+
+export function canAccessMetaLeadAdsTab(user: MetaLeadAdsTabCapabilityUser | null | undefined): boolean {
+  if (!user || user.reviewFlagEnabled !== true || !user.companyId) return false;
+  if (user.platformRole === 'super_admin') return true;
+  return user.membershipRole === 'manager' && user.leadAdsEnabled === true;
+}
+
 export function canAccessMetaIntegrationsReviewTab(user: MetaIntegrationsReviewCapabilityUser | null | undefined): boolean {
   return (
     user?.reviewFlagEnabled === true &&

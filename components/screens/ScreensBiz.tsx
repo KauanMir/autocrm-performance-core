@@ -11,13 +11,15 @@ import { LeadService, VisitService, DealService, SaleService, SellerService, Pip
 import { usePipelineStages } from '@/lib/hooks/usePipelineStages';
 import { useReorderStages, getReorderStagesErrorMessage } from '@/lib/hooks/useReorderStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
-import { canManageCompanySettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites, canManageFollowUpTemplates, canManageCompetitionRewards, canAccessMetaIntegrationsReviewTab } from '@/lib/capabilities';
+import { canManageCompanySettings, canAccessStageSettings, canReorderPipelineStages, canManageInvites, canManageFollowUpTemplates, canManageCompetitionRewards, canAccessMetaIntegrationsReviewTab, canAccessMetaLeadAdsTab } from '@/lib/capabilities';
 import { UsersTabSection } from '@/components/users/UsersTabSection';
 import { FollowUpsTabSection } from '@/components/followUpTemplates/FollowUpsTabSection';
 import { CompetitionRewardsTabSection } from '@/components/competitionRewards/CompetitionRewardsTabSection';
 import { CompetitionRewardHistorySection } from '@/components/competitionRewards/CompetitionRewardHistorySection';
 import { MetaIntegrationsTabSection } from '@/components/integrations/MetaIntegrationsTabSection';
 import { MetaLeadOpsPanel } from '@/components/integrations/MetaLeadOpsPanel';
+import { useMetaLeadAdsAccess } from '@/lib/hooks/useMetaLeadOps';
+import { isRemoteLeadsError } from '@/lib/leads/errors';
 import { WhatsAppDiagnosticsPanel } from '@/components/integrations/WhatsAppDiagnosticsPanel';
 import type { CreateInviteActor } from '@/lib/hooks/useCreateInvite';
 import { isActiveUsersEnabled, isUserEmailEditEnabled, isUserLifecycleEnabled, isMetaIntegrationsReviewEnabled } from '@/lib/flags';
@@ -1352,6 +1354,15 @@ function ScreenAjustesEmpresaRemote({ userId, companyId, readAuthorized, writeAu
   );
 }
 
+function readLeadsForStageCounts(): any[] | null {
+  try {
+    return LeadService.getAll();
+  } catch (error) {
+    if (isRemoteLeadsError(error) && error.code === 'remote_leads_snapshot_unavailable') return null;
+    throw error;
+  }
+}
+
 export function ScreenAjustes({ go }: any) {
   useStore();
   // MOBILE-RESPONSIVENESS-V1-B4-EXEC §26/§31 — tabs em ChipRow; reorder de
@@ -1371,13 +1382,17 @@ export function ScreenAjustes({ go }: any) {
   // companyId já cai no estado "indisponível" antes de chegar lá), mas a
   // leitura precisa ser condicional na ORIGEM, não no consumo, porque
   // LeadService.getAll() já lança ao ser chamada, antes de qualquer JSX.
-  const leads = currentUser?.activeMembership ? LeadService.getAll() : [];
+  //
+  // META-MVP2: a volta do OAuth abre Ajustes direto, antes de existir o espelho de
+  // leads. Sem espelho, a contagem por etapa fica desconhecida (null), em vez de
+  // derrubar a tela do Manager no meio da conexão da Página.
+  const leads = currentUser?.activeMembership ? readLeadsForStageCounts() : [];
   // META-OAUTH-REVIEW-UI: só abre direto em "Integrações" quando a própria
   // URL já carrega o marcador `meta_review` (o redirect assinado do
   // callback OAuth Meta — ver app/company/[companyId]/page.tsx). Qualquer
   // outro acesso continua abrindo em "Empresa", exatamente como antes.
   const [tab, setTab] = useState(() => (
-    typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('meta_review')
+    typeof window !== 'undefined' && ['meta_review', 'meta_select', 'meta_error'].some((key) => new URLSearchParams(window.location.search).has(key))
       ? 'Integrações'
       : 'Empresa'
   ));
@@ -1518,11 +1533,27 @@ export function ScreenAjustes({ go }: any) {
   // qualquer Manager/Seller (mesmo na própria company de teste), ou Super
   // Admin em qualquer outra company: capability false, aba fora do array,
   // fora do DOM.
-  const metaIntegrationsReviewAccess = canAccessMetaIntegrationsReviewTab({
+  const metaReviewTabAccess = canAccessMetaIntegrationsReviewTab({
     platformRole: currentUser?.platformRole ?? null,
     companyId,
     reviewFlagEnabled: isMetaIntegrationsReviewEnabled(),
   });
+  // META-MVP2: a aba também existe para qualquer empresa no fluxo multiempresa
+  // (Super Admin sempre; Manager só com a empresa habilitada). O estado da
+  // habilitação é lido do banco como o usuário (Seller nunca consulta).
+  const ajustesMembershipRole: 'manager' | 'seller' | null =
+    isOperationalSuperAdmin ? null : (currentUser?.activeMembership?.role ?? null);
+  const canReadLeadAdsAccess = isMetaIntegrationsReviewEnabled() && Boolean(companyId)
+    && (currentUser?.platformRole === 'super_admin' || ajustesMembershipRole === 'manager');
+  const leadAdsAccess = useMetaLeadAdsAccess(companyId, canReadLeadAdsAccess);
+  const metaLeadAdsTabAccess = canAccessMetaLeadAdsTab({
+    platformRole: currentUser?.platformRole ?? null,
+    membershipRole: ajustesMembershipRole,
+    companyId,
+    reviewFlagEnabled: isMetaIntegrationsReviewEnabled(),
+    leadAdsEnabled: leadAdsAccess.data === true,
+  });
+  const metaIntegrationsReviewAccess = metaReviewTabAccess || metaLeadAdsTabAccess;
   const allowedTabs: string[] = [
     ...(companySettingsAccess ? ['Empresa'] : []),
     ...(invitesAccess ? ['Usuários'] : []),
@@ -1702,7 +1733,7 @@ export function ScreenAjustes({ go }: any) {
                   style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', border: `1px solid ${overStage === stageDragKey(s) ? 'var(--gold-line)' : 'var(--border)'}`, borderRadius: 10, marginBottom: 8, cursor: isMd && stageDraggable(s, i) ? 'grab' : 'default', opacity: draggedStage === stageDragKey(s) ? 0.4 : 1, transition: 'opacity .12s, border-color .15s' }}>
                   <Icon name="list" size={16} stroke={2} style={{ color: 'var(--t-400)' }} />
                   <span style={{ fontWeight: 600, fontSize: 14, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</span>
-                  <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--t-400)', flexShrink: 0 }}>{leads.filter((l: any) => l.stage === s.name).length} clientes</span>
+                  <span className="tnum" style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--t-400)', flexShrink: 0 }}>{leads === null ? '…' : `${leads.filter((l: any) => l.stage === s.name).length} clientes`}</span>
                   {/* < md: drag HTML5 não funciona em touch → Subir/Descer. */}
                   {!isMd && (
                     <span style={{ display: 'flex', gap: 4, flexShrink: 0 }} onClick={(e: any) => e.stopPropagation()}>
@@ -1765,8 +1796,12 @@ export function ScreenAjustes({ go }: any) {
       )}
       {activeTab === 'Integrações' && metaIntegrationsReviewAccess && companyId && (
         <>
-          <MetaIntegrationsTabSection companyId={companyId} />
-          <MetaLeadOpsPanel companyId={companyId} />
+          <MetaIntegrationsTabSection
+            companyId={companyId}
+            isSuperAdmin={currentUser?.platformRole === 'super_admin'}
+            leadAdsEnabled={leadAdsAccess.data === true}
+          />
+          {(leadAdsAccess.data === true || currentUser?.platformRole === 'super_admin') && <MetaLeadOpsPanel companyId={companyId} />}
           <WhatsAppDiagnosticsPanel companyId={companyId} />
         </>
       )}

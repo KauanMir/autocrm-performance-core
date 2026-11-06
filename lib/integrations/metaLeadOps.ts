@@ -9,7 +9,7 @@
 import { supabase } from '@/lib/supabase/client';
 
 export class MetaLeadOpsError extends Error {
-  constructor(public readonly code: 'forbidden' | 'not_found' | 'invalid_input' | 'unavailable') {
+  constructor(public readonly code: 'forbidden' | 'not_found' | 'invalid_input' | 'company_not_active' | 'unavailable') {
     super(code);
     this.name = 'MetaLeadOpsError';
   }
@@ -20,6 +20,7 @@ function toOpsError(error: { message?: string; code?: string } | null): MetaLead
   if (message === 'forbidden' || message === 'unauthenticated') return new MetaLeadOpsError('forbidden');
   if (message === 'lead_not_found') return new MetaLeadOpsError('not_found');
   if (message === 'invalid_input' || message === 'company_required') return new MetaLeadOpsError('invalid_input');
+  if (message === 'company_not_active') return new MetaLeadOpsError('company_not_active');
   return new MetaLeadOpsError('unavailable');
 }
 
@@ -269,4 +270,141 @@ export async function fetchLeadFormSubmissions(leadId: string, companyId: string
           .map((item) => ({ key: item.key, values: item.values.filter((v) => typeof v === 'string') }))
       : [],
   }));
+}
+
+// ── META-MVP2 — autorização da empresa e seleção de Página ────────────
+
+export async function fetchMetaLeadAdsAccess(companyId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc('meta_lead_ads_company_access', { p_company_id: companyId });
+  if (error) throw toOpsError(error);
+  return rowsOf(data)[0]?.enabled === true;
+}
+
+// Só Super Admin (o banco recusa qualquer outro papel).
+export async function setMetaLeadAdsAccess(companyId: string, enabled: boolean): Promise<boolean> {
+  const { data, error } = await supabase.rpc('meta_lead_ads_set_company_access', { p_company_id: companyId, p_enabled: enabled });
+  if (error) throw toOpsError(error);
+  return rowsOf(data)[0]?.enabled === true;
+}
+
+export interface SelectablePage {
+  pageId: string;
+  pageName: string;
+}
+
+async function readBody(response: Response): Promise<Record<string, unknown>> {
+  try {
+    const body = await response.json();
+    return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export class MetaPageSelectionError extends Error {
+  constructor(public readonly code: string) {
+    super(code);
+    this.name = 'MetaPageSelectionError';
+  }
+}
+
+// O token assinado da seleção fica num cookie HttpOnly: o JavaScript não o lê
+// e ele nunca entra em URL ou corpo.
+export async function fetchSelectablePagesRequest(accessToken: string): Promise<SelectablePage[]> {
+  let response: Response;
+  try {
+    response = await fetch('/api/integrations/meta/oauth/page-selection', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+  } catch {
+    throw new MetaPageSelectionError('unavailable');
+  }
+  const body = await readBody(response);
+  if (body.ok === true && Array.isArray(body.pages)) {
+    return (body.pages as unknown[])
+      .filter((p): p is SelectablePage =>
+        typeof p === 'object' && p !== null &&
+        typeof (p as SelectablePage).pageId === 'string' && typeof (p as SelectablePage).pageName === 'string')
+      .map((p) => ({ pageId: p.pageId, pageName: p.pageName }));
+  }
+  throw new MetaPageSelectionError(typeof body.error === 'string' ? body.error : 'unavailable');
+}
+
+export async function selectPageRequest(pageId: string, accessToken: string): Promise<SelectablePage> {
+  let response: Response;
+  try {
+    response = await fetch('/api/integrations/meta/oauth/page-selection', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page_id: pageId }),
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+  } catch {
+    throw new MetaPageSelectionError('unavailable');
+  }
+  const body = await readBody(response);
+  const page = body.page as { id?: unknown; name?: unknown } | undefined;
+  if (body.ok === true && typeof page?.id === 'string' && typeof page?.name === 'string') {
+    return { pageId: page.id, pageName: page.name };
+  }
+  throw new MetaPageSelectionError(typeof body.error === 'string' ? body.error : 'unavailable');
+}
+
+// ── META-MVP2 — eventos retidos sem empresa (só Super Admin) ──────────
+
+export type UnroutedReason = 'no_connection' | 'company_disabled' | 'ambiguous_owner';
+
+export interface MetaUnroutedGroup {
+  pageId: string;
+  reason: UnroutedReason;
+  pending: number;
+  firstReceivedAt: string | null;
+  lastReceivedAt: string | null;
+  canAdopt: boolean;
+}
+
+export async function fetchMetaUnroutedEvents(companyId: string): Promise<MetaUnroutedGroup[]> {
+  const { data, error } = await supabase.rpc('meta_leadgen_unrouted_list', { p_company_id: companyId });
+  if (error) throw toOpsError(error);
+  return rowsOf(data).map((row) => ({
+    pageId: typeof row.page_id === 'string' ? row.page_id : '',
+    reason: row.reason as UnroutedReason,
+    pending: typeof row.pending === 'number' ? row.pending : 0,
+    firstReceivedAt: typeof row.first_received_at === 'string' ? row.first_received_at : null,
+    lastReceivedAt: typeof row.last_received_at === 'string' ? row.last_received_at : null,
+    canAdopt: row.can_adopt === true,
+  }));
+}
+
+export type AdoptUnroutedOutcome = 'adopted' | 'nothing_pending' | 'not_connected' | 'company_disabled' | 'owner_conflict';
+
+export async function adoptMetaUnroutedRequest(
+  companyId: string,
+  pageId: string,
+  accessToken: string,
+): Promise<{ outcome: AdoptUnroutedOutcome; adopted: number; processingScheduled: boolean }> {
+  let response: Response;
+  try {
+    response = await fetch('/api/integrations/meta/leadgen-review/unrouted-adopt', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ company_id: companyId, page_id: pageId }),
+      cache: 'no-store',
+    });
+  } catch {
+    throw new MetaLeadOpsError('unavailable');
+  }
+  const body = await readBody(response);
+  if (body.ok === true && typeof body.outcome === 'string') {
+    return {
+      outcome: body.outcome as AdoptUnroutedOutcome,
+      adopted: typeof body.adopted === 'number' ? body.adopted : 0,
+      processingScheduled: body.processingScheduled === true,
+    };
+  }
+  throw new MetaLeadOpsError(response.status === 403 || response.status === 401 ? 'forbidden' : 'unavailable');
 }

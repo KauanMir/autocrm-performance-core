@@ -4,8 +4,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AuthService } from '@/lib/services';
 import {
+  adoptMetaUnroutedRequest,
   deleteMetaFormMapping,
   dismissMetaLeadEvent,
+  fetchMetaLeadAdsAccess,
+  fetchMetaUnroutedEvents,
+  fetchSelectablePagesRequest,
+  selectPageRequest,
+  setMetaLeadAdsAccess,
   fetchLeadFormSubmissions,
   fetchMetaConnectionHealth,
   fetchMetaFormMappings,
@@ -96,5 +102,68 @@ export function useLeadFormSubmissions(options: { leadId: string | null; company
     queryKey: metaLeadOpsKeys.submissions(companyId, leadId ?? 'none'),
     enabled: authorized && typeof leadId === 'string' && leadId !== '',
     queryFn: () => fetchLeadFormSubmissions(leadId as string, companyId),
+  });
+}
+
+// ── META-MVP2 ─────────────────────────────────────────────────────────
+
+export const metaLeadAdsAccessKey = (companyId: string) => ['company', companyId, 'metaLeadOps', 'access'] as const;
+
+export function useMetaLeadAdsAccess(companyId: string | null, authorized: boolean) {
+  return useQuery({
+    queryKey: metaLeadAdsAccessKey(companyId ?? 'none'),
+    enabled: authorized && typeof companyId === 'string' && companyId !== '',
+    queryFn: () => fetchMetaLeadAdsAccess(companyId as string),
+  });
+}
+
+export function useSetMetaLeadAdsAccess(companyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => setMetaLeadAdsAccess(companyId, enabled),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: metaLeadOpsKeys.all(companyId) }),
+  });
+}
+
+async function sessionToken(): Promise<string> {
+  const { data } = await AuthService.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new MetaLeadOpsError('forbidden');
+  return token;
+}
+
+export function useSelectablePages(companyId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['metaPageSelection', companyId],
+    enabled,
+    retry: false,
+    // A seleção é de uso único e vence em 10 minutos: nunca servir de cache.
+    gcTime: 0,
+    queryFn: async () => fetchSelectablePagesRequest(await sessionToken()),
+  });
+}
+
+export function useSelectMetaPage(companyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (pageId: string) => selectPageRequest(pageId, await sessionToken()),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: metaLeadOpsKeys.all(companyId) }),
+  });
+}
+
+// Só Super Admin (o banco recusa qualquer outro papel).
+export function useMetaUnroutedEvents(companyId: string, authorized: boolean) {
+  return useQuery({
+    queryKey: [...metaLeadOpsKeys.all(companyId), 'unrouted'],
+    enabled: authorized,
+    queryFn: () => fetchMetaUnroutedEvents(companyId),
+  });
+}
+
+export function useAdoptMetaUnrouted(companyId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (pageId: string) => adoptMetaUnroutedRequest(companyId, pageId, await sessionToken()),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: metaLeadOpsKeys.all(companyId) }),
   });
 }

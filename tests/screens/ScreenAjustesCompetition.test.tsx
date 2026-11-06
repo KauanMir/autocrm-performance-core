@@ -5,6 +5,8 @@
 // tests/components/competitionRewards/CompetitionRewardsTabSection.test.tsx.
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+// META-MVP2: habilitação de Lead Ads da empresa (aba Integrações) fora do escopo deste arquivo.
+vi.mock('@/lib/hooks/useMetaLeadOps', () => ({ useMetaLeadAdsAccess: () => ({ data: false, isLoading: false }) }));
 import { render, screen, fireEvent } from '@testing-library/react';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
 

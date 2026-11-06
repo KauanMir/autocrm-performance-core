@@ -13,6 +13,14 @@ export const LEAD_STAGE_UNAVAILABLE_LABEL = 'Etapa indisponível';
 
 export type LeadAssignmentState = 'assigned' | 'unassigned';
 
+// META-MVP2 — fila "Sem vendedor" do Manager (tela Clientes). Valor reservado
+// do filtro: nunca colide com um sellers.id real.
+export const UNASSIGNED_SELLER_FILTER = '__sem_vendedor__';
+
+export function isUnassignedLead(lead: { sellerId?: string | null }): boolean {
+  return lead.sellerId === null || lead.sellerId === undefined || lead.sellerId === '';
+}
+
 export function resolveLeadAssignmentState(sellerId: string | null): LeadAssignmentState {
   return sellerId !== null && sellerId !== undefined ? 'assigned' : 'unassigned';
 }

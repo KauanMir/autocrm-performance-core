@@ -3,6 +3,8 @@
 // O helper getReorderStagesErrorMessage permanece REAL (partial mock).
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// META-MVP2: habilitação de Lead Ads da empresa (aba Integrações) fora do escopo deste arquivo.
+vi.mock('@/lib/hooks/useMetaLeadOps', () => ({ useMetaLeadAdsAccess: () => ({ data: false, isLoading: false }) }));
 import { fireEvent, render, screen } from '@testing-library/react';
 import { adaptLocalStageNames } from '@/lib/pipeline/localStages';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
