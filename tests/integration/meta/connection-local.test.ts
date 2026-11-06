@@ -15,10 +15,11 @@ import {
   type UpsertRpcArgs,
 } from '@/lib/server/meta-oauth/connection-persistence';
 import { decryptMetaPageToken, encryptMetaPageToken } from '@/lib/server/meta-oauth/token-crypto';
+import { assertDisposableLocalDatabase } from '@/tests/helpers/localDatabaseGuard';
 
 const RUN = process.env.META_P4B5_LOCAL === '1';
-// Container configurable to target an isolated local project (never the owner's shared volumes by accident).
-const CONTAINER = process.env.LOCAL_SUPABASE_DB_CONTAINER ?? process.env.META_LOCAL_DB_CONTAINER ?? 'supabase_db_autocrm-performance-core';
+// No default: the local stack must be named explicitly before any write.
+const CONTAINER = process.env.LOCAL_SUPABASE_DB_CONTAINER ?? process.env.META_LOCAL_DB_CONTAINER ?? '';
 const FAKE_KEY_HEX = 'cd'.repeat(32);
 const FAKE_KEY = Buffer.from(FAKE_KEY_HEX, 'hex');
 const FAKE_PAGE_TOKEN = 'FAKE-PAGE-TOKEN-p4b5-local-only';
@@ -40,8 +41,11 @@ describe.runIf(RUN)('META-P4B.5 — integração local real', () => {
   let companyA = '';
   let companyB = '';
   let userId = '';
+  let databaseProvenLocal = false;
 
   beforeAll(async () => {
+    assertDisposableLocalDatabase();
+    databaseProvenLocal = true;
     admin = createAdminClient();
     vi.stubEnv('META_TOKEN_ENCRYPTION_KEY_V1', FAKE_KEY_HEX);
     vi.stubEnv('META_CONNECTION_PERSISTENCE_ENABLED', 'true');
@@ -65,6 +69,7 @@ describe.runIf(RUN)('META-P4B.5 — integração local real', () => {
   });
 
   afterAll(async () => {
+    if (!databaseProvenLocal) return;
     try {
       sql(
         `delete from public.audit_log where action = 'meta_connection_upserted' and company_id in ('${companyA}', '${companyB}');\n` +

@@ -55,6 +55,8 @@ const m = vi.hoisted(() => ({
   sellerServiceGetById: vi.fn(),
 }));
 
+// Monta o shell real do App: hooks usam o cliente Supabase, que aqui não abre rede.
+vi.mock('@/lib/supabase/client', async () => (await import('@/tests/helpers/offlineSupabaseClient')).offlineSupabaseModule());
 vi.mock('@/lib/hooks/useRemoteLeadsScreenState', () => ({
   useRemoteLeadsScreenState: m.useRemoteLeadsScreenState,
 }));

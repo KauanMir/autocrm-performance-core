@@ -41,6 +41,8 @@ const m = vi.hoisted(() => ({
   sellerServiceGetAll: vi.fn(),
 }));
 
+// Monta o shell real do App: hooks usam o cliente Supabase, que aqui não abre rede.
+vi.mock('@/lib/supabase/client', async () => (await import('@/tests/helpers/offlineSupabaseClient')).offlineSupabaseModule());
 vi.mock('@/lib/flags', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/flags')>();
   return {
