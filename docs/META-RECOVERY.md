@@ -4,7 +4,7 @@ O webhook persiste antes de responder e tenta processar imediatamente via waitUn
 Esse processamento não é uma fila durável. A recuperação usa a rota autenticada
 `GET /api/cron/meta-leadgen-sweep`, acionada pelo schedule `meta-leadgen-recovery`.
 
-## Configuração preparada
+## Configuração publicada
 
 - `vercel.json`: a cada cinco minutos em UTC, janela de dispersão de um minuto.
 - Projeto atual identificado no painel como Pro. Essa frequência exige plano compatível.
@@ -36,14 +36,23 @@ Isso não prova concorrência entre processos, PostgREST real ou scheduler remot
 
 ## Publicação e verificação
 
-O painel de produção estava sem schedules em 2026-11-06. A configuração local não
-significa que o job já esteja ativo. Publicar apenas uma entrega baseada no commit
-de produção `1da7ccf`, com as alterações Meta necessárias. O checkout mais recente
-contém WhatsApp W2B ainda bloqueado por backup/restauração; não promover tudo.
+Publicado em produção em 2026-11-06 pelo commit
+`69d82713f9f072e0f9e3ee5b23828ea44eab15f4`, baseado em `1da7ccf`, sem incluir
+as alterações posteriores de WhatsApp W2B. Deployment
+`dpl_8wsJZVEKicSS9SoZtLLo2zGAJivG` confirmado READY e associado a
+`crm.assessoriakapa.com.br`.
 
-Depois da publicação, confirmar `meta-leadgen-recovery` ativo em Schedules, executar
-Run Schedule uma vez e verificar resposta/log autenticado sem erro. Confirmar a
-próxima execução periódica e que o único lead Meta válido de teste continua único.
+Verificação em 2026-11-06, 21:53 UTC: o painel mostrou o schedule ativo em
+Production, 29 execuções e taxa de erro de 0%. As execuções periódicas das
+21:40, 21:45 e 21:50 UTC produziram logs autenticados com todos os contadores
+zerados, inclusive `failed` e `infrastructureErrors`. A consulta somente leitura
+confirmou um lead Meta na empresa de teste, nenhum evento pendente e um registro
+terminal `missing_phone` preservado. Não foi necessário disparar execução manual.
+
+Essa verificação comprova acionamento periódico e acesso autenticado à rota com
+fila vazia. A recuperação de falhas e reentregas foi validada nos testes isolados;
+não foram provocadas falhas artificiais na produção.
+
 Falhas terminais como missing_phone permanecem no ledger e não devem ser apagadas
 ou convertidas em retries automáticos.
 
