@@ -311,12 +311,12 @@ describe('entradas nulas e integridade', () => {
   });
 
   it('o objeto do usuário não é modificado', () => {
-    const user = { role: 'manager' as const };
+    const user = { ...activeManager };
     const frozen = Object.freeze(user);
     canManageCompanySettings(frozen);
     canAccessStageSettings(frozen);
     canReorderPipelineStages(frozen);
-    expect(user).toEqual({ role: 'manager' });
+    expect(user).toEqual(activeManager);
   });
 });
 

@@ -164,9 +164,9 @@ describe('parseInviteFragment — encoding e ambiguidade', () => {
   });
 
   it('valor não-string é rejeitado sem lançar', () => {
-    // @ts-expect-error — entrada propositalmente inválida
+    // strictNullChecks está desligado; null é aceito pelo compilador,
+    // mas deve ser rejeitado em runtime.
     expect(() => parseInviteFragment(null)).not.toThrow();
-    // @ts-expect-error
     expect(parseInviteFragment(null).ok).toBe(false);
   });
 });
