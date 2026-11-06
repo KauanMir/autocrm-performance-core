@@ -1071,3 +1071,8 @@ npx supabase@2.116.0 start -x studio,imgproxy,edge-runtime,logflare,vector,supav
    `lib/supabase/database.types.ts`, sem edição manual.
 7. **Encerrar:** `npx supabase@2.116.0 stop --no-backup`, voltar à raiz e remover a
    pasta da cópia.
+
+
+## Backup rehearsal update — 2026-11-06
+
+A production logical backup was restored and the three pending WhatsApp migrations passed locally. All 208 database contract assertions passed after including source ACL metadata. Production remains unchanged. See DEVELOPMENT-STATUS.md for backup location, encryption, recovery limitations, and remaining release gates. Earlier freeze notes are historical; the full production release is still pending the remaining checks.
