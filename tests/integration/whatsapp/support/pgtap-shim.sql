@@ -1,4 +1,4 @@
--- Implementação mínima das funções pgTAP usadas pelos testes WhatsApp, para rodar em
+-- Implementação mínima das funções pgTAP usadas pelos testes Meta/WhatsApp, para rodar em
 -- PGlite, que não tem a extensão pgtap. NÃO substitui o pgTAP real: o procedimento em
 -- docs/WHATSAPP-CLOUD-API.md executa os mesmos arquivos em Supabase local.
 create schema if not exists tap;
@@ -54,6 +54,20 @@ begin
   return $4;
 end $f$;
 
+create function public.lives_ok(text, text default '') returns text language plpgsql as $f$
+declare st text; msg text;
+begin
+  begin
+    execute $1;
+  exception when others then
+    get stacked diagnostics st = returned_sqlstate, msg = message_text;
+  end;
+  insert into tap.results(pass, descr, detail)
+  values (st is null, $2, case when st is null then null else format('state %s msg %s', st, msg) end);
+  return $2;
+end $f$;
+
 grant execute on function public.no_plan(), public.finish(), public.ok(boolean, text), public.has_table(text, text, text),
   public.columns_are(text, text, text[], text), public.throws_ok(text, text, text, text) to public;
 grant execute on function public.is(anyelement, anyelement, text) to public;
+grant execute on function public.lives_ok(text, text) to public;

@@ -37,7 +37,7 @@ function expectOk(result: ReturnType<typeof adaptPipelineStageRows>) {
 }
 
 function expectMismatch(result: ReturnType<typeof adaptPipelineStageRows>) {
-  if (result.ok) throw new Error('esperava name-mismatch, veio ok');
+  if (result.ok !== false) throw new Error('esperava name-mismatch, veio ok');
   return result;
 }
 

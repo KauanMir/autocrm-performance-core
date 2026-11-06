@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "schedules": {
+    "meta-leadgen-recovery": {
+      "schedule": "*/5 * * * *",
+      "timezone": "UTC",
+      "jitter": 1,
+      "path": "/api/cron/meta-leadgen-sweep",
+      "requestMethod": "GET"
+    }
+  }
+}

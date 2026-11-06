@@ -1,4 +1,4 @@
-// Rota do sweep de eventos Lead Ads, chamada futuramente pelo scheduler. SERVER-ONLY.
+// Rota do sweep de eventos Lead Ads, chamada pelo schedule configurado em vercel.json. SERVER-ONLY.
 // Ordem obrigatória: autenticação → flag → sweep. A URL e os parâmetros do caller
 // são ignorados: batch, lease e escopo são definidos no servidor. Respostas trazem
 // só status e contadores, nunca IDs, PII, token ou erro bruto.
@@ -8,6 +8,9 @@ import { sweepMetaLeadgenEvents } from '@/lib/server/meta-webhook/sweep-leadgen-
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// O lote sequencial pode buscar 20 leads (timeout Graph de 8 s por chamada).
+// Reserva abaixo do lease de 300 s para que uma interrupção seja recuperável.
+export const maxDuration = 240;
 
 function jsonResponse(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -30,6 +33,8 @@ export async function GET(request: Request): Promise<Response> {
 
   try {
     const summary = await sweepMetaLeadgenEvents();
+    // Apenas contadores definidos pelo servidor: sem IDs, PII ou credenciais.
+    console.log('[meta-leadgen-sweep]', JSON.stringify(summary));
     return jsonResponse(200, { status: 'ok', ...summary });
   } catch {
     return jsonResponse(500, { status: 'error' });

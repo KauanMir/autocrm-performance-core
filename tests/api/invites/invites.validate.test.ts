@@ -24,7 +24,7 @@ function makeAdmin(opts: {
   const reserveResponse = opts.reserveResponse ?? { data: [{ allowed: true, code: 'ok', retry_after_seconds: 0 }], error: null };
   const validateResponse = opts.validateResponse ?? { data: [{ valid: true, code: 'ok', masked_email: 'f***@x.com' }], error: null };
 
-  const rpc = vi.fn((name: string) => {
+  const rpc = vi.fn((name: string, _params: Record<string, unknown>) => {
     if (name === 'reserve_invite_validation_rate_limit') {
       return Promise.resolve(reserveResponse);
     }
