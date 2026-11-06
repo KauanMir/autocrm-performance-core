@@ -83,10 +83,10 @@ describe('POST /api/webhooks/meta com ingestão', () => {
     expect(await res.text()).toBe('service unavailable');
   });
 
-  it('casos não processáveis (other_company, no_connection, already_exists) → 200', async () => {
+  it('casos não processáveis (empresa desabilitada, sem conexão, já existe) → 200', async () => {
     vi.stubEnv('META_LEAD_INGESTION_ENABLED', 'true');
     ingestLeadgenChange
-      .mockResolvedValueOnce('skipped_other_company')
+      .mockResolvedValueOnce('skipped_company_disabled')
       .mockResolvedValueOnce('skipped_no_connection')
       .mockResolvedValueOnce('already_exists');
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -101,7 +101,7 @@ describe('POST /api/webhooks/meta com ingestão', () => {
     await POST(post(body(1)));
     const logged = logSpy.mock.calls.map((a) => a.join(' ')).join('\n');
     expect(logged).toContain('leadgen_registered');
-    expect(logged).toContain('"testCompany":true');
+    expect(logged).toContain('"ownerRegistered":true');
     expect(logged).not.toContain('7778889990001112');
     expect(logged).not.toContain('9990001112223330');
     expect(logged).not.toContain('1112223334445556');

@@ -15,7 +15,8 @@ export interface MetaWebhookLogFields {
   field?: string;
   formPresent?: boolean;
   leadgenPresent?: boolean;
-  testCompany?: boolean;
+  // META-MVP2: evento registrado para a empresa dona da Page (sem ID).
+  ownerRegistered?: boolean;
   httpStatus?: number;
   changeCount?: number;
   durationMs?: number;

@@ -1,8 +1,8 @@
 // POST /api/integrations/meta/leadgen-review/requeue — META-MVP1.
 // Reprocessamento de UM evento da fila de revisão do Lead Ads.
 //
-// Ordem: env → Origin → body → autenticação (Bearer) → gate do MVP-1 (flag de
-// review + company de teste) → RPC meta_leadgen_event_requeue COMO O USUÁRIO
+// Ordem: env → Origin → body → autenticação (Bearer) → flag de Integrações +
+// empresa autorizada (META-MVP2) → RPC meta_leadgen_event_requeue COMO O USUÁRIO
 // (o banco decide: Manager da company ou Super Admin com acesso; o evento
 // precisa ser da company) → se requeued e a ingestão estiver ligada, agenda o
 // processamento imediato (waitUntil, service_role). Sem ingestão ligada o
@@ -11,7 +11,6 @@
 // Resposta: só outcome e booleanos. Nunca IDs da Meta, PII, token ou erro bruto.
 import { getAppUrl, InvalidAppUrlError } from '@/lib/server/env';
 import { isOriginAllowed, isValidUuid, jsonResponse, readJsonObjectBody, requireAuthenticatedActor } from '@/lib/server/invites/http';
-import { META_TEST_COMPANY_ID } from '@/lib/server/meta-oauth/config';
 import { isMetaIntegrationsReviewEnabled } from '@/lib/flags';
 import { isMetaLeadIngestionEnabled } from '@/lib/server/meta-webhook/env';
 import { scheduleManualRequeueProcessing } from '@/lib/server/meta-webhook/schedule-leadgen-processing';
@@ -48,8 +47,17 @@ export async function POST(request: Request): Promise<Response> {
   const actor = await requireAuthenticatedActor(request);
   if (actor.ok === false) return fail(401, 'unauthenticated');
 
-  // MVP-1: a operação Lead Ads só existe para a company de teste.
-  if (!isMetaIntegrationsReviewEnabled() || companyId !== META_TEST_COMPANY_ID) return fail(403, 'forbidden');
+  // META-MVP2: a operação Lead Ads existe para empresa AUTORIZADA (relida como
+  // o usuário: a RPC também confere Manager da empresa ou Super Admin).
+  if (!isMetaIntegrationsReviewEnabled()) return fail(403, 'forbidden');
+  try {
+    const access = await actor.client.rpc('meta_lead_ads_company_access', { p_company_id: companyId });
+    const enabled = !access.error && Array.isArray(access.data)
+      && (access.data[0] as { enabled?: unknown } | undefined)?.enabled === true;
+    if (!enabled) return fail(403, 'forbidden');
+  } catch {
+    return fail(503, 'unavailable');
+  }
 
   let data: unknown;
   let error: { message?: string } | null;

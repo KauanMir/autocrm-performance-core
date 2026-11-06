@@ -77,6 +77,13 @@ export async function sweepMetaLeadgenEvents(
     return summary;
   }
 
+  // META-MVP2: nunca interrompe o sweep; falha só adia o expurgo.
+  try {
+    await deps.rpc.purgeExpired?.();
+  } catch {
+    // Sem log de erro bruto.
+  }
+
   const claimed = await deps.rpc.claimBatch(clampLimit(options.limit), SWEEP_LEASE_SECONDS);
   if (!claimed.ok) {
     summary.infrastructureErrors += 1;

@@ -24,12 +24,13 @@
 // Nenhum tenant existente é afetado — a rota só responde a um POST
 // autenticado por Manager/Super Admin.
 //
-// META-OAUTH-REVIEW-UI: body opcional `flow: "review_ui"` (UI mínima de
-// Ajustes > Integrações, só para o vídeo do App Review). Só é aceito
-// (vira `f` no state assinado) quando, ALÉM da autorização normal acima,
-// o ator é Super Admin (is_platform_super_admin()) E a company resolvida é
-// EXATAMENTE a company de teste fixa (META_TEST_COMPANY_ID). Qualquer
-// piloto continua exatamente como antes — nunca alcança este ramo.
+// META-MVP2: body opcional `flow: "review_ui"` = fluxo de conexão pela UI de
+// Ajustes > Integrações (o callback redireciona de volta para a seleção de
+// Página). Só é aceito (vira `f` no state assinado) quando, ALÉM da
+// autorização normal acima (Manager da empresa ou Super Admin), a flag de
+// Integrações está ligada E a empresa está AUTORIZADA para Lead Ads
+// (company_meta_lead_ads_access, desligada por padrão, só o Super Admin
+// liga). Substitui a antiga exigência de Super Admin + company de teste.
 import { randomUUID } from 'node:crypto';
 import {
   requireAuthenticatedActor,
@@ -48,7 +49,6 @@ import {
 } from '@/lib/server/meta-oauth/env';
 import { createOAuthState, OAUTH_STATE_FLOW_REVIEW_UI } from '@/lib/server/meta-oauth/state';
 import { buildMetaAuthorizationUrl } from '@/lib/server/meta-oauth/authorize-url';
-import { META_TEST_COMPANY_ID } from '@/lib/server/meta-oauth/config';
 import { isMetaIntegrationsReviewEnabled } from '@/lib/flags';
 import {
   generateBinding,
@@ -250,7 +250,7 @@ export async function POST(request: Request): Promise<Response> {
   // — só perde o indicador de redirect da UI de review). ──────────────────
   let reviewUiAuthorized = false;
   if (requestedReviewUiFlow) {
-    if (!isMetaIntegrationsReviewEnabled() || targetCompanyId !== META_TEST_COMPANY_ID) {
+    if (!isMetaIntegrationsReviewEnabled()) {
       logMetaOAuthEvent({
         requestId,
         operation: 'oauth_start',
@@ -262,12 +262,17 @@ export async function POST(request: Request): Promise<Response> {
       });
       return errorResponse(403, 'forbidden');
     }
-    const { data: isSuperAdmin, error: superAdminError } = await userClient.rpc('is_platform_super_admin');
-    if (superAdminError) {
+    // Autorização da empresa lida COMO O USUÁRIO (a RPC confere
+    // is_manager_or_platform de novo): nunca um valor vindo do cliente.
+    const { data: accessRows, error: accessError } = await userClient.rpc('meta_lead_ads_company_access', {
+      p_company_id: targetCompanyId,
+    });
+    if (accessError) {
       logMetaOAuthError('permission_check_failed', { requestId });
       return errorResponse(500, 'server_misconfigured');
     }
-    if (isSuperAdmin !== true) {
+    const companyEnabled = Array.isArray(accessRows) && (accessRows[0] as { enabled?: unknown } | undefined)?.enabled === true;
+    if (!companyEnabled) {
       logMetaOAuthEvent({
         requestId,
         operation: 'oauth_start',

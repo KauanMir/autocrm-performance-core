@@ -4,67 +4,31 @@
 // URL final:
 //   https://crm.assessoriakapa.com.br/api/integrations/meta/oauth/callback
 //
-// ESCOPO ATUAL (proposital):
-//   - EXIGE e valida o `state` (assinado por HMAC, TTL curto) e o binding
-//     anti-CSRF (cookie HttpOnly setado por POST .../oauth/start) ANTES de
-//     qualquer tratamento — inclusive quando a Meta devolve `error`
-//     (usuário cancelou/negou). Não há caminho que responda sem provar que
-//     o retorno pertence a um fluxo iniciado pelo KAPA CRM.
-//   - confirma o contexto assinado (propósito/versão; uid/cid quando
-//     presentes);
-//   - SÓ DEPOIS de state+binding válidos: OU trata o erro do provider de
-//     forma sanitizada, OU troca o `code` por access token SERVER-SIDE.
-//   - a troca do `code` roda exclusivamente no servidor (GET direto à
-//     Meta — conforme a doc oficial —, com META_APP_SECRET); o access
-//     token NUNCA é devolvido ao browser, NUNCA é logado, NUNCA é
-//     persistido, NUNCA vai a cookie/URL — só existe em memória durante a
-//     request e é descartado.
-//   - responde de forma segura sem expor o `code` nem o token;
-//   - limpa o cookie de binding depois de consumido (sucesso ou erro).
+// GATE DE SEGURANÇA (inalterado): EXIGE e valida o `state` (HMAC, TTL curto) e
+// o binding anti-CSRF (cookie HttpOnly setado por POST .../oauth/start) ANTES de
+// qualquer tratamento — inclusive quando a Meta devolve `error`. Só depois:
+// trata o erro do provider de forma sanitizada OU troca o `code` por token
+// server-side. O cookie de binding é limpo em todos os ramos pós-verificação.
 //
-// HARD GATE (etapa atual): SOMENTE quando `state.cid === META_TEST_COMPANY_ID`
-// (lib/server/meta-oauth/config.ts), o token é usado para TRÊS chamadas de
-// negócio, nesta ordem, exclusivamente server-side e em memória:
-//   1. GET /me/accounts (lib/server/meta-oauth/page-token.ts) — deriva o
-//      Page Access Token da Page fixa META_TEST_PAGE_ID (nunca de outra
-//      Page) e confirma a task `ADVERTISE`.
-//   2. GET /{META_TEST_PAGE_ID}/posts?fields=id&limit=1
-//      (lib/server/meta-oauth/page-read-engagement.ts), usando o Page
-//      Access Token — leitura mínima e read-only de conteúdo publicado
-//      pela própria Page (só `id`, no máximo 1 post) para gerar uso real
-//      de `pages_read_engagement`.
-//   3. POST /{META_TEST_PAGE_ID}/subscribed_apps?subscribed_fields=leadgen
-//      (lib/server/meta-oauth/page-subscription.ts), usando o Page Access
-//      Token (nunca o SUAT/user token).
-// Qualquer outra company recebe a MESMA resposta de sempre
-// (`token_exchange_verified`) e nenhuma dessas chamadas é feita. Ver
-// docs/META-OAUTH.md para o propósito (elegibilidade de Advanced Access
-// de `pages_manage_metadata` e `pages_read_engagement`).
-//
-// NÃO FAZ NESTA FASE (nem para a company de teste):
-//   - NÃO usa o token para NENHUMA outra chamada de negócio (GET /me,
-//     businesses, forms, lead retrieval, debug_token…);
-//   - NÃO persiste nada (sem banco, sem tabela, sem token, sem page_id,
-//     sem portfolio/business id, sem registro da assinatura);
-//   - NÃO cria lead / automação / notificação;
-//   - NÃO tem UI;
-//   - NÃO vincula page_id -> company_id;
-//   - NÃO generaliza para nenhuma outra company/Page.
-//
-// ISOLAMENTO: esta rota e lib/server/meta-oauth/ são infraestrutura
-// isolada, importada por nada além do fluxo Meta OAuth. Não há middleware
-// no projeto; nenhuma rota existente é afetada. Rota pública por
-// necessidade (a Meta redireciona o browser sem o Bearer do SPA) — a
-// proteção é a assinatura do `state` + o binding do cookie.
-//
-// META-OAUTH-REVIEW-UI: quando (e SÓ quando) `state.f === "review_ui"`
-// (assinado pelo /start, só para Super Admin + company de teste — ver esse
-// arquivo) e o resultado é `test_page_permissions_verified`, esta rota
-// devolve um 302 para a SPA (Ajustes > Integrações) em vez do JSON de
-// sempre, com um token de resultado EFÊMERO e assinado na querystring
-// (lib/server/meta-oauth/review-result.ts — TTL curto, nunca persistido,
-// nunca token/segredo). Qualquer outro caso (piloto, erro, sem o flag)
-// continua exatamente como antes.
+// META-MVP2 — multiempresa (substitui a company/Página de teste fixas):
+//   1. a empresa do `state` precisa estar AUTORIZADA para Lead Ads
+//      (company_meta_lead_ads_access, desligada por padrão, só o Super Admin
+//      liga) e a persistência precisa estar ligada; senão a resposta é a de
+//      sempre (`token_exchange_verified`) e nada é feito com o token;
+//   2. troca por token de longa duração quando possível (MVP-1);
+//   3. confere as quatro permissões de Lead Ads;
+//   4. lista as Páginas elegíveis (/me/accounts com a task ADVERTISE), cifra o
+//      token de cada uma (AAD company+page) e grava uma SELEÇÃO de uso único
+//      com TTL de 10 min (lib/server/meta-oauth/page-selection.ts);
+//   5. o navegador recebe só um cookie HttpOnly com o token assinado da seleção
+//      (302 para Ajustes > Integrações no fluxo da UI, com um marcador sem
+//      segredo na URL). A Página escolhida é verificada (debug_token), inscrita
+//      no webhook leadgen e persistida por POST
+//      /api/integrations/meta/oauth/page-selection.
+// No fluxo da UI, falha depois do gate volta para Ajustes > Integrações com um
+// código do catálogo fechado (`meta_error`), nunca JSON cru para o usuário.
+// Nenhum token da Meta é logado, devolvido, posto em cookie/URL ou salvo em
+// claro, e o token assinado da seleção nunca vai em URL nem em corpo de resposta.
 import { randomUUID } from 'node:crypto';
 import { getAppUrl, InvalidAppUrlError } from '@/lib/server/env';
 import {
@@ -74,45 +38,28 @@ import {
   MissingMetaAppIdError,
   getMetaAppSecret,
   MissingMetaAppSecretError,
+  isMetaConnectionPersistenceEnabled,
 } from '@/lib/server/meta-oauth/env';
-import {
-  resolveGraphApiVersion,
-  META_TEST_COMPANY_ID,
-  META_TEST_PAGE_ID,
-  REQUIRED_LEADGEN_PAGE_TASK,
-  LEADGEN_SUBSCRIBED_FIELD,
-} from '@/lib/server/meta-oauth/config';
+import { resolveGraphApiVersion } from '@/lib/server/meta-oauth/config';
 import { verifyOAuthState, OAUTH_STATE_FLOW_REVIEW_UI } from '@/lib/server/meta-oauth/state';
-import {
-  createReviewResultToken,
-  type ReviewResultFailureCode,
-} from '@/lib/server/meta-oauth/review-result';
-import { isMetaConnectionPersistenceEnabled } from '@/lib/server/meta-oauth/env';
-import {
-  findMetaConnectionOwnerByPage,
-  persistMetaPageConnection,
-  type MetaConnectionRpcPort,
-  type MetaPersistenceErrorCode,
-} from '@/lib/server/meta-oauth/connection-persistence';
-import { createMetaConnectionRpcPort } from '@/lib/server/meta-oauth/connection-rpc';
 import { isMetaIntegrationsReviewEnabled } from '@/lib/flags';
-import { readBindingCookie, clearBindingCookie } from '@/lib/server/meta-oauth/cookie';
+import { readBindingCookie, clearBindingCookie, serializePageSelectionCookie } from '@/lib/server/meta-oauth/cookie';
 import { exchangeCodeForToken } from '@/lib/server/meta-oauth/token-exchange';
-import { fetchPageAccessToken } from '@/lib/server/meta-oauth/page-token';
-import { fetchPageReadEngagement } from '@/lib/server/meta-oauth/page-read-engagement';
 import {
   fetchGrantedUserPermissions,
   findMissingRequiredPermission,
-  REQUIRED_LEAD_ADS_PERMISSIONS,
 } from '@/lib/server/meta-oauth/user-permissions';
-import { subscribePageToWebhookField } from '@/lib/server/meta-oauth/page-subscription';
 import { logMetaOAuthEvent, logMetaOAuthError } from '@/lib/server/meta-oauth/logger';
+import { exchangeForLongLivedUserToken } from '@/lib/server/meta-oauth/token-lifetime';
+import type { TokenOrigin } from '@/lib/server/meta-oauth/connection-persistence';
 import {
-  evaluatePageToken,
-  exchangeForLongLivedUserToken,
-  inspectAccessToken,
-} from '@/lib/server/meta-oauth/token-lifetime';
-import type { MetaTokenHealth, TokenOrigin } from '@/lib/server/meta-oauth/connection-persistence';
+  createPageSelectionRpc,
+  createPageSelectionToken,
+  encryptSelectionPages,
+  fetchEligiblePages,
+  PAGE_SELECTION_TTL_SECONDS,
+  type PageSelectionRpc,
+} from '@/lib/server/meta-oauth/page-selection';
 
 export const runtime = 'nodejs';
 // Um callback OAuth nunca pode ser servido de cache. Escopo estrito desta
@@ -131,20 +78,16 @@ type CallbackErrorCode =
   | 'binding_invalid'
   | 'provider_error'
   | 'token_exchange_failed'
-  // Teste técnico controlado (subscribed_apps) — só atingível quando
-  // `cid === META_TEST_COMPANY_ID` (ver hard gate abaixo).
+  // META-MVP2 — fluxo de conexão de empresa autorizada.
+  | 'context_missing'
+  | 'company_access_disabled'
+  | 'missing_required_permission'
   | 'user_permissions_lookup_failed'
   | 'user_permissions_lookup_incomplete'
   | 'page_token_lookup_failed'
-  | 'test_page_not_found'
-  | 'test_page_access_token_missing'
-  | 'test_page_missing_advertise_task'
-  | 'test_page_read_engagement_failed'
-  | 'test_page_subscription_failed'
-  // META-MVP1 — validade do token antes de inscrever/persistir.
-  | 'page_token_inspection_failed'
-  | 'page_token_invalid'
-  | 'page_token_short_lived';
+  | 'no_eligible_page'
+  | 'token_encryption_failed'
+  | 'page_selection_unavailable';
 
 function isSecureEnv(): boolean {
   return process.env.NODE_ENV === 'production';
@@ -166,35 +109,44 @@ function errorResponse(status: number, code: CallbackErrorCode, opts?: { clearCo
   return jsonResponse(status, { ok: false, error: code }, headers);
 }
 
-// META-OAUTH-REVIEW-UI: 302 de volta para a SPA — só usado no ramo de
-// sucesso quando `isReviewUiFlow` é true (ver abaixo). Nunca carrega
-// code/token/segredo — só o token de resultado efêmero e assinado
-// (lib/server/meta-oauth/review-result.ts), que prova apenas que este
-// callback chegou a `test_page_permissions_verified` para a company de
-// teste, dentro de um TTL curto.
-function reviewUiRedirectResponse(location: string): Response {
+// Consome o binding e entrega o token assinado da seleção só no cookie HttpOnly.
+function selectionHeaders(selectionToken: string): Headers {
+  const headers = new Headers({ 'Cache-Control': 'no-store' });
+  headers.append('Set-Cookie', clearBindingCookie(isSecureEnv()));
+  headers.append(
+    'Set-Cookie',
+    serializePageSelectionCookie({ value: selectionToken, secure: isSecureEnv(), maxAgeSeconds: PAGE_SELECTION_TTL_SECONDS }),
+  );
+  return headers;
+}
+
+// 302 de volta para a SPA (Ajustes > Integrações). A URL leva só um marcador
+// sem segredo; nunca code, token da Meta ou o token da seleção.
+function selectionRedirectResponse(location: string, selectionToken: string): Response {
+  const headers = selectionHeaders(selectionToken);
+  headers.set('Location', location);
+  return new Response(null, { status: 302, headers });
+}
+
+// Fluxo da UI: quem clicou em "Conectar Meta" volta para a tela com um código do
+// catálogo fechado. Sem APP_URL válida, null: cai na resposta JSON.
+function uiFailureResponse(companyId: string, code: CallbackErrorCode): Response | null {
+  let origin: string;
+  try {
+    origin = getAppUrl().origin;
+  } catch {
+    return null;
+  }
+  const location = new URL(`/company/${companyId}`, origin);
+  location.searchParams.set('meta_error', code);
   return new Response(null, {
     status: 302,
     headers: {
-      Location: location,
+      Location: location.toString(),
       'Cache-Control': 'no-store',
       'Set-Cookie': clearBindingCookie(isSecureEnv()),
     },
   });
-}
-
-// Erros da camada de persistência viram código fechado de review. Nunca
-// mensagem SQL, Graph, ciphertext, token ou chave.
-function toReviewFailureCode(code: MetaPersistenceErrorCode): ReviewResultFailureCode {
-  switch (code) {
-    case 'page_already_connected':
-    case 'persistence_unavailable':
-    case 'token_encryption_failed':
-    case 'invalid_persistence_input':
-      return code;
-    default:
-      return 'connection_persist_failed';
-  }
 }
 
 // Sanitização defensiva de qualquer string vinda da Meta antes de ir para
@@ -309,6 +261,13 @@ export async function GET(request: Request): Promise<Response> {
 
   // ═══ A PARTIR DAQUI: state assinado + não expirado + binding conferido.
   //     O cookie é consumido (limpo) em todos os ramos abaixo. ═══════════
+  const { uid, cid, f: flow } = stateResult.payload;
+  // Fluxo da UI: só com o `f` assinado pelo /start e a flag ligada. Nunca
+  // inferido de nenhum input não assinado desta request.
+  const isReviewUiFlow = flow === OAUTH_STATE_FLOW_REVIEW_UI && isMetaIntegrationsReviewEnabled();
+  const failAfterGate = (status: number, code: CallbackErrorCode): Response =>
+    (isReviewUiFlow && typeof cid === 'string' ? uiFailureResponse(cid, code) : null)
+    ?? errorResponse(status, code, { clearCookie: true });
 
   // ── (5) Erro do provider (usuário cancelou/negou etc.) ─────────────
   if (hasProviderError) {
@@ -325,7 +284,7 @@ export async function GET(request: Request): Promise<Response> {
       durationMs: Date.now() - startedAt,
     });
     // Resposta genérica — nunca reflete error_description externo.
-    return errorResponse(400, 'provider_error', { clearCookie: true });
+    return failAfterGate(400, 'provider_error');
   }
 
   // ── (6) Defensivo: sem provider error e sem code (não deveria ocorrer
@@ -338,22 +297,17 @@ export async function GET(request: Request): Promise<Response> {
       bindingCookiePresent: true,
       durationMs: Date.now() - startedAt,
     });
-    return errorResponse(400, 'invalid_request', { clearCookie: true });
+    return failAfterGate(400, 'invalid_request');
   }
 
   // ═══ (7) state válido + binding conferido + code presente ═══════════
   // SÓ AGORA (depois de TODO o gate) troca o `code` por access token,
   // exclusivamente server-side. O cookie é consumido (limpo) em todos os
   // ramos abaixo — o binding não pode ser reutilizado (anti-replay).
-  const { uid, cid, f: flow } = stateResult.payload;
   const contextFlags = {
     userIdPresent: typeof uid === 'string',
     companyIdPresent: typeof cid === 'string',
   };
-  // META-OAUTH-REVIEW-UI: só true quando o PRÓPRIO /start já validou Super
-  // Admin + company de teste antes de assinar o state (ver esse arquivo) —
-  // nunca inferido de nenhum input não assinado desta request.
-  const isReviewUiFlow = flow === OAUTH_STATE_FLOW_REVIEW_UI && isMetaIntegrationsReviewEnabled();
 
   // Envs da troca — fail closed. META_APP_SECRET é a MESMA credencial já
   // usada em Production pelo webhook; server-only, nunca devolvida/logada.
@@ -375,7 +329,7 @@ export async function GET(request: Request): Promise<Response> {
             : 'unknown';
     if (which === 'unknown') throw envError;
     logMetaOAuthError('token_exchange_env_missing', { requestId, which });
-    return errorResponse(500, 'server_misconfigured', { clearCookie: true });
+    return failAfterGate(500, 'server_misconfigured');
   }
 
   const exchange = await exchangeCodeForToken({
@@ -403,31 +357,46 @@ export async function GET(request: Request): Promise<Response> {
       durationMs: Date.now() - startedAt,
     });
     // Erro genérico — nunca o corpo bruto da Meta, nunca code/secret/token.
-    return errorResponse(502, 'token_exchange_failed', { clearCookie: true });
+    return failAfterGate(502, 'token_exchange_failed');
   }
 
-  // ═══ (8) HARD GATE — teste técnico controlado de subscribed_apps ═════
-  // SÓ prossegue para /me/accounts + /subscribed_apps quando a company do
-  // `state` é EXATAMENTE a company de teste. Qualquer outra company (todo
-  // piloto, hoje) recebe a MESMA resposta de sempre (`token_exchange_verified`)
-  // e NENHUMA chamada Graph API adicional é feita — nem /me/accounts, nem
-  // /subscribed_apps.
-  if (cid !== META_TEST_COMPANY_ID) {
+  // ═══ (8) META-MVP2 — autorização da empresa ═══════════════════════════
+  // A empresa é a do `state` assinado pelo /start (que já exigiu Manager da
+  // empresa ou Super Admin). Empresa não autorizada ou persistência desligada:
+  // resposta de sempre, o token é descartado e nada mais é chamado.
+  if (typeof cid !== 'string' || typeof uid !== 'string') {
+    logMetaOAuthEvent({ requestId, operation: 'oauth_callback', result: 'context_missing', durationMs: Date.now() - startedAt });
+    return errorResponse(400, 'context_missing', { clearCookie: true });
+  }
+
+  // Persistência desligada: o banco nem é consultado.
+  const persistenceOn = isMetaConnectionPersistenceEnabled();
+  let selectionRpc: PageSelectionRpc | null = null;
+  let companyEnabled = false;
+  if (persistenceOn) {
+    try {
+      selectionRpc = createPageSelectionRpc();
+    } catch {
+      logMetaOAuthError('page_selection_rpc_unavailable', { requestId });
+      return failAfterGate(500, 'server_misconfigured');
+    }
+    companyEnabled = (await selectionRpc.leadAdsEnabled(cid)) === true;
+  }
+  if (!companyEnabled || selectionRpc === null) {
     logMetaOAuthEvent({
       requestId,
       operation: 'oauth_callback',
       result: 'token_exchange_verified',
+      reason: persistenceOn ? 'company_not_enabled' : 'persistence_disabled',
       codePresent: true,
       codeLength: (code as string).length, // só o comprimento, nunca o valor
       bindingCookiePresent: true,
       metaHttpStatus: exchange.httpStatus,
-      tokenType: exchange.tokenType, // ex.: "bearer" — não sensível
-      tokenExpiresInSeconds: exchange.expiresInSeconds, // não sensível
+      tokenType: exchange.tokenType,
+      tokenExpiresInSeconds: exchange.expiresInSeconds,
       durationMs: Date.now() - startedAt,
     });
-
-    // Resposta: só metadados seguros. NUNCA o access token (nem parcial,
-    // nem hash), nunca o `code`, nunca o App Secret.
+    if (isReviewUiFlow) return failAfterGate(403, 'company_access_disabled');
     return jsonResponse(
       200,
       {
@@ -436,28 +405,17 @@ export async function GET(request: Request): Promise<Response> {
         context: contextFlags,
         token: { received: true },
         message:
-          'Token da Meta obtido e validado server-side (etapa de validacao tecnica). ' +
-          'O token nao e persistido nem exposto; foi descartado ao final da request.',
+          'Token da Meta obtido e validado server-side. A empresa não está habilitada para Lead Ads: ' +
+          'o token foi descartado e nenhuma Página foi conectada.',
       },
       { 'Set-Cookie': clearBindingCookie(isSecureEnv()) },
     );
   }
 
-  // ═══ (9) SOMENTE company de teste: deriva o Page Access Token via
-  // /me/accounts, faz UMA leitura mínima da própria Page
-  // (pages_read_engagement) e, se elegível, inscreve a Page de teste no
-  // webhook `leadgen`. `exchange.accessToken` (SUAT/User Access Token) e o
-  // `pageAccessToken` derivado abaixo existem SÓ em memória nesta request
-  // — nunca logados, nunca devolvidos, nunca persistidos. ═══════════════
   const graphApiVersion = resolveGraphApiVersion();
 
-  // ═══ META-MVP1 — token de longa duração ANTES de derivar o de Página. ══
-  // Doc oficial: token de Página derivado de token de usuário de curta
-  // duração também expira em horas; derivado de um de longa duração não
-  // expira. Se a troca do `code` informou expires_in, é token de usuário com
-  // validade: troca por longa duração. Sem expires_in (ex.: usuário do
-  // sistema), usa o token como veio. A validade real do token de Página é
-  // confirmada adiante com debug_token, antes de inscrever e persistir.
+  // ═══ (9) token de longa duração ANTES de derivar os de Página (MVP-1) ══
+  // Falha na troca não recusa: o debug_token da Página escolhida decide.
   let tokenOrigin: TokenOrigin = 'original_token';
   let userAccessToken = exchange.accessToken;
   if (exchange.expiresInSeconds !== undefined) {
@@ -471,10 +429,6 @@ export async function GET(request: Request): Promise<Response> {
       userAccessToken = longLived.accessToken;
       tokenOrigin = 'exchanged_long_lived';
     } else {
-      // Falha na troca NÃO recusa a conexão: alguns tokens válidos (ex.: usuário
-      // do sistema com expires_in) não aceitam fb_exchange_token. Segue com o
-      // token original; o debug_token adiante decide se o token de Página é
-      // durável. Recusar aqui rejeitaria tokens válidos.
       logMetaOAuthEvent({
         requestId,
         operation: 'oauth_callback',
@@ -486,12 +440,8 @@ export async function GET(request: Request): Promise<Response> {
     }
   }
 
-  // Antes de QUALQUER operação sobre a Page: as quatro permissões de Lead
-  // Ads precisam estar concedidas ao usuário. Falha = nada é feito adiante.
-  const userPermissions = await fetchGrantedUserPermissions({
-    userAccessToken,
-    graphApiVersion,
-  });
+  // ═══ (10) as quatro permissões de Lead Ads ════════════════════════════
+  const userPermissions = await fetchGrantedUserPermissions({ userAccessToken, graphApiVersion });
   if (!userPermissions.ok) {
     logMetaOAuthEvent({
       requestId,
@@ -501,13 +451,8 @@ export async function GET(request: Request): Promise<Response> {
       metaHttpStatus: 'httpStatus' in userPermissions ? userPermissions.httpStatus : undefined,
       durationMs: Date.now() - startedAt,
     });
-    // Limite de paginação excedido não é "permissão ausente": não sabemos se está.
     const incomplete = 'reason' in userPermissions && userPermissions.reason === 'pagination_limit_exceeded';
-    return errorResponse(
-      502,
-      incomplete ? 'user_permissions_lookup_incomplete' : 'user_permissions_lookup_failed',
-      { clearCookie: true },
-    );
+    return failAfterGate(502, incomplete ? 'user_permissions_lookup_incomplete' : 'user_permissions_lookup_failed');
   }
   const missingPermission = findMissingRequiredPermission(userPermissions.grantedPermissions);
   if (missingPermission) {
@@ -518,6 +463,7 @@ export async function GET(request: Request): Promise<Response> {
       reason: missingPermission,
       durationMs: Date.now() - startedAt,
     });
+    if (isReviewUiFlow) return failAfterGate(403, 'missing_required_permission');
     return jsonResponse(
       403,
       { ok: false, error: 'missing_required_permission', permission: missingPermission },
@@ -525,271 +471,73 @@ export async function GET(request: Request): Promise<Response> {
     );
   }
 
-  const pageLookup = await fetchPageAccessToken({
-    accessToken: userAccessToken,
-    targetPageId: META_TEST_PAGE_ID,
-    graphApiVersion,
-  });
-  // A partir daqui `exchange.accessToken` (SUAT/user token) não é mais
-  // referenciado.
-
-  if (!pageLookup.ok) {
-    // `in` em vez de narrowing pelo discriminante: o tsconfig do projeto
-    // roda com strict:false.
+  // ═══ (11) Páginas elegíveis ═══════════════════════════════════════════
+  const eligible = await fetchEligiblePages({ accessToken: userAccessToken, graphApiVersion });
+  // A partir daqui o token de usuário não é mais referenciado.
+  if (!('pages' in eligible)) {
     logMetaOAuthEvent({
       requestId,
       operation: 'oauth_callback',
       result: 'page_token_lookup_failed',
-      reason: 'reason' in pageLookup ? pageLookup.reason : 'unknown',
-      metaHttpStatus: 'httpStatus' in pageLookup ? pageLookup.httpStatus : undefined,
+      reason: eligible.reason,
+      metaHttpStatus: eligible.httpStatus,
       durationMs: Date.now() - startedAt,
     });
-    return errorResponse(502, 'page_token_lookup_failed', { clearCookie: true });
+    return failAfterGate(502, 'page_token_lookup_failed');
   }
-
-  if (!pageLookup.found) {
+  if (eligible.pages.length === 0) {
     logMetaOAuthEvent({
       requestId,
       operation: 'oauth_callback',
-      result: 'test_page_not_found',
-      metaHttpStatus: pageLookup.httpStatus,
+      result: 'no_eligible_page',
       pageFound: false,
       durationMs: Date.now() - startedAt,
     });
-    return errorResponse(502, 'test_page_not_found', { clearCookie: true });
+    return failAfterGate(502, 'no_eligible_page');
   }
 
-  if (pageLookup.pageAccessToken === '') {
-    logMetaOAuthEvent({
-      requestId,
-      operation: 'oauth_callback',
-      result: 'test_page_access_token_missing',
-      metaHttpStatus: pageLookup.httpStatus,
-      pageFound: true,
-      durationMs: Date.now() - startedAt,
-    });
-    return errorResponse(502, 'test_page_access_token_missing', { clearCookie: true });
+  // ═══ (12) seleção cifrada de uso único ════════════════════════════════
+  let encryptedPages: ReturnType<typeof encryptSelectionPages>;
+  try {
+    encryptedPages = encryptSelectionPages(cid, eligible.pages);
+  } catch {
+    logMetaOAuthError('page_selection_encryption_failed', { requestId });
+    return failAfterGate(500, 'token_encryption_failed');
+  }
+  const selectionId = await selectionRpc.create({ companyId: cid, profileId: uid, pages: encryptedPages, tokenOrigin });
+  if (!selectionId) {
+    logMetaOAuthEvent({ requestId, operation: 'oauth_callback', result: 'page_selection_unavailable', durationMs: Date.now() - startedAt });
+    return failAfterGate(502, 'page_selection_unavailable');
   }
 
-  // META-P4B: persistência SÓ no fluxo review_ui com flag ligada. Falha de
-  // persistência vira redirect de review com código fechado (sem JSON cru).
-  const persistenceEnabled = isReviewUiFlow && isMetaConnectionPersistenceEnabled();
-  let persistencePort: MetaConnectionRpcPort | null = null;
-  const failReview = (code: ReviewResultFailureCode): Response => {
-    logMetaOAuthEvent({
-      requestId,
-      operation: 'oauth_callback',
-      result: 'persistence_failed',
-      reason: code,
-      durationMs: Date.now() - startedAt,
-    });
-    const failureToken = createReviewResultToken({
-      secret,
-      companyId: META_TEST_COMPANY_ID,
-      outcome: 'failure',
-      failureCode: code,
-    });
-    const failureUrl = new URL(`/company/${META_TEST_COMPANY_ID}`, appOrigin);
-    failureUrl.searchParams.set('meta_review', failureToken);
-    return reviewUiRedirectResponse(failureUrl.toString());
-  };
-
-  if (persistenceEnabled) {
-    try {
-      persistencePort = createMetaConnectionRpcPort();
-    } catch {
-      return failReview('persistence_unavailable');
-    }
-    const owner = await findMetaConnectionOwnerByPage({ rpc: persistencePort }, META_TEST_PAGE_ID);
-    if (!owner.ok) return failReview(toReviewFailureCode('code' in owner ? owner.code : 'connection_persist_failed'));
-    if (owner.value && owner.value.companyId !== META_TEST_COMPANY_ID) {
-      return failReview('page_already_connected');
-    }
-  }
-
-  const advertiseTaskPresent = pageLookup.tasks.includes(REQUIRED_LEADGEN_PAGE_TASK);
-  if (!advertiseTaskPresent) {
-    logMetaOAuthEvent({
-      requestId,
-      operation: 'oauth_callback',
-      result: 'test_page_missing_advertise_task',
-      metaHttpStatus: pageLookup.httpStatus,
-      pageFound: true,
-      advertiseTaskPresent: false,
-      durationMs: Date.now() - startedAt,
-    });
-    return errorResponse(502, 'test_page_missing_advertise_task', { clearCookie: true });
-  }
-
-  // ═══ META-MVP1 — validade do token de Página (debug_token) ANTES de
-  // inscrever a Page e de persistir. Token inválido, de outro app, que não é
-  // de Página ou que expira em menos de 7 dias nunca vira conexão. ═════════
-  const tokenCheckedAt = new Date();
-  const inspection = await inspectAccessToken({
-    inputToken: pageLookup.pageAccessToken,
-    appId,
-    appSecret,
-    graphApiVersion,
-  });
-  if (!inspection.ok) {
-    logMetaOAuthEvent({
-      requestId,
-      operation: 'oauth_callback',
-      result: 'page_token_inspection_failed',
-      reason: 'reason' in inspection ? inspection.reason : 'unknown',
-      metaHttpStatus: 'httpStatus' in inspection ? inspection.httpStatus : undefined,
-      tokenOrigin,
-      durationMs: Date.now() - startedAt,
-    });
-    return errorResponse(502, 'page_token_inspection_failed', { clearCookie: true });
-  }
-  const verdict = evaluatePageToken(inspection.inspection, tokenCheckedAt, META_TEST_PAGE_ID);
-  if (!verdict.ok) {
-    const reason = 'reason' in verdict ? verdict.reason : 'page_token_invalid';
-    logMetaOAuthEvent({
-      requestId,
-      operation: 'oauth_callback',
-      result: reason,
-      tokenOrigin,
-      durationMs: Date.now() - startedAt,
-    });
-    return errorResponse(502, reason, { clearCookie: true });
-  }
-  const tokenHealth: MetaTokenHealth = {
-    origin: tokenOrigin,
-    expiresAt: 'expiresAt' in verdict ? verdict.expiresAt : null,
-    dataAccessExpiresAt: 'dataAccessExpiresAt' in verdict ? verdict.dataAccessExpiresAt : null,
-    checkedAt: tokenCheckedAt,
-  };
-
-  // ═══ (9a) leitura mínima e read-only de conteúdo publicado pela própria
-  // Page — gera uso de `pages_read_engagement`. GET /{page-id}/posts com
-  // fields=id&limit=1, exclusivamente com o Page Access Token (nunca o
-  // SUAT). Só o `id` de no máximo 1 post — nenhum `message`, comentário,
-  // reaction, dado de usuário ou insight. `data: []` (Page sem posts)
-  // também é sucesso. ═══════════════════════════════════════════════════
-  const readEngagement = await fetchPageReadEngagement({
-    pageId: META_TEST_PAGE_ID,
-    pageAccessToken: pageLookup.pageAccessToken,
-    graphApiVersion,
-  });
-
-  if (!readEngagement.ok) {
-    // `in` em vez de narrowing pelo discriminante: o tsconfig do projeto
-    // roda com strict:false.
-    logMetaOAuthEvent({
-      requestId,
-      operation: 'oauth_callback',
-      result: 'test_page_read_engagement_failed',
-      reason: 'reason' in readEngagement ? readEngagement.reason : 'unknown',
-      metaHttpStatus: 'httpStatus' in readEngagement ? readEngagement.httpStatus : undefined,
-      pageFound: true,
-      advertiseTaskPresent: true,
-      durationMs: Date.now() - startedAt,
-    });
-    return errorResponse(502, 'test_page_read_engagement_failed', { clearCookie: true });
-  }
-
-  const subscription = await subscribePageToWebhookField({
-    pageId: META_TEST_PAGE_ID,
-    pageAccessToken: pageLookup.pageAccessToken,
-    subscribedField: LEADGEN_SUBSCRIBED_FIELD,
-    graphApiVersion,
-  });
-  const leadgenSubscribedAt = new Date();
-
-  if (!subscription.ok) {
-    // `in` em vez de narrowing pelo discriminante: o tsconfig do projeto
-    // roda com strict:false.
-    logMetaOAuthEvent({
-      requestId,
-      operation: 'oauth_callback',
-      result: 'test_page_subscription_failed',
-      reason: 'reason' in subscription ? subscription.reason : 'unknown',
-      metaHttpStatus: 'httpStatus' in subscription ? subscription.httpStatus : undefined,
-      pageFound: true,
-      advertiseTaskPresent: true,
-      subscribedField: LEADGEN_SUBSCRIBED_FIELD,
-      durationMs: Date.now() - startedAt,
-    });
-    return errorResponse(502, 'test_page_subscription_failed', { clearCookie: true });
-  }
-
-  // Único uso do Page Access Token após o subscribe: cifrado em memória pela
-  // camada de persistência e enviado somente como ciphertext à RPC. Sem
-  // persistência (flag OFF ou fluxo não-review), o token não sai daqui.
-  if (persistenceEnabled && persistencePort) {
-    const persisted = await persistMetaPageConnection(
-      { rpc: persistencePort },
-      {
-        companyId: META_TEST_COMPANY_ID,
-        pageId: META_TEST_PAGE_ID,
-        pageName: pageLookup.pageName,
-        pageAccessToken: pageLookup.pageAccessToken,
-        grantedScopes: [...REQUIRED_LEAD_ADS_PERMISSIONS],
-        connectedAt: new Date(),
-        connectedBy: uid,
-        leadgenSubscribedAt,
-        tokenHealth,
-      },
-    );
-    if (!persisted.ok) return failReview(toReviewFailureCode('code' in persisted ? persisted.code : 'connection_persist_failed'));
-    logMetaOAuthEvent({
-      requestId,
-      operation: 'oauth_callback',
-      result: 'persistence_completed',
-      durationMs: Date.now() - startedAt,
-    });
-  }
-
+  const selectionToken = createPageSelectionToken({ secret, selectionId, companyId: cid, userId: uid });
   logMetaOAuthEvent({
     requestId,
     operation: 'oauth_callback',
-    result: 'test_page_permissions_verified',
-    reviewUiRedirect: isReviewUiFlow,
-    metaHttpStatus: subscription.httpStatus,
+    result: 'page_selection_ready',
     pageFound: true,
-    advertiseTaskPresent: true,
-    readEngagementVerified: true,
-    subscribedField: LEADGEN_SUBSCRIBED_FIELD,
     tokenOrigin,
-    pageTokenExpires: tokenHealth.expiresAt !== null,
-    pageTokenDataAccessExpires: tokenHealth.dataAccessExpiresAt !== null,
+    reviewUiRedirect: isReviewUiFlow,
     durationMs: Date.now() - startedAt,
   });
 
-  // ═══ META-OAUTH-REVIEW-UI: SÓ quando este state foi emitido pelo /start
-  // para a UI de review (flow=review_ui, já validada Super Admin + company
-  // de teste antes de chegar aqui) — volta para Ajustes > Integrações em
-  // vez do JSON abaixo. `cid` aqui é SEMPRE META_TEST_COMPANY_ID quando
-  // isReviewUiFlow é true (o /start nunca assina `f` para outra company),
-  // mas o valor efetivamente usado na URL de redirect é a constante fixa,
-  // nunca `cid` bruto do state. ═════════════════════════════════════════
   if (isReviewUiFlow) {
-    const token = createReviewResultToken({
-      secret,
-      companyId: META_TEST_COMPANY_ID,
-      outcome: 'success',
-      persisted: persistenceEnabled,
-    });
-    const redirectUrl = new URL(`/company/${META_TEST_COMPANY_ID}`, appOrigin);
-    redirectUrl.searchParams.set('meta_review', token);
-    return reviewUiRedirectResponse(redirectUrl.toString());
+    // Manager opera sempre a própria empresa em /company/[id] (a URL só vale
+    // para Super Admin); o cid aqui veio do state assinado.
+    const redirectUrl = new URL(`/company/${cid}`, appOrigin);
+    redirectUrl.searchParams.set('meta_select', '1');
+    return selectionRedirectResponse(redirectUrl.toString(), selectionToken);
   }
 
-  // Resposta: só metadados seguros. NUNCA o SUAT, NUNCA o Page Access
-  // Token, nunca o `code`, nunca o App Secret, nunca outras Pages, nunca o
-  // corpo bruto (id/name) devolvido pela Meta na leitura de engajamento.
-  return jsonResponse(
-    200,
-    {
+  const headers = selectionHeaders(selectionToken);
+  headers.set('Content-Type', 'application/json');
+  return new Response(
+    JSON.stringify({
       ok: true,
-      stage: 'test_page_permissions_verified',
+      stage: 'page_selection_required',
       context: contextFlags,
-      token: { received: true },
-      page: { matched: true, advertiseTaskPresent: true, readEngagementVerified: true },
-      pageSubscription: { verified: true, field: LEADGEN_SUBSCRIBED_FIELD },
-    },
-    { 'Set-Cookie': clearBindingCookie(isSecureEnv()) },
+      selection: { pageCount: eligible.pages.length, truncated: eligible.truncated },
+    }),
+    { status: 200, headers },
   );
 }

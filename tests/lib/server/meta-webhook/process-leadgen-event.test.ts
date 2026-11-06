@@ -34,6 +34,7 @@ const CONNECTED: ProcessingIntegration = {
   tokenKeyVersion: 1,
   tokenExpiresAt: null,
   tokenDataAccessExpiresAt: null,
+  leadAdsEnabled: true,
 };
 const FIELD_DATA = [
   { name: 'full_name', values: ['Cliente Fake'] },
@@ -511,5 +512,21 @@ describe('META-MVP1 — log de processamento', () => {
       log: vi.fn(() => { throw new Error('log down'); }),
     });
     expect(await run(deps)).toEqual({ outcome: 'infrastructure_error' });
+  });
+});
+
+describe('META-MVP2 — autorização da empresa', () => {
+  it('empresa desabilitada → fail company_access_disabled, sem decrypt nem Graph', async () => {
+    const { deps, rpc } = makeDeps({ lookup: { ok: true, value: { ...CONNECTED, leadAdsEnabled: false } } });
+    expect(await run(deps)).toEqual({ outcome: 'failed', errorCode: 'company_access_disabled' });
+    expect(deps.decryptToken).not.toHaveBeenCalled();
+    expect(deps.fetchLead).not.toHaveBeenCalled();
+    expect(rpc.completeLead).not.toHaveBeenCalled();
+  });
+
+  it('desabilitada entre o lookup e a gravação (complete devolve company_access_disabled) → fail, sem lead', async () => {
+    const { deps, rpc } = makeDeps({ complete: { ok: true, value: { outcome: 'company_access_disabled' } } });
+    expect(await run(deps)).toEqual({ outcome: 'failed', errorCode: 'company_access_disabled' });
+    expect(rpc.failEvent.mock.calls[0][0].errorCode).toBe('company_access_disabled');
   });
 });

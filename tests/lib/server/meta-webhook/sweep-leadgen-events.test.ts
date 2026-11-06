@@ -31,6 +31,7 @@ const CONNECTED: ProcessingIntegration = {
   tokenKeyVersion: 1,
   tokenExpiresAt: null,
   tokenDataAccessExpiresAt: null,
+  leadAdsEnabled: true,
 };
 
 function eventsOf(n: number): ClaimedEvent[] {
@@ -224,5 +225,29 @@ describe('resultado sanitizado', () => {
     for (const forbidden of [COMPANY, INTEGRATION, PAGE, TOKEN, 'Cliente', events[0].eventId, events[0].leaseToken]) {
       expect(serialized).not.toContain(forbidden);
     }
+  });
+});
+
+describe('META-MVP2 — expurgo no sweep', () => {
+  const baseDeps = (purgeExpired?: () => Promise<void>) => ({
+    rpc: { claimBatch: vi.fn(async () => ({ ok: true, value: [] })), purgeExpired },
+  }) as unknown as MetaLeadProcessorDeps;
+
+  it('expurga antes de buscar eventos', async () => {
+    const purgeExpired = vi.fn(async () => undefined);
+    await sweepMetaLeadgenEvents({ deps: baseDeps(purgeExpired) });
+    expect(purgeExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it('falha no expurgo nunca interrompe o sweep', async () => {
+    const deps = baseDeps(vi.fn(async () => { throw new Error('banco'); }));
+    const summary = await sweepMetaLeadgenEvents({ deps });
+    expect(deps.rpc.claimBatch).toHaveBeenCalledTimes(1);
+    expect(summary.infrastructureErrors).toBe(0);
+  });
+
+  it('porta sem expurgo continua funcionando', async () => {
+    const summary = await sweepMetaLeadgenEvents({ deps: baseDeps() });
+    expect(summary.attempted).toBe(0);
   });
 });

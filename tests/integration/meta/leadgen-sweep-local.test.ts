@@ -96,6 +96,9 @@ describe.runIf(RUN)('META-INGESTION-P2.5A — sweep local real', () => {
     const c = await admin().from('companies').insert({ name: `P25A Fixture ${suffix}` }).select('id').single();
     if (c.error || !c.data) throw new Error('fixture_company_failed');
     companyId = c.data.id;
+    // META-MVP2: gravação exige a empresa habilitada para Lead Ads.
+    sql(`update public.companies set status = 'ativa' where id = '${companyId}';
+      insert into public.company_meta_lead_ads_access (company_id, enabled) values ('${companyId}', true);`);
 
     const email = `p25a-${suffix}@test.local`;
     const created = await admin().auth.admin.createUser({ email, email_confirm: true });

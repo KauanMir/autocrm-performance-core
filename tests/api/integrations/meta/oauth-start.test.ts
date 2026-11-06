@@ -33,9 +33,14 @@ function fakeUserClient(opts: {
   permErr?: unknown;
   isSuperAdmin?: unknown;
   superAdminErr?: unknown;
+  leadAdsEnabled?: boolean;
+  accessErr?: unknown;
 } = {}) {
   return {
-    rpc: vi.fn((name: string) => {
+    rpc: vi.fn((name: string, _args?: unknown) => {
+      if (name === 'meta_lead_ads_company_access') {
+        return Promise.resolve({ data: opts.accessErr ? null : [{ enabled: opts.leadAdsEnabled ?? false }], error: opts.accessErr ?? null });
+      }
       if (name === 'current_membership_company_id') {
         return Promise.resolve({ data: opts.companyId ?? null, error: opts.companyErr ?? null });
       }
@@ -313,11 +318,10 @@ describe('POST /api/integrations/meta/oauth/start — flow: "review_ui" (App Rev
     expect(verified.ok && verified.payload.f).toBeFalsy();
   });
 
-  it('Super Admin + company de teste + flow=review_ui -> 200, state carrega f=review_ui', async () => {
-    mocks.requireAuthenticatedActor.mockResolvedValue(
-      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: true })),
-    );
-    const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID, flow: 'review_ui' } }));
+  it('META-MVP2: QUALQUER empresa HABILITADA + flow=review_ui -> 200, state carrega f=review_ui e a empresa', async () => {
+    const client = fakeUserClient({ companyId: COMPANY_ID, allowed: true, leadAdsEnabled: true });
+    mocks.requireAuthenticatedActor.mockResolvedValue(authorizedActor(client));
+    const res = await POST(startRequest({ body: { company_id: COMPANY_ID, flow: 'review_ui' } }));
     expect(res.status).toBe(200);
     const body = await res.json();
     const state = new URL(body.authorizationUrl).searchParams.get('state') ?? '';
@@ -326,31 +330,41 @@ describe('POST /api/integrations/meta/oauth/start — flow: "review_ui" (App Rev
     expect(verified.ok).toBe(true);
     if (verified.ok) {
       expect(verified.payload.f).toBe('review_ui');
-      expect(verified.payload.cid).toBe(META_TEST_COMPANY_ID);
+      expect(verified.payload.cid).toBe(COMPANY_ID);
     }
+    // A habilitação é lida COMO O USUÁRIO, com a empresa já autorizada.
+    expect(client.rpc).toHaveBeenCalledWith('meta_lead_ads_company_access', { p_company_id: COMPANY_ID });
   });
 
-  it('Super Admin + OUTRA company + flow=review_ui -> 403 forbidden, nenhum state emitido', async () => {
+  it('META-MVP2: Manager (sem ser Super Admin) de empresa habilitada -> 200', async () => {
     mocks.requireAuthenticatedActor.mockResolvedValue(
-      authorizedActor(fakeUserClient({ companyId: COMPANY_ID, allowed: true, isSuperAdmin: true })),
+      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: false, leadAdsEnabled: true })),
     );
-    const res = await POST(startRequest({ body: { company_id: COMPANY_ID, flow: 'review_ui' } }));
-    expect(res.status).toBe(403);
-    expect((await res.json()).error).toBe('forbidden');
+    const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID, flow: 'review_ui' } }));
+    expect(res.status).toBe(200);
   });
 
-  it('Manager (não Super Admin) na company de teste + flow=review_ui -> 403 forbidden', async () => {
+  it('META-MVP2: empresa DESABILITADA (padrão), mesmo para Super Admin -> 403, nenhum state emitido', async () => {
     mocks.requireAuthenticatedActor.mockResolvedValue(
-      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: false })),
+      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, isSuperAdmin: true, leadAdsEnabled: false })),
     );
     const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID, flow: 'review_ui' } }));
     expect(res.status).toBe(403);
     expect((await res.json()).error).toBe('forbidden');
+    expect(res.headers.get('set-cookie')).toBeNull();
   });
 
-  it('erro na RPC is_platform_super_admin -> 500 server_misconfigured (fail closed)', async () => {
+  it('META-MVP2: Seller (sem permissão) nunca chega à leitura da habilitação -> 403', async () => {
+    const client = fakeUserClient({ companyId: COMPANY_ID, allowed: false, leadAdsEnabled: true });
+    mocks.requireAuthenticatedActor.mockResolvedValue(authorizedActor(client));
+    const res = await POST(startRequest({ body: { company_id: COMPANY_ID, flow: 'review_ui' } }));
+    expect(res.status).toBe(403);
+    expect(client.rpc).not.toHaveBeenCalledWith('meta_lead_ads_company_access', expect.anything());
+  });
+
+  it('erro na leitura da habilitação -> 500 server_misconfigured (fail closed)', async () => {
     mocks.requireAuthenticatedActor.mockResolvedValue(
-      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, superAdminErr: { message: 'boom' } })),
+      authorizedActor(fakeUserClient({ companyId: META_TEST_COMPANY_ID, allowed: true, accessErr: { message: 'boom' } })),
     );
     const res = await POST(startRequest({ body: { company_id: META_TEST_COMPANY_ID, flow: 'review_ui' } }));
     expect(res.status).toBe(500);

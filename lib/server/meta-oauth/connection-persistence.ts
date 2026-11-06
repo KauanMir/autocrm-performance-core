@@ -82,6 +82,8 @@ export interface OwnerRpcRow {
   company_id: string;
   page_id: string;
   status: string;
+  // META-MVP2: só em owner_for_ingestion.
+  lead_ads_enabled?: boolean | null;
 }
 
 // Porta mínima: o adaptador real (service_role) implementa estes dois métodos.

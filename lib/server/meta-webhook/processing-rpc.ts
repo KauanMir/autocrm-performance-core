@@ -33,6 +33,9 @@ export interface ProcessingIntegration {
   // ou conexão antiga ainda não verificada.
   tokenExpiresAt: string | null;
   tokenDataAccessExpiresAt: string | null;
+  // META-MVP2: autorização de Lead Ads da empresa (desligada por padrão).
+  // Ausente na resposta = false (fail closed).
+  leadAdsEnabled: boolean;
 }
 
 export interface CompleteLeadInput {
@@ -69,6 +72,9 @@ export interface ProcessingRpc {
   completeLead(input: CompleteLeadInput): Promise<ProcessingRpcResult<{ outcome: string }>>;
   failEvent(input: FailEventInput): Promise<ProcessingRpcResult<{ outcome: string }>>;
   markIntegrationError(integrationId: string, code: IntegrationErrorCode): Promise<ProcessingRpcResult<{ outcome: string }>>;
+  // META-MVP2: expurgo de seleções vencidas e eventos retidos além da retenção.
+  // Opcional na porta: quem não implementa só não expurga.
+  purgeExpired?(): Promise<void>;
 }
 
 const INFRA = { ok: false, code: 'infrastructure_error' } as const;
@@ -141,6 +147,7 @@ function readIntegration(row: Record<string, unknown>): ProcessingIntegration | 
     out_token_key_version,
     out_token_expires_at,
     out_token_data_access_expires_at,
+    out_lead_ads_enabled,
   } = row;
   if (
     typeof out_integration_id !== 'string' ||
@@ -165,6 +172,7 @@ function readIntegration(row: Record<string, unknown>): ProcessingIntegration | 
     tokenExpiresAt: typeof out_token_expires_at === 'string' ? out_token_expires_at : null,
     tokenDataAccessExpiresAt:
       typeof out_token_data_access_expires_at === 'string' ? out_token_data_access_expires_at : null,
+    leadAdsEnabled: out_lead_ads_enabled === true,
   };
 }
 
@@ -194,6 +202,10 @@ export function createProcessingRpc(client: SupabaseClient<Database> = createAdm
       if (rows.length === 0) return { ok: true, value: null };
       const claimed = readClaim(rows[0]);
       return claimed ? { ok: true, value: claimed } : INFRA;
+    },
+
+    async purgeExpired() {
+      await safeRpc(() => client.rpc('meta_leadads_purge_expired'));
     },
 
     async claimBatch(limit, leaseSeconds) {

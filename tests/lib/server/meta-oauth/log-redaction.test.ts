@@ -28,10 +28,13 @@ describe('redação de Page ID nos logs', () => {
     expect(source).toMatch(/leadgenPresent: change\.leadgenId !== undefined/);
   });
 
-  it('o Page ID continua sendo usado na lógica (Graph, ownership, persistência)', () => {
-    const callback = read('app/api/integrations/meta/oauth/callback/route.ts');
-    expect(callback).toMatch(/targetPageId: META_TEST_PAGE_ID/);
-    expect(callback).toMatch(/findMetaConnectionOwnerByPage\(\{ rpc: persistencePort \}, META_TEST_PAGE_ID\)/);
-    expect(callback).toMatch(/pageId: META_TEST_PAGE_ID,\s*pageName/);
+  it('META-MVP2: o Page ID escolhido é usado na lógica (ownership, debug_token, persistência), nunca em log', () => {
+    const selection = read('lib/server/meta-oauth/page-selection.ts');
+    expect(selection).toMatch(/deps\.connection\.ownerForIngestion\(input\.pageId\)/);
+    expect(selection).toMatch(/evaluatePageToken\(inspection\.inspection, now, input\.pageId\)/);
+    expect(selection).toMatch(/pageId: input\.pageId,\s*pageName: consumed\.pageName/);
+    expect(selection).not.toMatch(/console\./);
+    const route = read('app/api/integrations/meta/oauth/page-selection/route.ts');
+    expect(route).not.toMatch(/logMetaOAuthEvent\(\{[^}]*pageId/);
   });
 });

@@ -33,6 +33,7 @@ const lookupRow = {
   out_token_key_version: 1,
   out_token_expires_at: null,
   out_token_data_access_expires_at: '2027-01-01T00:00:00+00:00',
+  out_lead_ads_enabled: true,
 };
 
 beforeEach(() => {
@@ -156,6 +157,7 @@ describe('lookupIntegration', () => {
         tokenKeyVersion: 1,
         tokenExpiresAt: null,
         tokenDataAccessExpiresAt: '2027-01-01T00:00:00+00:00',
+        leadAdsEnabled: true,
       },
     });
   });
@@ -321,5 +323,15 @@ describe('META-MVP1 — markIntegrationError', () => {
     rpc.mockResolvedValue({ data: null, error: { message: 'raw pg detail' } });
     const r = await createProcessingRpc().markIntegrationError(INTEGRATION_ID, 'token_expired');
     expect(JSON.stringify(r)).not.toContain('raw pg detail');
+  });
+});
+
+describe('META-MVP2 — lookup com autorização da empresa', () => {
+  it('out_lead_ads_enabled ausente ou não-true → leadAdsEnabled false (fail closed)', async () => {
+    for (const value of [undefined, null, false, 'true']) {
+      rpc.mockResolvedValue({ data: [{ ...lookupRow, out_lead_ads_enabled: value }], error: null });
+      const r = await createProcessingRpc().lookupIntegration(INTEGRATION_ID);
+      expect(r.ok && r.value?.leadAdsEnabled).toBe(false);
+    }
   });
 });

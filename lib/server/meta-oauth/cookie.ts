@@ -85,3 +85,43 @@ export function bindingsEqual(a: string, b: string): boolean {
   }
   return timingSafeEqual(aBuf, bBuf);
 }
+
+// ── META-MVP2 — cookie da seleção de Página ───────────────────────────
+// O token ASSINADO da seleção (nunca um token da Meta) não vai em URL nem em
+// corpo de resposta: fica num cookie HttpOnly restrito à rota da seleção, fora
+// de logs de acesso, do histórico e do Referer. O uso continua exigindo o
+// Bearer do mesmo usuário que iniciou o OAuth.
+
+export const PAGE_SELECTION_COOKIE_NAME = 'kapa_meta_page_selection';
+export const PAGE_SELECTION_COOKIE_PATH = '/api/integrations/meta/oauth/page-selection';
+
+function pageSelectionCookieParts(value: string, maxAgeSeconds: number, secure: boolean): string {
+  const parts = [
+    `${PAGE_SELECTION_COOKIE_NAME}=${value}`,
+    `Path=${PAGE_SELECTION_COOKIE_PATH}`,
+    `Max-Age=${maxAgeSeconds}`,
+    'HttpOnly',
+    'SameSite=Strict',
+  ];
+  if (secure) parts.push('Secure');
+  return parts.join('; ');
+}
+
+export function serializePageSelectionCookie(opts: { value: string; secure: boolean; maxAgeSeconds: number }): string {
+  return pageSelectionCookieParts(opts.value, opts.maxAgeSeconds, opts.secure);
+}
+
+export function clearPageSelectionCookie(secure: boolean): string {
+  return pageSelectionCookieParts('', 0, secure);
+}
+
+export function readPageSelectionCookie(cookieHeader: string | null): string | null {
+  if (typeof cookieHeader !== 'string' || cookieHeader === '') return null;
+  for (const pair of cookieHeader.split(';')) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0 || pair.slice(0, eq).trim() !== PAGE_SELECTION_COOKIE_NAME) continue;
+    const value = pair.slice(eq + 1).trim();
+    return value === '' ? null : value;
+  }
+  return null;
+}

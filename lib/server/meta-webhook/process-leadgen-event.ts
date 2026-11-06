@@ -172,6 +172,9 @@ async function runClaimed(
   // Conexão já marcada como erro: aguarda reconexão sem chamar a Graph.
   if (integration.status === 'error') return failEvent(deps, event, 'token_invalid');
   if (integration.status !== 'connected') return INFRA;
+  // META-MVP2: empresa sem autorização de Lead Ads nunca recebe lead; o evento
+  // espera visível na fila (operacional) em vez de ser descartado.
+  if (!integration.leadAdsEnabled) return failEvent(deps, event, 'company_access_disabled');
 
   if (isPast(integration.tokenExpiresAt, now) || isPast(integration.tokenDataAccessExpiresAt, now)) {
     await markIntegration(deps, event, 'token_expired', notes);
@@ -240,6 +243,8 @@ async function runClaimed(
       return failEvent(deps, event, 'initial_stage_missing');
     case 'duplicate_phone_ambiguous':
       return failEvent(deps, event, 'duplicate_phone_ambiguous');
+    case 'company_access_disabled':
+      return failEvent(deps, event, 'company_access_disabled');
     default:
       return INFRA;
   }

@@ -335,17 +335,29 @@ describe('logs e isolamento', () => {
     for (const spy of consoleSpies) expect(spy).not.toHaveBeenCalled();
   });
 
-  it('o callback só chega à persistência atrás da flag e do fluxo review, e depois do subscribe', () => {
-    const source = readFileSync(path.resolve(process.cwd(), 'app/api/integrations/meta/oauth/callback/route.ts'), 'utf8');
-    const owner = source.indexOf('findMetaConnectionOwnerByPage(');
-    const subscribe = source.indexOf('await subscribePageToWebhookField(');
-    const persist = source.indexOf('await persistMetaPageConnection(');
-    expect(owner).toBeGreaterThan(0);
-    expect(subscribe).toBeGreaterThan(0);
-    expect(persist).toBeGreaterThan(subscribe);
-    expect(owner).toBeLessThan(subscribe);
-    expect(source).toContain('const persistenceEnabled = isReviewUiFlow && isMetaConnectionPersistenceEnabled();');
-    expect(source).not.toMatch(/meta_connection_(upsert|owner_by_page|status|lookup_by_page)/);
+  it('META-MVP2: a conexão da Página escolhida segue a ordem dono → consumo → debug_token → inscrição → persistência', () => {
+    const source = readFileSync(path.resolve(process.cwd(), 'lib/server/meta-oauth/page-selection.ts'), 'utf8');
+    const start = source.indexOf('export async function connectSelectedPage(');
+    const body = source.slice(start);
+    const access = body.indexOf('leadAdsEnabled(');
+    const owner = body.indexOf('deps.connection.ownerForIngestion(');
+    const consume = body.indexOf('selection.consume(');
+    const inspect = body.indexOf('inspectAccessToken(');
+    const subscribe = body.indexOf('await subscribePageToWebhookField(');
+    const persist = body.indexOf('await persistMetaPageConnection(');
+    expect(start).toBeGreaterThan(0);
+    for (const index of [access, owner, consume, inspect, subscribe, persist]) expect(index).toBeGreaterThan(0);
+    expect(access).toBeLessThan(owner);
+    expect(owner).toBeLessThan(consume);
+    expect(consume).toBeLessThan(inspect);
+    expect(inspect).toBeLessThan(subscribe);
+    expect(subscribe).toBeLessThan(persist);
+  });
+
+  it('o callback nunca persiste conexão nem inscreve Página (só cria a seleção cifrada)', () => {
+    const callback = readFileSync(path.resolve(process.cwd(), 'app/api/integrations/meta/oauth/callback/route.ts'), 'utf8');
+    expect(callback).not.toMatch(/persistMetaPageConnection|subscribePageToWebhookField|META_TEST_COMPANY_ID|META_TEST_PAGE_ID/);
+    expect(callback).toContain('encryptSelectionPages(cid, eligible.pages)');
   });
 });
 

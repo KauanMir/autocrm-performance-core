@@ -13,6 +13,7 @@ export const META_LEAD_ERROR_CODES = [
   'lead_not_found',
   'crm_create_failed',
   'initial_stage_missing',
+  'company_access_disabled',
   'integration_not_found',
   'invalid_field_data',
   'missing_name',
@@ -42,6 +43,8 @@ const ERROR_KIND: Record<MetaLeadErrorCode, MetaLeadErrorKind> = {
   token_expired: 'operational',
   graph_permission_missing: 'operational',
   initial_stage_missing: 'operational',
+  // META-MVP2: empresa sem autorização de Lead Ads: o evento espera (visível).
+  company_access_disabled: 'operational',
   integration_not_found: 'terminal',
   invalid_field_data: 'terminal',
   missing_name: 'terminal',

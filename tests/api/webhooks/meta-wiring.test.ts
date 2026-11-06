@@ -7,6 +7,7 @@ import { META_TEST_COMPANY_ID, META_TEST_PAGE_ID } from '@/lib/server/meta-oauth
 const mocks = vi.hoisted(() => ({
   ownerByPage: vi.fn(),
   register: vi.fn(),
+  recordUnrouted: vi.fn(),
   processMetaLeadgenEvent: vi.fn(),
   createMetaLeadgenProcessorDeps: vi.fn(() => ({})),
   waitUntil: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('@/lib/server/meta-oauth/connection-rpc', () => ({
   createMetaConnectionRpcPort: () => ({ ownerForIngestion: mocks.ownerByPage }),
 }));
 vi.mock('@/lib/server/meta-webhook/leadgen-events-rpc', () => ({ registerLeadgenEvent: mocks.register }));
+vi.mock('@/lib/server/meta-webhook/leadgen-unrouted-rpc', () => ({ recordUnroutedLeadgenEvent: mocks.recordUnrouted }));
 vi.mock('@/lib/server/meta-webhook/process-leadgen-event', () => ({
   processMetaLeadgenEvent: mocks.processMetaLeadgenEvent,
   createMetaLeadgenProcessorDeps: mocks.createMetaLeadgenProcessorDeps,
@@ -66,7 +68,7 @@ function post(body: string): Request {
 
 function ownerRow(companyId = META_TEST_COMPANY_ID) {
   return {
-    data: [{ integration_id: INTEGRATION_ID, company_id: companyId, page_id: META_TEST_PAGE_ID, status: 'connected' }],
+    data: [{ integration_id: INTEGRATION_ID, company_id: companyId, page_id: META_TEST_PAGE_ID, status: 'connected', lead_ads_enabled: true }],
     error: null,
   };
 }
@@ -112,19 +114,41 @@ describe('flag OFF', () => {
   });
 });
 
-describe('isolamento de pilots e companies', () => {
-  it('B. Page diferente da Page de teste → zero register, zero waitUntil, 200', async () => {
+describe('isolamento de pilotos e empresas (META-MVP2)', () => {
+  it('B. Página sem conexão no CRM → evento retido sem empresa, zero register, zero waitUntil, 200', async () => {
+    mocks.ownerByPage.mockResolvedValue({ data: [], error: null });
+    mocks.recordUnrouted.mockResolvedValue({ ok: true });
     const res = await POST(post(pageBody('1234567890')));
     expect(res.status).toBe(200);
-    expect(mocks.ownerByPage).not.toHaveBeenCalled();
+    expect(mocks.ownerByPage).toHaveBeenCalledWith('1234567890');
+    expect(mocks.recordUnrouted).toHaveBeenCalledWith(expect.objectContaining({ pageId: '1234567890', reason: 'no_connection' }));
     expect(mocks.register).not.toHaveBeenCalled();
     expect(mocks.waitUntil).not.toHaveBeenCalled();
   });
 
-  it('B2. dono de outra company na Page de teste → zero register, zero waitUntil, 200', async () => {
-    mocks.ownerByPage.mockResolvedValue(ownerRow('f9eeeeee-2222-2222-2222-222222222222'));
+  it('B1. falha ao reter o evento → 503: a Meta reentrega e nada se perde em silêncio', async () => {
+    mocks.ownerByPage.mockResolvedValue({ data: [], error: null });
+    mocks.recordUnrouted.mockResolvedValue({ ok: false });
+    expect((await POST(post(pageBody('1234567890')))).status).toBe(503);
+  });
+
+  it('B2. Página de OUTRA empresa habilitada → registrada para a empresa dona da conexão', async () => {
+    const other = 'f9eeeeee-2222-2222-2222-222222222222';
+    mocks.ownerByPage.mockResolvedValue(ownerRow(other));
     const res = await POST(post(pageBody()));
     expect(res.status).toBe(200);
+    expect(mocks.register).toHaveBeenCalledWith(expect.objectContaining({ companyId: other }));
+  });
+
+  it('B3. empresa dona da Página DESABILITADA (padrão) → evento retido, zero register, zero waitUntil, 200', async () => {
+    mocks.recordUnrouted.mockResolvedValue({ ok: true });
+    mocks.ownerByPage.mockResolvedValue({
+      data: [{ integration_id: INTEGRATION_ID, company_id: META_TEST_COMPANY_ID, page_id: META_TEST_PAGE_ID, status: 'connected', lead_ads_enabled: false }],
+      error: null,
+    });
+    const res = await POST(post(pageBody()));
+    expect(res.status).toBe(200);
+    expect(mocks.recordUnrouted).toHaveBeenCalledWith(expect.objectContaining({ reason: 'company_disabled' }));
     expect(mocks.register).not.toHaveBeenCalled();
     expect(mocks.waitUntil).not.toHaveBeenCalled();
     expect(mocks.processMetaLeadgenEvent).not.toHaveBeenCalled();
@@ -306,7 +330,7 @@ describe('webhook duplicado', () => {
 describe('META-MVP1 — conexão em erro e sweep oportunístico', () => {
   it('conexão da Page de teste em status error → evento REGISTRADO (aguarda reconexão), não descartado', async () => {
     mocks.ownerByPage.mockResolvedValue({
-      data: [{ integration_id: INTEGRATION_ID, company_id: META_TEST_COMPANY_ID, page_id: META_TEST_PAGE_ID, status: 'error' }],
+      data: [{ integration_id: INTEGRATION_ID, company_id: META_TEST_COMPANY_ID, page_id: META_TEST_PAGE_ID, status: 'error', lead_ads_enabled: true }],
       error: null,
     });
     const res = await POST(post(pageBody()));
@@ -316,7 +340,7 @@ describe('META-MVP1 — conexão em erro e sweep oportunístico', () => {
 
   it('conexão disconnected → não registra (desconexão é decisão explícita)', async () => {
     mocks.ownerByPage.mockResolvedValue({
-      data: [{ integration_id: INTEGRATION_ID, company_id: META_TEST_COMPANY_ID, page_id: META_TEST_PAGE_ID, status: 'disconnected' }],
+      data: [{ integration_id: INTEGRATION_ID, company_id: META_TEST_COMPANY_ID, page_id: META_TEST_PAGE_ID, status: 'disconnected', lead_ads_enabled: true }],
       error: null,
     });
     await POST(post(pageBody()));

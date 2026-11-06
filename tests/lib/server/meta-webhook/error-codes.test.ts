@@ -8,7 +8,7 @@ import {
 } from '@/lib/server/meta-webhook/error-codes';
 
 describe('lista fechada de códigos', () => {
-  it('contém exatamente os 17 códigos aprovados (META-MVP1: + token_expired)', () => {
+  it('contém exatamente os 18 códigos aprovados (MVP-1: token_expired; MVP-2: company_access_disabled)', () => {
     expect([...META_LEAD_ERROR_CODES].sort()).toEqual(
       [
         'token_decrypt_failed',
@@ -21,6 +21,7 @@ describe('lista fechada de códigos', () => {
         'lead_not_found',
         'crm_create_failed',
         'initial_stage_missing',
+        'company_access_disabled',
         'integration_not_found',
         'invalid_field_data',
         'missing_name',
@@ -79,6 +80,7 @@ describe('classes', () => {
       'token_expired',
       'graph_permission_missing',
       'initial_stage_missing',
+      'company_access_disabled',
     ] as const) {
       expect(metaLeadErrorKind(code)).toBe('operational');
       expect(isMetaLeadErrorRetryable(code)).toBe(true);

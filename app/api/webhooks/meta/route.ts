@@ -7,9 +7,10 @@
 // lib/server/meta-webhook/ são infraestrutura isolada. NÃO cria lead, NÃO
 // consulta Graph API, NÃO toca pipeline/telas/ranking/automação/
 // notificação, NÃO altera dado de nenhuma company existente. Com a flag
-// META_LEAD_INGESTION_ENABLED desligada o POST não toca no banco. Ligada, só
-// para a TEST COMPANY: registra o evento de forma durável e agenda uma tentativa
-// imediata de processamento via waitUntil (aceleração, não durabilidade).
+// META_LEAD_INGESTION_ENABLED desligada o POST não toca no banco. Ligada
+// (META-MVP2): registra o evento para a empresa dona da Page conectada, se ela
+// estiver autorizada para Lead Ads, e agenda o processamento via waitUntil
+// (aceleração, não durabilidade).
 //
 // IDEMPOTÊNCIA: o ledger meta_leadgen_events é único por (page_id, leadgen_id).
 // Entregas repetidas agendam no máximo uma tentativa a mais; o claim com lease
@@ -154,7 +155,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // (8) eventos leadgen. Flag OFF: zero Supabase, só log booleano. Flag ON:
-  // registro idempotente no ledger para a TEST COMPANY. IDs nunca vão para log.
+  // registro idempotente no ledger da empresa dona da Página, ou retenção sem
+  // empresa quando ela não existe (META-MVP2). IDs nunca vão para log.
   const ingestionEnabled = isMetaLeadIngestionEnabled();
   let infraFailure = false;
   for (const change of parsed.leadgenChanges) {
@@ -171,7 +173,7 @@ export async function POST(request: Request): Promise<Response> {
       field: 'leadgen',
       formPresent: change.formId !== undefined,
       leadgenPresent: change.leadgenId !== undefined,
-      testCompany: result === 'registered' || result === 'already_exists',
+      ownerRegistered: result === 'registered' || result === 'already_exists',
       durationMs: Date.now() - changeStartedAt,
     });
   }

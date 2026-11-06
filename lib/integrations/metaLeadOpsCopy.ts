@@ -14,6 +14,7 @@ const ERROR_COPY: Record<string, { title: string; action: string }> = {
   lead_not_found: { title: 'A Meta ainda não liberou o lead', action: 'Nova tentativa automática.' },
   crm_create_failed: { title: 'Falha ao gravar no CRM', action: 'Nova tentativa automática.' },
   initial_stage_missing: { title: 'A empresa não tem a etapa inicial “Novo”', action: 'Restaure a etapa e reprocesse.' },
+  company_access_disabled: { title: 'Lead Ads está desligado para esta empresa', action: 'Peça ao Super Admin para habilitar e reprocesse.' },
   integration_not_found: { title: 'A conexão desta Página não existe mais', action: 'Reconecte a Página e reprocesse.' },
   invalid_field_data: { title: 'Formulário em formato inesperado', action: 'Veja o lead na Central de Leads da Meta.' },
   missing_name: { title: 'Formulário sem nome', action: 'Mapeie o campo de nome do formulário e reprocesse.' },

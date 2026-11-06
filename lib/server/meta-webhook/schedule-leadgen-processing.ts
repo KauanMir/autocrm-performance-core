@@ -51,3 +51,9 @@ export function scheduleMetaLeadgenProcessing(eventId: string): void {
 export function scheduleManualRequeueProcessing(eventId: string): void {
   waitUntil(runLeadgenProcessingSafely(eventId, 'manual_requeue'));
 }
+
+// META-MVP2: eventos retidos liberados pelo Super Admin entram como `received`.
+// Um sweep imediato processa até o limite; o restante segue pelo sweep normal.
+export function scheduleUnroutedAdoptionSweep(): void {
+  waitUntil(sweepMetaLeadgenEvents().then(() => undefined, () => undefined));
+}
