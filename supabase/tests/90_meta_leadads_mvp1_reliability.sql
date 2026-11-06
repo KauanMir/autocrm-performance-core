@@ -98,6 +98,9 @@ insert into public.pipeline_stages (company_id, code, name, sort_order, is_termi
   ('fd100000-0000-0000-0000-00000000000a', 'new', 'Novo', 0, false),
   ('fd100000-0000-0000-0000-00000000000b', 'new', 'Novo', 0, false);
 
+-- META-MVP2: a gravação exige a empresa habilitada para Lead Ads.
+insert into public.company_meta_lead_ads_access (company_id, enabled) values ('fd100000-0000-0000-0000-00000000000a', true);
+
 insert into auth.users (instance_id, id, aud, role, email, email_confirmed_at, created_at, updated_at) values
   ('00000000-0000-0000-0000-000000000000', 'fd200000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'mvp1-manager-a@test.local', now(), now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'fd200000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'mvp1-seller-a@test.local',  now(), now(), now()),
