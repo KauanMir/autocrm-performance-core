@@ -1,4 +1,4 @@
--- META-MVP2 — multiempresa (20261107100000_meta_leadads_mvp2_multicompany.sql).
+-- META-MVP2 — multiempresa (20261109110000_meta_leadads_mvp2_multicompany.sql).
 -- Autorização por empresa desligada por padrão, isolamento entre empresas,
 -- seleção de Página de uso único e atribuição de vendedor sem cruzar empresas.
 -- Dados fictícios; rollback ao final.

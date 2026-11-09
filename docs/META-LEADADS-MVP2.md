@@ -8,7 +8,7 @@ Estado: implementado e validado **localmente**. Nada publicado, nenhuma migratio
 fora de banco descartável, nada alterado na Meta, na Vercel ou no Supabase remoto. A
 Liberação B segue congelada, e as migrations deste pacote não fazem parte dela.
 
-Migration: `supabase/migrations/20261107100000_meta_leadads_mvp2_multicompany.sql`.
+Migration: `supabase/migrations/20261109110000_meta_leadads_mvp2_multicompany.sql`.
 pgTAP: `supabase/tests/91_meta_leadads_mvp2_multicompany.sql`.
 Ponta a ponta local: `tests/integration/meta/mvp2-multicompany-local.test.ts`.
 
@@ -194,7 +194,7 @@ Antes de publicar:
 
 Publicação, nesta ordem:
 
-- [ ] Aplicar as migrations `20261106100000` e `20261107100000`.
+- [ ] Aplicar as migrations `20261106100000` e `20261109110000` (renumerada de 20261107100000 na integração de 2026-11-09: a versão colidia com `whatsapp_conversation_lead_link_w2b9`).
 - [ ] **Na mesma janela**, habilitar a company de teste: sem isso, a conexão existente deixa de
       registrar eventos, e eles ficam retidos até a liberação.
 - [ ] Publicar o código.
