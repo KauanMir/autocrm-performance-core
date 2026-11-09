@@ -87,8 +87,9 @@ describe.runIf(RUN)('META-MVP1 — processamento local ponta a ponta', () => {
     const created = await admin().auth.admin.createUser({ email, email_confirm: true });
     if (created.error || !created.data.user) throw new Error('fixture_user_failed');
     userId = created.data.user.id;
-    const profile = await admin().from('profiles').upsert({ id: userId, name: 'MVP1 Fixture', email, is_active: true }, { onConflict: 'id' });
-    if (profile.error) throw new Error('fixture_profile_failed');
+    // service_role only reads profiles(id) since 20261109100000; the fixture row is written as postgres.
+    sql(`insert into public.profiles (id, name, email, is_active) values ('${userId}', 'MVP1 Fixture', '${email}', true) ` +
+      `on conflict (id) do update set name = excluded.name, email = excluded.email, is_active = excluded.is_active;`);
 
     sql(`insert into public.pipeline_stages (company_id, code, name, sort_order, is_terminal) values ('${companyId}', 'new', 'Novo', 0, false);`);
     sql(`insert into public.meta_lead_form_mappings (company_id, form_id, target, field_key) values ('${companyId}', '${FORM}', 'vehicle', 'qual_carro');`);

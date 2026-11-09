@@ -146,9 +146,10 @@ export function createPostgrestBridge(db: PGlite, options: PostgrestBridgeOption
     const headers = new Headers(init?.headers);
 
     try {
-      const rpc = /\/rest\/v1\/rpc\/([a-z_]+)$/.exec(url.pathname);
+      // Identifiers may contain digits (e.g. meta_leadgen_event_complete_v2).
+      const rpc = /\/rest\/v1\/rpc\/([a-z0-9_]+)$/.exec(url.pathname);
       if (!rpc) {
-        const table = /\/rest\/v1\/([a-z_]+)$/.exec(url.pathname);
+        const table = /\/rest\/v1\/([a-z0-9_]+)$/.exec(url.pathname);
         if (!table) throw new Error(`rota inesperada: ${url.pathname}`);
         const rows = await withRole(headers, async (tx) => (await tx.query(`select * from public.${table[1]}`)).rows);
         return jsonResponse(200, rows);
@@ -171,7 +172,17 @@ export function createPostgrestBridge(db: PGlite, options: PostgrestBridgeOption
       const list = names
         .map((key, index) => `${key} := $${index + 1}::text::${(parameters ?? []).find((p) => p.name === key)?.type}`)
         .join(', ');
-      const values = names.map((key) => (args[key] === null ? null : String(args[key])));
+      const values = names.map((key) => {
+        const value = args[key];
+        if (value === null) return null;
+        // json/jsonb parameters receive the JSON text itself, as PostgREST does.
+        const type = (parameters ?? []).find((p) => p.name === key)?.type ?? '';
+        if (/^jsonb?$/.test(type)) return JSON.stringify(value);
+        // PostgREST sends JSON arrays; PostgreSQL expects array-literal syntax
+        // when this bridge casts the supplied value through text.
+        if (Array.isArray(value)) return `{${value.map((item) => item === null ? 'NULL' : JSON.stringify(String(item))).join(',')}}`;
+        return String(value);
+      });
       const rows = await withRole(
         headers,
         async (tx) => (await tx.query<Record<string, unknown>>(`select * from public.${name}(${list})`, values)).rows,

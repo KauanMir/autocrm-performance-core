@@ -1,5 +1,5 @@
 // META-MVP1 — compatibilidade do agendamento com o plano da Vercel. Puro.
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -61,9 +61,28 @@ describe('buildVercelCronConfig', () => {
   });
 });
 
-describe('MVP-1 não publica cron', () => {
-  it('não existe vercel.json nem vercel.ts no projeto', () => {
-    expect(existsSync(path.resolve(process.cwd(), 'vercel.json'))).toBe(false);
+// The recovery schedule was published to Production on 2026-11-06 (deployment
+// dpl_8wsJZVEKicSS9SoZtLLo2zGAJivG, docs/META-RECOVERY.md); MVP-1 predates it.
+// The contract is now: exactly that one schedule, on the real sweep route, at a
+// frequency the Pro plan accepts, and no second config file.
+describe('agendamento publicado (meta-leadgen-recovery)', () => {
+  it('vercel.json tem exatamente o agendamento de recuperação, na rota real do sweep', () => {
+    const file = path.resolve(process.cwd(), 'vercel.json');
+    expect(existsSync(file)).toBe(true);
+    const config = JSON.parse(readFileSync(file, 'utf8')) as {
+      crons?: unknown;
+      schedules?: Record<string, { schedule: string; path: string; requestMethod?: string }>;
+    };
+    expect(config.crons).toBeUndefined();
+    expect(Object.keys(config.schedules ?? {})).toEqual(['meta-leadgen-recovery']);
+    const job = config.schedules!['meta-leadgen-recovery'];
+    expect(job.path).toBe(META_SWEEP_CRON_PATH);
+    expect(job.requestMethod).toBe('GET');
+    expect(job.schedule).toBe(RECOMMENDED_SWEEP_SCHEDULE.pro);
+    expect(checkScheduleForPlan(job.schedule, 'pro').ok).toBe(true);
+  });
+
+  it('não existe vercel.ts concorrente', () => {
     expect(existsSync(path.resolve(process.cwd(), 'vercel.ts'))).toBe(false);
   });
 });

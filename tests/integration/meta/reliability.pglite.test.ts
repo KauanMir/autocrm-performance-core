@@ -43,6 +43,9 @@ beforeEach(async () => {
       ('${OTHER_COMPANY}', 'Outra empresa ficticia', 'ativa');
     insert into public.pipeline_stages (company_id, code, name, sort_order, is_terminal)
     values ('${COMPANY}', 'new', 'Novo', 0, false);
+    -- META-MVP2: Lead Ads must be enabled per company by a Super Admin; only the
+    -- company under test is enabled (the other one stays disabled).
+    insert into public.company_meta_lead_ads_access (company_id, enabled) values ('${COMPANY}', true);
   `);
   await database.db.query(`
     insert into public.company_meta_integrations
@@ -152,7 +155,7 @@ describe('entrega e recuperacao usando adapters e SQL reais', () => {
   });
 
   it('falha antes de complete preserva evento e sweep recupera somente apos expirar o lease', async () => {
-    failingRpc = 'meta_leadgen_event_complete';
+    failingRpc = 'meta_leadgen_event_complete_v2'; // MVP-1: the processor completes through v2
     expect((await deliver()).status).toBe(200);
     expect(await event()).toMatchObject({ status: 'processing', attempts: 1, linked: false });
     expect((await sweepMetaLeadgenEvents()).attempted).toBe(0);

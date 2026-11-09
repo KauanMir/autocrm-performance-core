@@ -129,8 +129,9 @@ describe.runIf(RUN)('META-MVP2 — duas concessionárias, ponta a ponta local', 
     const created = await admin().auth.admin.createUser({ email, password: PASSWORD, email_confirm: true });
     if (created.error || !created.data.user) throw new Error('fixture_user_failed');
     const id = created.data.user.id;
-    const profile = await admin().from('profiles').upsert({ id, name: `MVP2 ${name}`, email, is_active: true }, { onConflict: 'id' });
-    if (profile.error) throw new Error('fixture_profile_failed');
+    // service_role only reads profiles(id) since 20261109100000; the fixture row is written as postgres.
+    sql(`insert into public.profiles (id, name, email, is_active) values ('${id}', 'MVP2 ${name}', '${email}', true) ` +
+      `on conflict (id) do update set name = excluded.name, email = excluded.email, is_active = excluded.is_active;`);
     if (platformRole) sql(`update public.profiles set platform_role = '${platformRole}' where id = '${id}';`);
     const session = createClient(url(), anon(), { auth: { persistSession: false, autoRefreshToken: false } });
     const signed = await session.auth.signInWithPassword({ email, password: PASSWORD });
