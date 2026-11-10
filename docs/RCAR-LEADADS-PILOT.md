@@ -157,3 +157,26 @@ Dependem de você:
   depois.
 - **Interromper só a RCAR:** Super Admin desliga a empresa; eventos ficam retidos e
   podem ser liberados depois.
+
+## 7. Atualização 2026-11-10
+
+**"Inativo — Verificação necessária" (só leitura, de novo).** O app está ligado à
+empresa Verificada e a Verificação de Uso de Dados está concluída. Pela documentação
+da Meta, a verificação é o requisito que deixaria os recursos inativos para outras
+empresas, e ela está atendida. As três permissões estão na renovação do envio em
+análise (`1007256908334218`). Hipótese não comprovada: o estado muda quando esse
+envio for concluído. O cadastro de Provedor de Tecnologia (09/11) não mudou nada. A
+prova continua sendo o caminho A da seção 4: o retorno do OAuth recusa com
+`missing_required_permission` sem gravar nada se a Meta não conceder.
+
+**Messenger × piloto.** Esta branch não contém código de Messenger, e o webhook é o de
+produção, inalterado. Na branch de mensagens (`codex/meta-messaging-review`) o ramo
+do Messenger:
+- não muda nada para entregas só de `leadgen`;
+- nunca lança erro;
+- não devolve 503 sem fim (o que poderia levar a Meta a desativar o webhook da
+  Página);
+- só deixa a TEST COMPANY ativar o Messenger.
+
+A Página da RCAR não recebe campos de mensagem sem uma ativação explícita. Detalhes:
+`docs/META-MESSAGING-APP-REVIEW.md` §7–8 daquela branch.
