@@ -180,3 +180,43 @@ do Messenger:
 
 A Página da RCAR não recebe campos de mensagem sem uma ativação explícita. Detalhes:
 `docs/META-MESSAGING-APP-REVIEW.md` §7–8 daquela branch.
+
+## 8. Preparação da implantação — 2026-11-10
+
+Nada foi alterado em produção. Kit de operação fora do Git, em
+`C:\Users\jaque\Documents\RCAR-Liberacao` (`LEIA-PRIMEIRO.md`, `CHECKLIST-RCAR.md`,
+`SHA256SUMS.txt`).
+
+**Leituras feitas sem conectar no banco:** projeto `ACTIVE_HEALTHY`, Postgres
+17.11.0.003; sem backups gerenciados nem PITR; 1 IPv4 banido no projeto; último
+deployment de Production = `9c11545`; host direto do banco alcançável por IPv6 também
+de dentro de um contêiner com rede do host. O número de migrations em produção **não**
+foi relido: esperado 82, hash `857bec8d6a90ec559e56567d51649785` (consulta
+`sql/01-estado-banco.sql` do kit).
+
+**CLI 2.116.0 (código da tag e binário instalado):** `db dump`/`db push` sem senha
+fazem `POST /cli/login-role` com `read_only: false` (senha temporária da role
+`cli_login_postgres`). No fallback para o pooler, depois de 3 falhas, a CLI chama
+`deleteNetworkBans` com **todos** os IPs banidos do projeto. O script de backup do kit
+mata a CLI no primeiro erro de conexão, antes disso. `db query --linked` usa a
+Management API.
+
+**Backup novo:** dump direto para a memória → zip → DPAPI; sem texto claro em disco;
+sessões e refresh tokens do Auth fora; roles sem senha. **Defeito do backup de
+2026-11-06 corrigido:** o suplemento de ACL fazia `REVOKE ALL ON TABLE` e não
+reemitia grants por coluna, então aquela restauração perde os grants de coluna de
+`profiles`, `invites`, `company_memberships` e `pipeline_stages`. O novo reemite os
+grants por coluna. Parte das "falhas dependentes de dados" registradas no ensaio de
+09/11 vinha disso.
+
+**Ensaios locais (dados fictícios, 82 migrations como a produção):** backup → cifra →
+restauração em contêiner sem rede → 3 migrations → pgTAP: PASS (contratos 8x PASS;
+4694 asserções ok; 7 arquivos informativos dependentes do seed). Aplicador de uma
+migration por vez: ordem errada recusada; 3 aplicadas → 85, hash
+`ed499445649a9cd996b7cd6a431f8ff8`. Cópia externa OpenPGP: ida e volta PASS.
+
+**Branch:** desde `a882392` mudou só este documento; tsc 0; suíte 400 arquivos /
+6881 testes PASS. O fluxo de conexão inscreve o app (`leadgen`) na Página escolhida
+por qualquer empresa habilitada; a trava de Página fixa vale só para o diagnóstico.
+
+Próximo passo do dono: G1 (SQL Editor) e autorização da OP-1 (backup).

@@ -193,3 +193,18 @@ baseline; tsc 0; full suite 400 files / 6881 PASS; build PASS. Nothing pushed,
 deployed or applied. Plan, risks, Meta permission status and owner decisions:
 `docs/RCAR-LEADADS-PILOT.md`. Read-only readiness query:
 `scripts/meta/rcar-pilot-readiness.sql`.
+
+## RCAR deployment preparation — 2026-11-10 (local only)
+
+No production change. Operator kit outside Git at `C:\Users\jaque\Documents\RCAR-Liberacao`
+(runbook, final checklist, read-only SQL, backup/restore/offsite scripts, one-migration
+applier, SHA-256 sums). Read-only checks: project healthy (PG 17.11.0.003), no managed
+backups/PITR, 1 banned IPv4, Production deployment still `9c11545`, direct DB host
+reachable over IPv6 from a host-network container. CLI 2.116.0 facts: dump/push mint the
+`cli_login_postgres` temp password (`read_only: false`); the pooler fallback deletes all
+network bans after 3 failed logins (the backup script aborts on the first connection
+error). Found and fixed: the 2026-11-06 ACL supplement dropped column-level grants on
+restore. Local rehearsals with fictitious data PASS (backup → DPAPI → isolated restore →
+3 migrations → pgTAP; one-at-a-time applier → 85 migrations, expected hash). Branch
+re-validated: tsc 0, suite 400 files / 6881 PASS. Details: `docs/RCAR-LEADADS-PILOT.md` §8.
+Production migration count not re-read (needs the owner's SQL Editor run).
