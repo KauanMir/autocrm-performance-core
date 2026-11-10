@@ -179,3 +179,17 @@ Production migrations applied individually, with original repository versions pr
 Final read-only checkpoint: 82 migrations; 15 leads; 4 companies; 2 Meta events; zero contacts/conversations/messages; zero capture-enabled connections; RLS enabled on all three new tables; no direct SELECT/INSERT/UPDATE/DELETE privilege for anon, authenticated, or service_role. Public WhatsApp RPCs deny anon/authenticated execution. Backend RPCs allow service_role; internal trigger/read-authorization helpers deny it, as designed. Supabase project overview independently showed GitHub: No repository connected.
 
 The schema/key prerequisites are complete. Capture/inbox application deployment, effective key-format checks, role-based HTTP probes, WABA subscription, and controlled real-message smoke remain pending. Do not enable capture or ingestion as part of deployment alone. The backup and restore evidence remains in the prior entry.
+
+## Lead Ads release for the RCAR pilot — 2026-11-09 (local only)
+
+Branch `codex/leadads-rcar-release` (worktree `C:\Users\jaque\.codex\worktrees\leadads-rcar-release`)
+is built on the Production commit `9c11545` with only the Lead Ads work (MVP-1, MVP-2,
+core grant hardening): 3 new migrations (82 → 85), no new environment variable, no
+WhatsApp W2B-9 / channel intake / Instagram. Validation: pgTAP 86 files / 4725 PASS;
+Meta integration 9 files / 92 PASS on a disposable `sbx` stack; Production code
+`9c11545` against the new schema 7 files / 41 PASS (code-only rollback is safe);
+restore rehearsal on the 2026-11-06 backup 16/16 PASS with no new pgTAP failure vs
+baseline; tsc 0; full suite 400 files / 6881 PASS; build PASS. Nothing pushed,
+deployed or applied. Plan, risks, Meta permission status and owner decisions:
+`docs/RCAR-LEADADS-PILOT.md`. Read-only readiness query:
+`scripts/meta/rcar-pilot-readiness.sql`.
