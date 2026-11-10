@@ -214,7 +214,11 @@ export type Database = {
           page_id: string
           page_name: string | null
           status: string
+          token_checked_at: string | null
+          token_data_access_expires_at: string | null
+          token_expires_at: string | null
           token_key_version: number
+          token_origin: string | null
           updated_at: string
         }
         Insert: {
@@ -232,7 +236,11 @@ export type Database = {
           page_id: string
           page_name?: string | null
           status: string
+          token_checked_at?: string | null
+          token_data_access_expires_at?: string | null
+          token_expires_at?: string | null
           token_key_version?: number
+          token_origin?: string | null
           updated_at?: string
         }
         Update: {
@@ -250,7 +258,11 @@ export type Database = {
           page_id?: string
           page_name?: string | null
           status?: string
+          token_checked_at?: string | null
+          token_data_access_expires_at?: string | null
+          token_expires_at?: string | null
           token_key_version?: number
+          token_origin?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -264,6 +276,45 @@ export type Database = {
           {
             foreignKeyName: "company_meta_integrations_connected_by_fkey"
             columns: ["connected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_meta_lead_ads_access: {
+        Row: {
+          company_id: string
+          created_at: string
+          enabled: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          enabled?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          enabled?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_meta_lead_ads_access_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_meta_lead_ads_access_updated_by_fkey"
+            columns: ["updated_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -905,6 +956,82 @@ export type Database = {
           },
         ]
       }
+      lead_form_submissions: {
+        Row: {
+          ad_id: string | null
+          answers: Json
+          company_id: string
+          contact_email: string | null
+          contact_name: string
+          contact_phone: string
+          created_at: string
+          form_id: string | null
+          id: string
+          lead_id: string
+          meta_event_id: string | null
+          outcome: string
+          source: string
+          submitted_at: string | null
+          vehicle_interest: string | null
+        }
+        Insert: {
+          ad_id?: string | null
+          answers?: Json
+          company_id: string
+          contact_email?: string | null
+          contact_name: string
+          contact_phone: string
+          created_at?: string
+          form_id?: string | null
+          id?: string
+          lead_id: string
+          meta_event_id?: string | null
+          outcome: string
+          source: string
+          submitted_at?: string | null
+          vehicle_interest?: string | null
+        }
+        Update: {
+          ad_id?: string | null
+          answers?: Json
+          company_id?: string
+          contact_email?: string | null
+          contact_name?: string
+          contact_phone?: string
+          created_at?: string
+          form_id?: string | null
+          id?: string
+          lead_id?: string
+          meta_event_id?: string | null
+          outcome?: string
+          source?: string
+          submitted_at?: string | null
+          vehicle_interest?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_form_submissions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_form_submissions_lead_fk"
+            columns: ["company_id", "lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["company_id", "id"]
+          },
+          {
+            foreignKeyName: "lead_form_submissions_meta_event_id_fkey"
+            columns: ["meta_event_id"]
+            isOneToOne: true
+            referencedRelation: "meta_leadgen_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_timeline_entries: {
         Row: {
           actor_profile_id: string | null
@@ -1067,6 +1194,54 @@ export type Database = {
           },
         ]
       }
+      meta_lead_form_mappings: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string | null
+          field_key: string
+          form_id: string
+          id: string
+          target: string
+          updated_at: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          field_key: string
+          form_id: string
+          id?: string
+          target: string
+          updated_at?: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          field_key?: string
+          form_id?: string
+          id?: string
+          target?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meta_lead_form_mappings_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_lead_form_mappings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       meta_leadgen_events: {
         Row: {
           attempts: number
@@ -1077,6 +1252,8 @@ export type Database = {
           id: string
           integration_id: string
           last_error_code: string | null
+          last_requeued_at: string | null
+          last_requeued_by: string | null
           leadgen_id: string
           lease_token: string | null
           locked_until: string | null
@@ -1084,6 +1261,10 @@ export type Database = {
           page_id: string
           processed_at: string | null
           received_at: string
+          requeue_count: number
+          review_resolution: string | null
+          review_resolved_at: string | null
+          review_resolved_by: string | null
           status: string
           updated_at: string
         }
@@ -1096,6 +1277,8 @@ export type Database = {
           id?: string
           integration_id: string
           last_error_code?: string | null
+          last_requeued_at?: string | null
+          last_requeued_by?: string | null
           leadgen_id: string
           lease_token?: string | null
           locked_until?: string | null
@@ -1103,6 +1286,10 @@ export type Database = {
           page_id: string
           processed_at?: string | null
           received_at: string
+          requeue_count?: number
+          review_resolution?: string | null
+          review_resolved_at?: string | null
+          review_resolved_by?: string | null
           status: string
           updated_at?: string
         }
@@ -1115,6 +1302,8 @@ export type Database = {
           id?: string
           integration_id?: string
           last_error_code?: string | null
+          last_requeued_at?: string | null
+          last_requeued_by?: string | null
           leadgen_id?: string
           lease_token?: string | null
           locked_until?: string | null
@@ -1122,6 +1311,10 @@ export type Database = {
           page_id?: string
           processed_at?: string | null
           received_at?: string
+          requeue_count?: number
+          review_resolution?: string | null
+          review_resolved_at?: string | null
+          review_resolved_by?: string | null
           status?: string
           updated_at?: string
         }
@@ -1145,6 +1338,128 @@ export type Database = {
             columns: ["integration_id"]
             isOneToOne: false
             referencedRelation: "company_meta_integrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_leadgen_events_last_requeued_by_fkey"
+            columns: ["last_requeued_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_leadgen_events_review_resolved_by_fkey"
+            columns: ["review_resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meta_leadgen_unrouted_events: {
+        Row: {
+          delivery_count: number
+          first_received_at: string
+          form_id: string | null
+          id: string
+          last_received_at: string
+          leadgen_id: string
+          page_id: string
+          reason: string
+          resolution: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          resolved_event_id: string | null
+        }
+        Insert: {
+          delivery_count?: number
+          first_received_at: string
+          form_id?: string | null
+          id?: string
+          last_received_at: string
+          leadgen_id: string
+          page_id: string
+          reason: string
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          resolved_event_id?: string | null
+        }
+        Update: {
+          delivery_count?: number
+          first_received_at?: string
+          form_id?: string | null
+          id?: string
+          last_received_at?: string
+          leadgen_id?: string
+          page_id?: string
+          reason?: string
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          resolved_event_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meta_leadgen_unrouted_events_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_leadgen_unrouted_events_resolved_event_id_fkey"
+            columns: ["resolved_event_id"]
+            isOneToOne: false
+            referencedRelation: "meta_leadgen_events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meta_oauth_page_selections: {
+        Row: {
+          company_id: string
+          consumed_at: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          pages: Json
+          profile_id: string
+          token_origin: string
+        }
+        Insert: {
+          company_id: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          pages: Json
+          profile_id: string
+          token_origin: string
+        }
+        Update: {
+          company_id?: string
+          consumed_at?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          pages?: Json
+          profile_id?: string
+          token_origin?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meta_oauth_page_selections_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meta_oauth_page_selections_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -2730,6 +3045,7 @@ export type Database = {
         Returns: boolean
       }
       is_platform_super_admin: { Args: never; Returns: boolean }
+      lead_form_answers_valid: { Args: { p_answers: Json }; Returns: boolean }
       list_commercial_companies: {
         Args: never
         Returns: {
@@ -2815,6 +3131,22 @@ export type Database = {
           name: string
           profile_id: string
           updated_at: string
+        }[]
+      }
+      list_lead_form_submissions: {
+        Args: { p_company_id?: string; p_lead_id: string }
+        Returns: {
+          ad_id: string
+          answers: Json
+          contact_email: string
+          contact_name: string
+          contact_phone: string
+          form_id: string
+          id: string
+          outcome: string
+          received_at: string
+          submitted_at: string
+          vehicle_interest: string
         }[]
       }
       list_my_unseen_competition_events: {
@@ -3083,6 +3415,23 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      meta_connection_health: {
+        Args: { p_company_id: string }
+        Returns: {
+          connected_at: string
+          integration_id: string
+          last_error_at: string
+          last_error_code: string
+          leadgen_subscribed_at: string
+          page_id: string
+          page_name: string
+          status: string
+          token_checked_at: string
+          token_data_access_expires_at: string
+          token_expires_at: string
+          token_origin: string
+        }[]
+      }
       meta_connection_lookup_by_page: {
         Args: { p_page_id: string }
         Returns: {
@@ -3100,9 +3449,18 @@ export type Database = {
           out_access_token_ciphertext: string
           out_company_id: string
           out_integration_id: string
+          out_lead_ads_enabled: boolean
           out_page_id: string
           out_status: string
+          out_token_data_access_expires_at: string
+          out_token_expires_at: string
           out_token_key_version: number
+        }[]
+      }
+      meta_connection_mark_error: {
+        Args: { p_error_code: string; p_integration_id: string }
+        Returns: {
+          out_outcome: string
         }[]
       }
       meta_connection_owner_by_page: {
@@ -3110,6 +3468,16 @@ export type Database = {
         Returns: {
           company_id: string
           integration_id: string
+          page_id: string
+          status: string
+        }[]
+      }
+      meta_connection_owner_for_ingestion: {
+        Args: { p_page_id: string }
+        Returns: {
+          company_id: string
+          integration_id: string
+          lead_ads_enabled: boolean
           page_id: string
           status: string
         }[]
@@ -3153,6 +3521,93 @@ export type Database = {
           status: string
         }[]
       }
+      meta_connection_upsert_v2: {
+        Args: {
+          p_access_token_ciphertext: string
+          p_company_id: string
+          p_connected_at: string
+          p_connected_by: string
+          p_granted_scopes: string[]
+          p_leadgen_subscribed_at: string
+          p_page_id: string
+          p_page_name: string
+          p_token_checked_at: string
+          p_token_data_access_expires_at?: string
+          p_token_expires_at?: string
+          p_token_key_version: number
+          p_token_origin: string
+        }
+        Returns: {
+          company_id: string
+          connected_at: string
+          id: string
+          leadgen_subscribed_at: string
+          page_id: string
+          page_name: string
+          status: string
+        }[]
+      }
+      meta_form_mapping_delete: {
+        Args: { p_company_id: string; p_form_id: string; p_target: string }
+        Returns: {
+          out_outcome: string
+        }[]
+      }
+      meta_form_mapping_for_processing: {
+        Args: { p_company_id: string; p_form_id: string }
+        Returns: {
+          out_field_key: string
+          out_target: string
+        }[]
+      }
+      meta_form_mapping_list: {
+        Args: { p_company_id: string }
+        Returns: {
+          field_key: string
+          form_id: string
+          target: string
+          updated_at: string
+        }[]
+      }
+      meta_form_mapping_set: {
+        Args: {
+          p_company_id: string
+          p_field_key: string
+          p_form_id: string
+          p_target: string
+        }
+        Returns: {
+          field_key: string
+          form_id: string
+          target: string
+          updated_at: string
+        }[]
+      }
+      meta_lead_ads_company_access: {
+        Args: { p_company_id: string }
+        Returns: {
+          enabled: boolean
+        }[]
+      }
+      meta_lead_ads_enabled_for: {
+        Args: { p_company_id: string }
+        Returns: boolean
+      }
+      meta_lead_ads_set_company_access: {
+        Args: { p_company_id: string; p_enabled: boolean }
+        Returns: {
+          company_id: string
+          enabled: boolean
+          updated_at: string
+        }[]
+      }
+      meta_leadads_purge_expired: {
+        Args: never
+        Returns: {
+          out_selections: number
+          out_unrouted: number
+        }[]
+      }
       meta_leadgen_error_kind: { Args: { p_code: string }; Returns: string }
       meta_leadgen_event_claim_batch: {
         Args: {
@@ -3185,6 +3640,30 @@ export type Database = {
           out_outcome: string
         }[]
       }
+      meta_leadgen_event_complete_v2: {
+        Args: {
+          p_ad_id?: string
+          p_answers: Json
+          p_email?: string
+          p_event_id: string
+          p_form_id?: string
+          p_lease_token: string
+          p_name: string
+          p_phone: string
+          p_submitted_at?: string
+          p_vehicle?: string
+        }
+        Returns: {
+          out_crm_lead_id: string
+          out_outcome: string
+        }[]
+      }
+      meta_leadgen_event_dismiss: {
+        Args: { p_company_id: string; p_event_id: string; p_resolution: string }
+        Returns: {
+          out_outcome: string
+        }[]
+      }
       meta_leadgen_event_fail: {
         Args: {
           p_error_code: string
@@ -3211,6 +3690,113 @@ export type Database = {
           out_created: boolean
           out_event_id: string
           out_status: string
+        }[]
+      }
+      meta_leadgen_event_requeue: {
+        Args: { p_company_id: string; p_event_id: string }
+        Returns: {
+          out_outcome: string
+        }[]
+      }
+      meta_leadgen_review_list: {
+        Args: { p_company_id: string; p_limit?: number }
+        Returns: {
+          attempts: number
+          can_dismiss: boolean
+          can_requeue: boolean
+          error_kind: string
+          event_id: string
+          form_id: string
+          last_error_code: string
+          leadgen_id: string
+          next_attempt_at: string
+          received_at: string
+          requeue_count: number
+          review_state: string
+          status: string
+          updated_at: string
+        }[]
+      }
+      meta_leadgen_review_summary: {
+        Args: { p_company_id: string }
+        Returns: {
+          dismissed_last_30d: number
+          failed_open: number
+          last_processed_at: string
+          last_received_at: string
+          pending: number
+          processed_last_7d: number
+          retrying: number
+          stuck: number
+        }[]
+      }
+      meta_leadgen_unrouted_adopt: {
+        Args: { p_company_id: string; p_page_id: string }
+        Returns: {
+          out_adopted: number
+          out_already_registered: number
+          out_outcome: string
+        }[]
+      }
+      meta_leadgen_unrouted_list: {
+        Args: { p_company_id: string }
+        Returns: {
+          can_adopt: boolean
+          first_received_at: string
+          last_received_at: string
+          page_id: string
+          pending: number
+          reason: string
+        }[]
+      }
+      meta_leadgen_unrouted_record: {
+        Args: {
+          p_form_id?: string
+          p_leadgen_id: string
+          p_page_id: string
+          p_reason: string
+          p_received_at: string
+        }
+        Returns: {
+          out_status: string
+        }[]
+      }
+      meta_page_selection_consume: {
+        Args: {
+          p_company_id: string
+          p_page_id: string
+          p_profile_id: string
+          p_selection_id: string
+        }
+        Returns: {
+          out_ciphertext: string
+          out_outcome: string
+          out_page_name: string
+          out_token_origin: string
+        }[]
+      }
+      meta_page_selection_create: {
+        Args: {
+          p_company_id: string
+          p_pages: Json
+          p_profile_id: string
+          p_token_origin: string
+          p_ttl_seconds?: number
+        }
+        Returns: {
+          out_expires_at: string
+          out_selection_id: string
+        }[]
+      }
+      meta_page_selection_list: {
+        Args: {
+          p_company_id: string
+          p_profile_id: string
+          p_selection_id: string
+        }
+        Returns: {
+          out_page_id: string
+          out_page_name: string
         }[]
       }
       move_lead_to_stage: {
