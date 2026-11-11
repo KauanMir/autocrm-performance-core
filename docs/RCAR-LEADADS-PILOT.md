@@ -274,3 +274,28 @@ a RPC exige empresa `ativa` (mesmo comportamento antes, confirmado no ensaio); a
 API recusa listar formulários da Página de teste (HTTP 403, código 200), assunto de
 permissão na Meta. Login real de Manager/Seller não foi feito (sem credenciais); o
 acesso deles foi comprovado pela simulação no banco.
+
+## 2026-11-10 — OP-4 aplicada em produção (`20261109110000`, MVP-2)
+
+Aplicada por volta das 22:00 BRT (SHA-256 `23A86AA1…`, conexão direta, bans 0 → 0).
+Antes: produção 84 = ensaio. Ensaio restauração + OP-2 + OP-3 + OP-4: 13/13, nenhuma
+asserção nova falhando. Código `9c11545` 7/41 e código desta branch 9/92 testes de
+integração no schema 85. Depois: 85 migrations, hash `ed499445…`; `sql/10` produção =
+ensaio (19/19, dados idênticos); `sql/09` isolamento sem violações (279 verificações).
+
+A TEST COMPANY **não** foi habilitada: `meta_lead_ads_set_company_access` exige empresa
+`ativa`, e ela está em `implantacao`. O código `9c11545` não consulta a habilitação, então
+nada mudou para ele. Depois do deploy, eventos da Página de teste ficam retidos como
+`company_disabled`; o smoke recomendado é exatamente esse (sem criar lead), e a criação
+real fica provada no lead controlado da RCAR.
+
+**Meta, 403 em `leadgen_forms` (código 200):** listar formulários exige `pages_manage_ads`,
+não pedida e não usada pelo fluxo (webhook + `GET {lead}`, comprovado em produção em 06/11).
+O painel passou a mostrar isso como "Não verificável". Pendência real: `pages_show_list`,
+`pages_read_engagement` e `leads_retrieval` aparecem com acesso avançado "Inativo —
+Verificação necessária", embora a empresa esteja verificada. Só a conexão de um gestor da
+RCAR sem função no app prova se o acesso funciona; se não, nada é gravado.
+
+Teste `62_podium…`: falhava conforme o horário (fixtures de até 10 dias caíam no mês
+anterior); corrigido. Variáveis da Vercel: todas só em Production; o código desta branch lê
+exatamente o mesmo conjunto que o `9c11545`. Suíte 401 arquivos / 6886 testes; tsc 0.
