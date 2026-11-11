@@ -4,6 +4,12 @@ Atualizado em 2026-11-06. Objetivo: centralizar implementação e validação no
 
 ## Estado atual confirmado
 
+**2026-11-11 — KAPA Leads → CRM (simuladores), só local.** Branch `codex/kapa-leads-crm-sync`
+(worktree `.codex/worktrees/kapa-leads-crm-sync`, base 132f684) e, no KAPA Leads, `codex/crm-export`
+(ac2f9e9). Sincronização por pull, desligada por padrão, migration local `20261111120000` (produção
+continua 85). Validação local completa com dados fictícios, inclusive ponta a ponta. Nada publicado.
+Plano de publicação e rollback: `docs/KAPA-LEADS-SYNC.md`.
+
 **Lead Ads: teste ponta a ponta aprovado em produção para a TEST COMPANY em 2026-11-06 às 16:09 de São Paulo.** App Meta em Ao vivo por autorização do usuário; webhook recebeu o evento, recuperou os campos pela Graph API e criou exatamente um lead na empresa de teste. Nenhum rollout para clientes foi realizado. WhatsApp W2B permanece congelado. Os blocos abaixo preservam o histórico e podem descrever estados anteriores.
 
 ## Fontes e limites

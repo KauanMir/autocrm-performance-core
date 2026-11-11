@@ -34,6 +34,12 @@ create table public.kapa_leads_store_links (
   last_success_at       timestamptz,
   last_error_code       text,
   consecutive_failures  integer not null default 0,
+  -- Conferência por contagem (KAPA Leads × fila do CRM) na janela (reconciled_from, reconciled_to].
+  reconciled_at            timestamptz,
+  reconciled_from          timestamptz,
+  reconciled_to            timestamptz,
+  reconciled_source_count  integer,
+  reconciled_crm_count     integer,
   updated_by            uuid references public.profiles(id) on delete set null,
   created_at            timestamptz not null default now(),
   updated_at            timestamptz not null default now(),
@@ -49,7 +55,12 @@ create table public.kapa_leads_store_links (
   -- Ligado exige cursor: nunca "desde o início".
   constraint kapa_leads_store_links_enabled_cursor_ck check (not enabled or cursor_created_at is not null),
   constraint kapa_leads_store_links_error_ck check (last_error_code is null or last_error_code ~ '^[a-z0-9_]{1,64}$'),
-  constraint kapa_leads_store_links_failures_ck check (consecutive_failures >= 0)
+  constraint kapa_leads_store_links_failures_ck check (consecutive_failures >= 0),
+  constraint kapa_leads_store_links_reconciled_ck check (
+    (reconciled_at is null) = (reconciled_source_count is null)
+    and (reconciled_at is null) = (reconciled_crm_count is null)
+    and coalesce(reconciled_source_count, 0) >= 0 and coalesce(reconciled_crm_count, 0) >= 0
+  )
 );
 
 create index kapa_leads_store_links_company_idx on public.kapa_leads_store_links (company_id);
@@ -190,14 +201,17 @@ returns table (
   kapa_store_id uuid,
   vehicle_form_key text,
   cursor_created_at timestamptz,
-  cursor_lead_id uuid
+  cursor_lead_id uuid,
+  activated_at timestamptz,
+  reconciled_at timestamptz
 )
 language sql
 stable
 security definer
 set search_path = ''
 as $$
-  select l.id, l.company_id, l.kapa_store_id, l.vehicle_form_key, l.cursor_created_at, l.cursor_lead_id
+  select l.id, l.company_id, l.kapa_store_id, l.vehicle_form_key, l.cursor_created_at, l.cursor_lead_id,
+         l.activated_at, l.reconciled_at
     from public.kapa_leads_store_links l
     join public.companies c on c.id = l.company_id
    where l.enabled
@@ -335,6 +349,39 @@ begin
          last_error_code = p_error_code,
          consecutive_failures = l.consecutive_failures + 1
    where l.id = p_link_id;
+end;
+$$;
+
+-- Conferência: o worker informa quantos leads o KAPA Leads tem na janela (from, to]; o banco conta
+-- quantos chegaram à fila do CRM na mesma janela (inclui falhas e descartados: foram recebidos).
+-- source > crm = faltando no CRM (alerta). crm > source = apagado depois no KAPA Leads.
+create or replace function public.kapa_leads_record_reconciliation(
+  p_link_id uuid, p_from timestamptz, p_to timestamptz, p_source_count integer
+)
+returns table (out_source_count integer, out_crm_count integer)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_crm integer;
+begin
+  if p_link_id is null or p_from is null or p_to is null or p_to < p_from
+    or p_source_count is null or p_source_count < 0
+  then
+    raise invalid_parameter_value using message = 'invalid_input';
+  end if;
+  select count(*)::integer into v_crm
+    from public.kapa_leads_inbound_events e
+   where e.link_id = p_link_id and e.source_created_at > p_from and e.source_created_at <= p_to;
+  update public.kapa_leads_store_links l
+     set reconciled_at = now(), reconciled_from = p_from, reconciled_to = p_to,
+         reconciled_source_count = p_source_count, reconciled_crm_count = v_crm
+   where l.id = p_link_id;
+  if not found then
+    raise no_data_found using message = 'link_not_found';
+  end if;
+  return query select p_source_count, v_crm;
 end;
 $$;
 
@@ -683,7 +730,10 @@ returns table (
   failed_count bigint,
   processed_7d bigint,
   oldest_pending_at timestamptz,
-  last_processed_at timestamptz
+  last_processed_at timestamptz,
+  reconciled_at timestamptz,
+  reconciled_source_count integer,
+  reconciled_crm_count integer
 )
 language plpgsql
 security definer
@@ -705,7 +755,8 @@ begin
            (select count(*) from public.kapa_leads_inbound_events e
              where e.link_id = l.id and e.status = 'processed' and e.processed_at > now() - interval '7 days'),
            (select min(e.received_at) from public.kapa_leads_inbound_events e where e.link_id = l.id and e.status = 'pending'),
-           (select max(e.processed_at) from public.kapa_leads_inbound_events e where e.link_id = l.id and e.status = 'processed')
+           (select max(e.processed_at) from public.kapa_leads_inbound_events e where e.link_id = l.id and e.status = 'processed'),
+           l.reconciled_at, l.reconciled_source_count, l.reconciled_crm_count
       from public.kapa_leads_store_links l
      where l.company_id = p_company_id
      order by l.created_at;
@@ -919,11 +970,13 @@ revoke all on function public.kapa_leads_link_record_failure(uuid, text) from pu
 revoke all on function public._kapa_leads_process_event(public.kapa_leads_inbound_events) from public, anon, authenticated, service_role;
 revoke all on function public.kapa_leads_process_pending(integer) from public, anon, authenticated;
 revoke all on function public.kapa_leads_purge_expired() from public, anon, authenticated;
+revoke all on function public.kapa_leads_record_reconciliation(uuid, timestamptz, timestamptz, integer) from public, anon, authenticated;
 grant execute on function public.kapa_leads_links_for_poll() to service_role;
 grant execute on function public.kapa_leads_ingest_page(uuid, timestamptz, uuid, jsonb, timestamptz, uuid) to service_role;
 grant execute on function public.kapa_leads_link_record_failure(uuid, text) to service_role;
 grant execute on function public.kapa_leads_process_pending(integer) to service_role;
 grant execute on function public.kapa_leads_purge_expired() to service_role;
+grant execute on function public.kapa_leads_record_reconciliation(uuid, timestamptz, timestamptz, integer) to service_role;
 
 revoke all on function public.kapa_leads_link_upsert(uuid, uuid, text, text) from public, anon, service_role;
 revoke all on function public.kapa_leads_link_set_enabled(uuid, uuid, boolean) from public, anon, service_role;

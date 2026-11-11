@@ -10,12 +10,15 @@
 // Nunca escreve no KAPA Leads. Resumo só com contadores (sem IDs, PII ou segredo).
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { KapaLeadsSyncConfig } from './env';
-import { fetchLeadsPage, PAGE_LIMIT, type Cursor } from './client';
+import { fetchLeadsCount, fetchLeadsPage, PAGE_LIMIT, type Cursor } from './client';
 import { toIngestItem } from './normalize';
 
 export const MAX_PAGES_PER_LINK = 5;
 export const PROCESS_BATCH = 25;
 export const MAX_PROCESS_ROUNDS = 4;
+/** Conferência por contagem no máximo a cada hora, numa janela de até 30 dias. */
+export const RECONCILE_EVERY_MS = 60 * 60_000;
+export const RECONCILE_WINDOW_MS = 30 * 86_400_000;
 
 export type SyncSummary = {
   links: number;
@@ -32,6 +35,8 @@ export type SyncSummary = {
   held: number;
   purged: number;
   processBusy: boolean;
+  reconciled: number;
+  reconcileMismatches: number;
 };
 
 type LinkRow = {
@@ -41,6 +46,8 @@ type LinkRow = {
   vehicle_form_key: string | null;
   cursor_created_at: string | null;
   cursor_lead_id: string | null;
+  activated_at: string | null;
+  reconciled_at: string | null;
 };
 
 // O cliente é tipado pelo chamador; aqui só RPCs (sem acesso direto a tabelas).
@@ -58,7 +65,7 @@ export async function runKapaLeadsSync(input: {
   const { supabase, config, fetchImpl = fetch, now = Date.now } = input;
   const summary: SyncSummary = {
     links: 0, pages: 0, received: 0, duplicates: 0, invalid: 0, sourceErrors: 0, cursorConflicts: 0,
-    created: 0, linked: 0, retry: 0, failed: 0, held: 0, purged: 0, processBusy: false,
+    created: 0, linked: 0, retry: 0, failed: 0, held: 0, purged: 0, processBusy: false, reconciled: 0, reconcileMismatches: 0,
   };
 
   const { data: links, error: linksError } = await supabase.rpc('kapa_leads_links_for_poll');
@@ -68,6 +75,7 @@ export async function runKapaLeadsSync(input: {
     summary.links += 1;
     if (!link.cursor_created_at || !link.cursor_lead_id) continue; // ligado sempre tem cursor (CHECK)
     let cursor: Cursor = { createdAt: link.cursor_created_at, id: link.cursor_lead_id };
+    let healthy = false;
 
     for (let page = 0; page < MAX_PAGES_PER_LINK; page += 1) {
       const result = await fetchLeadsPage({ config, storeId: link.kapa_store_id, cursor, limit: PAGE_LIMIT, fetchImpl, nowMs: now() });
@@ -98,11 +106,33 @@ export async function runKapaLeadsSync(input: {
         break;
       }
       summary.pages += 1;
+      healthy = true;
       summary.received += outcome.out_inserted;
       summary.duplicates += outcome.out_duplicates;
       summary.invalid += outcome.out_invalid;
+      if (result.nextCursor) cursor = result.nextCursor;
       if (!result.nextCursor || !result.hasMore) break;
-      cursor = result.nextCursor;
+    }
+
+    // Conferência: leads do KAPA Leads × recebidos na fila, até o cursor (só com a consulta saudável).
+    const due = !link.reconciled_at || now() - Date.parse(link.reconciled_at) >= RECONCILE_EVERY_MS;
+    if (healthy && due && link.activated_at) {
+      const toMs = Date.parse(cursor.createdAt);
+      const fromMs = Math.max(Date.parse(link.activated_at), toMs - RECONCILE_WINDOW_MS);
+      if (Number.isFinite(toMs) && Number.isFinite(fromMs) && toMs > fromMs) {
+        const from = fromMs === Date.parse(link.activated_at) ? link.activated_at : new Date(fromMs).toISOString();
+        const counted = await fetchLeadsCount({ config, storeId: link.kapa_store_id, from, to: cursor.createdAt, fetchImpl, nowMs: now() });
+        if ('count' in counted) {
+          const { data: rec } = await supabase.rpc('kapa_leads_record_reconciliation', {
+            p_link_id: link.link_id, p_from: from, p_to: cursor.createdAt, p_source_count: counted.count,
+          });
+          const row = first<{ out_source_count: number; out_crm_count: number }>(rec);
+          if (row) {
+            summary.reconciled += 1;
+            if (row.out_source_count > row.out_crm_count) summary.reconcileMismatches += 1;
+          }
+        }
+      }
     }
   }
 

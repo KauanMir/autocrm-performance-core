@@ -239,7 +239,9 @@ describe.skipIf(!RUN)('KAPA Leads → CRM ponta a ponta (local)', () => {
     expect(JSON.stringify(data)).not.toMatch(/1990-05-20|cpf/i);
 
     const health = await manager.rpc('kapa_leads_sync_health', { p_company_id: companyA });
-    expect((health.data as { processed_7d: number; pending_count: number }[])[0]).toMatchObject({ processed_7d: 1, pending_count: 0 });
+    expect((health.data as { processed_7d: number; pending_count: number }[])[0]).toMatchObject({
+      processed_7d: 1, pending_count: 0, reconciled_source_count: 1, reconciled_crm_count: 1,
+    });
 
     const managerB = await signIn(`kl-e2e-managerb-${run}@test.local`);
     expect((await managerB.rpc('list_lead_form_submissions_v2', { p_lead_id: leadId, p_company_id: companyA })).error).not.toBeNull();

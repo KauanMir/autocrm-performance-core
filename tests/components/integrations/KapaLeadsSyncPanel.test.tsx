@@ -26,6 +26,7 @@ const LINK = {
   activatedAt: new Date(Date.now() - 3600_000).toISOString(), lastPolledAt: new Date().toISOString(),
   lastSuccessAt: new Date().toISOString(), lastErrorCode: null, consecutiveFailures: 0,
   pendingCount: 0, failedCount: 1, processed7d: 12, oldestPendingAt: null, lastProcessedAt: null,
+  reconciledAt: new Date().toISOString(), reconciledSourceCount: 12, reconciledCrmCount: 12,
 };
 const FAILED = {
   eventId: 'e1', status: 'failed' as const, campaignName: 'Fábrica de Aprovação', sourceCreatedAt: '2026-11-11T12:00:00Z',
@@ -80,6 +81,19 @@ describe('KapaLeadsSyncPanel', () => {
     expect(await screen.findByText('Sem sincronizar')).toBeTruthy();
     expect(screen.getByText(/Assinatura recusada/)).toBeTruthy();
     expect(screen.getByText(/Nenhuma consulta bem-sucedida há mais de 15 minutos/)).toBeTruthy();
+  });
+
+  it('mostra a conferência e alerta quando faltam leads no CRM', async () => {
+    renderWithQueryClient(<KapaLeadsSyncPanel companyId={COMPANY} isSuperAdmin={false} />);
+    expect((await screen.findByTestId('kapa-leads-reconciliation')).textContent).toMatch(/KAPA Leads 12 · CRM 12 — tudo conferido/);
+  });
+
+  it('alerta de conferência com diferença', async () => {
+    mocks.fetchKapaLeadsSyncHealth.mockResolvedValue([{ ...LINK, reconciledSourceCount: 13, reconciledCrmCount: 12 }]);
+    renderWithQueryClient(<KapaLeadsSyncPanel companyId={COMPANY} isSuperAdmin={false} />);
+    const node = await screen.findByTestId('kapa-leads-reconciliation');
+    expect(node.getAttribute('role')).toBe('alert');
+    expect(node.textContent).toMatch(/não chegaram ao CRM/);
   });
 
   it('Manager sem vínculo não vê o painel', async () => {

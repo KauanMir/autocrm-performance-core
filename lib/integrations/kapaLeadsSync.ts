@@ -39,6 +39,9 @@ export interface KapaLeadsSyncHealth {
   processed7d: number;
   oldestPendingAt: string | null;
   lastProcessedAt: string | null;
+  reconciledAt: string | null;
+  reconciledSourceCount: number | null;
+  reconciledCrmCount: number | null;
 }
 
 export interface KapaLeadsReviewItem {
@@ -78,6 +81,9 @@ export async function fetchKapaLeadsSyncHealth(companyId: string): Promise<KapaL
     processed7d: num(r.processed_7d),
     oldestPendingAt: str(r.oldest_pending_at),
     lastProcessedAt: str(r.last_processed_at),
+    reconciledAt: str(r.reconciled_at),
+    reconciledSourceCount: r.reconciled_source_count == null ? null : num(r.reconciled_source_count),
+    reconciledCrmCount: r.reconciled_crm_count == null ? null : num(r.reconciled_crm_count),
   }));
 }
 

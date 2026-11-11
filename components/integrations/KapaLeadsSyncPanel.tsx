@@ -60,6 +60,22 @@ function errorMessage(error: unknown): string {
   return 'Não foi possível concluir agora.';
 }
 
+function Reconciliation({ link }: { link: KapaLeadsSyncHealth }) {
+  const source = link.reconciledSourceCount;
+  const crm = link.reconciledCrmCount;
+  if (!link.reconciledAt || source === null || crm === null) return null;
+  const missing = source > crm;
+  const note = missing
+    ? ' — há leads do KAPA Leads que não chegaram ao CRM.'
+    : source < crm ? ' (leads apagados depois no KAPA Leads)' : ' — tudo conferido.';
+  return (
+    <div data-testid="kapa-leads-reconciliation" role={missing ? 'alert' : undefined}
+      style={{ fontSize: 12.5, color: missing ? 'var(--red)' : 'var(--t-500)' }}>
+      Conferência ({formatDateTime(link.reconciledAt)}): KAPA Leads {source} · CRM {crm}{note}
+    </div>
+  );
+}
+
 function LinkStatus({ link, companyId, isSuperAdmin }: { link: KapaLeadsSyncHealth; companyId: string; isSuperAdmin: boolean }) {
   const setEnabled = useSetKapaLeadsLinkEnabled(companyId);
   const [message, setMessage] = useState<string | null>(null);
@@ -79,6 +95,7 @@ function LinkStatus({ link, companyId, isSuperAdmin }: { link: KapaLeadsSyncHeal
         Recebidos (7 dias): {link.processed7d} · na fila: {link.pendingCount} · para revisar: {link.failedCount}
         {link.oldestPendingAt ? ` · pendente desde ${formatDateTime(link.oldestPendingAt)}` : ''}
       </div>
+      <Reconciliation link={link} />
       {link.lastErrorCode && (
         <div role="alert" style={{ fontSize: 12.5, color: 'var(--red)' }}>
           {describeKapaLeadsErrorCode(link.lastErrorCode)} ({link.consecutiveFailures} falha(s) seguida(s))

@@ -54,8 +54,8 @@ Custo aceito: latência de até ~3 min (agendamento de 2 min + 60 s de confirma�
 ## 4. Validação local (dados fictícios, bancos descartáveis)
 
 - KAPA Leads: unit 197/197 (inclui assinatura, config, export, matcher do proxy), typecheck, lint, build.
-- CRM: pgTAP 87 arquivos / 4789 (novo `92_kapa_leads_sync.sql`: 64 asserções), unit e integração,
-  `tsc` 0, suíte completa, build.
+- CRM: pgTAP 87 arquivos / 4793 (novo `92_kapa_leads_sync.sql`: 68 asserções), `tsc` 0, suíte
+  completa 403 arquivos / 6918 testes, build.
 - Ponta a ponta (`tests/integration/kapa-leads/sync-e2e-local.test.ts`, orquestrado fora do repo):
   KAPA Leads real (`next start`) + banco local dele; CRM real (rota cron) + banco local.
   Comprovado: lead entra no KAPA Leads → chega ao CRM na empresa certa, sem vendedor, com origem,
@@ -63,7 +63,7 @@ Custo aceito: latência de até ~3 min (agendamento de 2 min + 60 s de confirma�
   Manager de outra empresa não; Seller vê depois de atribuído; reenvio da LP, novo ciclo e página
   repetida não duplicam; nova simulação do mesmo contato associa; pausa não perde e religar traz o
   lead do período; **com o gateway do CRM parado a LP recebeu 201**; com o KAPA Leads fora do ar o
-  cursor não anda e a falha fica registrada.
+  cursor não anda e a falha fica registrada; a conferência de contagem mostra KAPA Leads 1 × CRM 1.
 
 ## 5. Publicação — plano para aprovação (nada disto foi feito)
 

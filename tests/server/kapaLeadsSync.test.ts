@@ -196,7 +196,7 @@ describe('runKapaLeadsSync', () => {
     };
     return { client, calls };
   }
-  const link = { link_id: 'l1', company_id: 'c1', kapa_store_id: STORE, vehicle_form_key: null, cursor_created_at: CURSOR.createdAt, cursor_lead_id: CURSOR.id };
+  const link = { link_id: 'l1', company_id: 'c1', kapa_store_id: STORE, vehicle_form_key: null, cursor_created_at: CURSOR.createdAt, cursor_lead_id: CURSOR.id, activated_at: CURSOR.createdAt, reconciled_at: new Date(NOW).toISOString() };
   const processIdle = () => [{ out_status: 'ok', out_created: 0, out_linked: 0, out_retry: 0, out_failed: 0, out_held: 0 }];
 
   it('ingests with compare-and-set on the cursor, then processes the queue', async () => {
@@ -249,6 +249,44 @@ describe('runKapaLeadsSync', () => {
     expect(summary.cursorConflicts).toBe(1);
   });
 
+  it('reconciles counts at most hourly, only after a healthy poll, up to the cursor', async () => {
+    const countCalls: string[] = [];
+    const { client, calls } = fakeSupabase({
+      kapa_leads_links_for_poll: () => [{ ...link, reconciled_at: null }],
+      kapa_leads_ingest_page: () => [{ out_outcome: 'ok', out_inserted: 1, out_duplicates: 0, out_invalid: 0 }],
+      kapa_leads_process_pending: processIdle,
+      kapa_leads_record_reconciliation: () => [{ out_source_count: 3, out_crm_count: 2 }],
+    });
+    const fetchImpl = (async (url: string) => {
+      if (url.includes('/leads/count?')) {
+        countCalls.push(url);
+        return new Response(JSON.stringify({ success: true, count: 3 }), { status: 200 });
+      }
+      return okResponse([exported()]);
+    }) as unknown as typeof fetch;
+    const summary = await runKapaLeadsSync({ supabase: client as never, config: CONFIG, fetchImpl, now: () => NOW });
+    expect(summary).toMatchObject({ reconciled: 1, reconcileMismatches: 1 });
+    const url = new URL(countCalls[0]);
+    expect(url.searchParams.get('from')).toBe(CURSOR.createdAt);
+    expect(url.searchParams.get('to')).toBe('2026-11-11T14:30:00.654321+00:00');
+    expect(calls.find((c) => c.fn === 'kapa_leads_record_reconciliation')?.args).toEqual({
+      p_link_id: 'l1', p_from: CURSOR.createdAt, p_to: '2026-11-11T14:30:00.654321+00:00', p_source_count: 3,
+    });
+
+    // Recente (menos de 1 h) ou com falha na consulta: não confere.
+    const recent = fakeSupabase({
+      kapa_leads_links_for_poll: () => [link],
+      kapa_leads_ingest_page: () => [{ out_outcome: 'ok', out_inserted: 1, out_duplicates: 0, out_invalid: 0 }],
+      kapa_leads_process_pending: processIdle,
+    });
+    await runKapaLeadsSync({ supabase: recent.client as never, config: CONFIG, fetchImpl, now: () => NOW });
+    expect(recent.calls.some((c) => c.fn === 'kapa_leads_record_reconciliation')).toBe(false);
+    const failing = fakeSupabase({ kapa_leads_links_for_poll: () => [{ ...link, reconciled_at: null }], kapa_leads_process_pending: processIdle });
+    const down = (async () => new Response('{}', { status: 503 })) as unknown as typeof fetch;
+    await runKapaLeadsSync({ supabase: failing.client as never, config: CONFIG, fetchImpl: down, now: () => NOW });
+    expect(failing.calls.some((c) => c.fn === 'kapa_leads_record_reconciliation')).toBe(false);
+  });
+
   it('does not loop forever on an always-full page (5 pages max per cycle)', async () => {
     const { client, calls } = fakeSupabase({
       kapa_leads_links_for_poll: () => [link],
@@ -297,6 +335,7 @@ describe('UI helpers', () => {
       linkId: 'l', kapaStoreId: STORE, storeLabel: 'RCAR', vehicleFormKey: null, enabled: true, activatedAt: '2026-11-11T14:00:00Z',
       lastPolledAt: null, lastSuccessAt: '2026-11-11T14:50:00Z', lastErrorCode: null, consecutiveFailures: 0,
       pendingCount: 0, failedCount: 0, processed7d: 0, oldestPendingAt: null, lastProcessedAt: null,
+      reconciledAt: null, reconciledSourceCount: null, reconciledCrmCount: null,
     };
     expect(isStale(base, NOW)).toBe(false);
     expect(isStale({ ...base, lastSuccessAt: '2026-11-11T14:40:00Z' }, NOW)).toBe(true);

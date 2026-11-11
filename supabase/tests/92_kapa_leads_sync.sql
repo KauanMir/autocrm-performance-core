@@ -361,5 +361,21 @@ reset role;
 select is((select row(last_error_code, consecutive_failures)::text from public.kapa_leads_store_links where id = (select link_id from t_link_b)),
   '(source_timeout,1)', 'I9 código e contagem de falhas');
 
+-- ═══ J. conferência por contagem ═══════════════════════════════════════
+select ok(has_function_privilege('service_role', 'public.kapa_leads_record_reconciliation(uuid, timestamptz, timestamptz, integer)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.kapa_leads_record_reconciliation(uuid, timestamptz, timestamptz, integer)', 'EXECUTE'),
+  'J1 conferência: só service_role');
+set local role service_role;
+select is((select row(out_source_count, out_crm_count)::text from public.kapa_leads_record_reconciliation(
+  (select link_id from t_link_a), now(), now() + interval '10 seconds', 6)), '(6,5)', 'J2 conta os eventos recebidos na janela (inclui falhas)');
+select throws_ok(format($$select * from public.kapa_leads_record_reconciliation(%L, now(), now() - interval '1 second', 1)$$, (select link_id from t_link_a)),
+  '22023', 'invalid_input', 'J3 janela invertida recusada');
+reset role;
+select pg_temp.as_user('fd200000-0000-0000-0000-000000000001');
+set local role authenticated;
+select is((select row(reconciled_source_count, reconciled_crm_count)::text from public.kapa_leads_sync_health('fd100000-0000-0000-0000-00000000000a')),
+  '(6,5)', 'J4 Manager vê a conferência na saúde');
+reset role;
+
 select * from finish();
 rollback;

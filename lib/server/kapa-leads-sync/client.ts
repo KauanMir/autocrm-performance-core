@@ -171,3 +171,37 @@ export async function fetchLeadsPage(input: {
   }
   return { ok: true, items, nextCursor, hasMore: body.hasMore };
 }
+
+export const COUNT_PATH = '/api/integrations/crm/leads/count';
+
+/** Contagem de leads da loja no KAPA Leads em (from, to] — sem dados pessoais. */
+export async function fetchLeadsCount(input: {
+  config: KapaLeadsSyncConfig;
+  storeId: string;
+  from: string;
+  to: string;
+  fetchImpl?: typeof fetch;
+  nowMs?: number;
+  timeoutMs?: number;
+}): Promise<{ ok: true; count: number } | { ok: false; code: string }> {
+  const { config, storeId, from, to, fetchImpl = fetch, timeoutMs = DEFAULT_TIMEOUT_MS } = input;
+  const pathAndQuery = `${COUNT_PATH}?${new URLSearchParams({ storeId, from, to }).toString()}`;
+  const headers = signedHeaders(config.secret, 'GET', pathAndQuery, input.nowMs ?? Date.now());
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(`${config.baseUrl}${pathAndQuery}`, {
+      method: 'GET', headers: { ...headers, Accept: 'application/json' }, signal: controller.signal, cache: 'no-store', redirect: 'error',
+    });
+    if (response.status !== 200) return { ok: false, code: 'count_unavailable' };
+    const body = await response.json() as unknown;
+    if (!isObject(body) || body.success !== true || typeof body.count !== 'number' || !Number.isSafeInteger(body.count) || body.count < 0) {
+      return { ok: false, code: 'count_invalid_body' };
+    }
+    return { ok: true, count: body.count };
+  } catch {
+    return { ok: false, code: 'count_unavailable' };
+  } finally {
+    clearTimeout(timer);
+  }
+}

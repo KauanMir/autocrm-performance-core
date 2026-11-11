@@ -1067,6 +1067,11 @@ export type Database = {
           last_error_code: string | null
           last_polled_at: string | null
           last_success_at: string | null
+          reconciled_at: string | null
+          reconciled_crm_count: number | null
+          reconciled_from: string | null
+          reconciled_source_count: number | null
+          reconciled_to: string | null
           store_label: string
           updated_at: string
           updated_by: string | null
@@ -1085,6 +1090,11 @@ export type Database = {
           last_error_code?: string | null
           last_polled_at?: string | null
           last_success_at?: string | null
+          reconciled_at?: string | null
+          reconciled_crm_count?: number | null
+          reconciled_from?: string | null
+          reconciled_source_count?: number | null
+          reconciled_to?: string | null
           store_label: string
           updated_at?: string
           updated_by?: string | null
@@ -1103,6 +1113,11 @@ export type Database = {
           last_error_code?: string | null
           last_polled_at?: string | null
           last_success_at?: string | null
+          reconciled_at?: string | null
+          reconciled_crm_count?: number | null
+          reconciled_from?: string | null
+          reconciled_source_count?: number | null
+          reconciled_to?: string | null
           store_label?: string
           updated_at?: string
           updated_by?: string | null
@@ -3291,11 +3306,13 @@ export type Database = {
       kapa_leads_links_for_poll: {
         Args: never
         Returns: {
+          activated_at: string
           company_id: string
           cursor_created_at: string
           cursor_lead_id: string
           kapa_store_id: string
           link_id: string
+          reconciled_at: string
           vehicle_form_key: string
         }[]
       }
@@ -3312,6 +3329,18 @@ export type Database = {
         }[]
       }
       kapa_leads_purge_expired: { Args: never; Returns: number }
+      kapa_leads_record_reconciliation: {
+        Args: {
+          p_from: string
+          p_link_id: string
+          p_source_count: number
+          p_to: string
+        }
+        Returns: {
+          out_crm_count: number
+          out_source_count: number
+        }[]
+      }
       kapa_leads_review_list: {
         Args: { p_company_id: string; p_limit?: number }
         Returns: {
@@ -3341,6 +3370,9 @@ export type Database = {
           oldest_pending_at: string
           pending_count: number
           processed_7d: number
+          reconciled_at: string
+          reconciled_crm_count: number
+          reconciled_source_count: number
           store_label: string
           vehicle_form_key: string
         }[]
