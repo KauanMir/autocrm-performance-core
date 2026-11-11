@@ -365,3 +365,36 @@ recusa com `missing_required_permission`/`no_eligible_page` e nada é gravado.
 (acesso padrão vale para quem tem função; token fica preso a ele); (C) a RCAR concede à
 Assessoria KAPA acesso de parceiro à Página com tarefa de leads/anúncios, e o dono conecta.
 Ambas exigem decisão do dono (alteração de função/ativos na Meta).
+
+## 2026-11-11 (manhã) — RCAR habilitada, aguardando o gestor
+
+**Conferência:** site 200; verificação falsa do webhook 403; tela de Integrações da RCAR
+igual ao registro anterior (nenhuma Página, fila vazia, mapeamento vazio).
+
+**Habilitação feita** (Super Admin, Ajustes → Integrações → "Habilitar"): status
+"Habilitado", botão "Conectar Meta" visível. Nenhuma Página conectada → nenhuma ingestão.
+Reverter: "Desabilitar" (eventos passam a ficar retidos como `company_disabled`).
+O evento retido da Página de teste `1381033925087695` é da TEST COMPANY: **não liberar**.
+
+**Meta (painel, leitura):** na tabela "Provedor de Tecnologia", `pages_show_list`,
+`pages_read_engagement` e `leads_retrieval` = "Inativo — Verificação necessária" (link →
+Configurações básicas, cartão de verificação: empresa "Verificado", Verificação de Uso de
+Dados concluída); `pages_manage_metadata` = "Ativo — acesso avançado concedido". Não há
+ação disponível no painel; a causa só se prova com a conexão de quem não tem função.
+O gestor da RCAR **não tem função no app** (Funções: só administrador + testador do
+Instagram) → a conexão dele é prova válida de acesso comercial.
+
+**Diagnóstico da conexão:** o callback registra no log da Vercel (`oauth_callback`) o
+resultado exato: `missing_required_permission` + nome da permissão,
+`no_eligible_page` (Página sem tarefa de anúncios + gerenciar/criar/moderar),
+`page_token_lookup_failed`, ou sucesso. Nada é gravado em caso de recusa.
+
+**Atenção:** o Super Admin também vê "Conectar Meta". A conta do dono gerencia Páginas de
+outros clientes; **não conectar pela conta do dono** (misturaria leads de outra loja na RCAR).
+
+**Campanhas ativas da RCAR:** não verificáveis pela conta do dono. Se houver formulários
+ativos, leads reais entram em Clientes → "Sem vendedor" logo após a conexão (nenhuma
+mensagem é enviada; o lead continua também na Central de Leads da Meta). Plano: conectar e
+fazer o lead de teste em seguida, com a equipe só trabalhando a fila após a validação.
+Alternativa mais conservadora (sem perder leads): conectar e, se o teste demorar,
+"Desabilitar" → eventos ficam retidos 90 dias e são liberados depois.
