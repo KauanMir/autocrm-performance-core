@@ -317,3 +317,51 @@ Verificação pós-deploy (11/11, 00:25–00:50 BRT):
 Pendente: criar+arquivar lead pela tela (escrita em produção, precisa de autorização);
 habilitar a RCAR e conectar a Página dela (gestor sem função no app) — isso prova também o
 acesso avançado "Inativo — Verificação necessária"; lead controlado F1.
+
+## 2026-11-11 — Smoke de lead e preparação da conexão da RCAR
+
+**Smoke criar/arquivar (autorizado):** na RCAR Seminovos Gama, Super Admin criou o lead
+fictício "Teste Kapa Smoke OP5" (telefone fictício, sem vendedor, origem "Teste interno")
+e o arquivou. Linha do tempo: "Lead criado" → "Lead arquivado". O código publicado não tem
+caminho de envio de mensagem (só RPCs `create_lead`/`archive_lead`, sem `pg_net`).
+
+**Efeitos de habilitar a RCAR** (`meta_lead_ads_set_company_access`): grava 1 linha em
+`company_meta_lead_ads_access` + 1 `audit_log`; reversível; exige empresa `ativa`.
+Nenhuma chamada externa. Passa a permitir: aba Meta Lead Ads para o Manager, início do
+OAuth, persistência no callback (sem habilitação o token é descartado) e processamento
+de eventos de Página conectada. **Sem Página conectada não há ingestão.** A ingestão real
+começa no momento em que o gestor conclui "Conectar esta Página" (o fluxo inscreve
+`leadgen` na Página e grava a conexão). Para reter sem perder: desabilitar a empresa →
+eventos ficam em "Eventos retidos" (`company_disabled`, 90 dias) e podem ser liberados.
+
+Estado em produção (11/11): RCAR desabilitada, nenhuma Página conectada, mapeamento vazio.
+"Eventos retidos" mostra 1 evento da Página de teste `1381033925087695` como "Empresa
+desabilitada": comportamento esperado do código novo para a TEST COMPANY (`implantacao`).
+A habilitação pela tela foi bloqueada pelo controle de permissões do agente e fica para
+o dono (um clique em Ajustes → Integrações → "Habilitar").
+
+**Meta:** a conta do dono não gerencia a Página da RCAR (Páginas gerenciadas: Kapa
+Agency, Porto Veículos, Luana Shô, Global Veículos GO, Global Veículos, KAPA CRM Teste);
+o portfólio Assessoria KAPA não tem ativo da RCAR. Página e formulários só podem ser
+identificados pelo gestor da RCAR. Permissões: `pages_show_list`,
+`pages_read_engagement`, `leads_retrieval` continuam com acesso avançado "Inativo —
+Verificação necessária" (link aponta para a verificação da empresa, já "Verificado");
+"Ações necessárias" sem pendências. Se a Meta negar as permissões ao gestor, o callback
+recusa com `missing_required_permission`/`no_eligible_page` e nada é gravado.
+
+**Roteiro da conexão (gestor da RCAR, no próprio dispositivo):**
+1. Dono habilita a RCAR (acima).
+2. Gestor entra no CRM → Ajustes → Integrações → Meta Lead Ads → "Conectar Meta" → login
+   do Facebook dele → marca a Página da RCAR e o portfólio → "Conectar esta Página".
+3. Resultado: "Conexão: conectada" com o nome da Página → anotar ID da Página e do(s)
+   formulário(s) (Central de Leads / Gerenciador de Anúncios → formulário → ID).
+4. Mapear no CRM a pergunta de veículo (campo "Veículo de interesse"), se houver.
+5. Lead de teste: Ferramenta de teste de anúncios de cadastro da Meta
+   (developers.facebook.com/tools/lead-ads-testing), Página da RCAR, formulário real,
+   nome "Teste Kapa" e telefone fictício válido. Esperado: lead em Clientes → "Sem
+   vendedor", ledger processado, nenhuma mensagem enviada. Depois arquivar.
+
+**Contingências se a Meta negar:** (B) dar ao gestor a função "Testador" no app KAPA CRM
+(acesso padrão vale para quem tem função; token fica preso a ele); (C) a RCAR concede à
+Assessoria KAPA acesso de parceiro à Página com tarefa de leads/anúncios, e o dono conecta.
+Ambas exigem decisão do dono (alteração de função/ativos na Meta).
