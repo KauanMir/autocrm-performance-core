@@ -29,6 +29,20 @@ begin
 end;
 $$ language plpgsql;
 
+-- Instante de fixture DENTRO do mês corrente em UTC, America/Sao_Paulo e
+-- America/New_York ao mesmo tempo: now() - offset, com os offsets comprimidos
+-- proporcionalmente quando o mês começou há menos de 11 dias (o maior offset
+-- usado é 10 dias + 3 horas). Mantém a ordem entre os fixtures; sem isso, nos
+-- primeiros dias do mês as vendas "de 10 dias atrás" caíam no mês anterior.
+create or replace function pg_temp.fx(p_offset interval) returns timestamptz as $$
+  select now() - p_offset * least(1.0, greatest(0.0,
+    extract(epoch from now() - greatest(
+      date_trunc('month', now()),
+      date_trunc('month', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo',
+      date_trunc('month', now() at time zone 'America/New_York') at time zone 'America/New_York'
+    ) - interval '1 second') / extract(epoch from interval '11 days')))
+$$ language sql stable;
+
 -- ═══════════════════════════════════════════════════════════════════════
 -- FIXTURES — companies/profiles/memberships/sellers/pipeline compartilhados
 -- ═══════════════════════════════════════════════════════════════════════
@@ -183,14 +197,14 @@ begin
         values (gen_random_uuid(), rec.company_id, rec.lead_id, rec.lead_name, rec.seller_id, 'Onix', 100000, 0, 'a_vista', 'e9200000-0000-0000-0000-000000000011', 'e9200000-0000-0000-0000-000000000011', 'sold')
         returning id into v_deal_id;
       insert into public.sales (company_id, deal_id, lead_id, assigned_seller_id, sold_value_cents, payment_method, sold_by, sold_at)
-        values (rec.company_id, v_deal_id, rec.lead_id, rec.seller_id, 100000, 'a_vista', 'e9200000-0000-0000-0000-000000000011', now() - (i || ' days')::interval);
+        values (rec.company_id, v_deal_id, rec.lead_id, rec.seller_id, 100000, 'a_vista', 'e9200000-0000-0000-0000-000000000011', pg_temp.fx((i || ' days')::interval));
     end loop;
   end loop;
 end $$;
 
 insert into public.visits (id, company_id, client_name, assigned_seller_id, vehicles, scheduled_at, status, outcome, closed_by, closed_at)
   select gen_random_uuid(), 'e9100000-0000-0000-0000-000000000010', 'Visita RK1C', 'rk1C', array['Onix'],
-         now() - interval '2 days', 'completed', 'sold', 'e9200000-0000-0000-0000-000000000011', now() - interval '2 days'
+         pg_temp.fx(interval '2 days'), 'completed', 'sold', 'e9200000-0000-0000-0000-000000000011', pg_temp.fx(interval '2 days')
   from generate_series(1,3);
 
 do $$
@@ -210,15 +224,15 @@ begin
         values (gen_random_uuid(), rec.company_id, rec.lead_id, rec.lead_name, rec.seller_id, 'Onix', 100000, 0, 'a_vista', 'e9200000-0000-0000-0000-000000000021', 'e9200000-0000-0000-0000-000000000021', 'sold')
         returning id into v_deal_id;
       insert into public.sales (company_id, deal_id, lead_id, assigned_seller_id, sold_value_cents, payment_method, sold_by, sold_at)
-        values (rec.company_id, v_deal_id, rec.lead_id, rec.seller_id, 100000, 'a_vista', 'e9200000-0000-0000-0000-000000000021', now() - (i || ' days')::interval);
+        values (rec.company_id, v_deal_id, rec.lead_id, rec.seller_id, 100000, 'a_vista', 'e9200000-0000-0000-0000-000000000021', pg_temp.fx((i || ' days')::interval));
     end loop;
   end loop;
 end $$;
 
 insert into public.visits (id, company_id, client_name, assigned_seller_id, vehicles, scheduled_at, status, outcome, closed_by, closed_at) values
-  (gen_random_uuid(), 'e9100000-0000-0000-0000-000000000020', 'Visita RK2B1', 'rk2B', array['Onix'], now() - interval '1 day', 'completed', 'sold', 'e9200000-0000-0000-0000-000000000021', now() - interval '1 day'),
-  (gen_random_uuid(), 'e9100000-0000-0000-0000-000000000020', 'Visita RK2B2', 'rk2B', array['Onix'], now() - interval '1 day', 'completed', 'sold', 'e9200000-0000-0000-0000-000000000021', now() - interval '1 day'),
-  (gen_random_uuid(), 'e9100000-0000-0000-0000-000000000020', 'Visita RK2C1', 'rk2C', array['Onix'], now() - interval '1 day', 'completed', 'sold', 'e9200000-0000-0000-0000-000000000021', now() - interval '1 day');
+  (gen_random_uuid(), 'e9100000-0000-0000-0000-000000000020', 'Visita RK2B1', 'rk2B', array['Onix'], pg_temp.fx(interval '1 day'), 'completed', 'sold', 'e9200000-0000-0000-0000-000000000021', pg_temp.fx(interval '1 day')),
+  (gen_random_uuid(), 'e9100000-0000-0000-0000-000000000020', 'Visita RK2B2', 'rk2B', array['Onix'], pg_temp.fx(interval '1 day'), 'completed', 'sold', 'e9200000-0000-0000-0000-000000000021', pg_temp.fx(interval '1 day')),
+  (gen_random_uuid(), 'e9100000-0000-0000-0000-000000000020', 'Visita RK2C1', 'rk2C', array['Onix'], pg_temp.fx(interval '1 day'), 'completed', 'sold', 'e9200000-0000-0000-0000-000000000021', pg_temp.fx(interval '1 day'));
 
 do $$
 declare
@@ -229,13 +243,13 @@ begin
   -- MAX(sold_at) ASC — B mais antigo (rank1) ... Target mais recente
   -- (rank4). Target sobe pra rank1 com 1 venda nova (count=3, unico > 2).
   for rec in
-    select l.company_id, l.id as lead_id, l.name as lead_name, l.seller_id, x.ts
+    select l.company_id, l.id as lead_id, l.name as lead_name, l.seller_id, x.off
       from (values
-        ('rk3B', now() - interval '3 hours'),
-        ('rk3C', now() - interval '2 hours'),
-        ('rk3D', now() - interval '1 hour'),
-        ('rk3Target', now() - interval '30 minutes')
-      ) as x(seller_id, ts)
+        ('rk3B', interval '3 hours'),
+        ('rk3C', interval '2 hours'),
+        ('rk3D', interval '1 hour'),
+        ('rk3Target', interval '30 minutes')
+      ) as x(seller_id, off)
       join public.leads l on l.seller_id = x.seller_id
   loop
     for i in 1..2 loop
@@ -247,7 +261,7 @@ begin
       -- pra nao virar o MAX.
       insert into public.sales (company_id, deal_id, lead_id, assigned_seller_id, sold_value_cents, payment_method, sold_by, sold_at)
         values (rec.company_id, v_deal_id, rec.lead_id, rec.seller_id, 100000, 'a_vista', 'e9200000-0000-0000-0000-000000000031',
-                case when i = 2 then rec.ts else rec.ts - interval '10 days' end);
+                case when i = 2 then pg_temp.fx(rec.off) else pg_temp.fx(rec.off + interval '10 days') end);
     end loop;
   end loop;
 end $$;
@@ -261,11 +275,11 @@ begin
   -- MAX(sold_at) mais antigo (vence o desempate, rank1); Target rank2.
   -- Target sobe pra rank1 com 1 venda nova (count=3 > Leader=2).
   for rec in
-    select l.company_id, l.id as lead_id, l.name as lead_name, l.seller_id, x.ts
+    select l.company_id, l.id as lead_id, l.name as lead_name, l.seller_id, x.off
       from (values
-        ('rk4Leader', now() - interval '2 hours'),
-        ('rk4Target', now() - interval '1 hour')
-      ) as x(seller_id, ts)
+        ('rk4Leader', interval '2 hours'),
+        ('rk4Target', interval '1 hour')
+      ) as x(seller_id, off)
       join public.leads l on l.seller_id = x.seller_id
   loop
     for i in 1..2 loop
@@ -274,7 +288,7 @@ begin
         returning id into v_deal_id;
       insert into public.sales (company_id, deal_id, lead_id, assigned_seller_id, sold_value_cents, payment_method, sold_by, sold_at)
         values (rec.company_id, v_deal_id, rec.lead_id, rec.seller_id, 100000, 'a_vista', 'e9200000-0000-0000-0000-000000000041',
-                case when i = 2 then rec.ts else rec.ts - interval '10 days' end);
+                case when i = 2 then pg_temp.fx(rec.off) else pg_temp.fx(rec.off + interval '10 days') end);
     end loop;
   end loop;
 end $$;
@@ -296,7 +310,7 @@ begin
         values (gen_random_uuid(), rec.company_id, rec.lead_id, rec.lead_name, rec.seller_id, 'Onix', 100000, 0, 'a_vista', 'e9200000-0000-0000-0000-000000000051', 'e9200000-0000-0000-0000-000000000051', 'sold')
         returning id into v_deal_id;
       insert into public.sales (company_id, deal_id, lead_id, assigned_seller_id, sold_value_cents, payment_method, sold_by, sold_at)
-        values (rec.company_id, v_deal_id, rec.lead_id, rec.seller_id, 100000, 'a_vista', 'e9200000-0000-0000-0000-000000000051', now() - (i || ' days')::interval);
+        values (rec.company_id, v_deal_id, rec.lead_id, rec.seller_id, 100000, 'a_vista', 'e9200000-0000-0000-0000-000000000051', pg_temp.fx((i || ' days')::interval));
     end loop;
   end loop;
 end $$;
@@ -305,7 +319,7 @@ end $$;
 -- ainda) — A com mais visitas (rank1 tecnico), B sem nenhuma (rank2
 -- tecnico). B registra a 1a venda da empresa -> competition_started=true.
 insert into public.visits (id, company_id, client_name, assigned_seller_id, vehicles, scheduled_at, status, outcome, closed_by, closed_at) values
-  (gen_random_uuid(), 'e9100000-0000-0000-0000-000000000060', 'Visita FirstA', 'firstA', array['Onix'], now() - interval '1 day', 'completed', 'sold', 'e9200000-0000-0000-0000-000000000061', now() - interval '1 day');
+  (gen_random_uuid(), 'e9100000-0000-0000-0000-000000000060', 'Visita FirstA', 'firstA', array['Onix'], pg_temp.fx(interval '1 day'), 'completed', 'sold', 'e9200000-0000-0000-0000-000000000061', pg_temp.fx(interval '1 day'));
 
 -- Deals OPEN (para os register_sale reais que os testes abaixo disparam):
 insert into public.deals (id, company_id, lead_id, client_name_snapshot, assigned_seller_id, vehicle, value_cents, discount_percent, payment_method, created_by, updated_by, status) values
