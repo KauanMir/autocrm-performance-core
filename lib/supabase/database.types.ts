@@ -956,6 +956,175 @@ export type Database = {
           },
         ]
       }
+      kapa_leads_inbound_events: {
+        Row: {
+          attempts: number
+          company_id: string
+          crm_lead_id: string | null
+          id: string
+          last_error_code: string | null
+          link_id: string
+          next_attempt_at: string
+          outcome: string | null
+          payload: Json
+          processed_at: string | null
+          received_at: string
+          requeue_count: number
+          resolution: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          source_campaign_id: string
+          source_campaign_name: string
+          source_campaign_slug: string
+          source_created_at: string
+          source_lead_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          company_id: string
+          crm_lead_id?: string | null
+          id?: string
+          last_error_code?: string | null
+          link_id: string
+          next_attempt_at?: string
+          outcome?: string | null
+          payload?: Json
+          processed_at?: string | null
+          received_at?: string
+          requeue_count?: number
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          source_campaign_id: string
+          source_campaign_name: string
+          source_campaign_slug: string
+          source_created_at: string
+          source_lead_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          company_id?: string
+          crm_lead_id?: string | null
+          id?: string
+          last_error_code?: string | null
+          link_id?: string
+          next_attempt_at?: string
+          outcome?: string | null
+          payload?: Json
+          processed_at?: string | null
+          received_at?: string
+          requeue_count?: number
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          source_campaign_id?: string
+          source_campaign_name?: string
+          source_campaign_slug?: string
+          source_created_at?: string
+          source_lead_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kapa_leads_inbound_events_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kapa_leads_inbound_events_link_fk"
+            columns: ["link_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "kapa_leads_store_links"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "kapa_leads_inbound_events_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      kapa_leads_store_links: {
+        Row: {
+          activated_at: string | null
+          company_id: string
+          consecutive_failures: number
+          created_at: string
+          cursor_created_at: string | null
+          cursor_lead_id: string | null
+          enabled: boolean
+          id: string
+          kapa_store_id: string
+          last_error_code: string | null
+          last_polled_at: string | null
+          last_success_at: string | null
+          store_label: string
+          updated_at: string
+          updated_by: string | null
+          vehicle_form_key: string | null
+        }
+        Insert: {
+          activated_at?: string | null
+          company_id: string
+          consecutive_failures?: number
+          created_at?: string
+          cursor_created_at?: string | null
+          cursor_lead_id?: string | null
+          enabled?: boolean
+          id?: string
+          kapa_store_id: string
+          last_error_code?: string | null
+          last_polled_at?: string | null
+          last_success_at?: string | null
+          store_label: string
+          updated_at?: string
+          updated_by?: string | null
+          vehicle_form_key?: string | null
+        }
+        Update: {
+          activated_at?: string | null
+          company_id?: string
+          consecutive_failures?: number
+          created_at?: string
+          cursor_created_at?: string | null
+          cursor_lead_id?: string | null
+          enabled?: boolean
+          id?: string
+          kapa_store_id?: string
+          last_error_code?: string | null
+          last_polled_at?: string | null
+          last_success_at?: string | null
+          store_label?: string
+          updated_at?: string
+          updated_by?: string | null
+          vehicle_form_key?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kapa_leads_store_links_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kapa_leads_store_links_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_form_submissions: {
         Row: {
           ad_id: string | null
@@ -967,10 +1136,12 @@ export type Database = {
           created_at: string
           form_id: string | null
           id: string
+          kapa_leads_event_id: string | null
           lead_id: string
           meta_event_id: string | null
           outcome: string
           source: string
+          source_detail: string | null
           submitted_at: string | null
           vehicle_interest: string | null
         }
@@ -984,10 +1155,12 @@ export type Database = {
           created_at?: string
           form_id?: string | null
           id?: string
+          kapa_leads_event_id?: string | null
           lead_id: string
           meta_event_id?: string | null
           outcome: string
           source: string
+          source_detail?: string | null
           submitted_at?: string | null
           vehicle_interest?: string | null
         }
@@ -1001,10 +1174,12 @@ export type Database = {
           created_at?: string
           form_id?: string | null
           id?: string
+          kapa_leads_event_id?: string | null
           lead_id?: string
           meta_event_id?: string | null
           outcome?: string
           source?: string
+          source_detail?: string | null
           submitted_at?: string | null
           vehicle_interest?: string | null
         }
@@ -1014,6 +1189,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_form_submissions_kapa_leads_event_id_fkey"
+            columns: ["kapa_leads_event_id"]
+            isOneToOne: true
+            referencedRelation: "kapa_leads_inbound_events"
             referencedColumns: ["id"]
           },
           {
@@ -2345,6 +2527,15 @@ export type Database = {
         Returns: number
       }
       _followup_template_active_limit: { Args: never; Returns: number }
+      _kapa_leads_process_event: {
+        Args: {
+          p_event: Database["public"]["Tables"]["kapa_leads_inbound_events"]["Row"]
+        }
+        Returns: {
+          out_crm_lead_id: string
+          out_outcome: string
+        }[]
+      }
       _lock_company_and_resolve_official_period: {
         Args: { p_company_id: string }
         Returns: {
@@ -3045,6 +3236,115 @@ export type Database = {
         Returns: boolean
       }
       is_platform_super_admin: { Args: never; Returns: boolean }
+      kapa_leads_event_dismiss: {
+        Args: { p_company_id: string; p_event_id: string; p_resolution: string }
+        Returns: {
+          out_outcome: string
+        }[]
+      }
+      kapa_leads_event_requeue: {
+        Args: { p_company_id: string; p_event_id: string }
+        Returns: {
+          out_outcome: string
+        }[]
+      }
+      kapa_leads_ingest_page: {
+        Args: {
+          p_expected_cursor_created_at: string
+          p_expected_cursor_lead_id: string
+          p_items: Json
+          p_link_id: string
+          p_next_cursor_created_at: string
+          p_next_cursor_lead_id: string
+        }
+        Returns: {
+          out_duplicates: number
+          out_inserted: number
+          out_invalid: number
+          out_outcome: string
+        }[]
+      }
+      kapa_leads_link_record_failure: {
+        Args: { p_error_code: string; p_link_id: string }
+        Returns: undefined
+      }
+      kapa_leads_link_set_enabled: {
+        Args: { p_company_id: string; p_enabled: boolean; p_link_id: string }
+        Returns: {
+          cursor_created_at: string
+          enabled: boolean
+          link_id: string
+        }[]
+      }
+      kapa_leads_link_upsert: {
+        Args: {
+          p_company_id: string
+          p_kapa_store_id: string
+          p_store_label: string
+          p_vehicle_form_key?: string
+        }
+        Returns: {
+          enabled: boolean
+          link_id: string
+        }[]
+      }
+      kapa_leads_links_for_poll: {
+        Args: never
+        Returns: {
+          company_id: string
+          cursor_created_at: string
+          cursor_lead_id: string
+          kapa_store_id: string
+          link_id: string
+          vehicle_form_key: string
+        }[]
+      }
+      kapa_leads_payload_valid: { Args: { p_payload: Json }; Returns: boolean }
+      kapa_leads_process_pending: {
+        Args: { p_limit?: number }
+        Returns: {
+          out_created: number
+          out_failed: number
+          out_held: number
+          out_linked: number
+          out_retry: number
+          out_status: string
+        }[]
+      }
+      kapa_leads_purge_expired: { Args: never; Returns: number }
+      kapa_leads_review_list: {
+        Args: { p_company_id: string; p_limit?: number }
+        Returns: {
+          attempts: number
+          event_id: string
+          last_error_code: string
+          next_attempt_at: string
+          received_at: string
+          source_campaign_name: string
+          source_created_at: string
+          status: string
+        }[]
+      }
+      kapa_leads_sync_health: {
+        Args: { p_company_id: string }
+        Returns: {
+          activated_at: string
+          consecutive_failures: number
+          enabled: boolean
+          failed_count: number
+          kapa_store_id: string
+          last_error_code: string
+          last_polled_at: string
+          last_processed_at: string
+          last_success_at: string
+          link_id: string
+          oldest_pending_at: string
+          pending_count: number
+          processed_7d: number
+          store_label: string
+          vehicle_form_key: string
+        }[]
+      }
       lead_form_answers_valid: { Args: { p_answers: Json }; Returns: boolean }
       list_commercial_companies: {
         Args: never
@@ -3145,6 +3445,24 @@ export type Database = {
           id: string
           outcome: string
           received_at: string
+          submitted_at: string
+          vehicle_interest: string
+        }[]
+      }
+      list_lead_form_submissions_v2: {
+        Args: { p_company_id?: string; p_lead_id: string }
+        Returns: {
+          ad_id: string
+          answers: Json
+          contact_email: string
+          contact_name: string
+          contact_phone: string
+          form_id: string
+          id: string
+          outcome: string
+          received_at: string
+          source: string
+          source_detail: string
           submitted_at: string
           vehicle_interest: string
         }[]

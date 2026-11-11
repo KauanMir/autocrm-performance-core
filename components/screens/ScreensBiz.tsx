@@ -18,6 +18,7 @@ import { CompetitionRewardsTabSection } from '@/components/competitionRewards/Co
 import { CompetitionRewardHistorySection } from '@/components/competitionRewards/CompetitionRewardHistorySection';
 import { MetaIntegrationsTabSection } from '@/components/integrations/MetaIntegrationsTabSection';
 import { MetaLeadOpsPanel } from '@/components/integrations/MetaLeadOpsPanel';
+import { KapaLeadsSyncPanel } from '@/components/integrations/KapaLeadsSyncPanel';
 import { useMetaLeadAdsAccess } from '@/lib/hooks/useMetaLeadOps';
 import { isRemoteLeadsError } from '@/lib/leads/errors';
 import { WhatsAppDiagnosticsPanel } from '@/components/integrations/WhatsAppDiagnosticsPanel';
@@ -1802,6 +1803,7 @@ export function ScreenAjustes({ go }: any) {
             leadAdsEnabled={leadAdsAccess.data === true}
           />
           {(leadAdsAccess.data === true || currentUser?.platformRole === 'super_admin') && <MetaLeadOpsPanel companyId={companyId} />}
+          <KapaLeadsSyncPanel companyId={companyId} isSuperAdmin={currentUser?.platformRole === 'super_admin'} />
           <WhatsAppDiagnosticsPanel companyId={companyId} />
         </>
       )}

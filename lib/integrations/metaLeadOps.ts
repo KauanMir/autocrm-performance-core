@@ -78,6 +78,10 @@ export interface MetaFormMapping {
 
 export interface LeadFormSubmission {
   id: string;
+  /** 'meta_lead_ads' | 'kapa_leads'; null quando lido pela v1. */
+  source: string | null;
+  /** Origem legível, ex.: "Fábrica de Aprovação (KAPA Leads)". */
+  sourceDetail: string | null;
   outcome: 'created' | 'linked_existing';
   formId: string | null;
   adId: string | null;
@@ -245,13 +249,17 @@ export async function deleteMetaFormMapping(
 // Manager/Seller: companyId null (o banco deriva da membership). Super Admin:
 // companyId explícito, validado no banco por can_access_company.
 export async function fetchLeadFormSubmissions(leadId: string, companyId: string | null): Promise<LeadFormSubmission[]> {
-  const { data, error } = await supabase.rpc('list_lead_form_submissions', {
-    p_lead_id: leadId,
-    p_company_id: companyId ?? undefined,
-  });
+  const args = { p_lead_id: leadId, p_company_id: companyId ?? undefined };
+  // v2 traz a origem; sem a migration no banco (ou num rollback de banco), cai para a v1.
+  let result: { data: unknown; error: { message?: string; code?: string } | null } =
+    await supabase.rpc('list_lead_form_submissions_v2', args);
+  if (result.error?.code === 'PGRST202') result = await supabase.rpc('list_lead_form_submissions', args);
+  const { data, error } = result;
   if (error) throw toOpsError(error);
   return rowsOf(data).map((row) => ({
     id: String(row.id),
+    source: str(row.source),
+    sourceDetail: str(row.source_detail),
     outcome: String(row.outcome) as LeadFormSubmission['outcome'],
     formId: str(row.form_id),
     adId: str(row.ad_id),

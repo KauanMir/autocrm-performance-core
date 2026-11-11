@@ -7,6 +7,13 @@
       "jitter": 1,
       "path": "/api/cron/meta-leadgen-sweep",
       "requestMethod": "GET"
+    },
+    "kapa-leads-sync": {
+      "schedule": "*/2 * * * *",
+      "timezone": "UTC",
+      "jitter": 1,
+      "path": "/api/cron/kapa-leads-sync",
+      "requestMethod": "GET"
     }
   }
 }

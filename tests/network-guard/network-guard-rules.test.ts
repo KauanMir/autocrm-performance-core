@@ -96,4 +96,13 @@ describe('comandos permitidos', () => {
   ])('recusa %s', (_label, file, args) => {
     expect(isCommandAllowed(file, args, env)).toBe(false);
   });
+
+  it('banco do KAPA Leads só quando declarado em KL_E2E_DB_CONTAINER e descartável', () => {
+    const kl = ['exec', '-i', 'supabase_db_kapa-leads-e2e-sbx', 'psql'];
+    expect(isCommandAllowed('docker', kl, env)).toBe(false);
+    expect(isCommandAllowed('docker', kl, { ...env, KL_E2E_DB_CONTAINER: 'supabase_db_kapa-leads-e2e-sbx' })).toBe(true);
+    expect(isCommandAllowed('docker', ['exec', '-i', 'supabase_db_producao', 'psql'], { ...env, KL_E2E_DB_CONTAINER: 'supabase_db_producao' })).toBe(false);
+    expect(isCommandAllowed('docker', ['exec', '-i', 'supabase_db_kapa-leads-e2e-sbx', 'sh'], { ...env, KL_E2E_DB_CONTAINER: 'supabase_db_kapa-leads-e2e-sbx' })).toBe(false);
+    expect(isCommandAllowed('docker', ['stop', 'supabase_kong_kapa-mvp1-sbx'], { ...env, KL_E2E_DB_CONTAINER: 'supabase_db_kapa-leads-e2e-sbx' })).toBe(false);
+  });
 });

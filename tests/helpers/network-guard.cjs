@@ -58,8 +58,11 @@ function isCommandAllowed(file, args, env = process.env) {
   const name = path.basename(String(file)).toLowerCase().replace(/\.(exe|cmd)$/, '');
   if (name !== 'docker' || !Array.isArray(args)) return false;
   if (args[0] === 'exec') {
-    return args[1] === '-i' && args[3] === 'psql'
-      && args[2] === env.META_LOCAL_DB_CONTAINER && DISPOSABLE_CONTAINER.test(String(args[2]));
+    // Banco do CRM (META_LOCAL_DB_CONTAINER) ou, no ponta a ponta KAPA Leads → CRM, o banco
+    // descartável do KAPA Leads (KL_E2E_DB_CONTAINER). Os dois precisam ser pilhas kapa-* locais.
+    const target = args[2];
+    const declared = target === env.META_LOCAL_DB_CONTAINER || (Boolean(env.KL_E2E_DB_CONTAINER) && target === env.KL_E2E_DB_CONTAINER);
+    return args[1] === '-i' && args[3] === 'psql' && declared && DISPOSABLE_CONTAINER.test(String(target));
   }
   if (args[0] === 'inspect') {
     return args.length === 2 && DISPOSABLE_CONTAINER.test(String(args[1]));

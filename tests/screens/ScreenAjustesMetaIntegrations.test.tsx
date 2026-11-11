@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // META-MVP1: o painel de operação tem testes próprios
 // (tests/components/integrations/MetaLeadOpsPanel.test.tsx).
 vi.mock('@/components/integrations/MetaLeadOpsPanel', () => ({ MetaLeadOpsPanel: () => null }));
+// Painel KAPA Leads tem teste próprio (tests/components/integrations/KapaLeadsSyncPanel.test.tsx).
+vi.mock('@/components/integrations/KapaLeadsSyncPanel', () => ({ KapaLeadsSyncPanel: () => null }));
 import { render, screen, fireEvent } from '@testing-library/react';
 import type { PipelineStage } from '@/lib/pipeline/adapter';
 import { META_OAUTH_REVIEW_TEST_COMPANY_ID } from '@/lib/capabilities';

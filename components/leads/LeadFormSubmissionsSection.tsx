@@ -22,6 +22,11 @@ export function formatBrazilPhoneDigits(digits: string): string {
   return digits;
 }
 
+export function sourceTitle(submission: Pick<LeadFormSubmission, 'source' | 'sourceDetail'>): string {
+  if (submission.source === 'kapa_leads') return submission.sourceDetail ?? 'Simulador (KAPA Leads)';
+  return 'Meta Lead Ads';
+}
+
 const label: React.CSSProperties = { fontSize: 12, color: 'var(--t-500)' };
 const value: React.CSSProperties = { fontSize: 13, color: 'var(--t-900)', wordBreak: 'break-word' };
 
@@ -35,6 +40,7 @@ function SubmissionCard({ submission }: { submission: LeadFormSubmission }) {
         </strong>
         <span style={label}>{formatDateTime(submission.submittedAt ?? submission.receivedAt)}</span>
       </div>
+      <span data-testid="lead-form-submission-source" style={label}>Origem: {sourceTitle(submission)}</span>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, auto) 1fr', gap: '4px 10px' }}>
         <span style={label}>Nome</span><span style={value}>{submission.contactName}</span>
         <span style={label}>Telefone</span><span style={value}>{formatBrazilPhoneDigits(submission.contactPhone)}</span>
@@ -76,7 +82,9 @@ export function LeadFormSubmissionsSection({ leadId, companyId, authorized }: {
   if (submissions.length === 0) return null;
   return (
     <section data-testid="lead-form-submissions" style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
-      <div style={{ fontWeight: 700, fontSize: 13.5 }}>Formulário Meta Lead Ads</div>
+      <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+        {submissions.some((s) => s.source === 'kapa_leads') ? 'Formulários recebidos' : 'Formulário Meta Lead Ads'}
+      </div>
       {submissions.map((submission) => <SubmissionCard key={submission.id} submission={submission} />)}
     </section>
   );

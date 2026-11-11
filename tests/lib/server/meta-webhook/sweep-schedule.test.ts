@@ -63,8 +63,9 @@ describe('buildVercelCronConfig', () => {
 
 // The recovery schedule was published to Production on 2026-11-06 (deployment
 // dpl_8wsJZVEKicSS9SoZtLLo2zGAJivG, docs/META-RECOVERY.md); MVP-1 predates it.
-// The contract is now: exactly that one schedule, on the real sweep route, at a
-// frequency the Pro plan accepts, and no second config file.
+// The contract is now: that schedule on the real sweep route plus the KAPA Leads
+// sync schedule (2026-11-11, off by flag), both at frequencies the Pro plan
+// accepts, and no second config file.
 describe('agendamento publicado (meta-leadgen-recovery)', () => {
   it('vercel.json tem exatamente o agendamento de recuperação, na rota real do sweep', () => {
     const file = path.resolve(process.cwd(), 'vercel.json');
@@ -74,7 +75,13 @@ describe('agendamento publicado (meta-leadgen-recovery)', () => {
       schedules?: Record<string, { schedule: string; path: string; requestMethod?: string }>;
     };
     expect(config.crons).toBeUndefined();
-    expect(Object.keys(config.schedules ?? {})).toEqual(['meta-leadgen-recovery']);
+    // Exatamente dois agendamentos: a recuperação Meta e a sincronização KAPA Leads → CRM
+    // (esta só faz algo com KAPA_LEADS_SYNC_ENABLED=true; sem a flag responde "disabled").
+    expect(Object.keys(config.schedules ?? {})).toEqual(['meta-leadgen-recovery', 'kapa-leads-sync']);
+    const sync = config.schedules!['kapa-leads-sync'];
+    expect(sync.path).toBe('/api/cron/kapa-leads-sync');
+    expect(sync.requestMethod).toBe('GET');
+    expect(checkScheduleForPlan(sync.schedule, 'pro').ok).toBe(true);
     const job = config.schedules!['meta-leadgen-recovery'];
     expect(job.path).toBe(META_SWEEP_CRON_PATH);
     expect(job.requestMethod).toBe('GET');
