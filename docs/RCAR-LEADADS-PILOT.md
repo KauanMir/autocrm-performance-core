@@ -220,3 +220,24 @@ migration por vez: ordem errada recusada; 3 aplicadas → 85, hash
 por qualquer empresa habilitada; a trava de Página fixa vale só para o diagnóstico.
 
 Próximo passo do dono: G1 (SQL Editor) e autorização da OP-1 (backup).
+
+## 2026-11-10 — "Novo Lead" não abria para o Super Admin dentro de uma empresa
+
+Observado em produção após a OP-2 (não causado por ela): em `/company/[id]` o botão
+"Novo Lead" não abria o modal, em qualquer empresa, sem erro no console. Causa: nessa
+rota a empresa vem da URL (`OperationalCompanyContext`), mas o modal de criação, o de
+edição e o detalhe do lead liam só o seletor manual (`CommercialCompanyContext`, vazio
+ali). O modal se fechava no primeiro efeito ("troca de empresa em voo") e as ações do
+detalhe (mover, atribuir, arquivar) seriam descartadas como contexto inválido. O
+defeito já existe no código publicado `9c11545`; não envolve banco nem permissões.
+
+Correção: hook único `lib/commercial/useEffectiveCommercialCompany.ts` usado pelas duas
+telas, pelos dois modais e pelo detalhe. A proteção contra troca de empresa continua,
+agora também para troca na URL (epoch por instância). Teste novo
+`tests/commercial/PlatformCommercialOperationalMode.test.tsx`: 3/3 falham sem a
+correção e passam com ela. tsc 0; suíte 401 arquivos / 6884 testes PASS.
+
+Consequência para o checklist: o critério "criar e arquivar lead de teste pela tela"
+da OP-2 só pode ser comprovado depois do deploy desta branch (OP-5). Até lá, Super Admin
+cria leads pelo seletor manual da área global ("Clientes" fora de `/company/[id]`), se
+necessário. Manager/Seller usam outro fluxo e não são afetados.

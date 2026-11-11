@@ -13,7 +13,7 @@ import { PlatformLeadDetails } from '@/components/commercial/PlatformLeadDetails
 import { PlatformLeadCreateModal } from '@/components/commercial/PlatformLeadCreateModal';
 import { PlatformLeadEditModal } from '@/components/commercial/PlatformLeadEditModal';
 import { useCommercialCompanyContext } from '@/lib/commercial/CommercialCompanyContext';
-import { useOperationalCompanyContext } from '@/lib/operational/OperationalCompanyContext';
+import { useEffectiveCommercialCompany } from '@/lib/commercial/useEffectiveCommercialCompany';
 import { useCommercialCompanies } from '@/lib/hooks/useCommercialCompanies';
 import { usePlatformLeads } from '@/lib/hooks/usePlatformLeads';
 import { usePlatformPipelineStages } from '@/lib/hooks/usePlatformPipelineStages';
@@ -76,10 +76,8 @@ export function PlatformCommercialClientsView({ userId, platformRole }: Platform
   // simultâneas (Company A no contexto operacional + Company B no
   // comercial). Fora do contexto operacional, comportamento 100%
   // preservado (seletor manual, como sempre).
-  const operational = useOperationalCompanyContext();
-  const isOperationalMode = operational.mode === 'super_admin';
+  const { companyId: selectedCompanyId, isOperationalMode } = useEffectiveCommercialCompany();
   const commercial = useCommercialCompanyContext();
-  const selectedCompanyId = isOperationalMode ? operational.companyId : commercial.selectedCompanyId;
   const setSelectedCompanyId = commercial.setSelectedCompanyId;
   const companiesQuery = useCommercialCompanies({ userId, authorized: true });
   const stagesQuery = usePlatformPipelineStages({ companyId: selectedCompanyId, authorized: true });

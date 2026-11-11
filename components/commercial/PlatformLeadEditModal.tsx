@@ -18,7 +18,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { LBtn } from '@/components/ui/kit';
 import { FField, FlowShell, Segmented } from '@/components/flows/FlowsShared';
-import { useCommercialCompanyContext } from '@/lib/commercial/CommercialCompanyContext';
+import { useEffectiveCommercialCompany } from '@/lib/commercial/useEffectiveCommercialCompany';
 import { useUpdatePlatformLead } from '@/lib/hooks/useUpdatePlatformLead';
 import { useCheckPlatformLeadPhoneDuplicate } from '@/lib/hooks/useCheckPlatformLeadPhoneDuplicate';
 import { getPlatformCommercialErrorMessage } from '@/lib/commercial/errors';
@@ -41,7 +41,7 @@ export type PlatformLeadEditModalProps = {
 };
 
 export function PlatformLeadEditModal({ lead, company, onClose, onUpdated }: PlatformLeadEditModalProps) {
-  const { selectedCompanyId } = useCommercialCompanyContext();
+  const { companyId: selectedCompanyId } = useEffectiveCommercialCompany();
 
   const liveCompanyIdRef = useRef(selectedCompanyId);
   useEffect(() => { liveCompanyIdRef.current = selectedCompanyId; }, [selectedCompanyId]);

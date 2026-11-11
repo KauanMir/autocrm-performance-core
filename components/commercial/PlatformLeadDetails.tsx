@@ -24,7 +24,7 @@ import { useAssignPlatformLeadSeller } from '@/lib/hooks/useAssignPlatformLeadSe
 import { useArchivePlatformLead } from '@/lib/hooks/useArchivePlatformLead';
 import { useUnarchivePlatformLead } from '@/lib/hooks/useUnarchivePlatformLead';
 import { useAddPlatformLeadTimelineEntry } from '@/lib/hooks/useAddPlatformLeadTimelineEntry';
-import { useCommercialCompanyContext } from '@/lib/commercial/CommercialCompanyContext';
+import { useEffectiveCommercialCompany } from '@/lib/commercial/useEffectiveCommercialCompany';
 import { getPlatformCommercialErrorMessage } from '@/lib/commercial/errors';
 import { formatLeadAssignmentLabel, resolveLeadStageName } from '@/lib/commercial/leadDisplay';
 import type { PlatformLeadRow, PlatformPipelineStageRow } from '@/lib/commercial/repository';
@@ -78,7 +78,7 @@ export function PlatformLeadDetails({
   // mesmo padrão já usado por PlatformLeadCreateModal/PlatformLeadEditModal
   // (liveCompanyIdRef), estendido com contextEpoch para cobrir também uma
   // troca A->B->A enquanto uma mutation está pendente.
-  const { selectedCompanyId, contextEpoch } = useCommercialCompanyContext();
+  const { companyId: selectedCompanyId, contextEpoch } = useEffectiveCommercialCompany();
   const liveCompanyIdRef = useRef(selectedCompanyId);
   const liveContextEpochRef = useRef(contextEpoch);
   useEffect(() => { liveCompanyIdRef.current = selectedCompanyId; }, [selectedCompanyId]);

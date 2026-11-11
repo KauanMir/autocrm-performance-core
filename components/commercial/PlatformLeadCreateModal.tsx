@@ -17,7 +17,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { LBtn } from '@/components/ui/kit';
 import { FField, FlowShell, Segmented } from '@/components/flows/FlowsShared';
-import { useCommercialCompanyContext } from '@/lib/commercial/CommercialCompanyContext';
+import { useEffectiveCommercialCompany } from '@/lib/commercial/useEffectiveCommercialCompany';
 import { usePlatformSellers } from '@/lib/hooks/usePlatformSellers';
 import { useCreatePlatformLead } from '@/lib/hooks/useCreatePlatformLead';
 import { useCheckPlatformLeadPhoneDuplicate } from '@/lib/hooks/useCheckPlatformLeadPhoneDuplicate';
@@ -40,7 +40,7 @@ export type PlatformLeadCreateModalProps = {
 };
 
 export function PlatformLeadCreateModal({ company, onClose, onCreated }: PlatformLeadCreateModalProps) {
-  const { selectedCompanyId } = useCommercialCompanyContext();
+  const { companyId: selectedCompanyId } = useEffectiveCommercialCompany();
 
   // Valor SEMPRE atualizado da empresa selecionada, lido de dentro de um
   // submit() assíncrono (closure) sem depender de re-render — mesmo

@@ -20,6 +20,13 @@ vi.mock('@/lib/commercial/CommercialCompanyContext', () => ({
   }),
 }));
 
+// Fora de /company/[id]: o seletor manual continua sendo a autoridade.
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: () => ({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  }),
+}));
+
 vi.mock('@/lib/hooks/usePlatformSellers', () => ({
   usePlatformSellers: () => ({
     queryEnabled: true, sellers: m.sellers.current, isLoading: false, isFetching: false,

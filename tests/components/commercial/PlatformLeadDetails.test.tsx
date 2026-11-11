@@ -35,6 +35,13 @@ vi.mock('@/lib/commercial/CommercialCompanyContext', () => ({
   }),
 }));
 
+// Fora de /company/[id]: o seletor manual continua sendo a autoridade.
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: () => ({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  }),
+}));
+
 const SELLERS: PlatformSellerRow[] = [
   { seller_id: 'seller-1', name: 'Vendedor Um' },
   { seller_id: 'seller-2', name: 'Vendedor Dois' },

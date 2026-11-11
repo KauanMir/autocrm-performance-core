@@ -20,6 +20,13 @@ vi.mock('@/lib/commercial/CommercialCompanyContext', () => ({
   }),
 }));
 
+// Fora de /company/[id]: o seletor manual continua sendo a autoridade.
+vi.mock('@/lib/operational/OperationalCompanyContext', () => ({
+  useOperationalCompanyContext: () => ({
+    mode: 'none', companyId: null, identity: { status: 'unavailable' }, isReadOnly: false,
+  }),
+}));
+
 vi.mock('@/lib/hooks/useUpdatePlatformLead', () => ({
   useUpdatePlatformLead: () => ({
     updateLead: m.updateLeadMock, isPending: false, isError: false, isSuccess: false, error: null, reset: vi.fn(),
