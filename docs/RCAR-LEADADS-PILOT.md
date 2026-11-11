@@ -241,3 +241,36 @@ Consequência para o checklist: o critério "criar e arquivar lead de teste pela
 da OP-2 só pode ser comprovado depois do deploy desta branch (OP-5). Até lá, Super Admin
 cria leads pelo seletor manual da área global ("Clientes" fora de `/company/[id]`), se
 necessário. Manager/Seller usam outro fluxo e não são afetados.
+
+## 2026-11-10 — OP-3 aplicada em produção (`20261109100000`, grants)
+
+Autorizada pelo dono somente a OP-3. Aplicada às 21:39 BRT pelo `aplicar-migration.ps1`
+(SHA-256 `81CC205C…`, conexão direta, sem pooler, bans de IPv4 0 → 0, dry-run final sem
+pendências). OP-4, deploy e ativações não foram executados.
+
+**Antes:** produção com 83 migrations e hash idêntico ao ensaio; schema, políticas,
+funções, donos, ACLs e dados iguais à restauração do backup OP-1 + OP-2 (`sql/07`).
+Diferenças de comparação explicadas e descartadas: dono `supabase_admin` dos objetos da
+OP-2 no ensaio (a CLI usa `postgres`), `uid()` × `auth.uid()` pelo `search_path` e
+parênteses de constraints do `pg_dump`. Backup OP-1 (DPAPI) e cópia GPG do Drive com
+SHA-256 conferido. Ensaio restauração + OP-2 + OP-3: 12/12; contrato 85 de 21 falhas
+para 0; nenhuma asserção pgTAP nova falhando, 59 corrigidas. Código `9c11545` contra o
+schema 84 real (PostgREST/Auth/Postgres): 7 arquivos / 41 testes de integração PASS.
+Revisão: o código publicado só lê `profiles` (5 colunas) e `companies` pela sessão,
+`invites.delivery_status` e `profiles.id` pela service role; as 23 RPCs do servidor são
+SECURITY DEFINER; políticas RLS e do Storage só usam `companies` (SELECT mantido) e
+helpers SECURITY DEFINER.
+
+**Depois:** 84 migrations; `sql/06` all_pass; `sql/08` produção = ensaio 84 (19/19,
+dados idênticos); `sql/09` (simulação de cada membro, Super Admin e anon): 0 linhas de
+outra empresa, anon 0 linhas, mesmos números do ensaio. Única mudança visível: `sellers`
+(e `companies`/`profiles` para anon) passa de "0 linhas pela RLS" para "negado pela
+permissão". Logs: Postgres sem `permission denied`; Vercel 0 avisos/erros; cron Lead Ads
+21:40 e 21:45 sem erro de infraestrutura. CRM (Super Admin): Empresas, Home, Clientes,
+Em progresso, Ajustes, Usuários/Convites, logo, diagnósticos Meta e WhatsApp OK.
+
+Observações sem relação com a OP-3: o pódio da TEST COMPANY responde `forbidden` porque
+a RPC exige empresa `ativa` (mesmo comportamento antes, confirmado no ensaio); a Graph
+API recusa listar formulários da Página de teste (HTTP 403, código 200), assunto de
+permissão na Meta. Login real de Manager/Seller não foi feito (sem credenciais); o
+acesso deles foi comprovado pela simulação no banco.
