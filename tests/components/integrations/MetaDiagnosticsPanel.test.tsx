@@ -154,6 +154,36 @@ describe('MetaDiagnosticsPanel — chamada e renderização', () => {
     expect(screen.getByText(/Formulários acessíveis: Não/)).toBeInTheDocument();
   });
 
+  it('recusa por permissão (código 200) em leadgen_forms vira observação, não erro', async () => {
+    respond({
+      ...okBody,
+      leadgenFormsAccessible: false,
+      formsCount: null,
+      formsCountTruncated: null,
+      smokeFormAccessible: null,
+      smokeFormActive: null,
+      graphErrors: {
+        leadgenForms: { kind: 'http', httpStatus: 403, graphCode: 200, graphType: 'OAuthException' },
+      },
+    });
+    render(<MetaDiagnosticsPanel companyId={TEST_COMPANY} />);
+    await runDiagnostics();
+    await waitFor(() => expect(screen.getByText(/Formulários acessíveis: Não verificável \(exige pages_manage_ads/)).toBeInTheDocument());
+    expect(screen.queryByTestId('meta-diagnostics-graph-error-leadgenForms')).toBeNull();
+  });
+
+  it('código 200 em outra chamada continua aparecendo como erro', async () => {
+    respond({
+      ...okBody,
+      graphErrors: {
+        pageIdentity: { kind: 'http', httpStatus: 403, graphCode: 200, graphType: 'OAuthException' },
+      },
+    });
+    render(<MetaDiagnosticsPanel companyId={TEST_COMPANY} />);
+    await runDiagnostics();
+    await waitFor(() => expect(screen.getByTestId('meta-diagnostics-graph-error-pageIdentity')).toBeInTheDocument());
+  });
+
   it('descarta campos fora do catálogo (nada bruto chega ao DOM)', async () => {
     respond({
       ...okBody,

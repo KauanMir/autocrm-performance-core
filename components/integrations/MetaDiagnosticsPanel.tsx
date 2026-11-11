@@ -38,6 +38,13 @@ function yesNo(value: boolean | null, yes = 'Sim', no = 'Não'): string {
   return value === null ? 'Não verificado' : value ? yes : no;
 }
 
+// Listar formulários (GET {page}/leadgen_forms) exige pages_manage_ads, que o app não
+// pede: o fluxo de leads só usa o webhook e GET {lead}. A recusa por permissão (código
+// 200) não indica defeito na conexão; vira observação, não erro.
+function isFormsPermissionOnly(failure: DiagnosticGraphFailure | undefined): boolean {
+  return failure?.kind === 'http' && failure.graphCode === 200;
+}
+
 function failureLabel(failure: DiagnosticGraphFailure): string {
   const parts = [`tipo ${failure.kind}`];
   if (failure.httpStatus !== undefined) parts.push(`HTTP ${failure.httpStatus}`);
@@ -105,14 +112,16 @@ export function MetaDiagnosticsPanel({ companyId }: { companyId: string }) {
           <span>Página: {statusLabel(state.report.pageIdentity)}</span>
           <span>App inscrito: {yesNo(state.report.appSubscribed)}</span>
           <span>leadgen inscrito: {yesNo(state.report.leadgenSubscribed)}</span>
-          <span>Formulários acessíveis: {yesNo(state.report.leadgenFormsAccessible)}</span>
+          <span>Formulários acessíveis: {isFormsPermissionOnly(state.report.graphErrors.leadgenForms) ? 'Não verificável (exige pages_manage_ads, que o fluxo de leads não usa)' : yesNo(state.report.leadgenFormsAccessible)}</span>
           {state.report.formsCount !== null && (
             <span>Formulários encontrados: {state.report.formsCount}{state.report.formsCountTruncated ? ' (lista truncada)' : ''}</span>
           )}
           <span>Formulário smoke: {state.report.smokeFormAccessible === null ? 'Não verificado' : !state.report.smokeFormAccessible ? 'Não encontrado' : state.report.smokeFormActive ? 'Ativo' : 'Inativo'}</span>
           <span>Graph: {state.report.graphVersion}</span>
           <span>Modo do app: Verificar manualmente</span>
-          {(Object.entries(state.report.graphErrors) as [string, DiagnosticGraphFailure][]).map(([key, failure]) => (
+          {(Object.entries(state.report.graphErrors) as [string, DiagnosticGraphFailure][])
+            .filter(([key, failure]) => !(key === 'leadgenForms' && isFormsPermissionOnly(failure)))
+            .map(([key, failure]) => (
             <span key={key} data-testid={`meta-diagnostics-graph-error-${key}`} style={{ color: 'var(--red)' }}>
               Erro Graph ({key}): {failureLabel(failure)}
             </span>
