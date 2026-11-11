@@ -299,3 +299,21 @@ RCAR sem função no app prova se o acesso funciona; se não, nada é gravado.
 Teste `62_podium…`: falhava conforme o horário (fixtures de até 10 dias caíam no mês
 anterior); corrigido. Variáveis da Vercel: todas só em Production; o código desta branch lê
 exatamente o mesmo conjunto que o `9c11545`. Suíte 401 arquivos / 6886 testes; tsc 0.
+
+## 2026-11-10/11 — OP-5 publicada (deploy de `3f60f1a`)
+
+Branch enviada ao GitHub em `3f60f1a`; Preview gerado às 22:28 BRT (sucesso) e Production
+às 22:37 BRT (sucesso). Painel da Vercel: deployment de produção atual = `3f60f1a`, Ready.
+Nenhuma migration, variável de ambiente ou configuração Meta alterada nesta etapa.
+
+Verificação pós-deploy (11/11, 00:25–00:50 BRT):
+- `crm.assessoriakapa.com.br` responde 200; GET do webhook com token fictício → 403
+  (`verify rejected`), como esperado.
+- Cron `meta-leadgen-sweep` a cada 5 min desde o deploy: 0 tentativas, 0 falhas, 0 erros
+  de infraestrutura. Logs de runtime da janela: 11 info, 0 warning, 0 error, 0 fatal.
+- "Novo Lead" do Super Admin dentro de `/company/[id]` (RCAR Seminovos Gama): o modal abre
+  com a empresa da URL. Cancelado sem salvar — nenhum dado criado em produção.
+
+Pendente: criar+arquivar lead pela tela (escrita em produção, precisa de autorização);
+habilitar a RCAR e conectar a Página dela (gestor sem função no app) — isso prova também o
+acesso avançado "Inativo — Verificação necessária"; lead controlado F1.
