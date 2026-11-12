@@ -24,7 +24,10 @@ param(
   [switch] $Clean,
   # Print the description of each failing pgTAP assertion (never diagnostics,
   # which may echo row values).
-  [switch] $ShowFailures
+  [switch] $ShowFailures,
+  # Negative control for the isolation check: disables RLS on public.leads in the
+  # disposable container first, so the isolation check MUST fail.
+  [switch] $IsolationNegativeControl
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Security
@@ -191,6 +194,55 @@ insert into public.leads (company_id, name, phone, car, stage_id)
 rollback;
 "@
   Check 'lead insert with the phone-class lock trigger works on restored data (rolled back)' $synthetic.ok $synthetic.error
+
+  if (-not $Clean) {
+    # Company isolation, behaviourally, on the restored (and migrated) data: every active,
+    # non-Super-Admin profile with exactly one active membership, acting as 'authenticated',
+    # must see zero rows of another company in EVERY public table that has a company_id
+    # column and is readable by the app. Output: aggregate counts only.
+    if ($IsolationNegativeControl) {
+      Write-Output 'NEGATIVE CONTROL: RLS disabled on public.leads; the isolation check must FAIL'
+      Query 'alter table public.leads disable row level security' | Out-Null
+    }
+    $iso = Query @'
+create temp table iso_result (users int, tables int, leaks bigint, companies_with_leads int);
+do $iso$
+declare u record; t record; v bigint; tot bigint := 0; n int := 0; nt int := 0;
+begin
+  select count(*) into nt
+    from information_schema.columns col join pg_class c on c.relname = col.table_name and c.relnamespace = 'public'::regnamespace
+   where col.table_schema = 'public' and col.column_name = 'company_id' and c.relkind in ('r', 'v', 'p')
+     and has_table_privilege('authenticated', c.oid, 'SELECT');
+  for u in
+    select p.id, min(cm.company_id::text)::uuid as company_id
+      from public.profiles p join public.company_memberships cm on cm.profile_id = p.id and cm.is_active
+     where p.is_active and p.platform_role is distinct from 'super_admin'
+     group by p.id having count(*) = 1
+  loop
+    for t in
+      select c.oid::regclass as rel
+        from information_schema.columns col join pg_class c on c.relname = col.table_name and c.relnamespace = 'public'::regnamespace
+       where col.table_schema = 'public' and col.column_name = 'company_id' and c.relkind in ('r', 'v', 'p')
+         and has_table_privilege('authenticated', c.oid, 'SELECT')
+    loop
+      perform set_config('request.jwt.claims', json_build_object('sub', u.id, 'role', 'authenticated')::text, true);
+      perform set_config('request.jwt.claim.sub', u.id::text, true);
+      execute 'set local role authenticated';
+      execute format('select count(*) from %s where company_id is distinct from $1', t.rel) into v using u.company_id;
+      execute 'reset role';
+      tot := tot + v;
+    end loop;
+    n := n + 1;
+  end loop;
+  insert into iso_result values (n, nt, tot, (select count(distinct company_id) from public.leads));
+end
+$iso$;
+select users || ',' || tables || ',' || leaks || ',' || companies_with_leads from iso_result;
+'@
+    $isoParts = ($iso -split "`n" | Select-Object -Last 1) -split ','
+    Check 'company isolation: no member sees another company''s rows (all company_id tables)' ([int]$isoParts[0] -gt 0 -and [int]$isoParts[1] -gt 0 -and [long]$isoParts[2] -eq 0 -and [int]$isoParts[3] -ge 2) ("users={0} tables={1} leaks={2} companies_with_leads={3}" -f $isoParts[0], $isoParts[1], $isoParts[2], $isoParts[3])
+    Write-Output ("INFO  isolation: users={0} tables={1} leaks={2} companies_with_leads={3}" -f $isoParts[0], $isoParts[1], $isoParts[2], $isoParts[3])
+  }
 
   # ── pgTAP contracts (each file rolls back) ───────────────────────────────────
   # Most files assume the seed users and an otherwise empty database, so on real

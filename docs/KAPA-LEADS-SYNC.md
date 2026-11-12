@@ -106,7 +106,19 @@ sincronização 27/27; ponta a ponta real 9/9 (LP 201 com o CRM parado); `tsc` 0
 CRM produção: 85 migrations (última `20261109110000`), nenhuma tabela `kapa_leads_*`. As LPs não perguntam o
 veículo de interesse (Duelo tem `tradeInVehicle` = veículo **na troca**): `vehicle_form_key` fica vazio.
 
-## 7. Publicação — operações de produção (cada uma precisa da sua autorização; nada disto foi feito)
+## 7. Publicação — operações de produção (cada uma precisa da sua autorização)
+
+**Situação em 2026-11-12:** P1 **concluída e aprovada** (autorizada pelo dono). P2–P10 não feitas.
+
+P1 — backup do KAPA Leads (`scjkyzdagwkscuxydgld`), 2026-11-12T20:01Z:
+- 20/20 verificações; contagens idênticas antes/depois (2 lojas, 823 leads, 9 usuários, 10 migrations); 0 bans de IP.
+- Restauração em contêiner sem rede: PASS (contagens, md5 do histórico, RLS em todas as tabelas, grants,
+  funções LGPD, gatilhos de auth, job do cron; 7 usuários sem ver lead de outra loja; controle negativo detecta vazamento).
+- Cópia externa GPG AES-256 no Google Drive (conta contato, `KAPA CRM/Backups/KAPA Leads/2026-11-12`, privada);
+  senha só no Bitwarden ("KAPA Leads — Backup produção 2026-11-12 (GPG)"). Os 3 arquivos baixados do Drive têm o
+  mesmo SHA-256 dos originais, e a senha copiada do Bitwarden decifra a cópia do Drive sem o DPAPI local (PASS).
+- Ensaio do CRM (`scripts/db/rehearse-restore-migrations.ps1`) ganhou o teste de isolamento entre empresas por
+  comportamento (todas as tabelas com `company_id` legíveis pelo app) e `-IsolationNegativeControl`.
 
 | # | Operação | Sistema | Efeito para o atendimento |
 |---|---|---|---|
