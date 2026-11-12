@@ -4,6 +4,8 @@ Atualizado em 2026-11-06. Objetivo: centralizar implementação e validação no
 
 ## Estado atual confirmado
 
+**2026-11-12 — P2 (backup do CRM de produção) concluída: 17/17, restauração isolada PASS com 86+87 na cópia, rollback provado com esquema idêntico; 86 ganhou lock_timeout 5 s. P3 pronta, aguarda autorização.**
+
 **2026-11-12 — P1 (backup do KAPA Leads de produção) concluída e aprovada.** Backup 20/20, restauração isolada PASS (inclusive isolamento entre lojas), cópia GPG no Google Drive privada com hashes conferidos e senha no Bitwarden comprovada. Ensaio do CRM com teste de isolamento entre empresas por comportamento (7 usuários, 9 tabelas, 0 vazamentos; controle negativo 59). P2 pronta, aguarda autorização. Detalhes: docs/KAPA-LEADS-SYNC.md §7.
 
 **2026-11-12 — KAPA Leads → CRM: auditoria final + LGPD + kit de liberação, só local.** Correções na 86 (item fora do contrato não trava a loja; ordem da página; recuperação de cursor), nova migration local 20261111130000 (eliminação LGPD no CRM, docs/LGPD-ELIMINACAO.md). pgTAP 88/4827, Meta 9/92, ponta a ponta 9/9. IDs RCAR/Vitrine lidos em produção (somente leitura) em docs/KAPA-LEADS-SYNC.md §6. Kit de backup/restauração dos dois sistemas ensaiado localmente: C:/Users/jaque/Documents/KAPA-Leads-CRM-Liberacao. Suíte completa 403 arquivos / 6921 PASS; tsc 0. Ensaio de aplicação 86/87 + rollback em banco com o histórico de produção: PASS. Produção intocada (CRM 85 migrations).

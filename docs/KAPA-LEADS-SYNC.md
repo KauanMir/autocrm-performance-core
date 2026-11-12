@@ -108,7 +108,23 @@ veículo de interesse (Duelo tem `tradeInVehicle` = veículo **na troca**): `veh
 
 ## 7. Publicação — operações de produção (cada uma precisa da sua autorização)
 
-**Situação em 2026-11-12:** P1 **concluída e aprovada** (autorizada pelo dono). P2–P10 não feitas.
+**Situação em 2026-11-12:** P1 e P2 **concluídas** (autorizadas pelo dono). P3–P10 não feitas.
+
+P2 — backup do CRM (`qglirrsyhdfbgkmchwcw`), 2026-11-12T23:38Z, pasta `.codex/backups/crm-20261112T233849Z`:
+- 17/17; contagens idênticas antes/depois (4 empresas, 17 leads, 8 usuários, 2 eventos Meta, 83 timeline);
+  85 migrations, md5 `ed4994…f8ff8`; 0 bans antes e depois; sem Vault, cron ou gatilhos em auth.
+- Restauração isolada PASS com 86+87 aplicadas só na cópia; isolamento entre empresas 7 usuários / 9 tabelas /
+  0 vazamentos; `03-pos-87` all_pass; checagens estruturais do `02-pos-86` todas verdadeiras.
+- pgTAP comparado com a linha de base sem 86/87: nenhuma regressão (a única diferença, `60_company_identity_logo_r1`,
+  foi intermitente e passou 77/77 em 4 repetições na cópia migrada).
+- Rollback 87→86 na cópia real: volta a 85 migrations, mesmo md5, mesmas contagens e esquema+grants idênticos
+  à restauração limpa (pg_dump de public/private/auth/storage: 0 diferenças).
+- Cópia GPG no Google Drive `KAPA CRM/Backups/CRM/2026-11-12` (privada; hashes do download iguais).
+
+P3 — correção de disponibilidade feita na preparação: a 86 começa com `set lock_timeout = '5s'` (o ALTER em
+`lead_form_submissions`, gravada pelo Meta Lead Ads, desiste em 5 s e volta inteira em vez de travar a fila).
+Provado com trava simulada (desistiu em 5,1 s, nada aplicado; sem trava, aplicou) e pelo caminho real da CLI
+(`aplicar-migration.ps1 -TestDbUrl` em banco local com as 85 migrations da produção, tabelas com dono `postgres`).
 
 P1 — backup do KAPA Leads (`scjkyzdagwkscuxydgld`), 2026-11-12T20:01Z:
 - 20/20 verificações; contagens idênticas antes/depois (2 lojas, 823 leads, 9 usuários, 10 migrations); 0 bans de IP.

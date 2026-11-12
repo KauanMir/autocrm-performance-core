@@ -15,6 +15,11 @@
 -- 5. Falhas ficam visíveis (fila de revisão), com nova tentativa controlada; nada é descartado em silêncio.
 --
 -- Nenhum vínculo é criado aqui. Nenhuma linha é criada.
+--
+-- Disponibilidade: o ALTER em lead_form_submissions (gravada pelo Meta Lead Ads) pede trava
+-- exclusiva. Com lock_timeout, se houver transação longa na tabela a migration desiste em 5 s e
+-- volta inteira (nada aplicado), em vez de ficar na fila travando as gravações atrás dela.
+set lock_timeout = '5s';
 
 -- ═══ 1. vínculo loja → empresa ══════════════════════════════════════════
 
