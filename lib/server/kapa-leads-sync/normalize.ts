@@ -1,7 +1,7 @@
 // lib/server/kapa-leads-sync/normalize.ts — lead do KAPA Leads → item da fila do CRM. SERVER-ONLY.
 // Sem efeitos: só monta o payload validado depois no banco (kapa_leads_payload_valid).
 // Respostas no formato de lead_form_answers_valid: [{ key (1..100), values: [1..1000] (1..10) }], ≤ 50.
-import type { ExportedLead } from './client';
+import type { ExportedLead, PageItem, RejectedLead } from './client';
 
 export const SOURCE_SUFFIX = ' (KAPA Leads)';
 const MAX_ANSWERS = 50;
@@ -14,13 +14,19 @@ export type IngestItem = {
   source_campaign_name: string;
   source_created_at: string;
   store_id: string;
-  payload: {
-    contact: { name: string; phone: string; email: string | null };
-    vehicle: string | null;
-    answers: { key: string; values: string[] }[];
-    source_label: string;
-  };
+  // Vazio = lead fora do contrato: o banco grava como falha 'invalid_payload' (revisão manual).
+  payload: IngestPayload | Record<string, never>;
 };
+
+export type IngestPayload = {
+  contact: { name: string; phone: string; email: string | null };
+  vehicle: string | null;
+  answers: { key: string; values: string[] }[];
+  source_label: string;
+};
+
+export const UNKNOWN_CAMPAIGN_SLUG = 'campanha-nao-identificada';
+export const UNKNOWN_CAMPAIGN_NAME = 'Campanha não identificada';
 
 const money = (cents: number) =>
   (cents / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
@@ -135,4 +141,21 @@ export function toIngestItem(lead: ExportedLead, vehicleFormKey: string | null):
       source_label: sourceLabel(lead),
     },
   };
+}
+
+/** Lead fora do contrato: só identificação, sem dados pessoais; o banco grava como falha visível. */
+export function toRejectedIngestItem(lead: RejectedLead): IngestItem {
+  return {
+    source_lead_id: lead.id,
+    source_campaign_id: lead.campaign.id,
+    source_campaign_slug: lead.campaign.slug ?? UNKNOWN_CAMPAIGN_SLUG,
+    source_campaign_name: lead.campaign.name ?? UNKNOWN_CAMPAIGN_NAME,
+    source_created_at: lead.createdAt,
+    store_id: lead.storeId,
+    payload: {},
+  };
+}
+
+export function toPageIngestItem(item: PageItem, vehicleFormKey: string | null): IngestItem {
+  return item.kind === 'lead' ? toIngestItem(item.lead, vehicleFormKey) : toRejectedIngestItem(item.lead);
 }

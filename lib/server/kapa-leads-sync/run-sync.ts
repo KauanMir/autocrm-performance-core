@@ -11,7 +11,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { KapaLeadsSyncConfig } from './env';
 import { fetchLeadsCount, fetchLeadsPage, PAGE_LIMIT, type Cursor } from './client';
-import { toIngestItem } from './normalize';
+import { toPageIngestItem } from './normalize';
 
 export const MAX_PAGES_PER_LINK = 5;
 export const PROCESS_BATCH = 25;
@@ -85,7 +85,7 @@ export async function runKapaLeadsSync(input: {
         break;
       }
 
-      const items = result.items.map((lead) => toIngestItem(lead, link.vehicle_form_key));
+      const items = result.items.map((item) => toPageIngestItem(item, link.vehicle_form_key));
       const { data, error } = await supabase.rpc('kapa_leads_ingest_page', {
         p_link_id: link.link_id,
         p_expected_cursor_created_at: cursor.createdAt,

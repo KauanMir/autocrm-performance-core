@@ -15,6 +15,7 @@ drop function if exists public.kapa_leads_review_list(uuid, integer);
 drop function if exists public.kapa_leads_sync_health(uuid);
 drop function if exists public.kapa_leads_link_set_enabled(uuid, uuid, boolean);
 drop function if exists public.kapa_leads_link_upsert(uuid, uuid, text, text);
+drop function if exists public.kapa_leads_link_rewind(uuid, timestamptz);
 drop function if exists public.kapa_leads_record_reconciliation(uuid, timestamptz, timestamptz, integer);
 drop function if exists public.kapa_leads_purge_expired();
 drop function if exists public.kapa_leads_process_pending(integer);

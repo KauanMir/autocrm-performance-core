@@ -37,8 +37,21 @@ export type ExportedLead = {
   cpfCooldownUntil: string | null;
 };
 
+/**
+ * Identificação mínima de um lead fora do contrato (o resto não é confiável). Entra na fila do CRM
+ * como falha visível ('invalid_payload') para revisão manual, sem travar os leads seguintes.
+ */
+export type RejectedLead = {
+  id: string;
+  storeId: string;
+  createdAt: string;
+  campaign: { id: string; slug: string | null; name: string | null };
+};
+
+export type PageItem = { kind: 'lead'; lead: ExportedLead } | { kind: 'rejected'; lead: RejectedLead };
+
 export type FetchPageResult =
-  | { ok: true; items: ExportedLead[]; nextCursor: Cursor | null; hasMore: boolean }
+  | { ok: true; items: PageItem[]; nextCursor: Cursor | null; hasMore: boolean }
   | { ok: false; code: string };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -102,6 +115,20 @@ export function parseExportedLead(value: unknown): ExportedLead | null {
   };
 }
 
+/**
+ * Envelope: id, loja, data e campanha. Sem ele o item não pode ser ordenado nem atribuído a uma
+ * empresa, e a página inteira é recusada. Com ele, um conteúdo fora do contrato vira falha visível.
+ */
+export function parseEnvelope(value: unknown): RejectedLead | null {
+  if (!isObject(value)) return null;
+  const { id, storeId, createdAt, campaign } = value;
+  if (!isStr(id) || !UUID.test(id) || !isStr(storeId) || !UUID.test(storeId) || !isTs(createdAt)) return null;
+  if (!isObject(campaign) || !isStr(campaign.id) || !UUID.test(campaign.id)) return null;
+  const slug = isStr(campaign.slug, 64) && SLUG.test(campaign.slug) ? campaign.slug : null;
+  const name = isStr(campaign.name, 150) && campaign.name.trim() ? campaign.name.trim() : null;
+  return { id, storeId, createdAt, campaign: { id: campaign.id, slug, name } };
+}
+
 export async function fetchLeadsPage(input: {
   config: KapaLeadsSyncConfig;
   storeId: string;
@@ -150,13 +177,15 @@ export async function fetchLeadsPage(input: {
     return { ok: false, code: 'source_invalid_body' };
   }
   if (body.items.length > limit) return { ok: false, code: 'source_invalid_body' };
-  const items: ExportedLead[] = [];
+  const items: PageItem[] = [];
   for (const raw of body.items) {
+    // Sem envelope válido a página inteira é recusada: nada é gravado pela metade.
+    const envelope = parseEnvelope(raw);
+    if (!envelope) return { ok: false, code: 'source_invalid_item' };
+    if (envelope.storeId !== storeId) return { ok: false, code: 'source_store_mismatch' };
     const lead = parseExportedLead(raw);
-    // Um item fora do contrato invalida a página inteira: nada é gravado pela metade.
-    if (!lead) return { ok: false, code: 'source_invalid_item' };
-    if (lead.storeId !== storeId) return { ok: false, code: 'source_store_mismatch' };
-    items.push(lead);
+    // Conteúdo fora do contrato: entra como falha visível e o cursor segue (nunca trava a loja).
+    items.push(lead ? { kind: 'lead', lead } : { kind: 'rejected', lead: envelope });
   }
   let nextCursor: Cursor | null = null;
   if (body.nextCursor !== null) {
@@ -165,11 +194,29 @@ export async function fetchLeadsPage(input: {
     nextCursor = { createdAt: c.createdAt, id: c.id };
   }
   if ((items.length === 0) !== (nextCursor === null)) return { ok: false, code: 'source_invalid_body' };
-  const last = items.at(-1);
+  const last = items.at(-1)?.lead;
   if (last && nextCursor && (last.id !== nextCursor.id || last.createdAt !== nextCursor.createdAt)) {
     return { ok: false, code: 'source_invalid_body' };
   }
+  // A ordem (createdAt, id) precisa ser estritamente crescente e depois do cursor.
+  let previous = cursor;
+  for (const item of items) {
+    if (!isAfter(item.lead, previous)) return { ok: false, code: 'source_invalid_order' };
+    previous = item.lead;
+  }
   return { ok: true, items, nextCursor, hasMore: body.hasMore };
+}
+
+/** (createdAt, id) estritamente depois do cursor, comparando o instante e depois o UUID. */
+export function isAfter(item: Cursor, cursor: Cursor): boolean {
+  const a = Date.parse(item.createdAt);
+  const b = Date.parse(cursor.createdAt);
+  const micros = (ts: string) => (/\.(\d{1,6})/.exec(ts)?.[1] ?? '').padEnd(6, '0');
+  if (a !== b) return a > b;
+  const ma = micros(item.createdAt);
+  const mb = micros(cursor.createdAt);
+  if (ma !== mb) return ma > mb;
+  return item.id > cursor.id;
 }
 
 export const COUNT_PATH = '/api/integrations/crm/leads/count';

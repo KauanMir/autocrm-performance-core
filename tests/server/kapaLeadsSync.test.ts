@@ -5,8 +5,8 @@ import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { readKapaLeadsSyncConfig } from '@/lib/server/kapa-leads-sync/env';
 import { signatureMessage, signedHeaders } from '@/lib/server/kapa-leads-sync/signature';
-import { fetchLeadsPage, parseExportedLead, type ExportedLead } from '@/lib/server/kapa-leads-sync/client';
-import { buildAnswers, normalizePhone, toIngestItem } from '@/lib/server/kapa-leads-sync/normalize';
+import { fetchLeadsPage, isAfter, parseExportedLead, type ExportedLead } from '@/lib/server/kapa-leads-sync/client';
+import { buildAnswers, normalizePhone, toIngestItem, toPageIngestItem } from '@/lib/server/kapa-leads-sync/normalize';
 import { runKapaLeadsSync } from '@/lib/server/kapa-leads-sync/run-sync';
 
 const SECRET = 'k'.repeat(40);
@@ -108,11 +108,49 @@ describe('fetchLeadsPage', () => {
     expect(await fetchLeadsPage({ config: CONFIG, storeId: STORE, cursor: CURSOR, fetchImpl: hang, timeoutMs: 5 })).toEqual({ ok: false, code: 'source_timeout' });
   });
 
-  it('rejects the whole page when any item is off-contract or from another store', async () => {
+  it('rejects the whole page when an item cannot be identified or is from another store', async () => {
     const bad = (async () => okResponse([exported(), { ...exported(), id: 'not-a-uuid' }])) as unknown as typeof fetch;
     expect(await fetchLeadsPage({ config: CONFIG, storeId: STORE, cursor: CURSOR, fetchImpl: bad })).toEqual({ ok: false, code: 'source_invalid_item' });
+    const noDate = (async () => okResponse([{ ...exported(), createdAt: 'ontem' }])) as unknown as typeof fetch;
+    expect(await fetchLeadsPage({ config: CONFIG, storeId: STORE, cursor: CURSOR, fetchImpl: noDate })).toEqual({ ok: false, code: 'source_invalid_item' });
     const other = (async () => okResponse([exported({ storeId: '22222222-2222-4222-8222-222222222222' })])) as unknown as typeof fetch;
     expect(await fetchLeadsPage({ config: CONFIG, storeId: STORE, cursor: CURSOR, fetchImpl: other })).toEqual({ ok: false, code: 'source_store_mismatch' });
+  });
+
+  it('keeps an identifiable off-contract item as a rejected item without PII, so the store never stalls', async () => {
+    const odd = { ...exported({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000002', createdAt: '2026-11-11T14:31:00+00:00' }),
+      formData: { nested: { a: 1 } }, campaign: { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', slug: 'Bad Slug', name: '' } };
+    const fetchImpl = (async () => okResponse([exported(), odd])) as unknown as typeof fetch;
+    const result = await fetchLeadsPage({ config: CONFIG, storeId: STORE, cursor: CURSOR, fetchImpl });
+    expect(result.ok).toBe(true);
+    if (!('items' in result)) throw new Error('expected page');
+    expect(result.items.map((i) => i.kind)).toEqual(['lead', 'rejected']);
+    expect(result.nextCursor).toEqual({ createdAt: '2026-11-11T14:31:00+00:00', id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000002' });
+    const item = toPageIngestItem(result.items[1], null);
+    expect(item).toEqual({
+      source_lead_id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000002', source_campaign_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      source_campaign_slug: 'campanha-nao-identificada', source_campaign_name: 'Campanha não identificada',
+      source_created_at: '2026-11-11T14:31:00+00:00', store_id: STORE, payload: {},
+    });
+    expect(JSON.stringify(item)).not.toContain('Maria');
+  });
+
+  it('rejects pages out of order or not after the cursor', async () => {
+    const before = (async () => okResponse([exported({ createdAt: '2026-11-11T13:00:00+00:00' })])) as unknown as typeof fetch;
+    expect(await fetchLeadsPage({ config: CONFIG, storeId: STORE, cursor: CURSOR, fetchImpl: before })).toEqual({ ok: false, code: 'source_invalid_order' });
+    const swapped = (async () => okResponse([
+      exported({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000009', createdAt: '2026-11-11T14:31:00+00:00' }),
+      exported({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001', createdAt: '2026-11-11T14:31:00+00:00' }),
+    ])) as unknown as typeof fetch;
+    expect(await fetchLeadsPage({ config: CONFIG, storeId: STORE, cursor: CURSOR, fetchImpl: swapped })).toEqual({ ok: false, code: 'source_invalid_order' });
+  });
+
+  it('orders by instant (microseconds, any offset) and then by id', () => {
+    const c = { createdAt: '2026-11-11T14:00:00.123456+00:00', id: '00000000-0000-0000-0000-000000000000' };
+    expect(isAfter({ createdAt: '2026-11-11T14:00:00.123457+00:00', id: '00000000-0000-0000-0000-000000000000' }, c)).toBe(true);
+    expect(isAfter({ createdAt: '2026-11-11T11:00:00.123456-03:00', id: '00000000-0000-0000-0000-000000000001' }, c)).toBe(true);
+    expect(isAfter({ createdAt: '2026-11-11T14:00:00.123456+00:00', id: '00000000-0000-0000-0000-000000000000' }, c)).toBe(false);
+    expect(isAfter({ createdAt: '2026-11-11T14:00:00.1234+00:00', id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' }, c)).toBe(false);
   });
 
   it('rejects a cursor that does not match the last item', async () => {

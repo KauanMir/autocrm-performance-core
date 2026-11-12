@@ -138,7 +138,7 @@ export async function dismissKapaLeadsEvent(companyId: string, eventId: string, 
 // Textos dos códigos técnicos (nunca mostram dados do cliente).
 const ERROR_COPY: Record<string, string> = {
   duplicate_phone_ambiguous: 'Há mais de um lead ativo com este telefone. Una ou arquive os duplicados e tente de novo.',
-  invalid_payload: 'Os dados recebidos não estão no formato esperado (ex.: telefone inválido).',
+  invalid_payload: 'Os dados vieram fora do formato esperado. Localize o lead no KAPA Leads pela campanha e pela data e cadastre manualmente.',
   initial_stage_missing: 'A empresa não tem a etapa inicial do funil. Nova tentativa automática.',
   link_disabled: 'Sincronização pausada. O lead entra quando ela for religada.',
   max_attempts: 'Esgotou as tentativas automáticas.',

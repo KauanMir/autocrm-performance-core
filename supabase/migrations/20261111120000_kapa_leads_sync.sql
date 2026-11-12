@@ -711,6 +711,48 @@ begin
 end;
 $$;
 
+-- Recuperação operacional (só operador do banco / service_role, nunca pela aplicação): volta o cursor
+-- para buscar de novo leads a partir de p_from (nunca antes da ativação: continua sem retroativo).
+-- Seguro: a fila é idempotente por source_lead_id, então leads já recebidos — inclusive os apagados por
+-- LGPD, cujo registro técnico fica sem dados pessoais — não entram de novo.
+create or replace function public.kapa_leads_link_rewind(p_link_id uuid, p_from timestamptz)
+returns table (out_cursor_created_at timestamptz)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_link public.kapa_leads_store_links;
+begin
+  if p_link_id is null or p_from is null then
+    raise invalid_parameter_value using message = 'invalid_input';
+  end if;
+  select * into v_link from public.kapa_leads_store_links l where l.id = p_link_id for update;
+  if not found then
+    raise no_data_found using message = 'link_not_found';
+  end if;
+  if v_link.activated_at is null or p_from < v_link.activated_at then
+    raise check_violation using message = 'before_activation';
+  end if;
+  if (p_from, '00000000-0000-0000-0000-000000000000'::uuid) >= (v_link.cursor_created_at, v_link.cursor_lead_id) then
+    raise check_violation using message = 'not_backwards';
+  end if;
+
+  update public.kapa_leads_store_links l
+     set cursor_created_at = p_from, cursor_lead_id = '00000000-0000-0000-0000-000000000000'::uuid
+   where l.id = p_link_id;
+
+  insert into public.audit_log
+    (actor_profile_id, company_id, action, entity_type, entity_id, result, reason, before_data, after_data, origin)
+  values
+    (null, v_link.company_id, 'kapa_leads_link_rewound', 'kapa_leads_store_link', p_link_id::text, 'success', null,
+     jsonb_build_object('cursor_created_at', v_link.cursor_created_at),
+     jsonb_build_object('cursor_created_at', p_from), 'sql_operator');
+
+  return query select p_from;
+end;
+$$;
+
 -- ═══ 7. Manager / Super Admin: saúde, revisão e nova tentativa ═══════════
 -- Só metadados técnicos: nunca nome, telefone ou e-mail.
 
@@ -971,6 +1013,8 @@ revoke all on function public._kapa_leads_process_event(public.kapa_leads_inboun
 revoke all on function public.kapa_leads_process_pending(integer) from public, anon, authenticated;
 revoke all on function public.kapa_leads_purge_expired() from public, anon, authenticated;
 revoke all on function public.kapa_leads_record_reconciliation(uuid, timestamptz, timestamptz, integer) from public, anon, authenticated;
+revoke all on function public.kapa_leads_link_rewind(uuid, timestamptz) from public, anon, authenticated;
+grant execute on function public.kapa_leads_link_rewind(uuid, timestamptz) to service_role;
 grant execute on function public.kapa_leads_links_for_poll() to service_role;
 grant execute on function public.kapa_leads_ingest_page(uuid, timestamptz, uuid, jsonb, timestamptz, uuid) to service_role;
 grant execute on function public.kapa_leads_link_record_failure(uuid, text) to service_role;

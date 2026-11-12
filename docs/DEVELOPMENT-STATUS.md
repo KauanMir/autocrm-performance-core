@@ -4,6 +4,8 @@ Atualizado em 2026-11-06. Objetivo: centralizar implementação e validação no
 
 ## Estado atual confirmado
 
+**2026-11-12 — KAPA Leads → CRM: auditoria final + LGPD + kit de liberação, só local.** Correções na 86 (item fora do contrato não trava a loja; ordem da página; recuperação de cursor), nova migration local 20261111130000 (eliminação LGPD no CRM, docs/LGPD-ELIMINACAO.md). pgTAP 88/4827, Meta 9/92, ponta a ponta 9/9. IDs RCAR/Vitrine lidos em produção (somente leitura) em docs/KAPA-LEADS-SYNC.md §6. Kit de backup/restauração dos dois sistemas ensaiado localmente: C:/Users/jaque/Documents/KAPA-Leads-CRM-Liberacao. Suíte completa 403 arquivos / 6921 PASS; tsc 0. Ensaio de aplicação 86/87 + rollback em banco com o histórico de produção: PASS. Produção intocada (CRM 85 migrations).
+
 **2026-11-11 — KAPA Leads → CRM (simuladores), só local.** Branch `codex/kapa-leads-crm-sync`
 (worktree `.codex/worktrees/kapa-leads-crm-sync`, base 132f684) e, no KAPA Leads, `codex/crm-export`
 (ac2f9e9). Sincronização por pull, desligada por padrão, migration local `20261111120000` (produção
