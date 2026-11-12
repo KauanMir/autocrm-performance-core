@@ -149,6 +149,12 @@ grant usage on schema storage to anon, authenticated, service_role;
   $before = if ($Clean) { '' } else { Query $countsSql }
   $applied = @((Query 'select version from supabase_migrations.schema_migrations order by version') -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
   Write-Output ("Restored: companies,leads,users,meta_events,timeline = {0}; migration history = {1}" -f $before, $applied.Count)
+  # Objects the CLI dumps do not cover (backup-producao.ps1 captures their DDL separately):
+  # reported so the caller can compare with the production manifest.
+  if (-not $Clean) {
+    $authTriggers = Query "select count(*) from pg_trigger t join pg_class c on c.oid = t.tgrelid where c.relnamespace = 'auth'::regnamespace and not t.tgisinternal"
+    Write-Output ("Restored auth triggers = {0}" -f $authTriggers)
+  }
 
   # ── pending migrations ───────────────────────────────────────────────────────
   $files = Get-ChildItem -LiteralPath (Join-Path $root 'supabase\migrations') -Filter '*.sql' | Sort-Object Name
@@ -240,7 +246,14 @@ $iso$;
 select users || ',' || tables || ',' || leaks || ',' || companies_with_leads from iso_result;
 '@
     $isoParts = ($iso -split "`n" | Select-Object -Last 1) -split ','
-    Check 'company isolation: no member sees another company''s rows (all company_id tables)' ([int]$isoParts[0] -gt 0 -and [int]$isoParts[1] -gt 0 -and [long]$isoParts[2] -eq 0 -and [int]$isoParts[3] -ge 2) ("users={0} tables={1} leaks={2} companies_with_leads={3}" -f $isoParts[0], $isoParts[1], $isoParts[2], $isoParts[3])
+    # With fewer than 2 companies the check proves nothing; it is required whenever the restored
+    # data has at least 2 companies (always true for the production backup: RCAR, Vitrine, test).
+    $multi = [int](Query 'select count(*) from public.companies') -ge 2
+    if ($multi) {
+      Check 'company isolation: no member sees another company''s rows (all company_id tables)' ([int]$isoParts[0] -gt 0 -and [int]$isoParts[1] -gt 0 -and [long]$isoParts[2] -eq 0 -and [int]$isoParts[3] -ge 2) ("users={0} tables={1} leaks={2} companies_with_leads={3}" -f $isoParts[0], $isoParts[1], $isoParts[2], $isoParts[3])
+    } else {
+      Write-Output 'SKIP  company isolation: restored data has a single company (no cross-company evidence possible)'
+    }
     Write-Output ("INFO  isolation: users={0} tables={1} leaks={2} companies_with_leads={3}" -f $isoParts[0], $isoParts[1], $isoParts[2], $isoParts[3])
   }
 
