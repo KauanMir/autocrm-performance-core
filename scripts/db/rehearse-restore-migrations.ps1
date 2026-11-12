@@ -77,11 +77,23 @@ if ($LASTEXITCODE -ne 0) { throw 'docker run failed' }
 try {
   $ready = $false
   for ($i = 0; $i -lt 90 -and -not $ready; $i++) {
-    docker exec $container pg_isready -U postgres -d postgres 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { $ready = $true } else { Start-Sleep -Seconds 1 }
+    try { docker exec $container pg_isready -U postgres -d postgres 2>$null | Out-Null; $ok = ($LASTEXITCODE -eq 0) } catch { $ok = $false }
+    if ($ok) { $ready = $true } else { Start-Sleep -Seconds 1 }
   }
   if (-not $ready) { throw 'database did not become ready' }
-  Start-Sleep -Seconds 5  # the image runs its own init scripts after the first ready signal
+  # The image runs its own init scripts (and restarts Postgres) after the first ready signal.
+  # A fixed sleep raced them on 2026-11-12 ("database system is shutting down", "could not open
+  # relation with OID"): wait until auth.users exists and 5 consecutive probes succeed.
+  $stable = 0
+  for ($i = 0; $i -lt 60 -and $stable -lt 5; $i++) {
+    Start-Sleep -Seconds 2
+    try {
+      $o = docker exec $container psql -X -At -U supabase_admin -d postgres -c "select (to_regclass('auth.users') is not null)::int" 2>$null
+      $ok = ($LASTEXITCODE -eq 0 -and "$o".Trim() -eq '1')
+    } catch { $ok = $false }
+    if ($ok) { $stable++ } else { $stable = 0 }
+  }
+  if ($stable -lt 5) { throw 'image init did not settle' }
   Write-Output ("Container {0} ({1}), network none" -f $container, (Query 'show server_version'))
 
   if ($Clean) {
@@ -110,6 +122,11 @@ grant usage on schema storage to anon, authenticated, service_role;
   try {
     $r = Invoke-Psql 'drop schema auth cascade; drop schema storage cascade;'
     if (-not $r.ok) { throw "reset managed schemas failed: $($r.error)" }
+    # Platform-managed roles production may have and this image may lack (2026-11-12:
+    # supabase_realtime_admin, target of GRANT SET ON PARAMETER in roles.sql). Created without
+    # login or privileges, only when missing; a real Supabase project already has them.
+    $r = Invoke-Psql "do `$`$ declare r text; begin foreach r in array array['supabase_realtime_admin'] loop if not exists (select 1 from pg_roles where rolname = r) then execute format('create role %I nologin noinherit', r); end if; end loop; end `$`$;"
+    if (-not $r.ok) { throw "managed roles failed: $($r.error)" }
     foreach ($name in @('roles.sql', 'restore-schema.sql', 'data.sql', 'migration-data.sql', 'production-acl.sql')) {
       $entry = $zip.GetEntry($name)
       if (-not $entry) { throw "archive entry missing: $name" }
