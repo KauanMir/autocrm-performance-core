@@ -8,6 +8,10 @@ import { runKapaLeadsSync } from '@/lib/server/kapa-leads-sync/run-sync';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Next 14 guarda no Data Cache os fetch do supabase-js mesmo com force-dynamic: em produção as RPCs
+// (links_for_poll, process_pending, purge_expired) voltavam "Using cache" com a resposta de antes da
+// ativação (2026-11-13, vínculo ligado e ciclos com links:0). Nenhum fetch desta rota pode vir do cache.
+export const fetchCache = 'force-no-store';
 // 5 páginas × timeout de 10 s por vínculo, com folga.
 export const maxDuration = 120;
 
