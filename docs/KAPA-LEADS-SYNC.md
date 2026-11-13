@@ -108,8 +108,21 @@ veículo de interesse (Duelo tem `tradeInVehicle` = veículo **na troca**): `veh
 
 ## 7. Publicação — operações de produção (cada uma precisa da sua autorização)
 
-**Situação em 2026-11-13:** P1–P6 **concluídas** (autorizadas pelo dono). P7–P10 não feitas (P7–P8 preparadas:
+**Situação em 2026-11-13:** P1–P7 **concluídas** (autorizadas pelo dono). P8–P10 não feitas (P8 preparada:
 kit `p6-p8LEIA-ME.md`).
+
+P7 — vínculo RCAR pausado, 2026-11-13 (~19:30 BRT):
+- Segredo da P6 guardado no Bitwarden (colado pelo dono); cópia pelo botão do Bitwarden comparada com o DPAPI → IGUAL;
+  histórico Win+V limpo (só as entradas do segredo).
+- Antes: IDs conferidos nos dois lados (KAPA Leads `0a07506a…` "RCAR Seminovos" ativa; CRM `6894656c…` "Rcar Seminovos
+  Gama" ativa); 0 vínculos, 0 eventos; `06` = pós-P4. `kapa_leads_link_upsert` exige Super Admin, cria com
+  `enabled=false` (default) e sem cursor, recusa loja já ligada a outra empresa.
+- Super Admin → Rcar Seminovos Gama → Ajustes → Integrações → "Salvar vínculo" (veículo vazio). Painel: "Pausada",
+  nunca ativada, recebidos 0. "Ligar sincronização" NÃO clicado.
+- Depois: `04` 1 linha `enabled=false`, cursor nulo, 0 eventos; `07` 17 leads, 0 ligados; 1 auditoria
+  `kapa_leads_link_upserted`; `06` idêntico (leads, empresas, membros, Meta, timeline, RLS, grants). Vitrine sem
+  vínculo. Meta: painel igual (habilitado, sem Página, 1 retido antigo), webhook 400 sem parâmetros. KAPA Leads:
+  assinaturas antes do corte iguais, LPs PASS, exportação PASS.
 
 P6 — exportação ligada no KAPA Leads só para a RCAR, 2026-11-13 21:18–21:45 UTC:
 - Antes: produção `ac2f9e9` (`dpl_36XdVnxX…`), rotas 404, LPs PASS, linha de base com corte 21:18Z (1020 leads);
