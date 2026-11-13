@@ -108,8 +108,18 @@ veículo de interesse (Duelo tem `tradeInVehicle` = veículo **na troca**): `veh
 
 ## 7. Publicação — operações de produção (cada uma precisa da sua autorização)
 
-**Situação em 2026-11-13:** P1–P7 **concluídas** (autorizadas pelo dono). P8–P10 não feitas (P8 preparada:
-kit `p6-p8LEIA-ME.md`).
+**Situação em 2026-11-13 23:00 UTC:** P1–P9 **concluídas** — a RCAR sincroniza desde 22:35:21 UTC. P10 (Vitrine)
+autorizada, só depois de 72 h estáveis (não antes de 2026-11-16 22:47 UTC). Estado, verificador e passos: kit `p9LEIA-ME.md`.
+
+P8 — variáveis do CRM (só Production): `KAPA_LEADS_API_URL`, `KAPA_LEADS_SYNC_ENABLED=true`, `KAPA_LEADS_SYNC_SECRET` (colado
+pelo dono) → Redeploy `dpl_8sr6d13…`. Cron: `links:0`, 0 erros; `06` idêntico; nada importado.
+
+P9 — RCAR ligada 22:35:21Z (marco; 723 leads anteriores ficam fora). Ciclos seguiram com `links:0`: o Next 14 servia do
+Data Cache os fetch do supabase-js na rota do cron (Vercel "Using cache" em links_for_poll/process_pending/purge_expired).
+Correção `2f26165` (`fetchCache = 'force-no-store'` + teste) → Preview → Promote → `dpl_D4ua82mU…` 22:46:39Z. Ciclo 22:48Z:
+1 recebido, 1 criado, reconciliação 1=1, 0 erros de origem. `p9/verificar-sincronizacao.mjs` PASS (hash de nome/telefone,
+campanha, empresa, sem duplicação, nada anterior ao marco); 17 leads antigos do CRM com assinatura idêntica; KAPA Leads
+intacto. Achado: o sweep de recuperação do Meta tem o mesmo cache (não corrigido: muda o comportamento do Meta; decisão do dono).
 
 P7 — vínculo RCAR pausado, 2026-11-13 (~19:30 BRT):
 - Segredo da P6 guardado no Bitwarden (colado pelo dono); cópia pelo botão do Bitwarden comparada com o DPAPI → IGUAL;
