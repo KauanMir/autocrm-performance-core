@@ -6,6 +6,8 @@ Atualizado em 2026-11-06. Objetivo: centralizar implementação e validação no
 
 **2026-11-13 — P4 concluída: CRM em produção = `8bf8a4f` (deployment B6sFxFUir), sincronização desligada (cron responde 200 sem executar, 0 vínculos), Meta e demais integrações iguais, dados intactos. P5 auditada, aguarda autorização. Detalhes: docs/KAPA-LEADS-SYNC.md §7.**
 
+**2026-11-13 23:00 UTC — P4–P9 concluídas em produção: a RCAR sincroniza do KAPA Leads para o CRM desde 22:35:21 UTC.** KAPA Leads prod `ac2f9e9` com exportação assinada só para a RCAR; CRM prod `2f26165` (correção do Data Cache do Next 14 na rota do cron, achada na ativação). Primeiro lead real sincronizado e conferido por hash, 0 duplicações, nada anterior ao marco, dados antigos intactos. P10 (Vitrine) só após 72 h estáveis (≥ 2026-11-16 22:47 UTC). Achado pendente: o sweep de recuperação do Meta também usa cache (não corrigido, decisão do dono). Detalhes: docs/KAPA-LEADS-SYNC.md §7 e kit p9/LEIA-ME.md.
+
 **2026-11-13 — P3 concluída em produção: CRM passou de 85 para 87 migrations (86 e 87), conferências pós-86/pós-87 all_pass, dados existentes com assinaturas idênticas, políticas e grants inalterados, sincronização inativa (0 vínculos). P4 e P5 preparadas e validadas (CRM 6921 testes, tsc 0, build; KAPA Leads 197 testes, check, build), aguardando autorização. Detalhes: docs/KAPA-LEADS-SYNC.md §7.**
 
 **2026-11-12 — P2 (backup do CRM de produção) concluída: 17/17, restauração isolada PASS com 86+87 na cópia, rollback provado com esquema idêntico; 86 ganhou lock_timeout 5 s. P3 pronta, aguarda autorização.**
