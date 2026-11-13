@@ -108,7 +108,28 @@ veículo de interesse (Duelo tem `tradeInVehicle` = veículo **na troca**): `veh
 
 ## 7. Publicação — operações de produção (cada uma precisa da sua autorização)
 
-**Situação em 2026-11-13:** P1, P2 e P3 **concluídas** (autorizadas pelo dono). P4–P10 não feitas.
+**Situação em 2026-11-13:** P1–P4 **concluídas** (autorizadas pelo dono). P5–P10 não feitas.
+
+P4 — deploy do CRM, 2026-11-12 21:22–21:35 BRT:
+- Antes: produção = `3f60f1a` (deployment `Ge2VNTQZ2v2V7EXoSBnQ4NZcgqZE`, ponto de retorno); nenhuma variável
+  `KAPA_LEADS_*` na Vercel (lista inteira conferida, só nomes).
+- Branch `codex/kapa-leads-crm-sync` enviada ao GitHub em `8bf8a4f` (não a `main`) → Preview OK → "Promote to
+  Production" (a Vercel pediu verificação de identidade por e-mail; feita pelo dono) → deployment
+  `B6sFxFUirnSDmQofbAUFuoz2Vwaw`, Production, sucesso.
+- Depois: `/api/cron/kapa-leads-sync` existe (401 sem segredo); schedule `kapa-leads-sync` ativo a cada 2 min,
+  execuções 21:34/21:36/21:38 → 200 sem log (caminho `disabled`). Cron do Meta 200, 0 falhas. Webhook do Meta
+  rejeita token fictício (403), WhatsApp responde; logs 0 warning/error/fatal. Banco: `06` idêntico ao pós-P3,
+  0 vínculos, 0 eventos na fila, 0 respostas `kapa_leads`, nenhum lead novo. App: lista de empresas e status
+  iguais; Ajustes → Integrações da RCAR mostra Meta como antes e o painel novo só com o formulário de vínculo
+  (nada salvo). KAPA Leads não tocado.
+- Reverter código: Vercel → Deployments → `Ge2VNTQZ2…` (`3f60f1a`) → Promote/Instant Rollback.
+
+P5 — auditoria final (não publicada): KAPA Leads produção = `50be7a6` = `origin/main`; deploy de produção sai da
+`main`; Vercel do KAPA Leads só tem as 3 variáveis do Supabase (nenhuma `CRM_EXPORT_*` → rotas 404 após o deploy).
+Procedimento: (1) enviar `codex/crm-export` (`ac2f9e9`) → Preview (usa o Supabase DEV) e conferir build;
+(2) avançar `main` de `50be7a6` para `ac2f9e9` (fast-forward) → deploy de produção automático; (3) conferir LP
+envia (201), Admin abre, `/api/integrations/crm/leads` → 404. Reverter: `main` de volta a `50be7a6` (ou promover
+o deployment anterior na Vercel).
 
 P3 — migrations em produção, 2026-11-13 00:06–00:08 UTC (21h BRT, banco ocioso):
 - Antes (`sql/01`, `05`, `06` via `sql/consultar-crm.ps1`, transação somente leitura): 85 migrations, md5
