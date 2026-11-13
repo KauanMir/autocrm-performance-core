@@ -119,7 +119,9 @@ P2 — backup do CRM (`qglirrsyhdfbgkmchwcw`), 2026-11-12T23:38Z, pasta `.codex/
   foi intermitente e passou 77/77 em 4 repetições na cópia migrada).
 - Rollback 87→86 na cópia real: volta a 85 migrations, mesmo md5, mesmas contagens e esquema+grants idênticos
   à restauração limpa (pg_dump de public/private/auth/storage: 0 diferenças).
-- Cópia GPG no Google Drive `KAPA CRM/Backups/CRM/2026-11-12` (privada; hashes do download iguais).
+- Cópia GPG no Google Drive `KAPA CRM/Backups/CRM/2026-11-12` (privada; hashes do download iguais); senha no
+  Bitwarden "KAPA CRM — Backup produção 2026-11-12 (GPG)", copiada do Bitwarden decifra a cópia do Drive (PASS).
+  Senhas removidas do histórico Win+V. **P2 encerrada.**
 
 P3 — correção de disponibilidade feita na preparação: a 86 começa com `set lock_timeout = '5s'` (o ALTER em
 `lead_form_submissions`, gravada pelo Meta Lead Ads, desiste em 5 s e volta inteira em vez de travar a fila).
