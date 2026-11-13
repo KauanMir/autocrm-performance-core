@@ -8,6 +8,9 @@ import { sweepMetaLeadgenEvents } from '@/lib/server/meta-webhook/sweep-leadgen-
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Next 14 serve do Data Cache os fetch do supabase-js e da Graph mesmo com force-dynamic (comprovado em produção
+// em 2026-11-13 no cron kapa-leads-sync). Nenhum fetch desta rota pode vir do cache.
+export const fetchCache = 'force-no-store';
 // O lote sequencial pode buscar 20 leads (timeout Graph de 8 s por chamada).
 // Reserva abaixo do lease de 300 s para que uma interrupção seja recuperável.
 export const maxDuration = 240;

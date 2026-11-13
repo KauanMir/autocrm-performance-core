@@ -37,6 +37,9 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Next 14 serve do Data Cache os fetch do supabase-js e da Graph mesmo com force-dynamic (comprovado em produção
+// em 2026-11-13 no cron kapa-leads-sync). Nenhum fetch desta rota pode vir do cache.
+export const fetchCache = 'force-no-store';
 
 const PAGE_ID_PATTERN = /^[0-9]{1,30}$/;
 
