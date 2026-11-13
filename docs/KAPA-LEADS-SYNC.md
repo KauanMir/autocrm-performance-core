@@ -108,7 +108,27 @@ veículo de interesse (Duelo tem `tradeInVehicle` = veículo **na troca**): `veh
 
 ## 7. Publicação — operações de produção (cada uma precisa da sua autorização)
 
-**Situação em 2026-11-13:** P1–P4 **concluídas** (autorizadas pelo dono). P5–P10 não feitas.
+**Situação em 2026-11-13:** P1–P5 **concluídas** (autorizadas pelo dono). P6–P10 não feitas (P6–P8 preparadas:
+kit `p6-p8LEIA-ME.md`).
+
+P5 — deploy do KAPA Leads sem variáveis, 2026-11-13 21:07 UTC (18:07 BRT):
+- Antes: produção = `50be7a6` = `origin/main` (badge Production na Vercel); variáveis só as 3 do Supabase;
+  `main` sem proteção/rulesets no GitHub; produção sai de push na `main`. Diff revisado: 13 arquivos, só
+  adições + matcher do proxy. Matcher compilado (`functions-config-manifest.json`) testado: só
+  `/api/integrations/crm/…` dispensa sessão; `/api/integrations/crm`, `/crmx`, `/other`, `/API/…` e o Admin
+  continuam no proxy. Unit 197/197, check, build. `next start` local: sem variáveis tudo 404 (inclusive assinado);
+  com variáveis fictícias: sem assinatura/só timestamp/segredo errado/±10 min/outra query/método trocado → 401,
+  loja não liberada 403, sem cursor 400, válida → só chega ao banco (500 com banco fictício). Admin → /login.
+- Preview `codex/crm-export` (`dpl_B4ui1S9…`, protegido pela Vercel Authentication, conferido pelo Chrome logado):
+  rotas novas 404, /login 200, Admin redireciona, POST `{}` na API pública 400.
+- `main` 50be7a6 → `ac2f9e9` (fast-forward, sem force) → deployment Production `dpl_36XdVnxX4qTxh5wFyX1pp1EEQ8AK`.
+- Depois: `/api/integrations/crm/leads` e `/count` 404 (com e sem query); `/`, `/dashboard`, `/leads`,
+  `/config/lojas`, `/api/integrations/other` → 307 /login; /login 200; Admin aberto com sessão de SDR real mostra
+  só "Meus leads" da RCAR (permissões preservadas). LPs Fábrica e Duelo: mesmos bundles; preflight 204 com CORS e
+  POST incompleto 400 antes e depois (nada gravado). Banco (agregados, somente leitura): 1020 leads, por loja
+  720/300, assinaturas de linha inteira e de colunas imutáveis, membros, lojas/campanhas ativas → **idênticos**.
+  Logs de produção na última hora: 0 warning/error.
+- Reverter: Vercel → Instant Rollback para o deployment de `50be7a6`, ou `main` de volta a `50be7a6`.
 
 P4 — deploy do CRM, 2026-11-12 21:22–21:35 BRT:
 - Antes: produção = `3f60f1a` (deployment `Ge2VNTQZ2v2V7EXoSBnQ4NZcgqZE`, ponto de retorno); nenhuma variável
