@@ -108,8 +108,22 @@ veículo de interesse (Duelo tem `tradeInVehicle` = veículo **na troca**): `veh
 
 ## 7. Publicação — operações de produção (cada uma precisa da sua autorização)
 
-**Situação em 2026-11-13:** P1–P5 **concluídas** (autorizadas pelo dono). P6–P10 não feitas (P6–P8 preparadas:
+**Situação em 2026-11-13:** P1–P6 **concluídas** (autorizadas pelo dono). P7–P10 não feitas (P7–P8 preparadas:
 kit `p6-p8LEIA-ME.md`).
+
+P6 — exportação ligada no KAPA Leads só para a RCAR, 2026-11-13 21:18–21:45 UTC:
+- Antes: produção `ac2f9e9` (`dpl_36XdVnxX…`), rotas 404, LPs PASS, linha de base com corte 21:18Z (1020 leads);
+  CRM (`sql/07`): 0 vínculos, 0 eventos, 17 leads.
+- Segredo de 256 bits gerado (`segredo.ps1`, DPAPI, impressão SHA-256 `5ebbaa09`), colado pela área de
+  transferência (conferido só comprimento/formato), histórico Win+V limpo. Vercel, só Production:
+  `CRM_EXPORT_STORE_IDS` = RCAR (Config) e `CRM_EXPORT_SECRET` (Secret, não legível). Redeploy de `ac2f9e9`
+  sem cache (código de identidade por e-mail feito pelo dono) → `dpl_2iqioEwUUMjUVgS68y9qu4i6G15i`.
+- Depois: `verificar-exportacao -Modo ligada` PASS (sem assinatura/segredo errado/expirada 401, Vitrine 403,
+  RCAR 200 com 0 itens, contagem só número); extras: loja inexistente 403, assinatura de outra loja 401, sem cursor
+  e limit 101 → 400; Admin e `/api/integrations/other` → 307 /login; LPs PASS. Banco: assinaturas antes do corte
+  idênticas; +2 leads reais da RCAR (captação normal). CRM: 0 vínculos, 0 eventos, 17 leads (nada importado).
+  Logs: 0 warning/error.
+- Reverter: Instant Rollback para `dpl_36XdVnxX…` (sem as variáveis) ou apagar `CRM_EXPORT_STORE_IDS` + Redeploy.
 
 P5 — deploy do KAPA Leads sem variáveis, 2026-11-13 21:07 UTC (18:07 BRT):
 - Antes: produção = `50be7a6` = `origin/main` (badge Production na Vercel); variáveis só as 3 do Supabase;
