@@ -108,7 +108,33 @@ veículo de interesse (Duelo tem `tradeInVehicle` = veículo **na troca**): `veh
 
 ## 7. Publicação — operações de produção (cada uma precisa da sua autorização)
 
-**Situação em 2026-11-12:** P1 e P2 **concluídas** (autorizadas pelo dono). P3–P10 não feitas.
+**Situação em 2026-11-13:** P1, P2 e P3 **concluídas** (autorizadas pelo dono). P4–P10 não feitas.
+
+P3 — migrations em produção, 2026-11-13 00:06–00:08 UTC (21h BRT, banco ocioso):
+- Antes (`sql/01`, `05`, `06` via `sql/consultar-crm.ps1`, transação somente leitura): 85 migrations, md5
+  `ed4994…f8ff8`, 86/87 ausentes; 0 travas exclusivas, 0 transações longas, 0 consultas ativas além da conferência.
+- 86 aplicada (`aplicar-migration.ps1`, SHA-256 `8b38af57…` = kit) → `02-pos-86` all_pass; depois 87
+  (`a21484c4…`) → `03-pos-87` all_pass. Bans de IPv4 0 antes e depois de cada uma. Agora 87 migrations,
+  histórico das 85 intacto.
+- `06-linha-de-base-p3.sql` antes × depois: assinaturas (md5 agregado) de leads, empresas, vínculos de usuários,
+  eventos e integrações Meta e linha do tempo **idênticas**; políticas RLS e grants de cliente existentes
+  idênticos; 0 tabelas sem RLS; só cresceram as 2 tabelas novas e 21 funções novas. Meta: mesmo status (1
+  processado, 1 falho antigo de 06/11).
+- Sincronização inativa: 0 vínculos (`04` vazio), rota `/api/cron/kapa-leads-sync` ainda inexistente em produção
+  (404), nenhuma variável alterada. App 200; webhook do Meta responde (400 sem parâmetros de verificação).
+  KAPA Leads não tocado.
+
+P4/P5 — preparadas (não publicadas):
+- CRM: branch `codex/kapa-leads-crm-sync` = `3f60f1a` (produção) + integração; tsc 0, suíte 403 arquivos / 6921,
+  build com a rota nova. Única mudança em código do Meta: a tela de respostas usa `list_lead_form_submissions_v2`
+  (já existe em produção) com volta automática para a v1. Novo cron `*/2` (o plano já roda o do Meta a cada 5 min).
+  Sem `KAPA_LEADS_SYNC_ENABLED=true` o cron responde `disabled`. Publicar como a OP-5: enviar a branch ao GitHub,
+  Preview, promover a Production; conferir rota com CRON_SECRET → `{"status":"disabled"}`, sem segredo → 401.
+  Reverter: promover de volta o deployment de `3f60f1a`.
+- KAPA Leads: `codex/crm-export` `ac2f9e9` = `50be7a6` (produção e `origin/main`) + exportação; sem migration;
+  único efeito global: o middleware deixa de exigir sessão em `/api/integrations/crm/` (teste trava o matcher).
+  Unit 197/197, check e build OK. Produção sai da `main`: avanço direto `main` → `ac2f9e9`. Sem variáveis as rotas
+  respondem 404. Conferir: LP envia (201), `/api/integrations/crm/leads` → 404. Reverter: `main` de volta a `50be7a6`.
 
 P2 — backup do CRM (`qglirrsyhdfbgkmchwcw`), 2026-11-12T23:38Z, pasta `.codex/backups/crm-20261112T233849Z`:
 - 17/17; contagens idênticas antes/depois (4 empresas, 17 leads, 8 usuários, 2 eventos Meta, 83 timeline);
